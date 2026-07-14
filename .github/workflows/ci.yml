@@ -32,10 +32,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -69,6 +69,14 @@ jobs:
 
       - name: Type-check (svelte-check + tsc)
         run: npm run check
+
+      # `dist/` is gitignored, so a fresh CI checkout doesn't have it — but
+      # the Rust crate compiles `tauri::generate_context!()` (src-tauri/src/
+      # lib.rs), which embeds tauri.conf.json's `frontendDist` ("../dist") at
+      # build time and PANICS if that path is missing. Without this step,
+      # cargo clippy/test fail with: "frontendDist ... path doesn't exist".
+      - name: Build frontend (required by generate_context!)
+        run: npm run build
 
       - name: Clippy (deny warnings)
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
