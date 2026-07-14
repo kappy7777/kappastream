@@ -20,7 +20,7 @@ impl DecApiClient {
 }
 
 fn is_valid_endpoint(endpoint: &str) -> bool {
-    ALLOWED_ENDPOINTS.iter().any(|e| *e == endpoint)
+    ALLOWED_ENDPOINTS.contains(&endpoint)
 }
 
 fn is_valid_channel_name(name: &str) -> bool {

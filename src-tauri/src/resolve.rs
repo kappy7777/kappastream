@@ -238,7 +238,7 @@ pub async fn resolve_stream(
             stderr,
             code,
         }) => {
-            let combined_detail = format!("{}\n{}\n{}", stdout, stderr, format!("exit {:?}", code));
+            let combined_detail = format!("{}\n{}\nexit {:?}", stdout, stderr, code);
             if is_offline(&combined_detail) {
                 Ok(ResolveResponse {
                     ok: false,
