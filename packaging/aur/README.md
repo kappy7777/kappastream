@@ -1,7 +1,12 @@
 # AUR packaging for kappastream
 
 Files for publishing kappastream to the [Arch User Repository](https://aur.archlinux.org).
-Two packages ship from this directory:
+Both packages are **published** (maintainer `kappy`) and current at v0.1.3:
+
+- `kappastream-git` → https://aur.archlinux.org/packages/kappastream-git
+- `kappastream-bin` → https://aur.archlinux.org/packages/kappastream-bin
+
+The recipes live in this directory:
 
 - **`kappastream-git`** (`PKGBUILD`) — builds natively from the git tip (rust +
   cargo + node toolchain). Idiomatic on Arch; uses system webkit2gtk/gstreamer.
@@ -38,8 +43,8 @@ Shared assets (also used by the Debian/Fedora packages, live in
   `source=()` to fetch.
 
 Both `provides=('kappastream')` and `conflict` with each other, so only one is
-installed at a time. Publish `-git` first; add `-bin` once you cut a tagged
-release with the prebuilt tarball attached.
+installed at a time. Both are live; on a new release, update `-git` and `-bin`
+together (see "Updating on a new release" below).
 
 ## Prerequisites (on an Arch host)
 
@@ -111,7 +116,7 @@ cp /path/to/packaging/shared/kappastream.sh .
 makepkg --printsrcinfo > .SRCINFO
 
 git add .gitignore PKGBUILD .SRCINFO README.md kappastream.desktop kappastream.sh dev.kappy.kappastream.metainfo.xml
-git commit -m "Initial import: kappastream-git 0.1.2"
+git commit -m "Initial import: kappastream-git 0.1.3"
 git push origin master
 ```
 
@@ -130,7 +135,7 @@ cp /path/to/packaging/aur/PKGBUILD-bin PKGBUILD   # AUR expects the file named P
 # fill in _release (real URL prefix) + the sha256sum (makepkg -g)
 makepkg --printsrcinfo > .SRCINFO
 git add PKGBUILD .SRCINFO
-git commit -m "Initial import: kappastream-bin 0.1.2"
+git commit -m "Initial import: kappastream-bin 0.1.3"
 git push origin master
 ```
 

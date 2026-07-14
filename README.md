@@ -1,24 +1,20 @@
 # kappastream
 
-**Twitch, without Twitch.**
+A native Linux Twitch client that works without an account.
 
-A native Linux Twitch client that doesn't want your account, doesn't want your data, and doesn't want your attention any longer than you choose to give it.
+No login, no ads, no tracking, no recommendations. Just the stream and the chat.
 
-No login. No ads. No tracking. No algorithm. Just the stream and the chat.
+> **Status:** v0.1.3 — early, and rough in places. It works well for what I use it for, but you'll find bugs. Please [report them](../../issues).
 
 ---
 
-## The pitch
+## What it is
 
-Some people want to chat, subscribe, follow, and be part of the community.
+Some people want to chat, follow, subscribe, and be part of the community. Some people just want to put a stream on a second monitor and be left alone.
 
-Some people want to put a stream on a second monitor and be left completely alone.
+kappastream is for the second kind. If you've used FreeTube, it's a similar idea, for Twitch — live streams, real chat with 7TV/BTTV/FFZ emotes, favorites with live status, and picture-in-picture, without ever touching a Twitch account.
 
-kappastream is for the second kind. If you've used FreeTube, you already know the shape of this: watch the thing, skip the platform. This is that, for Twitch — a native Linux client with live streams, real chat, 7TV/BTTV/FFZ emotes, favorites with live status, and picture-in-picture, requiring exactly zero interaction with a Twitch account.
-
-You connect to chat anonymously — not as a lurker with a username, not as a user with a profile. Just as somebody who happens to be watching.
-
-No login. No ads. No tracking. No algorithm. No backend. The app doesn't know who you are.
+Chat connects anonymously through Twitch's own IRC gateway, which lets you read a channel without identifying yourself. There's no login flow because there's nothing to log into.
 
 ---
 
@@ -26,85 +22,68 @@ No login. No ads. No tracking. No algorithm. No backend. The app doesn't know wh
 
 <table>
   <tr>
-    <td align="center"><img src="Screenshots/1.png" alt="kappastream"></td>
-    <td align="center"><img src="Screenshots/2.png" alt="kappastream"></td>
-    <td align="center"><img src="Screenshots/3.png" alt="kappastream"></td>
+    <td align="center"><img src="docs/screenshots/1.png" alt="kappastream"></td>
+    <td align="center"><img src="docs/screenshots/2.png" alt="kappastream"></td>
+    <td align="center"><img src="docs/screenshots/3.png" alt="kappastream"></td>
   </tr>
 </table>
 
 ---
 
-## What you *don't* get
+## Features
 
-The absences are the product.
+**Stream playback** — live HLS, quality selection, theater mode, fullscreen.
 
-| | |
-|---|---|
-| 🚫 **No account** | No login, no OAuth, no client_id, no Twitch API keys. There is no sign-up flow because there is nothing to sign up for. |
-| 🚫 **No ads** | No pre-roll. No mid-roll. No purple screen. Ever. |
-| 🚫 **No tracking** | No analytics, no telemetry, no crash reporting, no fingerprinting, no "anonymous usage statistics." Nothing phones home, because there's no home to phone. |
-| 🚫 **No algorithm** | Nothing is recommended to you. Nothing is promoted at you. You see the channels you added. That's the whole feed. |
-| 🚫 **No watch history** | Nobody is building a profile of what you watch, because nobody is watching you watch. |
-| 🚫 **No backend** | There is no kappastream server. There is no kappastream database. There is no kappastream company. Your data physically cannot be collected — there's nowhere to put it. |
+**Chat** — full IRC chat with Twitch, 7TV, BTTV and FFZ emotes, badges, colored names, timestamps and mention highlighting.
 
-Chat connects **anonymously** — Twitch's own IRC gateway lets you read a channel without identifying yourself at all. You're not a lurker with a username. You're not a user. You're just... there.
+**Favorites** — sidebar with live status, viewer counts, current game and title. Drag to reorder. Export and import as JSON, stored locally.
 
----
+**Notifications** — opt in per channel. Get notified when a channel goes live, or when you're mentioned in chat. Nothing else notifies you.
 
-## What you *do* get
+**Picture-in-Picture** — a floating, borderless window that snaps to 16:9 and remembers its position. (Needs a one-time compositor rule on Wayland — see [Known limitations](#known-limitations).)
 
-**🎥 The stream** — live HLS playback, quality selection, theater mode, fullscreen. No embed, no player skin, no overlay begging you to follow.
+**Themes** — 29 of them, plus a UI scale slider from 0.5× to 4×.
 
-**💬 Real chat** — full IRC chat with Twitch, 7TV, BTTV and FFZ emotes, badges, colored names, timestamps, mention highlighting. The chat experience the web client wishes it had.
-
-**⭐ Favorites that make sense** — a proper sidebar with live status, viewer counts, current game and title. Drag to reorder. Export and import as JSON. It's *your* list, on *your* disk.
-
-**🔔 Notifications you asked for** — opt in per channel with a single click. Get pinged when someone you actually care about goes live, or when your name shows up in chat. Nothing else will ever notify you.
-
-**🖼️ Picture-in-Picture** — pop the stream into a floating, always-on-top window and go do something else. Snaps to 16:9, remembers where you left it. Play a game, watch a stream. That's the whole point.
-
-**🎨 29 themes** — warm palettes, dark palettes, Dracula, Nord, Midnight, Forest, and yes, a Twitch-purple one if you're feeling nostalgic. Plus a UI scale slider from 0.5× to 4×, because your monitor is your business.
-
-**🛡️ It doesn't fall over** — failed status checks keep showing the last known state and retry with backoff. Rate-limited? A circuit breaker backs off gracefully instead of hammering. It degrades politely instead of breaking loudly.
+**Graceful degradation** — failed status checks keep showing the last known state and retry with backoff. A circuit breaker backs off when rate-limited rather than hammering the API.
 
 ---
 
-## Radical transparency
+## Privacy
 
-Most apps say "we respect your privacy" and then hand you a 4,000-word policy.
+There's no kappastream server and no kappastream account, so there's nothing to collect and nowhere to put it. Your favorites, settings and cached state live on your disk and go nowhere unless you export them yourself.
 
-Here is the complete, exhaustive list of every network request kappastream makes:
+Rather than asking you to take that on faith, here's the complete list of every network request the app makes:
 
 | Service | What it's for |
 |---|---|
-| **Twitch IRC** (`irc-ws.chat.twitch.tv`) | Reading chat. Anonymously. |
+| **Twitch IRC** (`irc-ws.chat.twitch.tv`) | Reading chat, anonymously |
 | **streamlink** (local binary) | Resolving the stream URL |
-| **Twitch video CDN** (`ttvnw.net`, `twitch.tv`) | The actual video |
+| **Twitch video CDN** (`ttvnw.net`, `twitch.tv`) | The video itself |
 | **Twitch CDN** (`static-cdn.jtvnw.net`) | Chat badges and native emotes |
 | **7TV / BTTV / FFZ** | Third-party emotes |
 | **DecAPI** | Live status, viewer count, title, game |
 
-That's it. That's the list.
+That's the whole list. These services see what any web request shows them — an IP address and a request — and nothing about you, because the app doesn't know anything about you.
 
-These services see what any web request shows them — an IP address and a request. **kappastream sends them nothing about you, because it doesn't know anything about you.** Your favorites, settings, notification preferences and cached state live in local storage on your machine and go nowhere unless you export them yourself.
+No Helix, no Kraken, no OAuth token in a config file. The app can't authenticate with Twitch even if you wanted it to.
 
-No Helix. No Kraken. No OAuth token sitting in a config file waiting to leak. The app is architecturally incapable of authenticating with Twitch, and that's on purpose.
+**Verifying this yourself:** release binaries are built by GitHub Actions from a tagged commit — the [workflow](.github/workflows/release.yml) and the [build log](../../actions) are both public. Every release ships a `SHA256SUMS` file, so you can confirm the binary you downloaded is the one CI produced:
+
+```bash
+sha256sum -c SHA256SUMS
+```
 
 ---
 
 ## Install
 
-**AppImage** — grab it from [Releases](../../releases), `chmod +x`, run it.
-
 **Arch / AUR** — `yay -S kappastream-bin` (or `kappastream-git` to build from source)
 
-**Debian / Ubuntu** — `.deb` available in [Releases](../../releases)
+**AppImage / Debian / Ubuntu / Fedora** — download from [Releases](../../releases). AppImage: `chmod +x`, then run.
 
-**Fedora** — `.rpm` available in [Releases](../../releases)
+### streamlink
 
-### One dependency
-
-kappastream resolves streams by shelling out to **[streamlink](https://streamlink.github.io/)** — the battle-tested, actively maintained tool that already solved this problem. No point reinventing it.
+kappastream resolves streams by calling out to [streamlink](https://streamlink.github.io/), which already solves this problem well. The `.deb` and `.rpm` packages pull it in automatically; **AppImage users need to install it themselves**, since AppImages can't declare dependencies:
 
 ```bash
 sudo pacman -S streamlink     # Arch
@@ -113,13 +92,13 @@ sudo dnf install streamlink   # Fedora
 pip install streamlink        # anywhere
 ```
 
-If it's not on your `PATH`, point at it explicitly:
+If it isn't on your `PATH`, point at it explicitly:
 
 ```bash
 STREAMLINK_BIN=/opt/bin/streamlink ./kappastream.AppImage
 ```
 
-If streamlink is missing, the app tells you clearly instead of failing silently. (Yes, that's a feature. Yes, it took a while.)
+If streamlink is missing, the app says so clearly rather than failing silently.
 
 ---
 
@@ -134,19 +113,19 @@ npx tauri build --bundles appimage  # first run: 15–30 min Rust compile
 
 Output lands in `src-tauri/target/release/bundle/appimage/`.
 
-There is no `npm run dev` — kappastream is Tauri-only. The frontend is compiled once and embedded directly into the binary. It is not, and never was, a website.
+There's no `npm run dev` — the frontend is compiled once and embedded into the binary. kappastream is a Tauri app, not a website.
 
 ---
 
 ## Stack
 
 - **Svelte 5** (runes) + TypeScript — the UI
-- **Vite 8** — builds `dist/`, embedded into the binary at compile time
+- **Vite** — builds `dist/`, embedded into the binary at compile time
 - **hls.js** — stream playback
-- **Raw IRC over WebSocket** — chat, with a hand-rolled parser
-- **Tauri 2** (Rust) — the native shell, subprocess handling, and packaging
+- **Raw IRC over WebSocket** — chat, with a hand-written parser
+- **Tauri 2** (Rust) — native shell, subprocess handling, packaging
 
-Roughly 30 MB of app instead of 300 MB of bundled Chromium. You're welcome.
+Around 30 MB rather than the ~300 MB you'd get bundling Chromium.
 
 ---
 
@@ -176,38 +155,51 @@ packaging/                # AUR, Debian, Fedora
 
 ## Known limitations
 
-**Picture-in-Picture "always on top" needs a one-time setup on Wayland.** WebKitGTK doesn't implement the HTML5 PiP API, so kappastream builds its own borderless floating window instead. Tauri requests always-on-top via GTK's keep-above hint — which works fine on X11, but is a no-op on Wayland, since xdg-shell has no concept of always-on-top.
+**Picture-in-Picture needs a one-time compositor rule on Wayland.** WebKitGTK doesn't implement the HTML5 PiP API, so kappastream builds its own borderless floating window. Tauri requests always-on-top through GTK's keep-above hint, which works on X11 but is a no-op on Wayland — xdg-shell has no always-on-top concept.
 
 <details>
 <summary><b>Hyprland</b></summary>
 
-```conf
-windowrulev2 = float, title:^(kappastream — PiP)$
-windowrulev2 = pin,   title:^(kappastream — PiP)$
+Since Hyprland 0.55, window rules use Lua instead of the old `windowrulev2` config syntax. Add this to `~/.config/hypr/hyprland.lua`:
+
+```lua
+hl.window_rule({
+  match = { title = "^(kappastream — PiP)$" },
+  float = true,
+  pin   = true,
+})
 ```
+
+(On Hyprland 0.54 or earlier, use the old syntax instead: `windowrulev2 = float, title:^(kappastream — PiP)$` and `windowrulev2 = pin, title:^(kappastream — PiP)$`.)
 </details>
 
 <details>
 <summary><b>KDE / KWin</b></summary>
 
-Focus the PiP window → `Alt+F3` → More Actions → Keep Above.
+Focus the PiP window → `Alt+F3` (or right-click the title bar) → **More Actions** → **Configure Special Window Settings**. This opens the window rules dialog for that window specifically.
 
-To make it permanent: System Settings → Window Management → Window Rules → match window title containing `PiP` → Keep Above: Force → Yes.
+Add a new property called **Layer** (labeled **Schicht** in German) and set its value to **Overlay**. Save.
+
+The older "Keep Above" rule is X11-era and unreliable on Wayland for windows like this one — `Layer: Overlay` is the property that actually works.
 </details>
 
-**streamlink must be installed on the host.** See above.
+**Live status depends on DecAPI.** It's a third-party service and a single point of failure — if it's down or rate-limiting, live status, viewer counts and titles stop updating. Playback and chat are unaffected.
 
-**Linux only.** X11 and Wayland. No macOS or Windows builds — for now.
+**streamlink must be installed.** See above.
+
+**Linux only.** X11 and Wayland. No macOS or Windows builds.
+
+---
+
+## Contributing
+
+Bug reports and PRs are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). If you hit something broken, an [issue](../../issues) with your distro, compositor and the app version is genuinely useful.
 
 ---
 
 ## License
 
-**GPL-3.0-only.**
-
-Copyleft on purpose. If someone forks kappastream and bolts ads or telemetry onto it, they're legally obligated to publish that too — where you can see it, and refuse it.
-
-Free software, in the sense that actually matters.
+**GPL-3.0-only.** Copyleft on purpose: if someone forks this and adds ads or telemetry, they have to publish that too.
 
 See [LICENSE](LICENSE) for the full text. Distributed in the hope that it will be useful, but **without any warranty**.
 

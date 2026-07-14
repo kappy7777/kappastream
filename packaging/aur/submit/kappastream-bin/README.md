@@ -1,7 +1,9 @@
 # kappastream-bin — AUR submission staging
 
-A ready-to-submit snapshot of the `kappastream-bin` AUR package (the prebuilt
-binary variant), staged here so the publish is a copy-paste once you're ready.
+The committed snapshot of the `kappastream-bin` AUR package (the prebuilt binary
+variant). This package is **published** at
+https://aur.archlinux.org/packages/kappastream-bin — these staged files are the
+source of truth for the next update push.
 
 Contents:
 - `PKGBUILD` — snapshot of `../../PKGBUILD-bin` (the source of truth). If that
@@ -15,15 +17,15 @@ Contents:
    makepkg --printsrcinfo > .SRCINFO
    ```
 
-## Submit
+## Update
 
 ```
 git clone ssh://aur@aur.archlinux.org/kappastream-bin.git
 cd kappastream-bin
 cp /path/to/here/{PKGBUILD,.SRCINFO} .
 git add PKGBUILD .SRCINFO
-git commit -m "Initial import: kappastream-bin 0.1.2"
+git commit -m "Update to 0.1.3"
 git push
 ```
 
-First push creates the package on the AUR; later pushes update it.
+The package already exists on the AUR; pushes update it in place.
