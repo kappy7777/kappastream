@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # npm — frontend + build tooling (root package.json)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # cargo — Rust host shell (src-tauri)
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+
+  # github-actions — keep the workflow actions pinned-to-tags but current
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

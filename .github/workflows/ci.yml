@@ -1,0 +1,85 @@
+# Continuous integration: type-check, lint, and Rust tests.
+#
+# This job intentionally stays fast — it does NOT build the Tauri bundles
+# (AppImage/deb/rpm). Bundle building is expensive and only belongs in the
+# release workflow (release.yml, triggered on `v*` tags).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Also callable from release.yml so a tagged release runs these exact
+  # gates before building/publishing anything.
+  workflow_call:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref so force-pushes / amended PRs
+# don't waste runner minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check
+    # ubuntu-22.04 is pinned (not ubuntu-latest) so CI matches the oldest
+    # glibc the Tauri AppImage must run on and so the webkit2gtk-4.1 dev
+    # packages resolve consistently. See release.yml for the full rationale.
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Rust stable (with clippy + rustfmt)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Tauri system dependencies
+        # Tauri v2 (linux) build requirements. libwebkit2gtk-4.1-dev +
+        # libsoup-3.0-dev are the v2 webkit/soup headers; the rest are
+        # transitive GTK/indicator deps + patchelf (appimage bundling).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            librsvg2-dev \
+            libgtk-3-dev \
+            patchelf \
+            libayatana-appindicator3-dev
+
+      - name: Cache Cargo (~/.cargo + src-tauri/target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Type-check (svelte-check + tsc)
+        run: npm run check
+
+      # `dist/` is gitignored, so a fresh CI checkout doesn't have it — but
+      # the Rust crate compiles `tauri::generate_context!()` (src-tauri/src/
+      # lib.rs), which embeds tauri.conf.json's `frontendDist` ("../dist") at
+      # build time and PANICS if that path is missing. Without this step,
+      # cargo clippy/test fail with: "frontendDist ... path doesn't exist".
+      - name: Build frontend (required by generate_context!)
+        run: npm run build
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
