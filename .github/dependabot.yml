@@ -5,6 +5,12 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # TypeScript 7 reworks the compiler/transform API that svelte-check and
+      # @sveltejs/vite-plugin-svelte build on; bumping to 7.x fails the
+      # type-check gate. Stay on 6.x until Svelte tooling supports TS 7.x.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   # cargo — Rust host shell (src-tauri)
   - package-ecosystem: "cargo"
