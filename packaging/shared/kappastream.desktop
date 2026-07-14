@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=kappastream
+GenericName=Twitch Viewer
+Comment=A lightweight, account-free Twitch viewer (live stream, chat, favorites)
+Exec=kappastream
+Icon=kappastream
+StartupNotify=true
+StartupWMClass=kappastream
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=twitch;stream;chat;live;irc;

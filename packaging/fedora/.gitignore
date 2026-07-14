@@ -1,0 +1,5 @@
+# build output
+/dist/
+# stray built rpms / source tarballs at this level
+/*.rpm
+/*.tar.gz

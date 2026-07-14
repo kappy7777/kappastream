@@ -1,0 +1,135 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "kappastream",
+  "version": "0.1.0",
+  "identifier": "dev.kappy.kappastream",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+"windows": [
+    {
+      "title": "kappastream",
+      "width": 800,
+      "height": 600,
+      "resizable": true,
+      "fullscreen": false,
+      "devtools": true,
+      "decorations": false
+    }
+  ],
+    "withGlobalTauri": true,
+    "security": {
+      "csp": {
+        "default-src": ["'self'"],
+        "base-uri": ["'none'"],
+        "form-action": ["'none'"],
+        "frame-ancestors": ["'none'"],
+        "object-src": ["'none'"],
+        "frame-src": ["'none'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "font-src": ["'self'"],
+        "img-src": [
+          "'self'",
+          "https://static-cdn.jtvnw.net",
+          "https://cdn.7tv.app",
+          "https://cdn.betterttv.net",
+          "https://cdn.frankerfacez.com"
+        ],
+        "connect-src": [
+          "'self'",
+          "ipc:",
+          "http://ipc.localhost",
+          "https://7tv.io",
+          "https://api.betterttv.net",
+          "https://api.frankerfacez.com",
+          "wss://irc-ws.chat.twitch.tv:443",
+          "https://ttvnw.net",
+          "https://*.ttvnw.net",
+          "https://twitch.tv",
+          "https://*.twitch.tv",
+          "https://ttv-clips.net",
+          "https://*.ttv-clips.net"
+        ],
+        "media-src": [
+          "'self'",
+          "blob:",
+          "https://ttvnw.net",
+          "https://*.ttvnw.net",
+          "https://twitch.tv",
+          "https://*.twitch.tv",
+          "https://ttv-clips.net",
+          "https://*.ttv-clips.net"
+        ],
+        "worker-src": ["'self'", "blob:"],
+        "child-src": ["'self'", "blob:"]
+      },
+      "devCsp": {
+        "default-src": ["'self'"],
+        "base-uri": ["'none'"],
+        "form-action": ["'none'"],
+        "frame-ancestors": ["'none'"],
+        "object-src": ["'none'"],
+        "frame-src": ["'none'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "font-src": ["'self'"],
+        "img-src": [
+          "'self'",
+          "https://static-cdn.jtvnw.net",
+          "https://cdn.7tv.app",
+          "https://cdn.betterttv.net",
+          "https://cdn.frankerfacez.com"
+        ],
+        "connect-src": [
+          "'self'",
+          "ipc:",
+          "http://ipc.localhost",
+          "https://7tv.io",
+          "https://api.betterttv.net",
+          "https://api.frankerfacez.com",
+          "wss://irc-ws.chat.twitch.tv:443",
+          "https://ttvnw.net",
+          "https://*.ttvnw.net",
+          "https://twitch.tv",
+          "https://*.twitch.tv",
+          "https://ttv-clips.net",
+          "https://*.ttv-clips.net"
+        ],
+        "media-src": [
+          "'self'",
+          "blob:",
+          "https://ttvnw.net",
+          "https://*.ttvnw.net",
+          "https://twitch.tv",
+          "https://*.twitch.tv",
+          "https://ttv-clips.net",
+          "https://*.ttv-clips.net"
+        ],
+        "worker-src": ["'self'", "blob:"],
+        "child-src": ["'self'", "blob:"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    },
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  }
+}

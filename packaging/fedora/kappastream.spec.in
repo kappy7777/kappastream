@@ -1,0 +1,153 @@
+# kappastream.spec.in — Fedora native RPM build.
+#
+# build.sh substitutes @VERSION@ from package.json (single source of truth,
+# kept in sync with src-tauri/Cargo.toml and src-tauri/tauri.conf.json) and
+# writes the real kappastream.spec into the rpmbuild tree.
+#
+# Mirrors packaging/aur/PKGBUILD: builds the frontend with Vite, then
+# `cargo build --release` embeds dist/ into the Rust binary via tauri-build.
+# A standalone release artifact (no COPR repo); install with `rpm -i` or
+# `dnf install ./kappastream-*.rpm`.
+
+Name:           kappastream
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        Lightweight, account-free Twitch viewer for Linux
+
+License:        GPL-3.0-only
+URL:            https://github.com/kappy7777/kappastream
+Source0:        %{name}-%{version}.tar.gz
+# The desktop file, metainfo, and Wayland-workaround wrapper are the shared
+# assets under packaging/shared/ (also used by the AUR and Debian packages);
+# they ship inside Source0, not as separate Sources.
+
+# streamlink (a runtime PATH binary) and hicolor-icon-theme (icon-dir owner)
+# are NOT linked libraries, so rpmbuild can't auto-detect them — declare by
+# hand. The linked libs (libwebkit2gtk-4.1.so.0, libgtk-3.so.0, libglib-2.0.so.0,
+# libsoup-3.0.so.0, ...) ARE auto-detected as soname Requires and resolve to
+# the providing package on every Fedora. Do NOT hand-declare webkit2gtk3 /
+# webkit2gtk4.1 / gtk3 by name: the webkit2gtk3 -> webkit2gtk4.1 package rename
+# (F43+) would break a name-pinned Requires, while the soname Require survives it.
+Requires:       streamlink
+Requires:       hicolor-icon-theme
+# Forces the FULL (RPM Fusion free) ffmpeg libraries, which carry the H.264
+# decoder GStreamer's libav plugin exposes as avdec_h264. Fedora ships only
+# ffmpeg-free (patent-stripped — no H.264), and ffmpeg-free Provides: ffmpeg,
+# so `Requires: ffmpeg` would be falsely satisfied by it. ffmpeg-libs is
+# uniquely an RPM Fusion package, so this hard-Requires pulls the real codecs
+# (dnf auto-removes the conflicting libav*-free / libswscale-free split).
+# Needs the rpmfusion-free repo enabled — see README. Without this, Twitch
+# streams decode audio but show a black video surface.
+Requires:       ffmpeg-libs
+
+BuildRequires:  make
+BuildRequires:  gcc
+BuildRequires:  rust
+BuildRequires:  cargo
+BuildRequires:  nodejs
+BuildRequires:  npm
+BuildRequires:  pkgconf-pkg-config
+BuildRequires:  cmake
+BuildRequires:  perl
+BuildRequires:  openssl-devel
+BuildRequires:  webkit2gtk4.1-devel
+BuildRequires:  gtk3-devel
+BuildRequires:  libsoup3-devel
+BuildRequires:  desktop-file-utils
+BuildRequires:  libappstream-glib
+
+# No -debuginfo subpackage: the Rust binary dwarfs it and we don't ship
+# debug symbols with a standalone release artifact.
+%global debug_package %{nil}
+
+BuildArch:      x86_64
+
+%description
+kappastream is a lightweight Twitch viewer: live stream playback via
+streamlink + hls.js, read-only IRC chat over the public Twitch WebSocket,
+favorites with DecAPI live status / retry backoff / circuit breaker, and
+per-channel desktop notifications.
+
+Account-free and read-only — no Twitch login, no OAuth, no client ID.
+Everything stays in local storage. The /usr/bin/kappastream wrapper exports
+WEBKIT_DISABLE_COMPOSITING_MODE=1 to avoid a WebKitGTK Wayland launch crash
+(a harmless no-op on X11).
+
+%prep
+%setup -q
+
+%build
+# The same three mandatory env tweaks as the AUR PKGBUILD (full rationale
+# there). Short version:
+#   1. drop the host's hardened toolchain flags (Fedora's redhat-rpm-config
+#      sets -fuse-ld=lld / -Wl,-z,pack-relative-relocs, which break
+#      aws-lc-sys's static-archive link with hundreds of undefined
+#      aws_lc_0_42_0_* symbols)
+#   2. force aws-lc-sys to build AWS-LC from bundled source (never auto-link
+#      a host install lacking the symbol prefix the bindings expect)
+#   3. enable the embedded custom-protocol frontend (else the binary has no
+#      dist/)
+unset CFLAGS CXXFLAGS LDFLAGS RUSTFLAGS || true
+export AWS_LC_SYS_USE_SYSTEM=0
+
+# Frontend → dist/ (Vite production build).
+npm ci --no-audit --no-fund
+npm run build
+
+# Rust host. tauri-build embeds ../dist into the binary.
+cd src-tauri
+cargo build --release --locked --features tauri/custom-protocol
+cd ..
+
+%install
+# Real binary → /usr/lib/kappastream (out of $PATH; same path the wrapper
+# hardcodes, keeping the wrapper byte-identical across AUR/Debian/Fedora).
+# The /usr/bin wrapper execs it with WEBKIT_DISABLE_COMPOSITING_MODE=1 set.
+# %build runs `cd src-tauri && cargo build`, so the binary lands in
+# src-tauri/target/ (cargo's target dir sits next to Cargo.toml), not the
+# package-root target/ — reference it there.
+install -Dpm0755 src-tauri/target/release/%{name} \
+    %{buildroot}%{_prefix}/lib/%{name}/%{name}
+install -Dpm0755 packaging/shared/%{name}.sh \
+    %{buildroot}%{_bindir}/%{name}
+
+# Icons (hicolor). Sizes mirror the AUR layout.
+install -Dpm0644 src-tauri/icons/32x32.png \
+    %{buildroot}%{_datadir}/icons/hicolor/32x32/apps/%{name}.png
+install -Dpm0644 src-tauri/icons/64x64.png \
+    %{buildroot}%{_datadir}/icons/hicolor/64x64/apps/%{name}.png
+install -Dpm0644 src-tauri/icons/128x128.png \
+    %{buildroot}%{_datadir}/icons/hicolor/128x128/apps/%{name}.png
+install -Dpm0644 src-tauri/icons/128x128@2x.png \
+    %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/%{name}.png
+install -Dpm0644 src-tauri/icons/icon.png \
+    %{buildroot}%{_datadir}/icons/hicolor/512x512/apps/%{name}.png
+
+# Desktop entry + AppStream metainfo.
+install -Dpm0644 packaging/shared/%{name}.desktop \
+    %{buildroot}%{_datadir}/applications/%{name}.desktop
+install -Dpm0644 packaging/shared/dev.kappy.kappastream.metainfo.xml \
+    %{buildroot}%{_datadir}/metainfo/dev.kappy.kappastream.metainfo.xml
+
+%check
+desktop-file-validate \
+    %{buildroot}%{_datadir}/applications/%{name}.desktop || :
+appstream-util validate-relax --nonet \
+    %{buildroot}%{_datadir}/metainfo/dev.kappy.kappastream.metainfo.xml || :
+
+%files
+%license LICENSE
+%{_bindir}/%{name}
+%dir %{_prefix}/lib/%{name}
+%{_prefix}/lib/%{name}/%{name}
+%{_datadir}/applications/%{name}.desktop
+%{_datadir}/metainfo/dev.kappy.kappastream.metainfo.xml
+%{_datadir}/icons/hicolor/32x32/apps/%{name}.png
+%{_datadir}/icons/hicolor/64x64/apps/%{name}.png
+%{_datadir}/icons/hicolor/128x128/apps/%{name}.png
+%{_datadir}/icons/hicolor/256x256/apps/%{name}.png
+%{_datadir}/icons/hicolor/512x512/apps/%{name}.png
+
+%changelog
+* Mon Jul 13 2026 kappy <kappy777@proton.me> - @VERSION@-1
+- Initial Fedora package.

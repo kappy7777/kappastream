@@ -1,0 +1,43 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Build artifacts / extracted AppImage output
+squashfs-root/
+src-tauri/gen/schemas/
+*.AppImage
+*.AppImage.zsync
+
+# Local secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local tooling config (opencode) — environment-specific, not for public release
+.opencode-global/
+opencode.json
+AGENTS.md
+agents.md

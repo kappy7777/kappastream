@@ -1,0 +1,15 @@
+.emote {
+  height: 1.4em;
+  width: auto;
+  vertical-align: -0.2em;
+  display: inline-block;
+  margin: 0 1px;
+}
+
+.emote--twitch {
+  height: 1.4em;
+}
+
+html[data-theme='light'] .emote {
+  filter: none;
+}

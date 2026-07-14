@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metainfo for kappastream.
+
+  Validate before committing (requires appstream / libappstream-glib):
+    appstream-util validate-relax dev.kappy.kappastream.metainfo.xml
+  or:
+    appstreamcli validate dev.kappy.kappastream.metainfo.xml
+-->
+<component type="desktop-application">
+  <id>dev.kappy.kappastream</id>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+
+  <name>kappastream</name>
+  <summary>Lightweight, account-free Twitch viewer for Linux</summary>
+
+  <url type="homepage">https://github.com/kappy7777/kappastream</url>
+  <url type="bugtracker">https://github.com/kappy7777/kappastream/issues</url>
+  <url type="vcs-browser">https://github.com/kappy7777/kappastream</url>
+
+  <description>
+    <p>
+      kappastream is a lightweight Twitch viewer for Linux: live stream,
+      IRC chat, favorites with live status, mentions, and per-channel
+      desktop notifications.
+    </p>
+    <p>
+      It is account-free and read-only — no Twitch login, no OAuth, no
+      client ID. Chat is read from the public IRC WebSocket; live status
+      and metadata come from DecAPI. Streams are resolved locally via
+      streamlink and played back with hls.js in a Tauri WebView.
+    </p>
+    <p>
+      Favorites poll DecAPI for uptime/viewers/game with retry backoff
+      and a circuit breaker on rate limits. Everything — favorites,
+      settings, cached state — stays in local storage. No telemetry, no
+      accounts, no server.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">kappastream.desktop</launchable>
+
+  <screenshots>
+    <screenshot type="default">
+      <image type="source" width="3839" height="1960">https://raw.githubusercontent.com/kappy7777/kappastream/main/Screenshots/1.png</image>
+    </screenshot>
+    <screenshot>
+      <image type="source" width="3839" height="1961">https://raw.githubusercontent.com/kappy7777/kappastream/main/Screenshots/2.png</image>
+    </screenshot>
+    <screenshot>
+      <image type="source" width="3839" height="1964">https://raw.githubusercontent.com/kappy7777/kappastream/main/Screenshots/3.png</image>
+    </screenshot>
+  </screenshots>
+
+  <provides>
+    <binary>kappastream</binary>
+  </provides>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+  </categories>
+
+  <recommends>
+    <control type="pointing"/>
+    <control type="keyboard"/>
+  </recommends>
+
+  <content_rating type="oars-1.1">
+    <!-- The app displays live, app-unmoderated Twitch chat (read-only). -->
+    <content_attribute id="social-chat">intense</content_attribute>
+  </content_rating>
+
+  <releases>
+    <release version="0.1.0" date="2026-07-12">
+      <description>
+        <p>Initial release.</p>
+        <ul>
+          <li>Live stream playback via streamlink + hls.js</li>
+          <li>Read-only IRC chat over the public Twitch WebSocket</li>
+          <li>Favorites with DecAPI live status, retry backoff, circuit breaker</li>
+          <li>Per-channel desktop notifications (with startup grace period)</li>
+          <li>29 themes, UI scale, theater mode, JSON favorites import/export</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#9147FF</color>
+    <color type="primary" scheme_preference="dark">#9147FF</color>
+  </branding>
+</component>

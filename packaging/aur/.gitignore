@@ -1,0 +1,12 @@
+# makepkg working directories and built packages — never commit these.
+/src/
+/pkg/
+/dist/
+# Built package archives.
+/*.pkg.tar*
+/*.src.tar.gz
+/*.tar.gz
+# Stray makepkg git clones of the source repo (e.g. /kappastream/ from a
+# previous makepkg run that landed outside the usual src/ tree).
+/kappastream/
+/kappastream-*/
