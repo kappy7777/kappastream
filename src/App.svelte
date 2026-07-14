@@ -1261,7 +1261,7 @@
         </svg>
       </button>
       <div id="about-title" class="about-modal-name">Kappastream</div>
-      <div class="about-modal-version">v0.1.0</div>
+      <div class="about-modal-version">v{__APP_VERSION__}</div>
       <p class="about-modal-tagline">Twitch, stripped down to what matters: the stream and the chat.</p>
       <p class="about-modal-body">
         No login, project telemetry, analytics, or project-operated backend. Chat connects anonymously —

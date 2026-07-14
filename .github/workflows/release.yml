@@ -126,8 +126,22 @@ jobs:
           releaseDraft: true
           args: --bundles appimage,deb,rpm
 
+      # Build the prebuilt-binary tarball consumed by the kappastream-bin AUR
+      # package (packaging/aur/PKGBUILD-bin). The script reads the version from
+      # package.json and packages src-tauri/target/release/kappastream (which
+      # tauri-action just compiled) + shared desktop/metainfo/wrapper/icons +
+      # LICENSE into packaging/aur/dist/kappastream-<ver>-x86_64.tar.gz.
+      - name: Build AUR -bin tarball
+        run: packaging/aur/build-release-tarball.sh
+
+      - name: Upload -bin tarball
+        run: gh release upload "${{ github.ref_name }}" packaging/aur/dist/*.tar.gz
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       # Generate a SHA256SUMS file covering every release artifact produced
-      # above, then attach it to the same (still-draft) release.
+      # above (bundles + the AUR tarball), then attach it to the same
+      # (still-draft) release.
       - name: Generate and upload SHA256SUMS
         shell: bash
         run: |
@@ -141,8 +155,9 @@ jobs:
             name="$(basename "$f")"
             ( cd "$dir" && sha256sum "$name" ) >> "$sums"
           done < <( find src-tauri/target/release/bundle -type f \
-                      \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
-                      -print0 )
+                      \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -print0
+                    find packaging/aur/dist -type f \
+                      -name '*.tar.gz' -print0 )
 
           echo "Generated checksums:"
           cat "$sums"
