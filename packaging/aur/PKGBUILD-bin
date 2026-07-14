@@ -8,14 +8,15 @@
 # Submission notes: see packaging/aur/README.md
 
 _pkgname=kappastream
-_release="https://github.com/kappy7777/kappastream/releases/download/v${pkgver}"
+_repo="https://github.com/kappy7777/kappastream"
+_release="${_repo}/releases/download/v${pkgver}"
 
 pkgname=${_pkgname}-bin
 pkgver=0.1.2
 pkgrel=1
 pkgdesc="A lightweight, account-free Twitch viewer (live stream, chat, favorites) for Linux"
 arch=('x86_64')
-url="${_release}"
+url="${_repo}"
 license=('GPL-3.0-only')
 # Same runtime deps as kappastream-git; the prebuilt binary links the same
 # webkit2gtk-4.1 / gtk3 / glib2 / libsoup3 libs. streamlink resolves HLS URLs.

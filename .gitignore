@@ -41,3 +41,6 @@ src-tauri/gen/schemas/
 opencode.json
 AGENTS.md
 agents.md
+
+# Local SSH agent sockets (environment-specific, e.g. AUR push forwarding)
+ssh-agent.sock

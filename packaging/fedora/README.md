@@ -95,7 +95,7 @@ The build runs in the Docker container (it needs `webkit2gtk4.1-devel` and
 # from the repo root:
 docker build -t kappastream-rpm packaging/fedora
 docker run --rm -v "$PWD":/src kappastream-rpm
-# → packaging/fedora/dist/kappastream-<version>-1.fc41.x86_64.rpm
+# → packaging/fedora/dist/kappastream-<version>-1.fc44.x86_64.rpm
 ```
 
 Then inspect and validate:

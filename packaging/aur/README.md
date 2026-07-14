@@ -111,7 +111,7 @@ cp /path/to/packaging/shared/kappastream.sh .
 makepkg --printsrcinfo > .SRCINFO
 
 git add .gitignore PKGBUILD .SRCINFO README.md kappastream.desktop kappastream.sh dev.kappy.kappastream.metainfo.xml
-git commit -m "Initial import: kappastream-git 0.1.0"
+git commit -m "Initial import: kappastream-git 0.1.2"
 git push origin master
 ```
 
@@ -130,7 +130,7 @@ cp /path/to/packaging/aur/PKGBUILD-bin PKGBUILD   # AUR expects the file named P
 # fill in _release (real URL prefix) + the sha256sum (makepkg -g)
 makepkg --printsrcinfo > .SRCINFO
 git add PKGBUILD .SRCINFO
-git commit -m "Initial import: kappastream-bin 0.1.0"
+git commit -m "Initial import: kappastream-bin 0.1.2"
 git push origin master
 ```
 
