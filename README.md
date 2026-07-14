@@ -178,7 +178,7 @@ hl.window_rule({
 
 Focus the PiP window → `Alt+F3` (or right-click the title bar) → **More Actions** → **Configure Special Window Settings**. This opens the window rules dialog for that window specifically.
 
-Add a new property called **Layer** (labeled **Schicht** in German) and set its value to **Overlay**. Save.
+Add a new property called **Layer** and set its value to **Overlay**. Save.
 
 The older "Keep Above" rule is X11-era and unreliable on Wayland for windows like this one — `Layer: Overlay` is the property that actually works.
 </details>
