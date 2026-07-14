@@ -1,6 +1,6 @@
 [package]
 name = "kappastream"
-version = "0.1.2"
+version = "0.1.3"
 description = "A lightweight, anonymous Twitch viewer (live stream, chat, favorites) shipped as a Tauri AppImage for Linux"
 authors = ["kappy <kappy777@proton.me>"]
 license = "GPL-3.0-only"

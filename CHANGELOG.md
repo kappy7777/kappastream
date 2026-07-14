@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-14
+
+### Changed
+
+- Dependency bumps: svelte 5.56.4 → 5.56.5, vite 8.1.3 → 8.1.4,
+  `@types/node` 24 → 26, `tauri-plugin-log` 2.8 → 2.9.
+- CI/release workflows now use `actions/checkout@v7` and `actions/setup-node@v7`.
+
+### Fixed
+
+- `dependabot.yml` now ignores `typescript` major updates (7.x breaks the
+  `svelte-check` type-check gate).
+
 ## [0.1.2] - 2026-07-14
 
 ### Fixed
@@ -52,7 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.3
 [0.1.2]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.2
 [0.1.1]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.1
 [0.1.0]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.0
