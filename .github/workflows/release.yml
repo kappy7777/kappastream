@@ -1,0 +1,161 @@
+# Release builds: build the Tauri bundles (AppImage/deb/rpm), publish the
+# GitHub Release, and attach a SHA256SUMS checksum file.
+#
+# Triggered by pushing a tag matching `v*` (e.g. `v0.1.0`).
+#
+# Flow: run the full CI gate set first (check), and only if it passes build
+# the bundles and publish — so a broken commit can never be shipped as a tag.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+# A tag points at exactly one commit; don't let two runs for the same tag
+# race (e.g. a re-pushed tag). Never cancel an in-flight release mid-upload.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Reuse the exact CI gates (npm run check + clippy -D warnings + cargo test)
+  # so a tagged commit can't ship unless it passes the same checks as main.
+  check:
+    name: check
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: build-and-release
+    needs: [check]
+    # ---------------------------------------------------------------------
+    # Why ubuntu-22.04 and NOT ubuntu-latest:
+    #
+    # ubuntu-latest currently resolves to ubuntu-24.04, whose system glibc
+    # is 2.39. Any binary (and the AppImage runtime) linked against that
+    # newer glibc will fail to start on older, still-common distros such as
+    # Ubuntu 22.04 / Debian 12 / CentOS Stream 9 with errors like
+    # `/lib64/libc.so.6: version 'GLIBC_2.34' not found`.
+    #
+    # Building on ubuntu-22.04 (glibc 2.35) keeps the AppImage/deb/rpm
+    # runnable on the widest set of Linux distributions. Do not "upgrade"
+    # this to ubuntu-latest without reconsidering that compatibility window.
+    # ---------------------------------------------------------------------
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Tauri + GStreamer system dependencies
+        # Tauri v2 (linux) build requirements. The GStreamer runtime plugin
+        # packages are REQUIRED for the AppImage: tauri.conf.json sets
+        # bundle.appimage.bundleMediaFramework = true, which makes the bundler
+        # invoke linuxdeploy's gstreamer plugin. That plugin copies the build
+        # host's GStreamer codec .so files out of
+        # /usr/lib/x86_64-linux-gnu/gstreamer-1.0/ INTO the AppImage so media
+        # playback is self-contained.
+        #
+        #   - If that dir is absent entirely the plugin errors and the build
+        #     fails ("could not find plugins directory").
+        #   - Worse: if only some plugins are present (e.g. -base via a
+        #     transitive dep) but gstreamer1.0-libav is NOT, the build
+        #     SUCCEEDS yet ships an AppImage that plays audio + black video
+        #     (no avdec_h264 -> no H.264 decode, and Twitch is H.264).
+        #
+        # So install the full runtime codec set. The -dev packages are not
+        # needed (nothing here compiles/links against GStreamer; webkit2gtk
+        # does that internally) — only the runtime plugin .so files are
+        # copied. patchelf (already listed) is a hard requirement of the
+        # gstreamer plugin. The .deb/.rpm targets don't bundle GStreamer and
+        # instead rely on the user's system libs at runtime, so this only
+        # matters for the AppImage — but release builds all three here.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            librsvg2-dev \
+            libgtk-3-dev \
+            patchelf \
+            libayatana-appindicator3-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav
+
+      - name: Cache Cargo (~/.cargo + src-tauri/target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      # Builds the frontend (npm run build via beforeBuildCommand), compiles
+      # the Rust host, bundles appimage + deb + rpm, and uploads them to the
+      # (draft) release it creates for this tag. Uses GITHUB_TOKEN only.
+      #
+      # releaseDraft: true -> the release is published only by the final
+      # step below, AFTER SHA256SUMS is attached, so there is never a window
+      # where the release is live and downloadable without its checksums.
+      - name: Build and publish bundles
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "${{ github.ref_name }}"
+          releaseBody: |
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md) for what changed in this release.
+
+            Artifacts attached below include the AppImage, `.deb`, and `.rpm` packages. Verify them with the published `SHA256SUMS`.
+          releaseDraft: true
+          args: --bundles appimage,deb,rpm
+
+      # Generate a SHA256SUMS file covering every release artifact produced
+      # above, then attach it to the same (still-draft) release.
+      - name: Generate and upload SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          sums="$RUNNER_TEMP/SHA256SUMS"
+          : > "$sums"
+          # Find each bundled artifact and record its hash against its
+          # basename so the checksum file matches the release asset names.
+          while IFS= read -r -d '' f; do
+            dir="$(dirname "$f")"
+            name="$(basename "$f")"
+            ( cd "$dir" && sha256sum "$name" ) >> "$sums"
+          done < <( find src-tauri/target/release/bundle -type f \
+                      \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
+                      -print0 )
+
+          echo "Generated checksums:"
+          cat "$sums"
+          cp "$sums" SHA256SUMS
+
+          gh release upload "${{ github.ref_name }}" SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Only now — with bundles AND SHA256SUMS attached — flip the release
+      # from draft to public. If any prior step failed, this never runs and
+      # the release stays draft (invisible, not downloadable).
+      - name: Publish release
+        run: gh release edit "${{ github.ref_name }}" --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
