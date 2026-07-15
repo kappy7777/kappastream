@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-07-15
+
+### Added
+
+- mpv handoff: open the current stream in a standalone `mpv` player via
+  `streamlink --player=mpv` (new `launch_player` command in `player.rs`).
+- Low-latency playback mode (~1-segment buffer) with a toggle in Settings.
+- System tray icon with Show / Hide / Quit menu and close-to-tray
+  (enabled by default; `tray.rs`).
+- `SECURITY.md`.
+
+### Changed
+
+- All frontend ↔ Rust IPC now goes through the typed `@tauri-apps/api`
+  package; the untyped `window.__TAURI__` global is disabled
+  (`withGlobalTauri: false`).
+- Release workflow upgraded to `tauri-apps/tauri-action@v1`.
+
+### Fixed
+
+- Tooltip positioning under UI-scale `zoom` now measures the real zoom
+  factor instead of assuming a formula (fixes misaligned tooltips in the
+  AppImage's webkit2gtk engine).
+- Low-latency stall recovery: webkit2gtk pauses (rather than just
+  buffering) on an underrun; playback now auto-seeks to the live edge and
+  resumes while respecting a deliberate user pause.
+
 ## [0.1.3] - 2026-07-14
 
 ### Changed
@@ -65,7 +92,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.4
 [0.1.3]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.3
 [0.1.2]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.2
 [0.1.1]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.1
