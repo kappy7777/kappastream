@@ -1,3 +1,4 @@
+import { invoke, isTauri } from '@tauri-apps/api/core'
 import { settings } from './settings.svelte.ts'
 import { notifications } from './notifications.svelte.ts'
 
@@ -28,14 +29,6 @@ const STATUS_CACHE_MAX_AGE_MS = 60 * 60 * 1000
 const NOTIF_CHANNELS_KEY = 'fav-notif-channels-v1'
 export const MAX_FAVORITES = 100
 
-interface TauriInternals {
-  invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>
-}
-function tauriInvoke(cmd: string, args: Record<string, unknown>): Promise<unknown> {
-  const t = (window as unknown as { __TAURI__?: { core?: TauriInternals } }).__TAURI__
-  if (!t?.core) throw new Error('Tauri not available')
-  return t.core.invoke(cmd, args)
-}
 const POLL_INTERVAL_MS = 600_000
 const OFFLINE_INITIAL_POLL_INTERVAL_MS = 120_000
 const PER_FAV_STAGGER_MS = 1500
@@ -210,8 +203,8 @@ async function fetchText(path: string, timeoutMs: number = REQUEST_TIMEOUT_MS): 
   // tauri://localhost). The Rust proxy uses reqwest and bypasses CORS.
   const trimmed = path.replace(/^\/+/, '')
   try {
-    const result = await tauriInvoke('decapi_fetch', { path: trimmed, timeoutMs })
-    return result as string
+    const result = await invoke<string>('decapi_fetch', { path: trimmed, timeoutMs })
+    return result
   } catch (err) {
     const msg = typeof err === 'string' ? err : (err as Error)?.message ?? 'invoke failed'
     throw new Error(msg)
@@ -764,7 +757,7 @@ export class FavoritesStore {
     const title = channel + ' is live'
     const body = status.title || status.game || 'Click to watch'
     notifications.record('live', title, body, channel)
-    if (typeof window !== 'undefined' && !!(window as unknown as { __TAURI__?: unknown }).__TAURI__) {
+    if (typeof window !== 'undefined' && isTauri()) {
       try {
         const mod = await import('@tauri-apps/plugin-notification')
         let h = 0

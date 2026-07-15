@@ -3,6 +3,7 @@
   import { pipController } from './pip-controller.svelte.ts'
   import { tooltip } from './tooltip.ts'
   import type { LiveStatus } from './favorites.svelte.ts'
+  import { isTauri } from '@tauri-apps/api/core'
 
   interface QualityOption {
     id: string
@@ -56,7 +57,7 @@
   // PiP here is a custom floating Tauri window (the native HTML5
   // `requestPictureInPicture` API is unavailable on WebKitGTK). It only works
   // under the Tauri runtime, which is where this control ships.
-  const pipSupported = !!(window as unknown as { __TAURI__?: unknown }).__TAURI__
+  const pipSupported = isTauri()
   const pipActive = $derived(pipController.isOpen)
   let volumeHydrated = false
   let lastActivityAt = $state(Date.now())

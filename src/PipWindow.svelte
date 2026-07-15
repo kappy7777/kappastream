@@ -1,6 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import Hls from 'hls.js'
+  import { emit, listen } from '@tauri-apps/api/event'
+  import { isTauri } from '@tauri-apps/api/core'
+  import { getCurrentWindow } from '@tauri-apps/api/window'
+  import { PhysicalSize } from '@tauri-apps/api/dpi'
 
   // Minimal PiP window: a single <video> fed by hls.js from the URL the main
   // window hands us. This window is the audio authority while open; the main
@@ -21,33 +25,6 @@
   }
   interface StreamPayload {
     url: string
-  }
-
-  interface PhysicalSizeLike {
-    readonly type: 'Physical'
-    width: number
-    height: number
-  }
-  interface TauriWindowHandle {
-    close(): Promise<void>
-    outerPosition(): Promise<{ x: number; y: number }>
-    outerSize(): Promise<{ width: number; height: number }>
-    startResizeDragging(direction: string): Promise<void>
-    setSize(size: PhysicalSizeLike): Promise<void>
-    setAlwaysOnTop(above: boolean): Promise<void>
-    onResized(cb: (e: { payload: PhysicalSizeLike }) => void): Promise<() => void>
-    onCloseRequested(cb: (e: { preventDefault(): void }) => void | Promise<void>): Promise<() => void>
-  }
-  interface TauriGlobal {
-    event: {
-      emit(evt: string, payload?: unknown): Promise<void>
-      listen<T>(evt: string, cb: (e: { payload: T }) => void): Promise<() => void>
-    }
-    window: { getCurrentWindow(): TauriWindowHandle }
-    dpi: { PhysicalSize: new (width: number, height: number) => PhysicalSizeLike }
-  }
-  function tauri(): TauriGlobal | null {
-    return (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__ ?? null
   }
 
   let videoEl: HTMLVideoElement | undefined = $state()
@@ -102,8 +79,7 @@
   }
 
   function emitVolume(): void {
-    const api = tauri()
-    if (api) void api.event.emit(EV_VOLUME, { volume, muted })
+    if (isTauri()) void emit(EV_VOLUME, { volume, muted })
   }
 
   function applyVolume(v: number): void {
@@ -128,18 +104,17 @@
   }
 
   async function emitClosedWithRect(): Promise<void> {
-    const api = tauri()
-    if (!api) return
+    if (!isTauri()) return
     let rect: { x: number; y: number; width: number; height: number } | undefined
     try {
-      const win = api.window.getCurrentWindow()
+      const win = getCurrentWindow()
       const pos = await win.outerPosition()
       const size = await win.outerSize()
       rect = { x: pos.x, y: pos.y, width: size.width, height: size.height }
     } catch {
       /* ignore — send closed without rect */
     }
-    try { await api.event.emit(EV_CLOSED, { rect }) } catch { /* ignore */ }
+    try { await emit(EV_CLOSED, { rect }) } catch { /* ignore */ }
   }
 
   async function requestClose(): Promise<void> {
@@ -147,19 +122,21 @@
     // fires (emits ks://pip-closed with the rect) and then lets the window
     // destroy. Calling close() (not destroy()) keeps the close path uniform
     // whether the user hits our close button, Escape, or the WM shortcut.
-    const api = tauri()
-    if (!api) return
-    try { await api.window.getCurrentWindow().close() } catch { /* ignore */ }
+    if (!isTauri()) return
+    try { await getCurrentWindow().close() } catch { /* ignore */ }
   }
 
   // The PiP window is borderless (decorations:false), so KWin/others give it
   // no server-side resize edges. We provide our own edge/corner handles that
   // drive tao's interactive resize via startResizeDragging. (Tauri ships a
   // data attribute only for *moving* windows, not for resizing.)
-  function startResize(direction: string): void {
-    const api = tauri()
-    if (!api) return
-    void api.window.getCurrentWindow().startResizeDragging(direction)
+  // Tauri's startResizeDragging takes a ResizeDirection union it doesn't
+  // export, so derive the type from the typed method signature.
+  type ResizeDirection = Parameters<ReturnType<typeof getCurrentWindow>['startResizeDragging']>[0]
+
+  function startResize(direction: ResizeDirection): void {
+    if (!isTauri()) return
+    void getCurrentWindow().startResizeDragging(direction)
   }
 
   function bumpControls(): void {
@@ -178,17 +155,17 @@
   }
 
   onMount(async () => {
-    const api = tauri()
-    if (!api) { errorMsg = 'Not running in Tauri'; loading = false; return }
+    if (!isTauri()) { errorMsg = 'Not running in Tauri'; loading = false; return }
+    const win = getCurrentWindow()
 
     // Re-assert always-on-top once the window is mapped. tao applies the
     // creation-time option via gtk_window_set_keep_above, which on Wayland is
     // a no-op (xdg-shell has no always-on-top), so this mainly solidifies the
     // state on X11. On KWin Wayland the only reliable fix is a Window Rule
     // (see README/AGENTS notes); nothing the app can do there.
-    try { await api.window.getCurrentWindow().setAlwaysOnTop(true) } catch { /* ignore */ }
+    try { await win.setAlwaysOnTop(true) } catch { /* ignore */ }
 
-    const uInit = await api.event.listen<InitPayload>(EV_INIT, (e) => {
+    const uInit = await listen<InitPayload>(EV_INIT, (e) => {
       const p = e.payload
       volume = typeof p.volume === 'number' ? Math.max(0, Math.min(1, p.volume)) : 1
       muted = !!p.muted
@@ -197,12 +174,12 @@
     })
     unlisteners.push(uInit)
 
-    const uStream = await api.event.listen<StreamPayload>(EV_STREAM, (e) => {
+    const uStream = await listen<StreamPayload>(EV_STREAM, (e) => {
       loadSource(e.payload.url)
     })
     unlisteners.push(uStream)
 
-    const uDoClose = await api.event.listen(EV_DO_CLOSE, () => { void requestClose() })
+    const uDoClose = await listen(EV_DO_CLOSE, () => { void requestClose() })
     unlisteners.push(uDoClose)
 
     // Snap the window to exact 16:9 after a resize settles. setSize keeps the
@@ -210,7 +187,7 @@
     // left/right edges and bottom corners (the handles we keep). The epsilon
     // check breaks the feedback loop once the window is already 16:9.
     try {
-      const uResize = await api.window.getCurrentWindow().onResized(({ payload }) => {
+      const uResize = await win.onResized(({ payload }) => {
         const width = payload.width
         const height = payload.height
         if (Date.now() < suppressSnapUntil) return
@@ -220,10 +197,7 @@
           const targetH = Math.round((width * 9) / 16)
           if (Math.abs(height - targetH) <= 1) return
           suppressSnapUntil = Date.now() + 500
-          void api.window
-            .getCurrentWindow()
-            .setSize(new api.dpi.PhysicalSize(width, targetH))
-            .catch(() => { /* ignore */ })
+          void win.setSize(new PhysicalSize(width, targetH)).catch(() => { /* ignore */ })
         }, 250)
       })
       unlisteners.push(uResize)
@@ -232,7 +206,7 @@
     }
 
     try {
-      const uClose = await api.window.getCurrentWindow().onCloseRequested(async () => {
+      const uClose = await win.onCloseRequested(async () => {
         await emitClosedWithRect()
       })
       unlisteners.push(uClose)
@@ -245,7 +219,7 @@
     window.addEventListener('pagehide', () => { void emitClosedWithRect() })
 
     bumpControls()
-    void api.event.emit(EV_READY)
+    void emit(EV_READY)
   })
 
   onDestroy(() => {

@@ -1,3 +1,5 @@
+import { invoke } from '@tauri-apps/api/core'
+
 export type EmoteProvider = 'twitch' | '7tv' | 'bttv' | 'ffz'
 
 export interface Emote {
@@ -45,8 +47,7 @@ function ffzUrl(id: string): string {
 export async function getTwitchUserId(username: string, signal?: AbortSignal): Promise<string | null> {
   try {
     if (signal?.aborted) return null
-    const t = (window as unknown as { __TAURI__: { core: { invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> } } }).__TAURI__
-    const id = await t.core.invoke('decapi_fetch', { path: `twitch/id/${username}`, timeoutMs: FETCH_TIMEOUT_MS })
+    const id = await invoke<string>('decapi_fetch', { path: `twitch/id/${username}`, timeoutMs: FETCH_TIMEOUT_MS })
     if (signal?.aborted) return null
     return typeof id === 'string' && /^\d+$/.test(id) ? id : null
   } catch {

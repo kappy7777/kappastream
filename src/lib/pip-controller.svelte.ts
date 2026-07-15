@@ -1,3 +1,6 @@
+import { emit, listen } from '@tauri-apps/api/event'
+import { isTauri } from '@tauri-apps/api/core'
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { settings } from './settings.svelte.ts'
 
 // Picture-in-Picture for this app is implemented as a SECOND, borderless,
@@ -35,28 +38,6 @@ interface StreamInfo {
   url: string
   channel: string
   quality: string
-}
-
-interface TauriWebviewWindow {
-  label: string
-  once(evt: string, cb: (e?: unknown) => void): Promise<() => void> | void
-  listen<T>(evt: string, cb: (e: { payload: T }) => void): Promise<() => void>
-  emit(evt: string, payload?: unknown): Promise<void>
-}
-
-interface TauriGlobal {
-  event: {
-    emit(evt: string, payload?: unknown): Promise<void>
-    listen<T>(evt: string, cb: (e: { payload: T }) => void): Promise<() => void>
-  }
-  webviewWindow: {
-    WebviewWindow: new (label: string, options?: Record<string, unknown>) => TauriWebviewWindow
-  }
-}
-
-function tauri(): TauriGlobal | null {
-  const w = window as unknown as { __TAURI__?: TauriGlobal }
-  return w.__TAURI__ ?? null
 }
 
 function readRect(): PipRect | null {
@@ -101,17 +82,16 @@ class PipController {
   private closeFallbackTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor() {
-    const api = tauri()
-    if (!api) return
-    void api.event.listen(EV_READY, () => { void this.sendInit() })
+    if (!isTauri()) return
+    void listen(EV_READY, () => { void this.sendInit() })
       .then((u) => { this.unlistenReady = u })
-    void api.event.listen<{ volume: number; muted: boolean }>(EV_VOLUME, (e) => {
+    void listen<{ volume: number; muted: boolean }>(EV_VOLUME, (e) => {
       const { volume, muted } = e.payload
       // PiP is the audio authority; its volume/mute ARE the persisted truth.
       settings.setVolume(volume)
       settings.setMuted(muted)
     }).then((u) => { this.unlistenVolume = u })
-    void api.event.listen<{ rect?: PipRect }>(EV_CLOSED, (e) => {
+    void listen<{ rect?: PipRect }>(EV_CLOSED, (e) => {
       if (e.payload?.rect) writeRect(e.payload.rect)
       void this.onPipClosed()
     }).then((u) => { this.unlistenClosed = u })
@@ -126,9 +106,8 @@ class PipController {
   setStream(info: StreamInfo): void {
     this.currentStream = info
     if (!this.isOpen) return
-    const api = tauri()
-    if (!api) return
-    void api.event.emit(EV_STREAM, { url: info.url })
+    if (!isTauri()) return
+    void emit(EV_STREAM, { url: info.url })
   }
 
   /** Called when the stream tears down (channel change, stop). Closes PiP. */
@@ -146,8 +125,7 @@ class PipController {
   }
 
   private async open(): Promise<void> {
-    const api = tauri()
-    if (!api || this.isOpen) return
+    if (!isTauri() || this.isOpen) return
     if (!this.currentStream) return // nothing to play yet
 
     // Force the main video muted BEFORE flipping the guard so the resulting
@@ -158,7 +136,7 @@ class PipController {
 
     const url = window.location.href.split('#')[0] + '#pip'
     const saved = readRect()
-    const options: Record<string, unknown> = {
+    const wv = new WebviewWindow(PIP_LABEL, {
       url,
       title: 'kappastream — PiP',
       width: saved?.width ?? 320,
@@ -170,13 +148,8 @@ class PipController {
       alwaysOnTop: true,
       skipTaskbar: true,
       shadow: true,
-    }
-    if (saved) {
-      options.x = saved.x
-      options.y = saved.y
-    }
-
-    const wv = new api.webviewWindow.WebviewWindow(PIP_LABEL, options)
+      ...(saved ? { x: saved.x, y: saved.y } : {}),
+    })
     wv.once('tauri://error', () => { void this.onPipClosed() })
 
     // Flip optimistically so the button reflects state immediately. Corrected
@@ -185,9 +158,8 @@ class PipController {
   }
 
   private async sendInit(): Promise<void> {
-    const api = tauri()
-    if (!api || !this.currentStream) return
-    await api.event.emit(EV_INIT, {
+    if (!isTauri() || !this.currentStream) return
+    await emit(EV_INIT, {
       url: this.currentStream.url,
       channel: this.currentStream.channel,
       quality: this.currentStream.quality,
@@ -199,11 +171,10 @@ class PipController {
   }
 
   private async close(): Promise<void> {
-    const api = tauri()
-    if (!api) return
+    if (!isTauri()) return
     // Ask the PiP window to close itself. It emits ks://pip-closed (with its
     // last rect) on its way out, which drives onPipClosed().
-    void api.event.emit(EV_DO_CLOSE)
+    void emit(EV_DO_CLOSE)
     // Safety net: if the PiP window is unresponsive and never reports closed,
     // restore main audio so the user is not stuck muted.
     if (this.closeFallbackTimer) clearTimeout(this.closeFallbackTimer)

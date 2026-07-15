@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import Hls from 'hls.js'
+  import { invoke, isTauri } from '@tauri-apps/api/core'
+  import { getCurrentWindow } from '@tauri-apps/api/window'
   import { loadChannelEmotes, loadGlobalEmotes, buildEmoteMap, renderMessage, type Emote, type RenderedMessagePart } from './lib/emotes'
   import './lib/emote.css'
   import { parseIrcLine, type ParsedMessage, type BadgeInfo } from './lib/irc'
@@ -94,26 +96,22 @@
   // data-tauri-drag-region, hosts the window controls (minimize/maximize/
   // close), and the window gets edge resize handles below — a borderless
   // window gets no server-side resize edges on Wayland. Mirrors PipWindow.
-  interface WinHandle {
-    minimize(): Promise<void>
-    toggleMaximize(): Promise<void>
-    isMaximized(): Promise<boolean>
-    close(): Promise<void>
-    startResizeDragging(direction: string): Promise<void>
-    onResized(cb: (e: { payload: { width: number; height: number } }) => void): Promise<() => void>
-  }
-  function currentWin(): WinHandle | null {
-    const g = (window as unknown as { __TAURI__?: { window?: { getCurrentWindow(): WinHandle } } }).__TAURI__
-    return g?.window?.getCurrentWindow() ?? null
+  function currentWin() {
+    // Returns the Tauri Window handle, or null when not running under Tauri
+    // (so callers' `?.` chains no-op cleanly outside the app shell).
+    return isTauri() ? getCurrentWindow() : null
   }
 
   let isMaximized = $state(false)
   const winResizeUnlisteners: Array<() => void> = []
 
+  // Tauri's startResizeDragging takes a ResizeDirection union it doesn't
+  // export, so derive the type from the typed method signature.
+  type ResizeDirection = Parameters<ReturnType<typeof getCurrentWindow>['startResizeDragging']>[0]
   function winMinimize(): void { void currentWin()?.minimize().catch(() => { /* ignore */ }) }
   function winToggleMaximize(): void { void currentWin()?.toggleMaximize().catch(() => { /* ignore */ }) }
   function winClose(): void { void currentWin()?.close().catch(() => { /* ignore */ }) }
-  function startWinResize(direction: string): void { void currentWin()?.startResizeDragging(direction).catch(() => { /* ignore */ }) }
+  function startWinResize(direction: ResizeDirection): void { void currentWin()?.startResizeDragging(direction).catch(() => { /* ignore */ }) }
 
   // Double-click on empty title-bar space toggles maximize. Tauri's drag.js
   // would also fire its own internal_toggle_maximize on double-click of a
@@ -264,9 +262,6 @@
   }
 
   async function resolveStream(channel: string, q: string): Promise<{ ok: true; url: string } | { ok: false; offline: boolean; unavailable?: boolean; error?: string }> {
-    const invoke = (window as unknown as {
-      __TAURI__: { core: { invoke(cmd: string, args?: unknown): Promise<unknown> } }
-    }).__TAURI__.core.invoke
     type ResolveRaw = { ok?: boolean; url?: string | null; offline?: boolean; error?: string | null; unavailable?: boolean; quality?: string | null }
     let raw: ResolveRaw
     try {
