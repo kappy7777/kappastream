@@ -4,7 +4,7 @@ A native Linux Twitch client that works without an account.
 
 No login, no ads, no tracking, no recommendations. Just the stream and the chat.
 
-> **Status:** v0.1.3 — early, and rough in places. It works well for what I use it for, but you'll find bugs. Please [report them](../../issues).
+> **Status:** v0.1.4 — early, and rough in places. It works well for what I use it for, but you'll find bugs. Please [report them](../../issues).
 
 ---
 
