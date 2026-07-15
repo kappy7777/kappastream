@@ -36,7 +36,10 @@ env:
 # A tag points at exactly one commit; don't let two runs for the same tag
 # race (e.g. a re-pushed tag). Never cancel an in-flight release mid-upload.
 concurrency:
-  group: release-${{ env.RELEASE_TAG }}
+  # NOTE: the `env` context is NOT available in `concurrency` (it's resolved
+  # before jobs/env are computed), so reference inputs/github directly here.
+  # The job steps below still use the top-level `env.RELEASE_TAG`.
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
