@@ -215,6 +215,42 @@ async function exportFavorites(): Promise<void> {
             <span class="toggle-knob"></span>
           </span>
         </div>
+        <div class="toggle-row">
+          <span class="toggle-label" id="low-latency-label">
+            Low latency
+            <span class="toggle-hint">chase the live edge (closer to chat); may stutter on weak connections</span>
+          </span>
+          <span
+            class="toggle"
+            class:toggle--on={settings.lowLatency}
+            role="switch"
+            tabindex="0"
+            aria-checked={settings.lowLatency}
+            aria-labelledby="low-latency-label"
+            onclick={() => settings.toggleLowLatency()}
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleLowLatency() } }}
+          >
+            <span class="toggle-knob"></span>
+          </span>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label" id="close-to-tray-label">
+            Close to tray
+            <span class="toggle-hint">keep running + notifications when the window is closed</span>
+          </span>
+          <span
+            class="toggle"
+            class:toggle--on={settings.closeToTray}
+            role="switch"
+            tabindex="0"
+            aria-checked={settings.closeToTray}
+            aria-labelledby="close-to-tray-label"
+            onclick={() => settings.toggleCloseToTray()}
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleCloseToTray() } }}
+          >
+            <span class="toggle-knob"></span>
+          </span>
+        </div>
         <div class="mention-row">
           <label class="panel-label" for="mention-username-input">Your Twitch username</label>
           <div class="mention-input-wrap">
@@ -548,6 +584,15 @@ async function exportFavorites(): Promise<void> {
   .toggle-label {
     font-size: 13px;
     color: var(--text-primary);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .toggle-hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 400;
   }
 
   .toggle {

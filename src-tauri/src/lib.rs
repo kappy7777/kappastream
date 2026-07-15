@@ -2,7 +2,9 @@ mod decapi;
 mod env_spawn;
 mod export;
 mod opener;
+mod player;
 mod resolve;
+mod tray;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -17,10 +19,12 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            tray::build(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             resolve::resolve_stream,
+            player::launch_player,
             opener::open_url_robust,
             decapi::decapi_fetch,
             export::save_favorites_export,

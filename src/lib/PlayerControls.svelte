@@ -26,10 +26,12 @@
     visible: boolean
     quality: string
     onqualitychange: (q: string) => void
+    onmpv: () => void
+    onplayintent: (playing: boolean) => void
     activeStatus: LiveStatus
   }
 
-  const { video, visible, quality, onqualitychange, activeStatus }: Props = $props()
+  const { video, visible, quality, onqualitychange, onmpv, onplayintent, activeStatus }: Props = $props()
 
   function formatViewers(n: number): string {
     if (n < 1000) return n.toString()
@@ -182,8 +184,15 @@
 
   function togglePlay(): void {
     if (!video) return
-    if (video.paused) void video.play()
-    else video.pause()
+    if (video.paused) {
+      void video.play()
+      onplayintent(true)
+    } else {
+      // Flag the user pause BEFORE calling pause() so App's onVideoPause
+      // sees userPaused and doesn't auto-resume a deliberate pause.
+      onplayintent(false)
+      video.pause()
+    }
   }
 
   function toggleMute(): void {
@@ -474,6 +483,18 @@
           </svg>
         </button>
       {/if}
+
+      <button
+        type="button"
+        class="ctrl-btn"
+        onclick={onmpv}
+        aria-label="Play in mpv"
+        use:tooltip={'Play in mpv'}
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h6v2h6v-2h6c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM10 15l7-4-7-4z" fill="currentColor"/>
+        </svg>
+      </button>
 
       <button
         type="button"

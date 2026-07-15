@@ -14,9 +14,10 @@
     currentChannel: string | null
     onselect: (channel: string) => void
     iconsOnly?: boolean
+    zoomK?: number
   }
 
-  const { currentChannel, onselect, iconsOnly = false }: Props = $props()
+  const { currentChannel, onselect, iconsOnly = false, zoomK = 1 }: Props = $props()
 
   const store = favoritesStore
   let statuses: FavoriteStatus[] = $state([])
@@ -38,11 +39,16 @@
 
   $effect(() => {
     if (!tooltipFav || !favTooltipEl) return
+    void zoomK // reposition if the zoom factor changed while up
     const target = tooltipFav.rect
     const tip = favTooltipEl.getBoundingClientRect()
-    const vw = window.innerWidth
-    const vh = window.innerHeight
+    // Visual viewport bounds (same visual space as the rects); see App.svelte
+    // for why we use the documentElement rect instead of window.innerWidth.
+    const root = document.documentElement.getBoundingClientRect()
+    const vw = root.width
+    const vh = root.height
     const m = 8
+    const k = zoomK || 1
     let left = target.right + m
     let top = target.top + target.height / 2
     if (left + tip.width > vw - m) {
@@ -52,14 +58,7 @@
     const halfH = tip.height / 2
     if (top - halfH < m) top = m + halfH
     else if (top + halfH > vh - m) top = vh - m - halfH
-    // The tooltip is position:fixed but lives inside the zoomed tree
-    // (document.documentElement.zoom = UI scale). getBoundingClientRect()
-    // returns post-zoom visual coords, but left/top on a fixed element
-    // inside a zoomed root are interpreted in pre-zoom space and would be
-    // re-scaled by zoom — landing the tooltip offset by exactly the zoom
-    // factor. Divide it out so the tooltip lands on the measured pixel.
-    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1
-    favTooltipPos = { left: left / zoom, top: top / zoom }
+    favTooltipPos = { left: left / k, top: top / k }
   })
 
   function showTooltip(e: MouseEvent, name: string, status: LiveStatus): void {

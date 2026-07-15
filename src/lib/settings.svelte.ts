@@ -77,6 +77,8 @@ const VOLUME_KEY = 'app-volume-v1'
 const MUTED_KEY = 'app-muted-v1'
 const QUALITY_PREFIX = 'app-quality:'
 const UI_SCALE_KEY = 'app-ui-scale-v1'
+const LOW_LATENCY_KEY = 'app-low-latency-v1'
+const CLOSE_TO_TRAY_KEY = 'app-close-to-tray-v1'
 
 export const UI_SCALE_MIN = 0.5
 export const UI_SCALE_MAX = 4
@@ -136,6 +138,17 @@ function readMuted(): boolean {
   return v === 'true'
 }
 
+function readLowLatency(): boolean {
+  return safeRead(LOW_LATENCY_KEY) === 'true'
+}
+
+function readCloseToTray(): boolean {
+  // Default ON: the whole point of the tray is background notifications,
+  // so close-to-tray is the expected behavior out of the box. Users who
+  // want close-to-quit disable it in Settings.
+  return safeRead(CLOSE_TO_TRAY_KEY) !== 'false'
+}
+
 const SORT_MODE_KEY = 'app-fav-sort-v1'
 
 function readSortMode(): SortMode {
@@ -163,6 +176,8 @@ class SettingsStore {
   muted: boolean = $state(readMuted())
   sortMode: SortMode = $state(readSortMode())
   uiScale: number = $state(readUiScale())
+  lowLatency: boolean = $state(readLowLatency())
+  closeToTray: boolean = $state(readCloseToTray())
   theaterMode: boolean = $state(false)
 
   constructor() {
@@ -231,6 +246,24 @@ class SettingsStore {
 
   toggleMuted(): void {
     this.setMuted(!this.muted)
+  }
+
+  setLowLatency(v: boolean): void {
+    this.lowLatency = v
+    safeWrite(LOW_LATENCY_KEY, v ? 'true' : 'false')
+  }
+
+  toggleLowLatency(): void {
+    this.setLowLatency(!this.lowLatency)
+  }
+
+  setCloseToTray(v: boolean): void {
+    this.closeToTray = v
+    safeWrite(CLOSE_TO_TRAY_KEY, v ? 'true' : 'false')
+  }
+
+  toggleCloseToTray(): void {
+    this.setCloseToTray(!this.closeToTray)
   }
 
   setSortMode(m: SortMode): void {

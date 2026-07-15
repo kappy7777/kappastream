@@ -9,7 +9,7 @@ const RESOLVE_TIMEOUT: Duration = Duration::from_millis(25_000);
 const STREAMLINK_OFFLINE_MARKERS: &[&str] =
     &["No playable streams found", "error: No playable streams"];
 
-const ALLOWED_QUALITIES: &[&str] = &[
+pub(crate) const ALLOWED_QUALITIES: &[&str] = &[
     "best",
     "worst",
     "audio_only",
@@ -32,7 +32,7 @@ pub struct ResolveResponse {
     pub error: Option<String>,
 }
 
-fn is_channel_name_valid(name: &str) -> bool {
+pub(crate) fn is_channel_name_valid(name: &str) -> bool {
     let len = name.chars().count();
     if len == 0 || len > 25 {
         return false;
@@ -41,7 +41,7 @@ fn is_channel_name_valid(name: &str) -> bool {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-fn streamlink_bin() -> PathBuf {
+pub(crate) fn streamlink_bin() -> PathBuf {
     match env::var("STREAMLINK_BIN") {
         Ok(v) if !v.is_empty() => PathBuf::from(v),
         _ => PathBuf::from("streamlink"),
@@ -74,11 +74,18 @@ async fn run_streamlink(
     bin: &std::path::Path,
     channel: &str,
     quality: &str,
+    low_latency: bool,
 ) -> Result<String, StreamlinkError> {
     let mut cmd = tokio::process::Command::new(bin);
     cmd.arg("--loglevel")
-        .arg("error")
-        .arg("--stream-url")
+        .arg("error");
+    // Twitch low-latency mode: requests the short-segment LL-HLS playlist so
+    // the player can chase the live edge (~5-8s vs the usual 15-30s). Paired
+    // with hls.js lowLatencyMode + liveSyncDurationCount in the frontend.
+    if low_latency {
+        cmd.arg("--twitch-low-latency");
+    }
+    cmd.arg("--stream-url")
         .arg(format!("https://twitch.tv/{}", channel))
         .arg(quality)
         .stdin(std::process::Stdio::null())
@@ -135,6 +142,7 @@ enum StreamlinkError {
 pub async fn resolve_stream(
     channel: String,
     quality: Option<String>,
+    low_latency: Option<bool>,
 ) -> Result<ResolveResponse, String> {
     let mut channel = channel.trim().to_lowercase();
     if let Some(stripped) = channel.strip_prefix('#') {
@@ -168,8 +176,10 @@ pub async fn resolve_stream(
     let bin = streamlink_bin();
     let channel_for_spawn = channel.clone();
     let q_for_spawn = q.clone();
+    let low_for_spawn = low_latency.unwrap_or(false);
 
-    let result = run_streamlink(&bin, &channel_for_spawn, &q_for_spawn).await;
+    let result =
+        run_streamlink(&bin, &channel_for_spawn, &q_for_spawn, low_for_spawn).await;
 
     match result {
         Ok(url) => {

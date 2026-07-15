@@ -28,6 +28,6 @@ url = "2"
 # DevTools are enabled by default in debug builds (`tauri dev`). The `devtools`
 # Cargo feature is intentionally NOT enabled so production/release builds do
 # not ship the web inspector. See tauri.conf.json window `devtools` field.
-tauri = { version = "2.11.3", features = [] }
+tauri = { version = "2.11.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-notification = "2.3.3"

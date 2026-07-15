@@ -63,28 +63,46 @@
   let aboutOpen = $state(false)
   let tooltipEl: HTMLElement | undefined = $state()
   let tooltipPos = $state({ left: 0, top: 0 })
+  let probeEl: HTMLElement | undefined = $state()
+  // k = visual pixels per CSS pixel for a position:fixed element under the
+  // current UI-scale zoom. Chromium and webkit2gtk disagree on how
+  // documentElement zoom re-scales fixed elements, so instead of assuming a
+  // formula we measure it with a hidden probe (see .zoom-probe below). All
+  // tooltip math runs in VISUAL space (target/tip rects are visual) and only
+  // divides by k at the very end to produce the CSS left/top to set.
+  let zoomK = $state(1)
+
+  $effect(() => {
+    // Recompute k when the UI scale changes (and once the probe mounts).
+    void settings.uiScale
+    if (!probeEl) return
+    const r = probeEl.getBoundingClientRect()
+    zoomK = r.left / 100 || 1
+  })
 
   $effect(() => {
     if (!tooltipState.visible || !tooltipState.rect || !tooltipEl) return
+    void zoomK // reposition if the zoom factor changed while a tooltip is up
     const target = tooltipState.rect
     const tip = tooltipEl.getBoundingClientRect()
-    const vw = window.innerWidth
-    const vh = window.innerHeight
+    // Visual viewport bounds — same visual space as target/tip. Using the
+    // documentElement rect (not window.innerWidth, whose zoom space is also
+    // engine-dependent) keeps the edge clamp consistent with the rects.
+    const root = document.documentElement.getBoundingClientRect()
+    const vw = root.width
+    const vh = root.height
     const m = 8
+    const k = zoomK || 1
+    const halfW = tip.width / 2
     let left = target.left + target.width / 2
     let top = target.bottom + m
-    const halfW = tip.width / 2
     if (left - halfW < m) left = halfW + m
     else if (left + halfW > vw - m) left = vw - halfW - m
     if (top + tip.height > vh - m) {
       const flipped = target.top - tip.height - m
       top = flipped >= m ? flipped : Math.max(m, vh - tip.height - m)
     }
-    // Same zoom compensation as the favorites tooltip in Sidebar.svelte:
-    // the tooltip is position:fixed inside the zoomed tree (UI scale), so
-    // visual coords from getBoundingClientRect() must be divided by zoom.
-    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1
-    tooltipPos = { left: left / zoom, top: top / zoom }
+    tooltipPos = { left: left / k, top: top / k }
   })
 
   function openAbout(): void {
@@ -144,6 +162,59 @@
   let hls: Hls | null = null
   let streamGeneration = 0
   let manifestTimeout: ReturnType<typeof setTimeout> | null = null
+  // Stall self-recovery for live playback (esp. low-latency, whose tiny
+  // buffer underruns on any hiccup). Because the live edge keeps advancing
+  // while stalled, currentTime falls behind the live window and the element
+  // hangs — in webkit2gtk it actually goes to `paused`, so we watch BOTH
+  // `waiting` (underrun) and a non-user `pause`. After a short grace we jump
+  // to the live edge and resume. Cleared on `playing` and on teardown.
+  let stallRecoverTimer: ReturnType<typeof setTimeout> | null = null
+  let userPaused = false
+  const STALL_RECOVER_GRACE_MS = 1_000
+
+  function clearStallRecover(): void {
+    if (stallRecoverTimer) {
+      clearTimeout(stallRecoverTimer)
+      stallRecoverTimer = null
+    }
+  }
+
+  function scheduleStallRecover(): void {
+    clearStallRecover()
+    stallRecoverTimer = setTimeout(() => {
+      stallRecoverTimer = null
+      const el = videoEl
+      if (!el) return
+      // Snap to the live edge where buffer exists (the app only plays live
+      // Twitch). Prefer hls.js's computed liveSyncPosition; fall back to the
+      // end of the seekable window.
+      const liveEdge = hls?.liveSyncPosition
+        ?? (el.seekable.length > 0 ? el.seekable.end(el.seekable.length - 1) : NaN)
+      if (Number.isFinite(liveEdge)) {
+        try { el.currentTime = Math.max(liveEdge - 1.5, 0) } catch { /* ignore */ }
+      }
+      void el.play().catch(() => { /* ignore — user can still press play */ })
+    }, STALL_RECOVER_GRACE_MS)
+  }
+
+  function onVideoWaiting(): void {
+    // Buffer underrun — schedule recovery (a momentary blip refills and
+    // fires `playing`, cancelling this).
+    scheduleStallRecover()
+  }
+
+  function onVideoPause(): void {
+    // Ignore user-initiated pauses (togglePlay sets userPaused first). A
+    // stall-induced pause in webkit2gtk lands here with userPaused still
+    // false — recover it.
+    if (userPaused) return
+    scheduleStallRecover()
+  }
+
+  function onVideoPlaying(): void {
+    clearStallRecover()
+    userPaused = false
+  }
   let cancelPendingAttach: (() => void) | null = null
   let emoteAbort: AbortController | null = null
   let thirdPartyMap = new Map<string, Emote>()
@@ -248,6 +319,7 @@
     }
     cancelPendingAttach?.()
     cancelPendingAttach = null
+    clearStallRecover()
     if (hls) {
       try { hls.destroy() } catch (_e) { /* ignore */ }
       hls = null
@@ -265,7 +337,7 @@
     type ResolveRaw = { ok?: boolean; url?: string | null; offline?: boolean; error?: string | null; unavailable?: boolean; quality?: string | null }
     let raw: ResolveRaw
     try {
-      raw = (await invoke('resolve_stream', { channel, quality: q })) as ResolveRaw
+      raw = (await invoke('resolve_stream', { channel, quality: q, lowLatency: settings.lowLatency })) as ResolveRaw
     } catch (err) {
       const msg = typeof err === 'string'
         ? err
@@ -277,6 +349,22 @@
       return { ok: false, offline: false, unavailable: raw.unavailable === true, error: raw.error ?? 'unknown resolve error' }
     }
     return { ok: true, url: raw.url }
+  }
+
+  async function handoffToPlayer(): Promise<void> {
+    const channel = channelJoined
+    if (!channel) return
+    try {
+      const r = (await invoke('launch_player', {
+        channel,
+        quality,
+        lowLatency: settings.lowLatency,
+      })) as { ok: boolean; error?: string | null }
+      showNotifToast(r.ok ? 'Launching in mpv…' : (r.error || 'Could not launch mpv'))
+    } catch (err) {
+      const msg = typeof err === 'string' ? err : (err as Error)?.message ?? 'Could not launch mpv'
+      showNotifToast(msg)
+    }
   }
 
   function isFatalNetworkishError(data: { fatal: boolean; type: string; details?: string }): boolean {
@@ -308,12 +396,18 @@
 
     if (Hls.isSupported()) {
       if (hls) {
+        clearStallRecover()
         try { hls.destroy() } catch (_e) { /* ignore */ }
       }
       const instance = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
         backBufferLength: 30,
+        // When low-latency is on, chase the live edge (one segment behind)
+        // instead of hls.js's default sync. Pair with streamlink's
+        // --twitch-low-latency (the LL-HLS playlist) to close the 10–30s
+        // gap between the player and chat.
+        liveSyncDurationCount: settings.lowLatency ? 1 : undefined,
       })
       hls = instance
 
@@ -399,6 +493,10 @@
     const generation = ++streamGeneration
     playerError = ''
     playerStatus = 'resolving'
+    clearStallRecover()
+    // A new stream load implies the user wants playback; clear any stale
+    // pause-intent from the previous channel so stalls on the new one recover.
+    userPaused = false
 
     const resolved = await resolveStream(channel, q)
     if (!isCurrentStream(generation, channel, q)) return
@@ -702,6 +800,19 @@
     favoritesStore.refresh()
   })
 
+  // Low-latency toggle: re-resolve the current stream so streamlink re-fetches
+  // with/without --twitch-low-latency and hls.js re-attaches with the matching
+  // live-sync config. The prev-value guard ensures this only fires on an actual
+  // toggle, not on unrelated channel/quality changes (which load the stream
+  // themselves).
+  let prevLowLatency = settings.lowLatency
+  $effect(() => {
+    const ll = settings.lowLatency
+    if (ll === prevLowLatency) return
+    prevLowLatency = ll
+    if (channelJoined) void loadStream(channelJoined, quality)
+  })
+
   let activeStatusToken = 0
   $effect(() => {
     const channel = channelJoined
@@ -742,6 +853,26 @@
       for (const u of winResizeUnlisteners) { try { u() } catch { /* ignore */ } }
       winResizeUnlisteners.length = 0
     }
+  })
+
+  // Close-to-tray: when enabled (default), intercept the window close so it
+  // hides to the tray instead of quitting — keeping the app running in the
+  // background so favorite live-notifications still fire. The process is
+  // fully quit via the tray's Quit menu item. Reading settings.closeToTray
+  // at event time keeps this reactive to the Settings toggle.
+  onMount(() => {
+    if (!isTauri()) return
+    let unlistenClose: (() => void) | null = null
+    void getCurrentWindow()
+      .onCloseRequested((event) => {
+        if (settings.closeToTray) {
+          event.preventDefault()
+          void getCurrentWindow().hide().catch(() => { /* ignore */ })
+        }
+      })
+      .then((un) => { unlistenClose = un })
+      .catch(() => { /* ignore */ })
+    return () => { try { unlistenClose?.() } catch { /* ignore */ } }
   })
 
   const playerLabel: Record<PlayerStatus, string> = {
@@ -1030,7 +1161,7 @@
 
   <div class="body">
     {#if !settings.theaterMode && sidebarMode !== 'hidden'}
-      <Sidebar currentChannel={channelJoined} onselect={selectChannel} iconsOnly={sidebarMode === 'icons'} />
+      <Sidebar currentChannel={channelJoined} onselect={selectChannel} iconsOnly={sidebarMode === 'icons'} {zoomK} />
     {/if}
     <div class="main" class:main--stacked={stacked} bind:this={mainEl}>
     <div class="video-pane">
@@ -1042,8 +1173,11 @@
         autoplay
         muted
         playsinline
+        onwaiting={onVideoWaiting}
+        onplaying={onVideoPlaying}
+        onpause={onVideoPause}
       ></video>
-        <PlayerControls video={videoEl} visible={status === 'connected' && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} {activeStatus} />
+        <PlayerControls video={videoEl} visible={status === 'connected' && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={() => void handoffToPlayer()} onplayintent={(p) => { userPaused = !p }} {activeStatus} />
         {#if showPlayerOverlay}
           <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
             {#if isPlayerBusy}
@@ -1236,6 +1370,9 @@
       style:top="{tooltipPos.top}px"
     >{tooltipState.text}</div>
   {/if}
+
+  <!-- Hidden probe used to measure the zoom factor (see zoomK). Never visible. -->
+  <div class="zoom-probe" bind:this={probeEl} aria-hidden="true"></div>
 
   {#if aboutOpen}
     <div class="about-backdrop" onclick={closeAbout} role="presentation"></div>
@@ -1927,6 +2064,18 @@
   @keyframes global-tooltip-in {
     from { opacity: 0; }
     to   { opacity: 1; }
+  }
+
+  /* Hidden probe that measures how position:fixed left/top map to visual
+     pixels under the current UI-scale zoom (see zoomK). Never painted. */
+  .zoom-probe {
+    position: fixed;
+    left: 100px;
+    top: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+    visibility: hidden;
   }
 
   .player-placeholder {
