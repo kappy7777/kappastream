@@ -6,7 +6,7 @@ Please **do not** open a public GitHub issue for security-sensitive bugs.
 
 Instead, report them privately via GitHub's _"Report a vulnerability"_
 flow on the [Security tab](./security/advisories/new), or email
-**kappy7777@proton.me**. Include:
+**kappy777@proton.me**. Include:
 
 - the app version (About modal, or the release page)
 - your distro / compositor (X11 or Wayland)
