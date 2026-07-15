@@ -1,7 +1,9 @@
 # Release builds: build the Tauri bundles (AppImage/deb/rpm), publish the
 # GitHub Release, and attach a SHA256SUMS checksum file.
 #
-# Triggered by pushing a tag matching `v*` (e.g. `v0.1.0`).
+# Triggered by pushing a tag matching `v*` (e.g. `v0.1.0`), or manually via
+# `workflow_dispatch` (provide a `tag` input — useful for smoke-testing the
+# bundle pipeline on a real release runner without cutting a real tag).
 #
 # Flow: run the full CI gate set first (check), and only if it passes build
 # the bundles and publish — so a broken commit can never be shipped as a tag.
@@ -11,14 +13,30 @@ on:
   push:
     tags:
       - "v*"
+  # Manual trigger: lets the release pipeline run without burning a tag.
+  # Useful for smoke-testing bundle changes (e.g. a tauri-action major
+  # bump) on a real release runner before tagging. When triggered manually
+  # set the `tag` input below to the version you want to publish.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag/version to publish (e.g. v0.1.4). Must not already exist as a release."
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+# The release tag is the pushed tag (`github.ref_name`) on a tag push, or the
+# explicit `tag` input on a manual run. `inputs.tag` is empty on push events,
+# so this falls back to the tag in that case.
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
 # A tag points at exactly one commit; don't let two runs for the same tag
 # race (e.g. a re-pushed tag). Never cancel an in-flight release mid-upload.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ env.RELEASE_TAG }}
   cancel-in-progress: false
 
 jobs:
@@ -117,10 +135,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "${{ github.ref_name }}"
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: "${{ env.RELEASE_TAG }}"
           releaseBody: |
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md) for what changed in this release.
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ env.RELEASE_TAG }}/CHANGELOG.md) for what changed in this release.
 
             Artifacts attached below include the AppImage, `.deb`, and `.rpm` packages. Verify them with the published `SHA256SUMS`.
           releaseDraft: true
@@ -135,7 +153,7 @@ jobs:
         run: packaging/aur/build-release-tarball.sh
 
       - name: Upload -bin tarball
-        run: gh release upload "${{ github.ref_name }}" packaging/aur/dist/*.tar.gz
+        run: gh release upload "${{ env.RELEASE_TAG }}" packaging/aur/dist/*.tar.gz
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -163,7 +181,7 @@ jobs:
           cat "$sums"
           cp "$sums" SHA256SUMS
 
-          gh release upload "${{ github.ref_name }}" SHA256SUMS
+          gh release upload "${{ env.RELEASE_TAG }}" SHA256SUMS
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -171,6 +189,6 @@ jobs:
       # from draft to public. If any prior step failed, this never runs and
       # the release stays draft (invisible, not downloadable).
       - name: Publish release
-        run: gh release edit "${{ github.ref_name }}" --draft=false
+        run: gh release edit "${{ env.RELEASE_TAG }}" --draft=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

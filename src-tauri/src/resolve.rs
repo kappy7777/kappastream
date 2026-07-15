@@ -274,3 +274,107 @@ pub async fn resolve_stream(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_name_valid_basic() {
+        assert!(is_channel_name_valid("x"));
+        assert!(is_channel_name_valid("twitch"));
+        assert!(is_channel_name_valid("shroud"));
+        assert!(is_channel_name_valid("name_with_underscore"));
+        assert!(is_channel_name_valid("123abc"));
+        assert!(is_channel_name_valid("a1b2c3"));
+    }
+
+    #[test]
+    fn channel_name_valid_boundaries() {
+        // exactly 25 chars is the max Twitch login length -> valid
+        assert!(is_channel_name_valid(&"a".repeat(25)));
+        // 26 chars -> invalid
+        assert!(!is_channel_name_valid(&"a".repeat(26)));
+        // empty -> invalid
+        assert!(!is_channel_name_valid(""));
+    }
+
+    #[test]
+    fn channel_name_rejects_invalid_chars() {
+        // uppercase
+        assert!(!is_channel_name_valid("Twitch"));
+        // hyphen (not allowed in Twitch logins)
+        assert!(!is_channel_name_valid("two-words"));
+        // dot
+        assert!(!is_channel_name_valid("dot.name"));
+        // space
+        assert!(!is_channel_name_valid("with space"));
+        // unicode
+        assert!(!is_channel_name_valid("café"));
+        // leading hash — note: stripping '#' happens in resolve_stream,
+        // NOT in is_channel_name_valid, so '#' must be rejected here.
+        assert!(!is_channel_name_valid("#channel"));
+        // special chars
+        assert!(!is_channel_name_valid("name!"));
+    }
+
+    #[test]
+    fn offline_detection_markers() {
+        assert!(is_offline("error: No playable streams found on this URL"));
+        assert!(is_offline("error: No playable streams"));
+        // substring match works even with surrounding noise
+        assert!(is_offline("streamlink: ...\nNo playable streams found\nexit 1"));
+        assert!(!is_offline("some unrelated streamlink error"));
+        assert!(!is_offline(""));
+    }
+
+    #[test]
+    fn unavailable_detection_markers() {
+        assert!(is_unavailable("The channel could not be found."));
+        assert!(is_unavailable("invalid stream"));
+        assert!(is_unavailable("Available streams: audio_only, 720p60"));
+        assert!(!is_unavailable("a normal streamlink message"));
+        assert!(!is_unavailable(""));
+    }
+
+    #[test]
+    fn allowed_qualities_complete() {
+        // The full allowlist mirrored by vite.config.ts ALLOWED_QUALITIES.
+        // Keep these in sync with the const at the top of this file.
+        for q in [
+            "best",
+            "worst",
+            "audio_only",
+            "160p",
+            "360p",
+            "480p",
+            "720p",
+            "720p60",
+            "1080p60",
+        ] {
+            assert!(
+                ALLOWED_QUALITIES.contains(&q),
+                "expected `{q}` in ALLOWED_QUALITIES"
+            );
+        }
+        // common-but-not-allowed values must be rejected
+        assert!(!ALLOWED_QUALITIES.contains(&"4k"));
+        assert!(!ALLOWED_QUALITIES.contains(&"source"));
+        assert!(!ALLOWED_QUALITIES.contains(&"1080p"));
+    }
+
+    #[test]
+    fn streamlink_bin_respects_env() {
+        // With the override unset, falls back to the bare binary name.
+        env::remove_var("STREAMLINK_BIN");
+        assert_eq!(streamlink_bin(), PathBuf::from("streamlink"));
+
+        // An explicit override is honored verbatim.
+        env::set_var("STREAMLINK_BIN", "/custom/path/streamlink");
+        assert_eq!(
+            streamlink_bin(),
+            PathBuf::from("/custom/path/streamlink")
+        );
+        env::remove_var("STREAMLINK_BIN");
+    }
+}
