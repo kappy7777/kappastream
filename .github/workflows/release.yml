@@ -131,7 +131,7 @@ jobs:
       # step below, AFTER SHA256SUMS is attached, so there is never a window
       # where the release is live and downloadable without its checksums.
       - name: Build and publish bundles
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
