@@ -95,14 +95,16 @@ fn run_candidate(name: &str, path: &str, args: &[String], child_path: &str) -> C
     let started = Instant::now();
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => break CandidateResult {
-                name: name.to_string(),
-                path: path.to_string(),
-                present: true,
-                exit_code: status.code(),
-                still_running: false,
-                stderr: String::new(),
-            },
+            Ok(Some(status)) => {
+                break CandidateResult {
+                    name: name.to_string(),
+                    path: path.to_string(),
+                    present: true,
+                    exit_code: status.code(),
+                    still_running: false,
+                    stderr: String::new(),
+                }
+            }
             Ok(None) if started.elapsed() < OPENER_TIMEOUT => {
                 thread::sleep(Duration::from_millis(25));
             }

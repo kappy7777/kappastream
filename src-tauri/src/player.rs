@@ -74,17 +74,14 @@ pub async fn launch_player(
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(LaunchPlayerResponse {
             ok: false,
-            error: Some(
-                if cfg!(debug_assertions) {
-                    format!(
-                        "streamlink binary not found at '{}': set STREAMLINK_BIN to override the path",
-                        bin.display()
-                    )
-                } else {
-                    "streamlink binary not found: set STREAMLINK_BIN to override the path"
-                        .to_string()
-                },
-            ),
+            error: Some(if cfg!(debug_assertions) {
+                format!(
+                    "streamlink binary not found at '{}': set STREAMLINK_BIN to override the path",
+                    bin.display()
+                )
+            } else {
+                "streamlink binary not found: set STREAMLINK_BIN to override the path".to_string()
+            }),
         }),
         Err(e) => Ok(LaunchPlayerResponse {
             ok: false,

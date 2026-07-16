@@ -43,8 +43,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Reuse the exact CI gates (npm run check + clippy -D warnings + cargo test)
-  # so a tagged commit can't ship unless it passes the same checks as main.
+  # Reuse the exact CI gates (npm run check + npm test + cargo fmt + clippy
+  # -D warnings + cargo test) so a tagged commit can't ship unless it passes
+  # the same checks as main.
   check:
     name: check
     uses: ./.github/workflows/ci.yml

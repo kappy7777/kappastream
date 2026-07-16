@@ -70,6 +70,9 @@ jobs:
       - name: Type-check (svelte-check + tsc)
         run: npm run check
 
+      - name: Frontend tests (Vitest)
+        run: npm test
+
       # `dist/` is gitignored, so a fresh CI checkout doesn't have it — but
       # the Rust crate compiles `tauri::generate_context!()` (src-tauri/src/
       # lib.rs), which embeds tauri.conf.json's `frontendDist` ("../dist") at
@@ -77,6 +80,9 @@ jobs:
       # cargo clippy/test fail with: "frontendDist ... path doesn't exist".
       - name: Build frontend (required by generate_context!)
         run: npm run build
+
+      - name: Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
       - name: Clippy (deny warnings)
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings

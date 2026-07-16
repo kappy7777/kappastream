@@ -77,8 +77,7 @@ async fn run_streamlink(
     low_latency: bool,
 ) -> Result<String, StreamlinkError> {
     let mut cmd = tokio::process::Command::new(bin);
-    cmd.arg("--loglevel")
-        .arg("error");
+    cmd.arg("--loglevel").arg("error");
     // Twitch low-latency mode: requests the short-segment LL-HLS playlist so
     // the player can chase the live edge (~5-8s vs the usual 15-30s). Paired
     // with hls.js lowLatencyMode + liveSyncDurationCount in the frontend.
@@ -178,8 +177,7 @@ pub async fn resolve_stream(
     let q_for_spawn = q.clone();
     let low_for_spawn = low_latency.unwrap_or(false);
 
-    let result =
-        run_streamlink(&bin, &channel_for_spawn, &q_for_spawn, low_for_spawn).await;
+    let result = run_streamlink(&bin, &channel_for_spawn, &q_for_spawn, low_for_spawn).await;
 
     match result {
         Ok(url) => {
@@ -333,7 +331,9 @@ mod tests {
         assert!(is_offline("error: No playable streams found on this URL"));
         assert!(is_offline("error: No playable streams"));
         // substring match works even with surrounding noise
-        assert!(is_offline("streamlink: ...\nNo playable streams found\nexit 1"));
+        assert!(is_offline(
+            "streamlink: ...\nNo playable streams found\nexit 1"
+        ));
         assert!(!is_offline("some unrelated streamlink error"));
         assert!(!is_offline(""));
     }
@@ -381,10 +381,7 @@ mod tests {
 
         // An explicit override is honored verbatim.
         env::set_var("STREAMLINK_BIN", "/custom/path/streamlink");
-        assert_eq!(
-            streamlink_bin(),
-            PathBuf::from("/custom/path/streamlink")
-        );
+        assert_eq!(streamlink_bin(), PathBuf::from("/custom/path/streamlink"));
         env::remove_var("STREAMLINK_BIN");
     }
 }
