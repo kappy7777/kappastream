@@ -13,6 +13,8 @@
   "scripts": {
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "tauri": "tauri"
   },
   "devDependencies": {
@@ -20,10 +22,12 @@
     "@tauri-apps/cli": "^2.11.4",
     "@tsconfig/svelte": "^5.0.8",
     "@types/node": "^26.1.1",
+    "happy-dom": "^20.10.6",
     "svelte": "^5.56.5",
     "svelte-check": "^4.7.1",
     "typescript": "~6.0.2",
-    "vite": "^8.1.4"
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

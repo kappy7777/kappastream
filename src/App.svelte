@@ -1405,7 +1405,16 @@
       <p class="about-modal-tagline about-modal-tagline--last">Built to watch, not to be watched.</p>
       <div class="about-modal-donate">
         <span class="about-modal-donate-label">Donate</span>
-        <code class="about-modal-donate-addr">bc1qj9ge9ug4pp5mr3g0lepuyyjh4j6sazhg2hgcrv</code>
+        <div class="about-modal-donate-addr-group">
+          <span
+            class="about-modal-btc-symbol"
+            aria-label="Bitcoin"
+            title="Bitcoin">₿</span
+          >
+          <code class="about-modal-donate-addr"
+            >bc1qj9ge9ug4pp5mr3g0lepuyyjh4j6sazhg2hgcrv</code
+          >
+        </div>
       </div>
     </div>
   {/if}
@@ -1728,6 +1737,21 @@
     color: var(--text-secondary);
     word-break: break-all;
     user-select: all;
+  }
+  .about-modal-donate-addr-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 3px;
+    min-width: 0;
+  }
+  .about-modal-btc-symbol {
+    flex: 0 0 auto;
+    color: #f7931a;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+    user-select: none;
   }
 
   .logo {

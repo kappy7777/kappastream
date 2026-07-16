@@ -31,7 +31,13 @@ export const MAX_FAVORITES = 100
 
 const POLL_INTERVAL_MS = 600_000
 const OFFLINE_INITIAL_POLL_INTERVAL_MS = 120_000
-const PER_FAV_STAGGER_MS = 1500
+// Small spread between channels at startup / on poll. The global DecAPI
+// limiter (MIN_FETCH_GAP_MS) serializes all requests, so this no longer gates
+// total sync time — it only avoids spawning every channel's async chain in the
+// same tick and keeps the limiter queue from being slammed all at once (which
+// would starve user-triggered refreshes for the whole drain window). Kept
+// small so the tail channel doesn't wait minutes merely to *start*.
+const PER_FAV_STAGGER_MS = 200
 const REQUEST_TIMEOUT_MS = 8_000
 const METADATA_REFRESH_MS = 10 * 60 * 1000
 const NOTIFY_STARTUP_GRACE_MS = 10 * 60 * 1000
@@ -177,7 +183,21 @@ function saveNotifChannels(set: Set<string>): void {
   }
 }
 
-const MIN_FETCH_GAP_MS = 200
+// Minimum gap between consecutive DecAPI requests, serialized globally via
+// waitForFetchSlot(). DecAPI documents a limit of ~100 requests / 60s across
+// /twitch/* endpoints. A strict minimum inter-request gap provably bounds the
+// rate over ANY window (≤ floor(60000/GAP)+1 per 60s), including bursts, which
+// a token bucket would NOT — and bursts are exactly what was tripping 429s.
+// 650ms → ≤ ~92 req/min.
+//
+// SCOPE: this limiter covers ALL favorites traffic (polling, metadata,
+// retries, manual refreshes). It does NOT cover emotes.ts' getTwitchUserId()
+// (`/twitch/id/<user>`), which calls `invoke('decapi_fetch')` directly — that
+// fires ~once per channel-join (not per favorite), so its volume is negligible
+// against the ~8 req/min headroom here. Do not assume this makes the *whole
+// app* provably under the limit; it makes the favorites burst safe and leaves
+// generous room for the occasional bypass call.
+const MIN_FETCH_GAP_MS = 650
 let lastFetchAt = 0
 let fetchThrottle = Promise.resolve()
 
@@ -192,8 +212,9 @@ async function waitForFetchSlot(): Promise<void> {
 }
 
 async function fetchText(path: string, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<string> {
-  // Global throttle — keeps DecAPI request rate at ~5 req/s sustained
-  // (no bursts) regardless of how many channels are in-flight at once.
+  // Global rate limiter — serializes ALL DecAPI traffic (favorites polling,
+  // metadata, retries, manual refreshes) so the combined request rate stays
+  // safely below DecAPI's ~100 req/60s limit (see MIN_FETCH_GAP_MS).
   await waitForFetchSlot()
 
   // All DecAPI calls go through the Rust `decapi_fetch` command. The
@@ -225,8 +246,29 @@ export async function fetchLiveStatus(
   channel: string,
   options?: FetchLiveStatusOptions,
 ): Promise<LiveStatus> {
+  // Atomic live/offline resolution used by App.svelte for the ACTIVE channel
+  // (a single, user-driven fetch where waiting for avatar/metadata is fine).
+  // The favorites store does NOT use this — it classifies via uptime first
+  // and commits status before launching cosmetic enrichment (see fetchOne() +
+  // enrich()). Kept for order: uptime -> avatar -> live metadata.
   const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS
   let avatarUrl = options?.cachedAvatarUrl ?? ''
+
+  // 1) Determine live/offline FIRST. This is the status users actually need,
+  //    and it must not be queued behind (or blocked by) a cosmetic avatar
+  //    request. If uptime fails we bail before fetching anything else, which
+  //    also saves a request on the failure path.
+  let uptimeBody: string
+  try {
+    uptimeBody = await fetchText('/twitch/uptime/' + channel, timeoutMs)
+  } catch (err) {
+    return { state: 'error', message: 'uptime: ' + (err as Error).message }
+  }
+
+  const offline = isOfflineMessage(channel, uptimeBody)
+
+  // 2) Avatar only if not already cached. It's non-essential and fetched
+  //    after status is known so it can never delay live/offline resolution.
   if (!avatarUrl) {
     try {
       avatarUrl = await fetchText('/twitch/avatar/' + channel, timeoutMs)
@@ -235,14 +277,7 @@ export async function fetchLiveStatus(
     }
   }
 
-  let uptimeBody: string
-  try {
-    uptimeBody = await fetchText('/twitch/uptime/' + channel, timeoutMs)
-  } catch (err) {
-    return { state: 'error', message: 'uptime: ' + (err as Error).message }
-  }
-
-  if (isOfflineMessage(channel, uptimeBody)) {
+  if (offline) {
     return { state: 'offline', avatarUrl }
   }
 
@@ -250,10 +285,11 @@ export async function fetchLiveStatus(
     return { state: 'live', title: '', viewers: 0, uptime: uptimeBody, game: '', avatarUrl }
   }
 
+  // 3) Live-only metadata (title/viewers/game). Partial failures leave the
+  // field at its default (this is the atomic active-channel path).
   let title = ''
   let viewers = 0
   let game = ''
-  const errors: string[] = []
 
   const results = await Promise.allSettled([
     fetchText('/twitch/title/' + channel, timeoutMs),
@@ -261,15 +297,11 @@ export async function fetchLiveStatus(
     fetchText('/twitch/game/' + channel, timeoutMs),
   ])
   if (results[0].status === 'fulfilled') title = results[0].value
-  else errors.push('title: ' + (results[0].reason as Error).message)
   if (results[1].status === 'fulfilled') {
     const v = parseInt(results[1].value, 10)
     viewers = Number.isFinite(v) ? v : 0
-  } else {
-    errors.push('viewers: ' + (results[1].reason as Error).message)
   }
   if (results[2].status === 'fulfilled') game = results[2].value
-  else errors.push('game: ' + (results[2].reason as Error).message)
 
   return {
     state: 'live',
@@ -300,6 +332,19 @@ export class FavoritesStore {
   private decapiCooldownUntil = 0
   private circuitBreakerStreak = 0
   private readonly startedAt = Date.now()
+  // Enrichment (avatar + live metadata) is decoupled from status
+  // classification and split into two independent task types so a deferred
+  // batch can prioritize them: live metadata first, then avatars. Each type
+  // has its own in-flight guard (a channel may have metadata and avatar
+  // enrichment queued concurrently without one cancelling the other).
+  private metadataInFlight = new Set<string>()
+  private avatarInFlight = new Set<string>()
+  // During the initial startup classification pass, enrichment is deferred so
+  // every channel's uptime request is queued ahead of cosmetic avatar /
+  // metadata requests (the limiter is FIFO). Once all initial classifications
+  // settle, the deferred enrichment is flushed.
+  private classifyBatchPending = 0
+  private deferredEnrich = new Map<string, number>()
 
   rateLimited: boolean = $state(false)
 
@@ -312,6 +357,19 @@ export class FavoritesStore {
       const c = cached.get(e.name)
       if (c) {
         this.statuses.set(e.name, c)
+        // Reuse persisted avatar + live metadata so the first poll after
+        // restart does not re-request them. The status cache is at most
+        // STATUS_CACHE_MAX_AGE_MS (1h) old, so these are fresh enough to show
+        // immediately; live metadata is refreshed again after
+        // METADATA_REFRESH_MS via shouldFetchMetadata().
+        const cs = c.status
+        if ((cs.state === 'live' || cs.state === 'offline') && cs.avatarUrl) {
+          this.avatarCache.set(e.name, cs.avatarUrl)
+        }
+        if (cs.state === 'live') {
+          this.metadataCache.set(e.name, { title: cs.title, viewers: cs.viewers, game: cs.game })
+          this.metadataFetchedAt.set(e.name, c.lastFetched ?? Date.now())
+        }
       } else {
         this.statuses.set(e.name, {
           name: e.name,
@@ -510,8 +568,12 @@ export class FavoritesStore {
       saveToStorage(this.entries)
       this.notify()
       this.scheduleNextPoll()
+      // Batch-classify like start(): enqueue every uptime before any
+      // enrichment so a large restore doesn't let avatars delay later
+      // channels' status resolution.
+      this.classifyBatchPending = newEntries.length
       for (let i = 0; i < newEntries.length; i++) {
-        void this.fetchOne(newEntries[i].name, i * PER_FAV_STAGGER_MS)
+        void this.fetchOne(newEntries[i].name, i * PER_FAV_STAGGER_MS, false, true)
       }
     }
     return { added, skipped, invalid }
@@ -519,9 +581,15 @@ export class FavoritesStore {
 
   start(): void {
     if (this.disposed) return
-    for (let i = 0; i < this.entries.length; i++) {
-      const name = this.entries[i].name
-      void this.fetchOne(name, i * PER_FAV_STAGGER_MS)
+    // The initial pass classifies every favorite (uptime first). Enrichment
+    // (avatar + live metadata) is deferred until all uptime requests have been
+    // queued, so cosmetic calls can't push a later channel's uptime down the
+    // FIFO limiter queue.
+    if (this.entries.length > 0) {
+      this.classifyBatchPending = this.entries.length
+      for (let i = 0; i < this.entries.length; i++) {
+        void this.fetchOne(this.entries[i].name, i * PER_FAV_STAGGER_MS, false, true)
+      }
     }
     this.scheduleNextPoll()
   }
@@ -543,6 +611,10 @@ export class FavoritesStore {
     this.stop()
     for (const t of this.retryTimers.values()) clearTimeout(t)
     this.retryTimers.clear()
+    this.deferredEnrich.clear()
+    this.metadataInFlight.clear()
+    this.avatarInFlight.clear()
+    this.classifyBatchPending = 0
     this.listeners.clear()
   }
 
@@ -562,10 +634,18 @@ export class FavoritesStore {
       const targets = this.entries.filter((e) => {
         if (!aggressiveAtFire) return true
         const st = this.statuses.get(e.name)?.status
-        return st?.state === 'offline'
+        // During the startup grace period, re-poll every channel that is NOT
+        // confirmed live — offline, unknown (never resolved, e.g. skipped
+        // during an earlier cooldown), and transient error states all need
+        // another attempt. Live channels already poll on the normal cadence
+        // (and refresh metadata), so they are excluded to avoid waste.
+        return st?.state !== 'live'
       })
+      // Batch-classify so cosmetic enrichment from earlier targets can't push
+      // a later target's uptime down the FIFO limiter queue.
+      if (targets.length > 0) this.classifyBatchPending = targets.length
       for (let i = 0; i < targets.length; i++) {
-        void this.fetchOne(targets[i].name, i * PER_FAV_STAGGER_MS)
+        void this.fetchOne(targets[i].name, i * PER_FAV_STAGGER_MS, false, true)
       }
       this.scheduleNextPoll()
     }, interval)
@@ -631,7 +711,12 @@ export class FavoritesStore {
     return Date.now() - last > METADATA_REFRESH_MS
   }
 
-  private async fetchOne(name: string, delayMs: number, isRetry = false): Promise<void> {
+  private async fetchOne(
+    name: string,
+    delayMs: number,
+    isRetry = false,
+    batch = false,
+  ): Promise<void> {
     if (this.disposed) return
     const version = this.entryVersions.get(name)
     if (version === undefined || !this.has(name)) return
@@ -640,65 +725,60 @@ export class FavoritesStore {
     if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs))
     if (this.disposed || !this.isCurrentEntry(name, version)) {
       if (this.inFlight.get(name) === version) this.inFlight.delete(name)
+      if (batch) this.classifyBatchDone()
       return
     }
-    this.clearCircuitBreakerIfExpired()
-    if (this.isOnCooldown()) {
-      if (this.inFlight.get(name) === version) this.inFlight.delete(name)
-      if (isRetry && (this.consecutiveFailures.get(name) ?? 0) > 0 && (this.consecutiveFailures.get(name) ?? 0) < CONSECUTIVE_FAILURES_FOR_STALE) {
-        this.scheduleRetry(name, this.consecutiveFailures.get(name) ?? 1)
-      }
-      return
-    }
-    const prev = this.statuses.get(name)
-    const prevStatus = prev?.status
     try {
-      const cachedAvatar = this.avatarCache.get(name)
-      const shouldFetchMeta = this.shouldFetchMetadata(name)
-      const timeoutMs = isRetry ? RETRY_TIMEOUT_MS : REQUEST_TIMEOUT_MS
+      this.clearCircuitBreakerIfExpired()
+      if (this.isOnCooldown()) {
+        if (this.inFlight.get(name) === version) this.inFlight.delete(name)
+        // A global DecAPI cooldown is active but THIS request never reached
+        // the network, so it is not a channel failure: it must not increment
+        // consecutiveFailures, apply per-channel backoff, or mark the channel
+        // stale. Just reschedule for after the cooldown ends (+ jitter). The
+        // breaker can only stay active while real 429s occur elsewhere, and
+        // those failures are capped independently.
+        this.scheduleCooldownDefer(name)
+        return
+      }
 
-      let status = await fetchLiveStatus(name, {
-        cachedAvatarUrl: cachedAvatar,
-        fetchMetadata: shouldFetchMeta,
-        timeoutMs,
-      })
+      // ---- Phase 1: classification (uptime) ----
+      // Resolve live/offline first and commit it, so the loading indicator
+      // disappears as soon as uptime is known — before any cosmetic avatar /
+      // metadata request. Avatar + metadata are Phase 2 (enrich()).
+      const cachedAvatar = this.avatarCache.get(name) ?? ''
+      const timeoutMs = isRetry ? RETRY_TIMEOUT_MS : REQUEST_TIMEOUT_MS
+      let uptimeBody: string
+      try {
+        uptimeBody = await fetchText('/twitch/uptime/' + name, timeoutMs)
+      } catch (err) {
+        throw new Error('uptime: ' + (err as Error).message)
+      }
       if (!this.isCurrentEntry(name, version)) return
 
-      // fetchLiveStatus returns { state: 'error' } when an individual endpoint
-      // (usually uptime) fails — e.g. HTTP 429. This is NOT an exception, so
-      // without this re-throw the success path below would delete the failure
-      // counter, clear the retry timer, and leave the channel stuck in error
-      // state with zero retries scheduled. Route it through the catch block
-      // so circuit-breaker detection and retry scheduling actually fire.
-      if (status.state === 'error') {
-        throw new Error(status.message)
-      }
-
-      if ((status.state === 'live' || status.state === 'offline') && status.avatarUrl && status.avatarUrl !== cachedAvatar) {
-        this.avatarCache.set(name, status.avatarUrl)
-      }
-
-      if (status.state === 'live') {
-        if (shouldFetchMeta) {
-          this.metadataCache.set(name, {
-            title: status.title,
-            viewers: status.viewers,
-            game: status.game,
-          })
-          this.metadataFetchedAt.set(name, Date.now())
-        } else {
-          const cachedMeta = this.metadataCache.get(name)
-          if (cachedMeta) {
-            status = {
-              ...status,
-              title: cachedMeta.title,
-              viewers: cachedMeta.viewers,
-              game: cachedMeta.game,
-            }
+      const prev = this.statuses.get(name)
+      const prevStatus = prev?.status
+      const offline = isOfflineMessage(name, uptimeBody)
+      const cachedMeta = this.metadataCache.get(name)
+      const status: LiveStatus = offline
+        ? { state: 'offline', avatarUrl: cachedAvatar }
+        : {
+            state: 'live',
+            title: cachedMeta?.title ?? '',
+            viewers: cachedMeta?.viewers ?? 0,
+            uptime: uptimeBody,
+            game: cachedMeta?.game ?? '',
+            avatarUrl: cachedAvatar,
           }
-        }
+
+      // Re-entering live (was offline/error/unknown): force a metadata
+      // refresh so we don't keep showing title/viewers from a previous live
+      // session that may have gone stale while offline.
+      if (!offline && prevStatus?.state !== 'live') {
+        this.metadataFetchedAt.delete(name)
       }
 
+      // Commit classification. This is a real success for the uptime call.
       this.consecutiveFailures.delete(name)
       this.clearRetryTimer(name)
       this.statuses.set(name, {
@@ -713,38 +793,205 @@ export class FavoritesStore {
       if (!wasLive && nowLive && Date.now() - this.startedAt >= NOTIFY_STARTUP_GRACE_MS) {
         this.fireLiveNotification(name, status)
       }
-    } catch (err) {
-      if (!this.isCurrentEntry(name, version)) return
-      const errorMessage = (err as Error).message
-      if (errorMessage.includes('429')) {
-        this.tripCircuitBreaker()
-      }
-
-      const priorFailures = this.consecutiveFailures.get(name) ?? 0
-      const nextFailures = priorFailures + 1
-      this.consecutiveFailures.set(name, nextFailures)
-
-      const isStale = nextFailures >= CONSECUTIVE_FAILURES_FOR_STALE
-      if (isStale) {
-        this.clearRetryTimer(name)
-      } else {
-        this.scheduleRetry(name, nextFailures)
-      }
-
-      this.statuses.set(name, {
-        name,
-        status: prevStatus ?? { state: 'unknown' },
-        lastFetched: prev?.lastFetched ?? null,
-        lastError: errorMessage,
-        updateDelayed: isStale,
-      })
-    } finally {
-      if (this.inFlight.get(name) === version) this.inFlight.delete(name)
       if (this.isCurrentEntry(name, version)) {
         saveStatusCache(this.statuses)
         this.notify()
       }
+
+      // ---- Phase 2: enrichment (avatar + live metadata) ----
+      // Deferred during the initial batch so every uptime request is queued
+      // ahead of cosmetic calls; launched immediately otherwise.
+      if (batch) {
+        this.deferredEnrich.set(name, version)
+      } else {
+        void this.enrich(name, version)
+      }
+    } catch (err) {
+      // Real network failure (e.g. a 429 that reached the server, or a
+      // timeout). This IS a channel failure: bump the counter, apply backoff.
+      const errorMessage = (err as Error).message
+      const prev = this.statuses.get(name)
+      if (this.isCurrentEntry(name, version)) {
+        if (errorMessage.includes('429')) {
+          this.tripCircuitBreaker()
+        }
+        const priorFailures = this.consecutiveFailures.get(name) ?? 0
+        const nextFailures = priorFailures + 1
+        this.consecutiveFailures.set(name, nextFailures)
+        const isStale = nextFailures >= CONSECUTIVE_FAILURES_FOR_STALE
+        if (isStale) this.clearRetryTimer(name)
+        else this.scheduleRetry(name, nextFailures)
+        this.statuses.set(name, {
+          name,
+          status: prev?.status ?? { state: 'unknown' },
+          lastFetched: prev?.lastFetched ?? null,
+          lastError: errorMessage,
+          updateDelayed: isStale,
+        })
+        saveStatusCache(this.statuses)
+        this.notify()
+      }
+    } finally {
+      if (this.inFlight.get(name) === version) this.inFlight.delete(name)
+      if (batch) this.classifyBatchDone()
     }
+  }
+
+  private classifyBatchDone(): void {
+    if (this.classifyBatchPending <= 0) return
+    this.classifyBatchPending--
+    if (this.classifyBatchPending === 0 && this.deferredEnrich.size > 0) {
+      this.flushDeferredEnrich()
+    }
+  }
+
+  private flushDeferredEnrich(): void {
+    if (this.disposed) {
+      this.deferredEnrich.clear()
+      return
+    }
+    const todo = this.deferredEnrich
+    this.deferredEnrich = new Map()
+    // Partition by CURRENT status and launch in priority order so no offline
+    // avatar can delay useful information for a confirmed-live channel. The
+    // shared DecAPI limiter is FIFO, so launching in this order queues the
+    // requests in this order. Within each phase the original favorite order
+    // (Map insertion order) is preserved. Per-method state checks re-verify
+    // liveness/offline at execution time, so a transition while queued is safe.
+    //   1. live metadata (title / game / viewers)
+    //   2. missing avatars for live channels
+    //   3. missing avatars for offline channels
+    // Unknown/error entries get no cosmetic enrichment (the per-method checks
+    // skip channels that aren't classified live/offline).
+    const live: [string, number][] = []
+    const offline: [string, number][] = []
+    for (const [name, version] of todo) {
+      const st = this.statuses.get(name)?.status
+      if (st?.state === 'live') live.push([name, version])
+      else if (st?.state === 'offline') offline.push([name, version])
+    }
+    for (const [name, version] of live) void this.enrichMetadata(name, version)
+    for (const [name, version] of live) void this.enrichAvatar(name, version)
+    for (const [name, version] of offline) void this.enrichAvatar(name, version)
+  }
+
+  private scheduleCooldownDefer(name: string): void {
+    // One deferral timer per channel (clearRetryTimer). NOT a failure: the
+    // request never reached the network, so consecutiveFailures is untouched.
+    this.clearRetryTimer(name)
+    if (this.disposed) return
+    const now = Date.now()
+    const base = Math.max(this.decapiCooldownUntil, now)
+    const delay = base - now + 250 + Math.random() * RETRY_JITTER_MS
+    const t = setTimeout(() => {
+      this.retryTimers.delete(name)
+      if (this.disposed) return
+      if (!this.entries.some((e) => e.name === name)) return
+      void this.fetchOne(name, 0, true)
+    }, delay)
+    this.retryTimers.set(name, t)
+  }
+
+  // Phase 2 entry point for NON-deferred (single-channel) enrichment paths
+  // (add / retryFetch / non-batch fetchOne). Metadata first (live information
+  // matters more than the avatar), then the avatar. The deferred batch path
+  // does NOT use this — it launches enrichMetadata / enrichAvatar in priority
+  // phases via flushDeferredEnrich().
+  private async enrich(name: string, version: number): Promise<void> {
+    await this.enrichMetadata(name, version)
+    await this.enrichAvatar(name, version)
+  }
+
+  // Live metadata enrichment: title / game / viewers. Re-verifies the channel
+  // is STILL live immediately before fetching and again before applying, so a
+  // live->offline transition while queued can't receive or store stale live
+  // metadata. Never reverts a classification; failure leaves cached values.
+  private async enrichMetadata(name: string, version: number): Promise<void> {
+    if (this.disposed || !this.isCurrentEntry(name, version)) return
+    if (this.metadataInFlight.has(name)) return
+    if (this.statuses.get(name)?.status.state !== 'live') return
+    if (!this.shouldFetchMetadata(name)) return
+    this.metadataInFlight.add(name)
+    try {
+      if (this.disposed || !this.isCurrentEntry(name, version)) return
+      if (this.statuses.get(name)?.status.state !== 'live') return
+      const results = await Promise.allSettled([
+        fetchText('/twitch/title/' + name, REQUEST_TIMEOUT_MS),
+        fetchText('/twitch/viewercount/' + name, REQUEST_TIMEOUT_MS),
+        fetchText('/twitch/game/' + name, REQUEST_TIMEOUT_MS),
+      ])
+      if (this.disposed || !this.isCurrentEntry(name, version)) return
+      // Re-check liveness before caching/applying: don't store live metadata
+      // for a channel that went offline while the requests were in flight.
+      if (this.statuses.get(name)?.status.state !== 'live') return
+      const prevMeta = this.metadataCache.get(name) ?? { title: '', viewers: 0, game: '' }
+      const parsedViewers =
+        results[1].status === 'fulfilled' && Number.isFinite(parseInt(results[1].value, 10))
+          ? parseInt(results[1].value, 10)
+          : prevMeta.viewers
+      this.metadataCache.set(name, {
+        title: results[0].status === 'fulfilled' ? results[0].value : prevMeta.title,
+        viewers: parsedViewers,
+        game: results[2].status === 'fulfilled' ? results[2].value : prevMeta.game,
+      })
+      this.metadataFetchedAt.set(name, Date.now())
+      this.reflectCaches(name)
+    } finally {
+      this.metadataInFlight.delete(name)
+    }
+  }
+
+  // Avatar enrichment: fetch a missing profile picture for an already-classified
+  // (live or offline) channel. An avatar is valid for either state, so no
+  // live/offline re-check is needed beyond "still classified"; the live-first
+  // ordering is handled by flushDeferredEnrich()'s phase launch. Failure is
+  // non-fatal and never erases a cached avatar.
+  private async enrichAvatar(name: string, version: number): Promise<void> {
+    if (this.disposed || !this.isCurrentEntry(name, version)) return
+    if (this.avatarInFlight.has(name)) return
+    if (this.avatarCache.get(name)) return // already have one
+    const cs = this.statuses.get(name)?.status
+    if (cs?.state !== 'live' && cs?.state !== 'offline') return
+    this.avatarInFlight.add(name)
+    try {
+      if (this.disposed || !this.isCurrentEntry(name, version)) return
+      try {
+        const av = await fetchText('/twitch/avatar/' + name, REQUEST_TIMEOUT_MS)
+        if (this.disposed || !this.isCurrentEntry(name, version)) return
+        if (av) {
+          this.avatarCache.set(name, av)
+          this.reflectCaches(name)
+        }
+      } catch {
+        /* non-essential: keep existing (cached or empty) avatar */
+      }
+    } finally {
+      this.avatarInFlight.delete(name)
+    }
+  }
+
+  // Reflect the avatar/metadata caches into the already-classified status.
+  // Never reverts a classification: only live statuses get metadata, and only
+  // live/offline statuses get an avatar. Guarded so a disposed/removed store
+  // or a state change is respected.
+  private reflectCaches(name: string): void {
+    if (this.disposed) return
+    const existing = this.statuses.get(name)
+    if (!existing) return
+    const es = existing.status
+    if (es.state !== 'live' && es.state !== 'offline') return
+    const next: LiveStatus = { ...es, avatarUrl: this.avatarCache.get(name) ?? es.avatarUrl }
+    if (es.state === 'live' && next.state === 'live') {
+      const m = this.metadataCache.get(name)
+      if (m) {
+        next.title = m.title
+        next.viewers = m.viewers
+        next.game = m.game
+      }
+    }
+    this.statuses.set(name, { ...existing, status: next, lastFetched: Date.now() })
+    saveStatusCache(this.statuses)
+    this.notify()
   }
 
   private isCurrentEntry(name: string, version: number): boolean {
