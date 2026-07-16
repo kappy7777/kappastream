@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-07-16
+
+### Added
+
+- Frontend test suite (Vitest) covering favorite synchronization:
+  cooldown deferral, stale-response guards, rate limiting,
+  status-before-enrichment, and live-channel enrichment priority.
+- CI now runs frontend tests (`npm test`) and enforces `cargo fmt`.
+
+### Fixed
+
+- Favorites no longer get stuck in the loading/"unknown" state for
+  ~10 minutes after startup. Channels skipped during a DecAPI rate-limit
+  cooldown are retried after the cooldown instead of being dropped, and
+  the aggressive startup poll now includes every non-live favorite.
+- Live/offline status is published as soon as the uptime check resolves,
+  before avatars and live metadata are fetched, so the loading indicator
+  clears after a single request per channel.
+- The DecAPI request limiter was slowed to 650 ms (~92 req/min) to stay
+  safely under DecAPI's ~100 req/60s limit, eliminating the 429 bursts
+  that triggered the cooldown.
+- Global-cooldown deferrals no longer count as per-channel failures or
+  mark channels stale; only real network failures consume the retry
+  budget.
+- After a classification batch, enrichment is prioritized — live
+  metadata, then live avatars, then offline avatars — so offline avatars
+  can't delay titles/games/viewer counts for live channels.
+- Persisted avatar and metadata hydrate the in-memory caches on restart.
+
 ## [0.1.4] - 2026-07-15
 
 ### Added
@@ -92,7 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.5
 [0.1.4]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.4
 [0.1.3]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.3
 [0.1.2]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.2
