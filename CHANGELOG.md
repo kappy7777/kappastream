@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-07-16
+
+### Fixed
+
+- The hls.js low-latency mode now follows the Low Latency setting instead of
+  being hardcoded on. Previously `lowLatencyMode` was always enabled and the
+  `liveSyncDurationCount` default was clobbered to `undefined` (hls.js's shallow
+  config merge does not skip `undefined`), so with Low Latency off the player
+  chased the live edge with a tiny buffer and no partial segments — causing
+  constant micro-underruns and, on webkit2gtk, the picture freezing while audio
+  kept going. Both the main player and the PiP window now share one config
+  builder (`buildHlsConfig`).
+
 ## [0.1.5] - 2026-07-16
 
 ### Added
@@ -121,7 +134,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.6
 [0.1.5]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.5
 [0.1.4]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.4
 [0.1.3]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.3
