@@ -5,6 +5,8 @@
   import { isTauri } from '@tauri-apps/api/core'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { PhysicalSize } from '@tauri-apps/api/dpi'
+  import { buildHlsConfig } from './lib/hls-config'
+  import { settings } from './lib/settings.svelte.ts'
 
   // Minimal PiP window: a single <video> fed by hls.js from the URL the main
   // window hands us. This window is the audio authority while open; the main
@@ -53,7 +55,7 @@
     if (hls) { try { hls.destroy() } catch { /* ignore */ } hls = null }
 
     if (Hls.isSupported()) {
-      const inst = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 30 })
+      const inst = new Hls(buildHlsConfig(settings.lowLatency))
       hls = inst
       inst.on(Hls.Events.MANIFEST_PARSED, () => {
         loading = false

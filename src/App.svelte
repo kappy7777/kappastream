@@ -11,6 +11,7 @@
   import Settings from './lib/Settings.svelte'
   import NotifyMenu from './lib/NotifyMenu.svelte'
   import { settings } from './lib/settings.svelte.ts'
+  import { buildHlsConfig } from './lib/hls-config'
   import { pipController } from './lib/pip-controller.svelte.ts'
   import { fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
   import { notifications } from './lib/notifications.svelte.ts'
@@ -399,16 +400,7 @@
         clearStallRecover()
         try { hls.destroy() } catch (_e) { /* ignore */ }
       }
-      const instance = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-        backBufferLength: 30,
-        // When low-latency is on, chase the live edge (one segment behind)
-        // instead of hls.js's default sync. Pair with streamlink's
-        // --twitch-low-latency (the LL-HLS playlist) to close the 10–30s
-        // gap between the player and chat.
-        liveSyncDurationCount: settings.lowLatency ? 1 : undefined,
-      })
+      const instance = new Hls(buildHlsConfig(settings.lowLatency))
       hls = instance
 
       return await new Promise((resolve) => {
