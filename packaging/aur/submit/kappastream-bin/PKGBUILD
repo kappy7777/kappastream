@@ -39,7 +39,7 @@ conflicts=("${_pkgname}" "${_pkgname}-git")
 # packaging/aur/build-release-tarball.sh). No makedepends, no build() — this
 # is a pure -bin repackage.
 source=("${_repo}/releases/download/v${pkgver}/${_pkgname}-${pkgver}-x86_64.tar.gz")
-sha256sums=('dc12c1d5770b05c92f8180c7ca107cf8369744d87c6cb9dfa417d53c10d7962e')   # kappastream-0.1.6-x86_64.tar.gz (v0.1.6 release asset)
+sha256sums=('dc12c1d5770b05c92f8180c7ca107cf8369744d87c6cb9dfa417d53c10d7962e')   # sha256 of the release tarball; bump alongside pkgver on each release
 
 package() {
 	cd "${srcdir}/${_pkgname}-${pkgver}-x86_64"

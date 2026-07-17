@@ -1,7 +1,7 @@
 # AUR packaging for kappastream
 
 Files for publishing kappastream to the [Arch User Repository](https://aur.archlinux.org).
-Both packages are **published** (maintainer `kappy`) and current at v0.1.3:
+Both packages are **published** (maintainer `kappy`) and track the latest release:
 
 - `kappastream-git` → https://aur.archlinux.org/packages/kappastream-git
 - `kappastream-bin` → https://aur.archlinux.org/packages/kappastream-bin
@@ -30,7 +30,7 @@ Shared assets (also used by the Debian/Fedora packages, live in
 | --- | --- |
 | `kappastream.desktop` | Desktop entry (native, not the AppImage one). |
 | `dev.kappy.kappastream.metainfo.xml` | AppStream metadata for GNOME Software / KDE Discover. |
-| `kappastream.sh` | Runtime launcher that applies the WebKitGTK Wayland workaround. |
+| `kappastream.sh` | Thin runtime launcher (NVIDIA EGL-Wayland explicit-sync compat is applied in the binary at startup, not here). |
 
 ## `-git` vs `-bin`
 
@@ -116,7 +116,7 @@ cp /path/to/packaging/shared/kappastream.sh .
 makepkg --printsrcinfo > .SRCINFO
 
 git add .gitignore PKGBUILD .SRCINFO README.md kappastream.desktop kappastream.sh dev.kappy.kappastream.metainfo.xml
-git commit -m "Initial import: kappastream-git 0.1.3"
+git commit -m "Initial import: kappastream-git <version>"
 git push origin master
 ```
 
@@ -135,13 +135,13 @@ cp /path/to/packaging/aur/PKGBUILD-bin PKGBUILD   # AUR expects the file named P
 # fill in _release (real URL prefix) + the sha256sum (makepkg -g)
 makepkg --printsrcinfo > .SRCINFO
 git add PKGBUILD .SRCINFO
-git commit -m "Initial import: kappastream-bin 0.1.3"
+git commit -m "Initial import: kappastream-bin <version>"
 git push origin master
 ```
 
 ## Updating on a new release
 
-1. Tag the release in the source repo (`git tag v0.2.0`).
+1. Tag the release in the source repo (`git tag v<version>`).
 2. (Optional) switch `pkgver()` to the `git describe` variant noted in the PKGBUILD.
 3. In the AUR repo: update the `PKGBUILD` (bump `pkgrel` to 1, adjust anything that changed), regenerate `.SRCINFO`, commit, push.
 

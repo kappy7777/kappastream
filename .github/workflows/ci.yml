@@ -67,6 +67,12 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
+      - name: Version drift check
+        # Fails fast if package.json / Cargo.toml / Cargo.lock disagree, or a
+        # packaging README / PKGBUILD carries a stale hardcoded version. Runs
+        # before the type-check so a half-bumped tree is caught immediately.
+        run: sh scripts/check-versions.sh
+
       - name: Type-check (svelte-check + tsc)
         run: npm run check
 
