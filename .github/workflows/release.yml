@@ -309,6 +309,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      # `gh` resolves the target repository from the local git remote, and
+      # `--target` resolves the commit sha via git — so publish needs a real
+      # checkout (the build artifacts arrive via download-artifact below, not
+      # from this checkout).
+      - name: Checkout
+        uses: actions/checkout@v7
+
       # merge-multiple flattens every artifact into release-staging/ with
       # clean basenames (no per-artifact subdirs), so the four release files
       # end up side by side.
@@ -375,14 +382,22 @@ jobs:
             echo '```'
           } > release-notes.md
 
-          # --target pins the tag to the exact commit this run built (the
-          # tagged commit). gh fails loudly if the tag already exists pointing
-          # elsewhere (a re-tag), so a stale release can't be silently moved.
-          gh release create "${RELEASE_TAG}" \
-            --target "${GITHUB_SHA}" \
-            --title "${RELEASE_TAG}" \
-            --notes-file release-notes.md \
-            --draft
+          # On a tag push the git tag already exists; on a manual dispatch it
+          # may not. Create the release for the existing tag when present
+          # (passing --target to an existing tag errors "reference already
+          # exists"); otherwise pin the tag to the commit this run built.
+          if git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release create "${RELEASE_TAG}" \
+              --title "${RELEASE_TAG}" \
+              --notes-file release-notes.md \
+              --draft
+          else
+            gh release create "${RELEASE_TAG}" \
+              --target "${GITHUB_SHA}" \
+              --title "${RELEASE_TAG}" \
+              --notes-file release-notes.md \
+              --draft
+          fi
 
       - name: Upload release assets
         env:
