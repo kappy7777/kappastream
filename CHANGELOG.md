@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-07-17
+
 ### Fixed
 
 - NVIDIA Wayland users no longer need WebKitGTK compositing disabled globally.
@@ -21,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `__NV_DISABLE_EXPLICIT_SYNC` value (including `0`) is always preserved, and
   the old fallback can still be forced with `WEBKIT_DISABLE_COMPOSITING_MODE=1
   kappastream`.
+
+### Added
+
+- `scripts/check-versions.sh`: a version-drift guard asserting the version
+  matches across `package.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock`,
+  with no stale hardcoded version in the packaging docs. It runs in CI before
+  the type-check and is part of the release checklist in `CONTRIBUTING.md`.
 
 ## [0.1.6] - 2026-07-16
 
@@ -149,7 +158,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.7
 [0.1.6]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.6
 [0.1.5]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.5
 [0.1.4]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.4
