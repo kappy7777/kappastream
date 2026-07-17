@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- NVIDIA Wayland users no longer need WebKitGTK compositing disabled globally.
+  Kappastream now disables NVIDIA EGL-Wayland explicit sync (`__NV_DISABLE_EXPLICIT_SYNC=1`)
+  only for Wayland launches on systems with the NVIDIA kernel driver loaded,
+  applied inside the binary at the very start of `main()` (before GTK/WebKitGTK/EGL
+  initialize). This avoids the `Error 71 (Protocol error) dispatching to Wayland
+  display` crash while keeping WebKitGTK's accelerated compositing path enabled
+  — a substantial improvement to maximized-window UI and video performance that
+  the previous broad `WEBKIT_DISABLE_COMPOSITING_MODE=1` workaround had cost.
+  AMD, Intel and X11 sessions are unaffected. A user-supplied
+  `__NV_DISABLE_EXPLICIT_SYNC` value (including `0`) is always preserved, and
+  the old fallback can still be forced with `WEBKIT_DISABLE_COMPOSITING_MODE=1
+  kappastream`.
+
 ## [0.1.6] - 2026-07-16
 
 ### Fixed

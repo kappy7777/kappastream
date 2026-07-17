@@ -75,8 +75,9 @@ sed "s/@VERSION@/$VERSION/g" "$SCRIPT_DIR/control.in" > "$STAGE/DEBIAN/control"
 install -m755 "$SCRIPT_DIR/postinst" "$STAGE/DEBIAN/postinst"
 install -m755 "$SCRIPT_DIR/postrm"    "$STAGE/DEBIAN/postrm"
 
-# Real binary → /usr/lib (kept out of $PATH). The wrapper at /usr/bin exports
-# WEBKIT_DISABLE_COMPOSITING_MODE=1 (see packaging/shared/kappastream.sh).
+# Real binary → /usr/lib (kept out of $PATH). The wrapper at /usr/bin is now a
+# thin launcher; NVIDIA EGL-Wayland explicit-sync compat is handled in the
+# binary itself at startup (see packaging/shared/kappastream.sh, src/compat.rs).
 install -Dm755 "$BIN"              "$STAGE/usr/lib/${PKG}/${PKG}"
 install -Dm755 "$SHARED/${PKG}.sh" "$STAGE/usr/bin/${PKG}"
 

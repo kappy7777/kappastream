@@ -9,7 +9,7 @@ packages never drift apart.
 | --- | --- |
 | `kappastream.desktop` | Desktop entry (native, `Exec=kappastream` — not the AppImage one). |
 | `dev.kappy.kappastream.metainfo.xml` | AppStream metadata for GNOME Software / KDE Discover. |
-| `kappastream.sh` | Runtime launcher that exports `WEBKIT_DISABLE_COMPOSITING_MODE=1` (the WebKitGTK Wayland workaround; a harmless no-op on X11). Installed at `/usr/bin/kappastream`; the real binary lives at `/usr/lib/kappastream/kappastream`. |
+| `kappastream.sh` | Thin runtime launcher (the NVIDIA EGL-Wayland explicit-sync compatibility is handled in the Rust binary at startup, not here). Installed at `/usr/bin/kappastream`; the real binary lives at `/usr/lib/kappastream/kappastream`. |
 
 Edit these here, not in the per-distro directories. Bump the metainfo
 `<releases>` block when cutting a release (version must match the three

@@ -8,13 +8,12 @@
 #   sudo ./install.sh             install (default)
 #   sudo ./install.sh uninstall   remove everything this installed
 #
-# Why the wrapper matters: /usr/bin/kappastream exports
-# WEBKIT_DISABLE_COMPOSITING_MODE=1 before exec'ing the real binary at
-# /usr/lib/kappastream/kappastream. Without that variable, WebKitGTK's
-# composited-surface path crashes on Wayland with
-# "Error 71 (Protocol error) dispatching to Wayland display". Running the
-# bare binary directly skips the wrapper and hits that crash — so always
-# launch via `kappastream` (the wrapper), never the raw binary.
+# The /usr/bin/kappastream wrapper is a thin launcher that execs the real
+# binary at /usr/lib/kappastream/kappastream. NVIDIA EGL-Wayland explicit-sync
+# compatibility is handled inside the binary at startup (on Wayland + NVIDIA it
+# sets __NV_DISABLE_EXPLICIT_SYNC=1), avoiding the "Error 71 (Protocol error)
+# dispatching to Wayland display" crash. The wrapper and the bare binary now
+# behave identically; either launch path is fine.
 set -eu
 
 PREFIX=/usr

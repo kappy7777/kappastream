@@ -6,6 +6,9 @@ mod player;
 mod resolve;
 mod tray;
 
+#[cfg(target_os = "linux")]
+pub mod compat;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

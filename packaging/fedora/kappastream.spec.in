@@ -69,9 +69,9 @@ favorites with DecAPI live status / retry backoff / circuit breaker, and
 per-channel desktop notifications.
 
 Account-free and read-only — no Twitch login, no OAuth, no client ID.
-Everything stays in local storage. The /usr/bin/kappastream wrapper exports
-WEBKIT_DISABLE_COMPOSITING_MODE=1 to avoid a WebKitGTK Wayland launch crash
-(a harmless no-op on X11).
+Everything stays in local storage. On NVIDIA Wayland the binary disables
+EGL-Wayland explicit sync at startup to avoid a WebKitGTK launch crash,
+retaining accelerated compositing; AMD, Intel and X11 are unaffected.
 
 %prep
 %setup -q
@@ -102,7 +102,8 @@ cd ..
 %install
 # Real binary → /usr/lib/kappastream (out of $PATH; same path the wrapper
 # hardcodes, keeping the wrapper byte-identical across AUR/Debian/Fedora).
-# The /usr/bin wrapper execs it with WEBKIT_DISABLE_COMPOSITING_MODE=1 set.
+# The /usr/bin wrapper is a thin launcher; NVIDIA EGL-Wayland explicit-sync
+# compat is applied inside the binary at startup (src/compat.rs).
 # %build runs `cd src-tauri && cargo build`, so the binary lands in
 # src-tauri/target/ (cargo's target dir sits next to Cargo.toml), not the
 # package-root target/ — reference it there.

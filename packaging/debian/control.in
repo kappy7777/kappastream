@@ -14,6 +14,6 @@ Description: lightweight, account-free Twitch viewer for Linux
  per-channel desktop notifications.
  .
  Account-free and read-only — no Twitch login, no OAuth, no client ID.
- Everything stays in local storage. The /usr/bin/kappastream wrapper exports
- WEBKIT_DISABLE_COMPOSITING_MODE=1 to avoid a WebKitGTK Wayland launch crash
- (a harmless no-op on X11).
+ Everything stays in local storage. On NVIDIA Wayland the binary disables
+ EGL-Wayland explicit sync at startup to avoid a WebKitGTK launch crash,
+ retaining accelerated compositing; AMD, Intel and X11 are unaffected.

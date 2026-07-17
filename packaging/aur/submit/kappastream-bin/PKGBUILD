@@ -44,7 +44,7 @@ sha256sums=('dc12c1d5770b05c92f8180c7ca107cf8369744d87c6cb9dfa417d53c10d7962e') 
 package() {
 	cd "${srcdir}/${_pkgname}-${pkgver}-x86_64"
 	# Real binary → /usr/lib/kappastream (out of $PATH); wrapper at /usr/bin
-	# exports WEBKIT_DISABLE_COMPOSITING_MODE=1 (Wayland workaround).
+	# is a thin launcher; NVIDIA Wayland compat is handled in the binary.
 	install -Dm755 "${_pkgname}"                          "${pkgdir}/usr/lib/${_pkgname}/${_pkgname}"
 	install -Dm755 "${_pkgname}.sh"                        "${pkgdir}/usr/bin/${_pkgname}"
 
