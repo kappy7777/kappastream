@@ -87,6 +87,14 @@ chmod +x kappastream*.AppImage
 ./kappastream*.AppImage
 ```
 
+> [!NOTE]
+> The AppImage is built on **Ubuntu 24.04** and bundles its WebKitGTK/GStreamer
+> stack, so it requires a recent glibc (the exact requirement is listed in each
+> release's notes). If it fails to start on an older distribution (for example
+> Debian 11 or Ubuntu 20.04) with a `GLIBC_… not found` error, install one of
+> the native packages below or the AUR package instead — those are built on
+> Ubuntu 22.04 and keep a wider compatibility window.
+
 ### Debian and Ubuntu
 
 Download the `.deb` package from the [latest release](../../releases/latest), then install it with:

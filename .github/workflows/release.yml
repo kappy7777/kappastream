@@ -1,40 +1,67 @@
-# Release builds: build the Tauri bundles (AppImage/deb/rpm), publish the
-# GitHub Release, and attach a SHA256SUMS checksum file.
+# Release builds: build the Tauri bundles and publish the GitHub Release with a
+# SHA256SUMS checksum file.
 #
-# Triggered by pushing a tag matching `v*` (e.g. `v0.1.0`), or manually via
-# `workflow_dispatch` (provide a `tag` input — useful for smoke-testing the
-# bundle pipeline on a real release runner without cutting a real tag).
+# Triggered by pushing a tag matching `v*` (e.g. `v0.1.8`), or manually via
+# `workflow_dispatch`. The pipeline first runs the full CI gate set (check),
+# then builds the bundles across TWO runners and finally publishes from a single
+# job — so a broken commit can never ship as a tag, and a failed bundle build
+# can never produce a partially-published release.
 #
-# Flow: run the full CI gate set first (check), and only if it passes build
-# the bundles and publish — so a broken commit can never be shipped as a tag.
+# ┌───────────────────────────────────────────────────────────────────────┐
+# │ WHY TWO DIFFERENT UBUNTU VERSIONS (intentional, do not "normalize")   │
+# │                                                                       │
+# │  • Native packages (.deb / .rpm / AUR -bin tarball) are built on      │
+# │    ubuntu-22.04 to keep their glibc (2.35) compatibility window as    │
+# │    wide as possible. These packages do NOT bundle WebKitGTK/GStreamer │
+# │    — they link the host's system libraries at runtime — so the build  │
+# │    baseline only affects the compiled binary's glibc requirement.     │
+# │                                                                       │
+# │  • The AppImage is built on ubuntu-24.04 to bundle the newer          │
+# │    WebKitGTK 2.44 + GStreamer stack, which is dramatically smoother   │
+# │    on modern NVIDIA/Wayland systems than the 22.04-bundled stack.     │
+# │    bundleMediaFramework:true still copies the 24.04 GStreamer codec   │
+# │    .so files (incl. libgstlibav → avdec_h264 for H.264) into the      │
+# │    AppImage. This RAISES the AppImage's glibc requirement vs 22.04;   │
+# │    the build-appimage job measures and reports the actual highest     │
+# │    GLIBC_* requirement, and it is recorded in the release notes.      │
+# │                                                                       │
+# │  Native packages and the AppImage therefore intentionally diverge in  │
+# │  build baseline. Only the AppImage is allowed to use the newer stack. │
+# └───────────────────────────────────────────────────────────────────────┘
 name: Release
 
 on:
   push:
     tags:
       - "v*"
-  # Manual trigger: lets the release pipeline run without burning a tag.
-  # Useful for smoke-testing bundle changes (e.g. a tauri-action major
-  # bump) on a real release runner before tagging. When triggered manually
-  # set the `tag` input below to the version you want to publish.
+  # Manual trigger: build all bundles and retain them as workflow artifacts.
+  # Set `publish` to true to also create/publish a real GitHub release for
+  # `tag`. Without `publish`, this is a pure smoke test that touches no
+  # release — useful for validating bundle changes before tagging.
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag/version to publish (e.g. v0.1.4). Must not already exist as a release."
+        description: "Tag/version to build (e.g. v0.1.8). Must not already exist as a published release."
         required: true
         type: string
+      publish:
+        description: "Publish a real GitHub release (otherwise just build + keep workflow artifacts)."
+        required: false
+        type: boolean
+        default: false
 
+# Build jobs only need read access. Only the publish job elevates to write.
 permissions:
-  contents: write
+  contents: read
 
-# The release tag is the pushed tag (`github.ref_name`) on a tag push, or the
+# The release tag is the pushed tag (github.ref_name) on a tag push, or the
 # explicit `tag` input on a manual run. `inputs.tag` is empty on push events,
 # so this falls back to the tag in that case.
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
-# A tag points at exactly one commit; don't let two runs for the same tag
-# race (e.g. a re-pushed tag). Never cancel an in-flight release mid-upload.
+# A tag points at exactly one commit; don't let two runs for the same tag race
+# (e.g. a re-pushed tag). Never cancel an in-flight release mid-upload.
 concurrency:
   # NOTE: the `env` context is NOT available in `concurrency` (it's resolved
   # before jobs/env are computed), so reference inputs/github directly here.
@@ -44,30 +71,115 @@ concurrency:
 
 jobs:
   # Reuse the exact CI gates (npm run check + npm test + cargo fmt + clippy
-  # -D warnings + cargo test) so a tagged commit can't ship unless it passes
-  # the same checks as main.
+  # -D warnings + cargo test + version-drift check) so a tagged commit can't
+  # ship unless it passes the same checks as main.
   check:
     name: check
     uses: ./.github/workflows/ci.yml
 
-  release:
-    name: build-and-release
+  # ── Native packages: .deb + .rpm + the AUR -bin tarball ───────────────
+  # ubuntu-22.04 (glibc 2.35) keeps the widest native-package compatibility.
+  # The AUR tarball reuses THIS job's compiled binary, so it inherits the same
+  # 22.04 baseline. No AppImage is built here.
+  build-native-packages:
+    name: build native (deb/rpm/aur) · ubuntu-22.04
     needs: [check]
-    # ---------------------------------------------------------------------
-    # Why ubuntu-22.04 and NOT ubuntu-latest:
-    #
-    # ubuntu-latest currently resolves to ubuntu-24.04, whose system glibc
-    # is 2.39. Any binary (and the AppImage runtime) linked against that
-    # newer glibc will fail to start on older, still-common distros such as
-    # Ubuntu 22.04 / Debian 12 / CentOS Stream 9 with errors like
-    # `/lib64/libc.so.6: version 'GLIBC_2.34' not found`.
-    #
-    # Building on ubuntu-22.04 (glibc 2.35) keeps the AppImage/deb/rpm
-    # runnable on the widest set of Linux distributions. Do not "upgrade"
-    # this to ubuntu-latest without reconsidering that compatibility window.
-    # ---------------------------------------------------------------------
     runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Tauri system dependencies
+        # Tauri v2 (linux) build requirements. The GStreamer codec packages
+        # are deliberately NOT installed here: .deb/.rpm do not bundle media
+        # (they rely on the host's system libs at runtime), and
+        # bundleMediaFramework only runs for the AppImage target. Only the
+        # webkit2gtk-4.1 / soup-3 / gtk-3 / appindicator dev headers needed
+        # to compile/link are required here.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            librsvg2-dev \
+            libgtk-3-dev \
+            patchelf \
+            libayatana-appindicator3-dev
+
+      # Separate cache key from the AppImage job: 22.04 and 24.04 produce
+      # glibc-incompatible target/ dirs that must never cross-restore.
+      - name: Cache Cargo (~/.cargo + src-tauri/target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: native-2204
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Verify release tag matches package version
+        # Enforced only on real tag pushes (a smoke-test dispatch may build a
+        # not-yet-bumped tree). scripts/check-versions.sh (run by the check
+        # job) already guarantees package.json == Cargo.toml == Cargo.lock.
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          set -eu
+          pkgver="$(node -p "require('./package.json').version")"
+          tagver="${RELEASE_TAG#v}"
+          if [ "$pkgver" != "$tagver" ]; then
+            echo "ERROR: tag '${RELEASE_TAG}' (v-stripped '${tagver}') != package.json version '${pkgver}'" >&2
+            exit 1
+          fi
+          echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
+
+      # `tauri build` always compiles src-tauri/target/release/kappastream
+      # first, then produces only the selected bundle formats. The compiled
+      # native binary is reused by the AUR tarball step below.
+      - name: Build .deb and .rpm
+        run: npm run tauri -- build --bundles deb,rpm
+
+      # Packages the just-compiled 22.04 native binary with desktop/metainfo/
+      # wrapper/icons/LICENSE into packaging/aur/dist/kappastream-<ver>-x86_64.tar.gz
+      # (consumed by the kappastream-bin AUR PKGBUILD).
+      - name: Build AUR -bin tarball
+        run: packaging/aur/build-release-tarball.sh
+
+      - name: Stage artifacts
+        run: |
+          set -eu
+          mkdir -p staging
+          cp src-tauri/target/release/bundle/deb/*.deb staging/
+          cp src-tauri/target/release/bundle/rpm/*.rpm staging/
+          cp packaging/aur/dist/*.tar.gz staging/
+          echo "Staged native artifacts:"
+          find staging -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Upload native artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-packages
+          path: staging/
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── AppImage: built separately on ubuntu-24.04 ────────────────────────
+  # The newer WebKitGTK 2.44 + GStreamer stack bundles a much smoother media
+  # pipeline than 22.04's. bundleMediaFramework:true copies the 24.04 codec
+  # .so files (incl. libgstlibav → avdec_h264) into the AppImage.
+  build-appimage:
+    name: build AppImage · ubuntu-24.04
+    needs: [check]
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -82,28 +194,16 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Tauri + GStreamer system dependencies
-        # Tauri v2 (linux) build requirements. The GStreamer runtime plugin
-        # packages are REQUIRED for the AppImage: tauri.conf.json sets
-        # bundle.appimage.bundleMediaFramework = true, which makes the bundler
-        # invoke linuxdeploy's gstreamer plugin. That plugin copies the build
-        # host's GStreamer codec .so files out of
-        # /usr/lib/x86_64-linux-gnu/gstreamer-1.0/ INTO the AppImage so media
-        # playback is self-contained.
-        #
-        #   - If that dir is absent entirely the plugin errors and the build
-        #     fails ("could not find plugins directory").
-        #   - Worse: if only some plugins are present (e.g. -base via a
-        #     transitive dep) but gstreamer1.0-libav is NOT, the build
-        #     SUCCEEDS yet ships an AppImage that plays audio + black video
-        #     (no avdec_h264 -> no H.264 decode, and Twitch is H.264).
-        #
-        # So install the full runtime codec set. The -dev packages are not
-        # needed (nothing here compiles/links against GStreamer; webkit2gtk
-        # does that internally) — only the runtime plugin .so files are
-        # copied. patchelf (already listed) is a hard requirement of the
-        # gstreamer plugin. The .deb/.rpm targets don't bundle GStreamer and
-        # instead rely on the user's system libs at runtime, so this only
-        # matters for the AppImage — but release builds all three here.
+        # Same dev headers as the native job, PLUS the GStreamer runtime codec
+        # set. tauri.conf.json sets bundle.appimage.bundleMediaFramework = true,
+        # which makes linuxdeploy's gstreamer plugin copy the build host's codec
+        # .so files (from /usr/lib/x86_64-linux-gnu/gstreamer-1.0/) INTO the
+        # AppImage so media playback is self-contained:
+        #   - gstreamer1.0-libav provides libgstlibav → avdec_h264 (Twitch is
+        #     H.264). Without it the build SUCCEEDS but ships audio + black
+        #     video.
+        # Package names are identical on 22.04 and 24.04; they resolve against
+        # 24.04's newer versions here (webkit2gtk-4.1 2.44, gstreamer 1.24).
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -123,76 +223,186 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          shared-key: appimage-2404
 
       - name: Install JS dependencies
         run: npm ci
 
-      # Builds the frontend (npm run build via beforeBuildCommand), compiles
-      # the Rust host, bundles appimage + deb + rpm, and uploads them to the
-      # (draft) release it creates for this tag. Uses GITHUB_TOKEN only.
-      #
-      # releaseDraft: true -> the release is published only by the final
-      # step below, AFTER SHA256SUMS is attached, so there is never a window
-      # where the release is live and downloadable without its checksums.
-      - name: Build and publish bundles
-        uses: tauri-apps/tauri-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: "${{ env.RELEASE_TAG }}"
-          releaseBody: |
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ env.RELEASE_TAG }}/CHANGELOG.md) for what changed in this release.
+      - name: Verify release tag matches package version
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          set -eu
+          pkgver="$(node -p "require('./package.json').version")"
+          tagver="${RELEASE_TAG#v}"
+          if [ "$pkgver" != "$tagver" ]; then
+            echo "ERROR: tag '${RELEASE_TAG}' (v-stripped '${tagver}') != package.json version '${pkgver}'" >&2
+            exit 1
+          fi
+          echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
 
-            Artifacts attached below include the AppImage, `.deb`, and `.rpm` packages. Verify them with the published `SHA256SUMS`.
-          releaseDraft: true
-          args: --bundles appimage,deb,rpm
+      - name: Build AppImage
+        run: npm run tauri -- build --bundles appimage
 
-      # Build the prebuilt-binary tarball consumed by the kappastream-bin AUR
-      # package (packaging/aur/PKGBUILD-bin). The script reads the version from
-      # package.json and packages src-tauri/target/release/kappastream (which
-      # tauri-action just compiled) + shared desktop/metainfo/wrapper/icons +
-      # LICENSE into packaging/aur/dist/kappastream-<ver>-x86_64.tar.gz.
-      - name: Build AUR -bin tarball
-        run: packaging/aur/build-release-tarball.sh
-
-      - name: Upload -bin tarball
-        run: gh release upload "${{ env.RELEASE_TAG }}" packaging/aur/dist/*.tar.gz
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Generate a SHA256SUMS file covering every release artifact produced
-      # above (bundles + the AUR tarball), then attach it to the same
-      # (still-draft) release.
-      - name: Generate and upload SHA256SUMS
+      # Measure the actual highest GLIBC_* requirement across every ELF file
+      # bundled into the AppImage, so the compatibility window is documented
+      # honestly (not guessed from the runner name). Surfaced on the run page
+      # via the job summary and carried into the release notes.
+      - name: Measure AppImage glibc requirement
         shell: bash
         run: |
           set -euo pipefail
-          sums="$RUNNER_TEMP/SHA256SUMS"
-          : > "$sums"
-          # Find each bundled artifact and record its hash against its
-          # basename so the checksum file matches the release asset names.
-          while IFS= read -r -d '' f; do
-            dir="$(dirname "$f")"
-            name="$(basename "$f")"
-            ( cd "$dir" && sha256sum "$name" ) >> "$sums"
-          done < <( find src-tauri/target/release/bundle -type f \
-                      \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -print0
-                    find packaging/aur/dist -type f \
-                      -name '*.tar.gz' -print0 )
+          mkdir -p staging
+          appimage="$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' -type f | head -n1)"
+          test -n "$appimage"
+          scripts/measure-appimage-glibc.sh "$appimage" | tee glibc-report.txt
+          {
+            echo "## AppImage glibc requirement"
+            echo '```'
+            cat glibc-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Single highest-requirement token (e.g. GLIBC_2.34) for the notes.
+          grep -oE 'GLIBC_[0-9]+\.[0-9]+' glibc-report.txt | sort -V | tail -n1 \
+            > staging/appimage-glibc-requirement.txt
 
+      - name: Stage AppImage
+        run: |
+          set -eu
+          cp src-tauri/target/release/bundle/appimage/*.AppImage staging/
+          echo "Staged AppImage artifacts:"
+          find staging -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: staging/
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── Single publication job ────────────────────────────────────────────
+  # The ONLY job that creates/edits the GitHub release. Build jobs have read
+  # permissions only and never touch the release, so two builds can never race
+  # on release creation. The release stays DRAFT until every artifact AND
+  # SHA256SUMS are attached; only then is it flipped to public.
+  publish-release:
+    name: publish release
+    needs: [check, build-native-packages, build-appimage]
+    # Publish on a real tag push, or an explicit manual opt-in. A manual
+    # dispatch without `publish` builds everything and keeps the workflow
+    # artifacts without creating any release.
+    if: ${{ github.event_name == 'push' || inputs.publish == true }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # merge-multiple flattens every artifact into release-staging/ with
+      # clean basenames (no per-artifact subdirs), so the four release files
+      # end up side by side.
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-staging
+          merge-multiple: true
+
+      - name: Verify and list artifact manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-staging
+          echo "=== Artifact manifest ==="
+          find . -maxdepth 1 -type f -printf '%f\n' | sort
+          # Fail unless each expected artifact appears EXACTLY once.
+          assert_one() {
+            local pat="$1" label="$2"
+            local found
+            found="$(find . -maxdepth 1 -type f -name "$pat" | sort)"
+            local n
+            n="$(printf '%s\n' "$found" | grep -c . || true)"
+            if [ "$n" -ne 1 ]; then
+              echo "ERROR: expected exactly 1 $label ($pat), found $n:" >&2
+              printf '%s\n' "$found" >&2
+              exit 1
+            fi
+          }
+          assert_one '*.AppImage' AppImage
+          assert_one '*_amd64.deb' 'Debian package'
+          assert_one '*.x86_64.rpm' 'RPM package'
+          assert_one '*-x86_64.tar.gz' 'AUR tarball'
+          # The glibc-requirement token produced by build-appimage must exist.
+          if [ ! -s appimage-glibc-requirement.txt ]; then
+            echo "ERROR: appimage-glibc-requirement.txt missing or empty" >&2
+            exit 1
+          fi
+          echo "=== All expected artifacts present exactly once ==="
+
+      - name: Create draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd release-staging
+          glibc_req="$(cat appimage-glibc-requirement.txt)"
+          {
+            echo "## Kappastream ${RELEASE_TAG}"
+            echo
+            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_TAG}/CHANGELOG.md) for what changed."
+            echo
+            echo "### Artifacts"
+            echo
+            echo "- \`kappastream_<version>_amd64.AppImage\` — portable build (built on **Ubuntu 24.04**). Requires glibc ≥ \`${glibc_req}\`; if it fails to start on an older distribution (e.g. Debian 11, Ubuntu 20.04), use the native package or the AUR build instead."
+            echo "- \`kappastream_<version>_amd64.deb\` — Debian/Ubuntu (built on Ubuntu 22.04)."
+            echo "- \`kappastream-<version>.x86_64.rpm\` — Fedora (built on Ubuntu 22.04)."
+            echo "- \`kappastream-<version>-x86_64.tar.gz\` — source for the AUR \`kappastream-bin\` package (Ubuntu 22.04 binary)."
+            echo
+            echo "Verify with the published \`SHA256SUMS\`:"
+            echo '```bash'
+            echo "sha256sum -c SHA256SUMS"
+            echo '```'
+          } > release-notes.md
+
+          # --target pins the tag to the exact commit this run built (the
+          # tagged commit). gh fails loudly if the tag already exists pointing
+          # elsewhere (a re-tag), so a stale release can't be silently moved.
+          gh release create "${RELEASE_TAG}" \
+            --target "${GITHUB_SHA}" \
+            --title "${RELEASE_TAG}" \
+            --notes-file release-notes.md \
+            --draft
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          cd release-staging
+          gh release upload "${RELEASE_TAG}" \
+            *.AppImage *_amd64.deb *.x86_64.rpm *-x86_64.tar.gz
+
+      # Generated LAST, over exactly the four artifacts just uploaded, so the
+      # checksum set can never lag behind the asset set. Basenames match the
+      # release asset names so `sha256sum -c SHA256SUMS` works from a download
+      # directory.
+      - name: Generate and upload SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-staging
+          sha256sum \
+            *.AppImage *_amd64.deb *.x86_64.rpm *-x86_64.tar.gz \
+            | sort -k2 > SHA256SUMS
           echo "Generated checksums:"
-          cat "$sums"
-          cp "$sums" SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "${RELEASE_TAG}" SHA256SUMS
 
-          gh release upload "${{ env.RELEASE_TAG }}" SHA256SUMS
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Only now — with bundles AND SHA256SUMS attached — flip the release
-      # from draft to public. If any prior step failed, this never runs and
-      # the release stays draft (invisible, not downloadable).
+      # Only now — with all four artifacts AND SHA256SUMS attached — flip the
+      # release from draft to public. Any earlier failure leaves it draft
+      # (invisible, not downloadable).
       - name: Publish release
-        run: gh release edit "${{ env.RELEASE_TAG }}" --draft=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${RELEASE_TAG}" --draft=false

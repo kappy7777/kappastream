@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- AppImage releases are now built on **Ubuntu 24.04**, bundling the newer
+  WebKitGTK 2.44 and GStreamer stack. On the target NVIDIA/Wayland system this
+  is dramatically smoother than the previous Ubuntu 22.04 AppImage (which was
+  effectively unusable). The build pipeline measures and reports the AppImage's
+  highest `GLIBC_*` requirement, which is recorded in the release notes.
+- **DEB, RPM and the AUR `kappastream-bin` tarball remain built on Ubuntu
+  22.04** to preserve their existing (wider) glibc compatibility baseline; only
+  the AppImage uses the newer stack. The release workflow was split into
+  separate `build-native-packages` (ubuntu-22.04) and `build-appimage`
+  (ubuntu-24.04) jobs feeding a single `publish-release` job, so the release
+  is still published as one draft with one `SHA256SUMS` and only goes public
+  once every artifact and its checksums are attached.
+
 ### Fixed
 
 - NVIDIA users on **X11** no longer get a blank/invisible window. Kappastream
