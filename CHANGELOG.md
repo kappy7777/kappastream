@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- NVIDIA users on **X11** no longer get a blank/invisible window. Kappastream
+  now sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` only on X11 sessions with the
+  NVIDIA kernel driver loaded, applied inside the binary at the very start of
+  `main()` (before WebKitGTK picks its renderer). This prevents WebKitGTK from
+  attempting the NVIDIA GBM/DMA-BUF renderer path that fails with `Failed to
+  create GBM buffer of size 800x600: Invalid argument` and leaves the webview
+  blank — without disabling compositing globally. The NVIDIA **Wayland**
+  `__NV_DISABLE_EXPLICIT_SYNC=1` fix from 0.1.7 is unchanged; the two paths are
+  mutually exclusive (Wayland selects explicit-sync, X11 selects DMA-BUF
+  renderer). AMD, Intel and unknown sessions are unaffected. A user-supplied
+  `WEBKIT_DISABLE_DMABUF_RENDERER` value (including `0`) is always preserved.
+
 ## [0.1.7] - 2026-07-17
 
 ### Fixed
