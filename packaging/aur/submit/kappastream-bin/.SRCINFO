@@ -1,6 +1,6 @@
 pkgbase = kappastream-bin
 	pkgdesc = A lightweight, account-free Twitch viewer (live stream, chat, favorites) for Linux
-	pkgver = 0.1.9
+	pkgver = 0.1.10
 	pkgrel = 1
 	url = https://github.com/kappy7777/kappastream
 	arch = x86_64

@@ -74,6 +74,23 @@
   </content_rating>
 
   <releases>
+    <release version="0.1.10" date="2026-07-19">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.1.10</url>
+      <description>
+        <p>Cluster of third-party emote rendering fixes. 7TV set entries are
+        now keyed by their alias (the string chatters type) instead of the
+        emote's original name, so renamed emotes actually resolve. The
+        PERSONAL/LISTED state filter was dropped (it was an eligibility flag,
+        not a filter). FFZ global emotes are now fetched at all, honoring
+        default_sets. Trailing punctuation after an emote token stays as
+        text instead of being absorbed into the emote span. Broken emote
+        images now fall back to a plain-text span (mirroring the badge
+        pattern). Emote-only messages now get the proper doubled emote
+        height; the flag is computed from the rendered parts. Failed channel
+        emote lookups are no longer cached as an empty result, so a transient
+        429 no longer costs a channel its third-party emotes.</p>
+      </description>
+    </release>
     <release version="0.1.9" date="2026-07-19">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.1.9</url>
       <description>

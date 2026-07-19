@@ -1,7 +1,7 @@
 {
   "name": "kappastream",
   "private": true,
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "A lightweight, anonymous Twitch viewer (live stream, chat, favorites) shipped as a Tauri AppImage for Linux",
   "author": "kappy <kappy7777@proton.me>",
   "license": "GPL-3.0-only",
