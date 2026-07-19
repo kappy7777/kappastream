@@ -340,9 +340,14 @@ function thirdPartyRanges(message: string, thirdParty: Map<string, Emote>): Emot
     if (!stripped) continue
     const emote = thirdParty.get(stripped.toLowerCase())
     if (!emote) continue
+    // The lookup uses the punctuation-stripped token, but the emitted range
+    // must cover only the stripped token — not the full word — so trailing
+    // punctuation ("omE!") stays as text instead of being absorbed into the
+    // emote span. indexOf gives the stripped token's offset within the word.
+    const offset = word.indexOf(stripped)
     ranges.push({
-      start,
-      end: start + word.length - 1,
+      start: start + offset,
+      end: start + offset + stripped.length - 1,
       id: emote.id + '|' + emote.provider,
     })
   }
