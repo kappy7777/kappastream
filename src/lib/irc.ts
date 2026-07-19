@@ -13,7 +13,6 @@ export interface ParsedMessage {
   twitchEmotes: EmoteRange[]
   badges: BadgeInfo[]
   timestamp: number
-  emoteOnly: boolean
 }
 
 const ACTION_PREFIX = '\u0001ACTION '
@@ -75,7 +74,6 @@ export function parseIrcLine(line: string): ParsedMessage | null {
     twitchEmotes,
     badges: parseBadges(tags.badges ? tags.badges.split(',').filter(Boolean) : []),
     timestamp: tags['tmi-sent-ts'] ? Number(tags['tmi-sent-ts']) : Date.now(),
-    emoteOnly: messageBody.split(/\s+/).every((w) => w.length > 0),
   }
 }
 
