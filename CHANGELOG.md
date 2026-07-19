@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-07-19
+
+### Changed
+
+- Chat timestamps now render **before** the badges (timestamp → badges →
+  username) instead of after them, matching the layout users expect from web
+  Twitch chat.
+- The DecAPI HTTP client's `User-Agent` is now derived from the crate version
+  (`Kappastream/<version>`) instead of a hardcoded `Kappastream/0.1` that had
+  to be bumped manually each release.
+
+### Fixed
+
+- IRCv3 tag-value escape decoding no longer mis-decodes `\\` followed by `s`.
+  The previous sequential `.replace()` chain ran `\\` → `\` before `\s` could
+  match against the original input, so a raw `a\\sb` decoded to `a\ b` instead
+  of `a\sb`. The decoder is now a single `\\(.)` regex pass with a map for the
+  five defined escapes (`\s`, `\n`, `\r`, `\:`, `\\`) and a fallback that
+  drops the backslash for unknown escapes (per the IRCv3 spec). Covered by a
+  new Vitest suite (`src/lib/irc.test.ts`).
+- The AppStream metainfo's `<releases>` block now lists every released
+  version (0.1.0 through 0.1.9), each with a `<url>` pointing at its GitHub
+  release. Previously it listed only 0.1.0, which blocked Flathub submission.
+  Two pre-existing `appstreamcli validate` findings were fixed in passing:
+  `<control type="…">` (needs AppStream 1.0+) was switched to the universally
+  accepted value form, and screenshot URLs pointing at the stale `Screenshots/`
+  path were corrected to `docs/screenshots/` (where the tracked images live).
+
+### Added
+
+- **Metainfo drift guard.** `scripts/check-versions.sh` now asserts that the
+  latest `<release version="…">` in the AppStream metainfo matches the current
+  `package.json` version, so the metainfo and CHANGELOG can't silently drift
+  apart on a future release. The `Releasing` checklist in `CONTRIBUTING.md`
+  was updated to include the metainfo bump.
+- **RustSec audit in CI.** `ci.yml` runs `cargo audit` after the Rust tests,
+  blocking on any non-ignored advisory. `src-tauri/.cargo/audit.toml` ignores
+  two `quick-xml` DoS advisories (reached only via plist and wayland-scanner;
+  kappastream parses no untrusted XML at runtime). `--deny warnings` /
+  `--deny unmaintained` are deliberately not passed — the gtk3-rs 0.18 stack
+  Tauri v2 pins on Linux is flagged unmaintained upstream and would keep CI
+  permanently red.
+- **Supply-chain pin.** `dtolnay/rust-toolchain@stable` (the only moving
+  branch ref in either workflow) is pinned to a commit SHA in `ci.yml` and
+  both `release.yml` jobs. Dependabot keeps SHA pins updated.
+
+### Removed
+
+- Dead `ParsedMessage.emoteOnly` field and its computation in `parseIrcLine`.
+  The predicate was always true for any string without consecutive whitespace,
+  and the actual emote-only styling is derived inline in `App.svelte`.
+
 ## [0.1.8] - 2026-07-17
 
 ### Changed
@@ -189,7 +241,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.9
 [0.1.8]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.8
 [0.1.7]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.7
 [0.1.6]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.6
