@@ -363,6 +363,16 @@ jobs:
         run: |
           set -euo pipefail
           cd release-staging
+          # Capture the actual asset basenames straight from release-staging
+          # (each was already asserted to exist exactly once by the previous
+          # step). Interpolating them — instead of guessing
+          # kappastream_<version>_… literals — means filename drift (e.g. the
+          # `-1` release suffix rpmbuild appends to *.x86_64.rpm) can't make
+          # the release notes lie about what was uploaded.
+          appimage="$(basename *.AppImage)"
+          deb="$(basename *_amd64.deb)"
+          rpm="$(basename *.x86_64.rpm)"
+          tarball="$(basename *-x86_64.tar.gz)"
           glibc_req="$(cat appimage-glibc-requirement.txt)"
           {
             echo "## Kappastream ${RELEASE_TAG}"
@@ -371,10 +381,10 @@ jobs:
             echo
             echo "### Artifacts"
             echo
-            echo "- \`kappastream_<version>_amd64.AppImage\` — portable build (built on **Ubuntu 24.04**). Requires glibc ≥ \`${glibc_req}\`; if it fails to start on an older distribution (e.g. Debian 11, Ubuntu 20.04), use the native package or the AUR build instead."
-            echo "- \`kappastream_<version>_amd64.deb\` — Debian/Ubuntu (built on Ubuntu 22.04)."
-            echo "- \`kappastream-<version>.x86_64.rpm\` — Fedora (built on Ubuntu 22.04)."
-            echo "- \`kappastream-<version>-x86_64.tar.gz\` — source for the AUR \`kappastream-bin\` package (Ubuntu 22.04 binary)."
+            echo "- \`${appimage}\` — portable build (built on **Ubuntu 24.04**). Requires glibc ≥ \`${glibc_req}\`; if it fails to start on an older distribution (e.g. Debian 11, Ubuntu 20.04), use the native package or the AUR build instead."
+            echo "- \`${deb}\` — Debian/Ubuntu (built on Ubuntu 22.04)."
+            echo "- \`${rpm}\` — Fedora (built on Ubuntu 22.04)."
+            echo "- \`${tarball}\` — source for the AUR \`kappastream-bin\` package (Ubuntu 22.04 binary)."
             echo
             echo "Verify with the published \`SHA256SUMS\`:"
             echo '```bash'
