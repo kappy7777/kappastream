@@ -87,9 +87,14 @@ function isPublicSevenTv(emote: SevenTvSetEmote): boolean {
 }
 
 function sevenTvEmote(setEmote: SevenTvSetEmote): Emote | null {
-  if (!isPublicSevenTv(setEmote)) return null
   const id = setEmote.data?.id || setEmote.id
-  const name = setEmote.data?.name || setEmote.name
+  // In a 7TV v3 emote-set entry the TOP-LEVEL `name` is the alias active in
+  // THAT set — the string chat messages actually contain — while `data.name`
+  // is the emote's original name. A channel that renames catErm to erm returns
+  // { name: "erm", data: { name: "catErm" } }; keying on data.name leaves the
+  // alias unmapped. Prefer the set-entry name, falling back to data.name only
+  // when the entry has no top-level name (e.g. the global set shape).
+  const name = setEmote.name || setEmote.data?.name
   if (!id || !name) return null
   return { id, name, url: sevenTvUrl(id), provider: '7tv' }
 }
