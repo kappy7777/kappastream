@@ -10,6 +10,14 @@
   height: 1.4em;
 }
 
+/* Emote-only messages (one or more emotes, no real text) get bigger emotes,
+   matching web Twitch. .emote--twitch sets its own height with equal
+   specificity, so it is listed explicitly to win inside .emote-only. */
+.message.emote-only .emote,
+.message.emote-only .emote--twitch {
+  height: 2.8em;
+}
+
 html[data-theme='light'] .emote {
   filter: none;
 }

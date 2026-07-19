@@ -30,6 +30,7 @@
     parts: RenderedMessagePart[]
     badges: BadgeInfo[]
     isAction: boolean
+    emoteOnly: boolean
     timestamp: number
   }
 
@@ -666,6 +667,15 @@
         twitchRanges: parsed.twitchEmotes,
       })
 
+      // Derive emoteOnly once from the rendered parts: at least one emote
+      // and every non-emote part whitespace-only. The old expression
+      // (`/^\s*$/.test(msg.raw.replace(/\s/g, ''))`) could only ever be true
+      // for a whitespace-only message and the .emote-only CSS rule did not
+      // exist, so the class was inert.
+      const emoteOnly =
+        parts.some((p) => p.type === 'emote') &&
+        parts.every((p) => p.type === 'emote' || p.text.trim() === '')
+
       messages.push({
         id: parsed.id || crypto.randomUUID(),
         username: parsed.displayName,
@@ -674,6 +684,7 @@
         parts,
         badges: parsed.badges,
         isAction: parsed.isAction,
+        emoteOnly,
         timestamp: parsed.timestamp,
       })
 
@@ -1292,7 +1303,7 @@
           </p>
         {:else}
           {#each messages as msg (msg.id)}
-          <div class="message" class:action={msg.isAction} class:emote-only={msg.isAction === false && /^\s*$/.test(msg.raw.replace(/\s/g, ''))}>
+          <div class="message" class:action={msg.isAction} class:emote-only={msg.emoteOnly && !msg.isAction}>
             {#if settings.chatTimestamps}
               <span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span>
             {/if}
