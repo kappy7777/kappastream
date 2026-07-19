@@ -44,13 +44,13 @@
 
   <screenshots>
     <screenshot type="default">
-      <image type="source" width="3839" height="1960">https://raw.githubusercontent.com/kappy7777/kappastream/main/Screenshots/1.png</image>
+      <image type="source" width="3839" height="1960">https://raw.githubusercontent.com/kappy7777/kappastream/main/docs/screenshots/1.png</image>
     </screenshot>
     <screenshot>
-      <image type="source" width="3839" height="1961">https://raw.githubusercontent.com/kappy7777/kappastream/main/Screenshots/2.png</image>
+      <image type="source" width="3839" height="1961">https://raw.githubusercontent.com/kappy7777/kappastream/main/docs/screenshots/2.png</image>
     </screenshot>
     <screenshot>
-      <image type="source" width="3839" height="1964">https://raw.githubusercontent.com/kappy7777/kappastream/main/Screenshots/3.png</image>
+      <image type="source" width="3839" height="1964">https://raw.githubusercontent.com/kappy7777/kappastream/main/docs/screenshots/3.png</image>
     </screenshot>
   </screenshots>
 
@@ -64,8 +64,8 @@
   </categories>
 
   <recommends>
-    <control type="pointing"/>
-    <control type="keyboard"/>
+    <control>pointing</control>
+    <control>keyboard</control>
   </recommends>
 
   <content_rating type="oars-1.1">
@@ -74,7 +74,77 @@
   </content_rating>
 
   <releases>
-    <release version="0.1.0" date="2026-07-12">
+    <release version="0.1.8" date="2026-07-17">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.1.8</url>
+      <description>
+        <p>AppImage built on Ubuntu 24.04 with the newer WebKitGTK 2.44 and
+        GStreamer stack for smoother NVIDIA/Wayland playback; native packages
+        stay on Ubuntu 22.04 for the wider glibc window. NVIDIA X11 no longer
+        renders a blank window (WEBKIT_DISABLE_DMABUF_RENDERER is now applied
+        selectively inside the binary).</p>
+      </description>
+    </release>
+    <release version="0.1.7" date="2026-07-17">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.1.7</url>
+      <description>
+        <p>NVIDIA Wayland users no longer need WebKitGTK compositing disabled
+        globally: the binary now sets __NV_DISABLE_EXPLICIT_SYNC=1 selectively
+        at startup. Added a version-drift guard (scripts/check-versions.sh) run
+        in CI and the release checklist.</p>
+      </description>
+    </release>
+    <release version="0.1.6" date="2026-07-16">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.1.6</url>
+      <description>
+        <p>The hls.js low-latency mode now follows the Low Latency setting
+        instead of being hardcoded on, fixing constant micro-underruns and
+        audio/video desync on webkit2gtk when Low Latency is off.</p>
+      </description>
+    </release>
+    <release version="0.1.5" date="2026-07-16">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.1.5</url>
+      <description>
+        <p>Favorites no longer get stuck loading for ~10 minutes after startup,
+        and live/offline status publishes before avatars and metadata. Added a
+        Vitest frontend test suite and CI gates for npm test and cargo fmt.</p>
+      </description>
+    </release>
+    <release version="0.1.4" date="2026-07-15">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.1.4</url>
+      <description>
+        <p>Added mpv handoff via streamlink --player=mpv, a low-latency
+        playback mode, a system tray icon with close-to-tray, typed
+        @tauri-apps/api IPC (window.__TAURI__ disabled), and tooltip and
+        stall-recovery fixes for webkit2gtk.</p>
+      </description>
+    </release>
+    <release version="0.1.3" date="2026-07-14">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.1.3</url>
+      <description>
+        <p>Dependency bumps and CI workflow updates, including ignoring
+        TypeScript major updates in Dependabot (7.x breaks the svelte-check
+        gate).</p>
+      </description>
+    </release>
+    <release version="0.1.2" date="2026-07-14">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.1.2</url>
+      <description>
+        <p>Restored the kappastream-&lt;ver&gt;-x86_64.tar.gz consumed by the
+        kappastream-bin AUR package, declared streamlink as a .deb/.rpm
+        dependency, and showed the real release version in the About
+        modal.</p>
+      </description>
+    </release>
+    <release version="0.1.1" date="2026-07-14">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.1.1</url>
+      <description>
+        <p>GitHub Actions CI (type-check, clippy, cargo test) and the release
+        workflow building AppImage/.deb/.rpm bundles with a SHA256SUMS
+        checksum file. Added issue templates and Dependabot.</p>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-07-14">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.1.0</url>
       <description>
         <p>Initial release.</p>
         <ul>
