@@ -80,12 +80,6 @@ interface SevenTvUserResponse {
   user?: { emote_sets?: SevenTvSet[] }
 }
 
-function isPublicSevenTv(emote: SevenTvSetEmote): boolean {
-  const state = Array.isArray(emote.data?.state) ? emote.data!.state : []
-  if (state.includes('PERSONAL')) return false
-  return true
-}
-
 function sevenTvEmote(setEmote: SevenTvSetEmote): Emote | null {
   const id = setEmote.data?.id || setEmote.id
   // In a 7TV v3 emote-set entry the TOP-LEVEL `name` is the alias active in
