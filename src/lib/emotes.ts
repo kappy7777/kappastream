@@ -230,7 +230,12 @@ export async function loadChannelEmotes(channel: string, signal?: AbortSignal): 
   const userId = await getTwitchUserId(channel, signal)
   if (signal?.aborted) return []
   if (!userId) {
-    cache.set(key, { seventv: [], bttv: [], ffz: [] })
+    // Do NOT cache the empty result. A null userId is most often a DecAPI
+    // 429/timeout (getTwitchUserId swallows the error and returns null), and
+    // cache is consulted first on the next call — caching [] here would cost
+    // that channel its third-party emotes for the rest of the process while
+    // loadEmotes still reported emoteStatus = 'ready'. Returning [] uncached
+    // lets a later rejoin retry.
     return []
   }
 
