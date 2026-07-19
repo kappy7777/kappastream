@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Third-party emote rendering** — a cluster of bugs that together left many
+  emotes rendering as plain text:
+  - **7TV channel-set aliases.** A 7TV v3 emote-set entry's top-level `name`
+    is the alias active in that set (the string chatters actually type), while
+    `data.name` is the emote's original name. The map was keyed on
+    `data.name`, so a channel that renamed `catErm` to `erm` returned
+    `{ name: "erm", data: { name: "catErm" } }` and no chatter's "erm" ever
+    matched. Now keyed on the set-entry name.
+  - **7TV `PERSONAL` filter.** `data.state` describes the emote globally, and
+    `PERSONAL` there means "approved for personal-emote use" — an eligibility
+    flag, not "this entry is a personal emote". Real channel-set responses
+    carry `state: ["PERSONAL", "LISTED"]` on ordinary public listed emotes,
+    so the old `isPublicSevenTv` filter silently deleted part of the map.
+    Removed.
+  - **FFZ global emotes were never fetched.** `loadGlobalEmotes` only called
+    `fetch7TVGlobal` + `fetchBTTVGlobal`, so every FFZ global emote rendered
+    as text. Added `fetchFFZGlobal` hitting `/v1/set/global`, iterating only
+    the sets listed in `default_sets` (not every key of `sets`).
+  - **Trailing punctuation absorbed into emote spans.** `thirdPartyRanges`
+    looked up the punctuation-stripped token but emitted a range covering the
+    full word, so "omE!" matched the emote and then rendered the "!" inside
+    the emote `<img>`. The range now covers only the stripped token; the
+    punctuation stays as a separate text part.
+  - **Broken emote images were indistinguishable from lookup misses.** Emote
+    `<img>` elements had no `onerror` handler, so a broken URL silently fell
+    back to the alt text. Added an `erroredEmotes` set + `markEmoteErrored`
+    mirroring the badge pattern; on error the emote's name renders as a plain
+    text span.
+  - **Emote-only styling was inert.** The `class:emote-only` expression could
+    only ever be true for a whitespace-only message and no `.emote-only` CSS
+    rule existed. The flag is now derived once from the rendered parts
+    (`parts.some(emote) && parts.every(emote || whitespace-only)`) and stored
+    on the `ChatMessage`; the new `.message.emote-only .emote` rule doubles
+    the emote height (with an explicit `.emote--twitch` companion so it wins
+    over the twitch-specific height rule).
+  - **Failed channel-emote lookups were cached forever.** When
+    `getTwitchUserId` returned `null` (typically a transient DecAPI
+    429/timeout), the empty result was written to the channel cache, so one
+    failure cost that channel its third-party emotes for the rest of the
+    process while `loadEmotes` still reported `emoteStatus = 'ready'`. The
+    empty result is no longer cached; a later rejoin retries.
+
+### Added
+
+- Vitest suite for `src/lib/emotes.ts` (`src/lib/emotes.test.ts`) covering
+  the 7TV alias keying, the `PERSONAL`/`LISTED` filter removal, FFZ global
+  `default_sets` parsing, trailing-punctuation rendering, and the
+  `emoteOnly` predicate.
+
 ## [0.1.9] - 2026-07-19
 
 ### Changed
