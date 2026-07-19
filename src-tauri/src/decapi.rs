@@ -23,14 +23,6 @@ fn is_valid_endpoint(endpoint: &str) -> bool {
     ALLOWED_ENDPOINTS.contains(&endpoint)
 }
 
-fn is_valid_channel_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 25
-        && name
-            .bytes()
-            .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_'))
-}
-
 #[tauri::command]
 pub async fn decapi_fetch(
     client: tauri::State<'_, DecApiClient>,
@@ -49,7 +41,7 @@ pub async fn decapi_fetch(
     if !is_valid_endpoint(endpoint) {
         return Err(format!("endpoint not allowed: {endpoint}"));
     }
-    if !is_valid_channel_name(channel) {
+    if !crate::resolve::is_channel_name_valid(channel) {
         return Err(format!("invalid channel name: {channel}"));
     }
 
