@@ -1286,6 +1286,9 @@
         {:else}
           {#each messages as msg (msg.id)}
           <div class="message" class:action={msg.isAction} class:emote-only={msg.isAction === false && /^\s*$/.test(msg.raw.replace(/\s/g, ''))}>
+            {#if settings.chatTimestamps}
+              <span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span>
+            {/if}
             {#each msg.badges as b (b.id + b.version)}
               {#if b.imageUrl && !erroredBadges.has(b.imageUrl)}
                 <img
@@ -1298,9 +1301,6 @@
                 />
               {/if}
             {/each}
-            {#if settings.chatTimestamps}
-              <span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span>
-            {/if}
             <span class="username" style="color: {msg.color}">{msg.username}</span>{#if !msg.isAction}<span class="username-sep">:</span>{/if}
             {#if msg.isAction}<span class="action-mark"> </span>{/if}
             <span class="text">{#each msg.parts as part}{#if part.type === 'text'}{part.text}{:else}<img
