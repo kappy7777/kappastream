@@ -95,3 +95,15 @@ jobs:
 
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: RustSec audit (cargo audit)
+        # Supply-chain advisory scan. The `command -v` guard lets the
+        # rust-cache-restored cargo-audit binary skip the install; first run
+        # pays the compile once. We deliberately do NOT pass --deny warnings /
+        # --deny unmaintained: the gtk3-rs 0.18 stack Tauri v2 pins on Linux
+        # (atk/gdk/gtk, glib RUSTSEC-2024-0429) is flagged unmaintained/unsound
+        # upstream and would keep CI permanently red. Ignored advisory IDs live
+        # in src-tauri/.cargo/audit.toml.
+        run: |
+          command -v cargo-audit >/dev/null || cargo install cargo-audit --locked
+          cd src-tauri && cargo audit

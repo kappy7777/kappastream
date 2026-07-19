@@ -1,0 +1,9 @@
+[advisories]
+ignore = [
+    # quick-xml DoS (patched >= 0.41): reached only via plist (Tauri
+    # config machinery) and wayland-scanner (build-time codegen) —
+    # kappastream parses no untrusted XML at runtime. Remove both
+    # when the transitive graph moves to quick-xml >= 0.41.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
