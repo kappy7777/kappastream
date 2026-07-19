@@ -13,7 +13,7 @@ impl DecApiClient {
     pub fn new() -> Result<Self, reqwest::Error> {
         reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .user_agent("Kappastream/0.1")
+            .user_agent(concat!("Kappastream/", env!("CARGO_PKG_VERSION")))
             .build()
             .map(Self)
     }
