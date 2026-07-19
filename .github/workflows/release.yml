@@ -96,7 +96,7 @@ jobs:
           cache: npm
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Install Tauri system dependencies
         # Tauri v2 (linux) build requirements. The GStreamer codec packages
@@ -191,7 +191,7 @@ jobs:
           cache: npm
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Install Tauri + GStreamer system dependencies
         # Same dev headers as the native job, PLUS the GStreamer runtime codec
