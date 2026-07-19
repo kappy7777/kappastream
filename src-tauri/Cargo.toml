@@ -31,3 +31,8 @@ url = "2"
 tauri = { version = "2.11.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-notification = "2.3.3"
+
+[dev-dependencies]
+# Used in resolve.rs tests to set/unset env vars without mutating the global
+# process environment (which would race under `cargo test`'s parallel runner).
+temp-env = "0.3"

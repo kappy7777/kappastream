@@ -376,12 +376,13 @@ mod tests {
     #[test]
     fn streamlink_bin_respects_env() {
         // With the override unset, falls back to the bare binary name.
-        env::remove_var("STREAMLINK_BIN");
-        assert_eq!(streamlink_bin(), PathBuf::from("streamlink"));
+        temp_env::with_var_unset("STREAMLINK_BIN", || {
+            assert_eq!(streamlink_bin(), PathBuf::from("streamlink"));
+        });
 
         // An explicit override is honored verbatim.
-        env::set_var("STREAMLINK_BIN", "/custom/path/streamlink");
-        assert_eq!(streamlink_bin(), PathBuf::from("/custom/path/streamlink"));
-        env::remove_var("STREAMLINK_BIN");
+        temp_env::with_var("STREAMLINK_BIN", Some("/custom/path/streamlink"), || {
+            assert_eq!(streamlink_bin(), PathBuf::from("/custom/path/streamlink"));
+        });
     }
 }
