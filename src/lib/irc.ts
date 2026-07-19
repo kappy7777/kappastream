@@ -94,13 +94,13 @@ function parseTags(raw: string): Record<string, string> {
 }
 
 function decodeTagValue(v: string): string {
-  return v
-    .replace(/\\s/g, ' ')
-    .replace(/\\n/g, '\n')
-    .replace(/\\r/g, '\r')
-    .replace(/\\\\/g, '\\')
-    .replace(/\\:/g, ';')
-    .replace(/\\"/g, '"')
+  // IRCv3 escape decode, single pass. The previous sequential .replace()
+  // chain reordered `\\` → `\` before `\\s` could be matched, so raw
+  // `a\\sb` mis-decoded to `a\ b` instead of `a\sb`. Mapping the escape
+  // char in one regex pass over the input fixes the ordering and drops
+  // the backslash for any unknown escape (per the IRCv3 spec).
+  return v.replace(/\\(.)/g, (_, c) =>
+    ({ s: ' ', n: '\n', r: '\r', ':': ';', '\\': '\\' } as Record<string, string>)[c] ?? c)
 }
 
 function normalizeColor(c: string | undefined): string {
