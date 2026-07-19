@@ -179,6 +179,10 @@ interface FfzEmote { id: number; name: string }
 interface FfzUser {
   sets?: Record<string, { emoticons?: FfzEmote[] }>
 }
+interface FfzGlobal {
+  default_sets: number[]
+  sets?: Record<string, { emoticons?: FfzEmote[] }>
+}
 
 function ffzEmote(e: FfzEmote): Emote {
   return { id: String(e.id), name: e.name, url: ffzUrl(String(e.id)), provider: 'ffz' }
@@ -192,6 +196,25 @@ async function fetchFFZChannel(twitchUserId: string, signal?: AbortSignal): Prom
     const out: Emote[] = []
     for (const set of Object.values(data.sets ?? {})) {
       for (const e of set.emoticons ?? []) uniquePush(out, ffzEmote(e))
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
+async function fetchFFZGlobal(signal?: AbortSignal): Promise<Emote[]> {
+  try {
+    const res = await fetchWithTimeout('https://api.frankerfacez.com/v1/set/global', signal)
+    if (!res.ok) return []
+    const data = (await res.json()) as FfzGlobal
+    // Only the sets listed in `default_sets` are the global ones — `sets` may
+    // also contain other (e.g. featured) collections, so iterate by id rather
+    // than flattening every key.
+    const out: Emote[] = []
+    for (const id of data.default_sets ?? []) {
+      const set = data.sets?.[String(id)]
+      for (const e of set?.emoticons ?? []) uniquePush(out, ffzEmote(e))
     }
     return out
   } catch {
@@ -223,8 +246,14 @@ export async function loadChannelEmotes(channel: string, signal?: AbortSignal): 
 }
 
 export async function loadGlobalEmotes(signal?: AbortSignal): Promise<Emote[]> {
-  const [seventv, bttv] = await Promise.all([fetch7TVGlobal(signal), fetchBTTVGlobal(signal)])
-  return [...seventv, ...bttv]
+  const [seventv, bttv, ffz] = await Promise.all([
+    fetch7TVGlobal(signal),
+    fetchBTTVGlobal(signal),
+    fetchFFZGlobal(signal),
+  ])
+  // FFZ appended last so channel emotes (which already won earlier in
+  // buildEmoteMap's first-write-wins on the lowercased name) keep winning.
+  return [...seventv, ...bttv, ...ffz]
 }
 
 export function buildEmoteMap(emotes: Emote[]): Map<string, Emote> {
