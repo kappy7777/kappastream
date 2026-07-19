@@ -50,6 +50,19 @@ if [ "$LOCK_VER" != "$PKG_VER" ]; then
     fail "src-tauri/Cargo.lock ($LOCK_VER) != package.json ($PKG_VER)"
 fi
 
+# Metainfo latest <release> must equal the current version. The <releases>
+# block is newest-first, so the first <release version="..."> is the latest.
+# Older history entries are legitimate, so the metainfo is deliberately NOT
+# included in the generic scan_file semver scan below.
+METAINFO_PATH="packaging/shared/dev.kappy.kappastream.metainfo.xml"
+METAINFO_VER=$(grep -oE '<release version="[^"]+"' "$METAINFO_PATH" 2>/dev/null \
+    | head -n 1 | sed -E 's/.*version="([^"]+)".*/\1/')
+[ -n "$METAINFO_VER" ] \
+    || fail "could not read latest <release> version from $METAINFO_PATH"
+if [ "$METAINFO_VER" != "$PKG_VER" ]; then
+    fail "$METAINFO_PATH latest <release> ($METAINFO_VER) != package.json ($PKG_VER)"
+fi
+
 # Hardcoded-semver scan. A semver anywhere in a scanned file must equal the
 # current version; anything else (a stale release number) is drift. READMEs
 # avoid this entirely by using `<version>` placeholders or dynamic commands.

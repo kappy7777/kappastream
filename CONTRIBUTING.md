@@ -67,21 +67,25 @@ Checklist for cutting a release:
    Regenerate the lock by running `cargo check` inside `src-tauri/`.
 2. Add a `## [<version>]` entry to `CHANGELOG.md` and update the
    `[Unreleased]` / `[<version>]` compare links at the bottom.
-3. Run the version-drift guard to confirm nothing has drifted:
+3. Add a `<release version="<version>" date="<YYYY-MM-DD>">` entry to
+   `packaging/shared/dev.kappy.kappastream.metainfo.xml` at the top of the
+   `<releases>` block (newest first), with a `<url>` pointing at the GitHub
+   release. The date must match the CHANGELOG heading.
+4. Run the version-drift guard to confirm nothing has drifted:
    ```bash
    sh scripts/check-versions.sh
    ```
-4. Run the full local gate set (`npm run check`, `npm test`, `cargo fmt
+5. Run the full local gate set (`npm run check`, `npm test`, `cargo fmt
    --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo
    test`). CI runs these too, but catch failures before tagging.
-5. Commit on `main` (e.g. `Release v<version>`), then tag and push the tag:
+6. Commit on `main` (e.g. `Release v<version>`), then tag and push the tag:
    ```bash
    git tag v<version>
    git push origin v<version>
    ```
    Pushing the tag runs `release.yml`, which builds and publishes the bundles +
    `SHA256SUMS` (the release stays **draft** until the checksums land).
-6. After the release publishes, update the AUR packages (see
+7. After the release publishes, update the AUR packages (see
    `packaging/aur/README.md`): refresh `-git`'s `pkgver` and `-bin`'s tarball
    sha256 (taken from the release's `SHA256SUMS`) + `pkgver`.
 
