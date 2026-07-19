@@ -736,6 +736,13 @@
     next.add(url)
     erroredBadges = next
   }
+  let erroredEmotes = $state<Set<string>>(new Set())
+  function markEmoteErrored(url: string): void {
+    if (erroredEmotes.has(url)) return
+    const next = new Set(erroredEmotes)
+    next.add(url)
+    erroredEmotes = next
+  }
   let newMessageCount = $state(0)
   let scrollBaseline = 0
   const SCROLL_BOTTOM_THRESHOLD = 32
@@ -1303,13 +1310,14 @@
             {/each}
             <span class="username" style="color: {msg.color}">{msg.username}</span>{#if !msg.isAction}<span class="username-sep">:</span>{/if}
             {#if msg.isAction}<span class="action-mark"> </span>{/if}
-            <span class="text">{#each msg.parts as part}{#if part.type === 'text'}{part.text}{:else}<img
+            <span class="text">{#each msg.parts as part}{#if part.type === 'text'}{part.text}{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img
               class="emote"
               class:emote--twitch={part.provider === 'twitch'}
               src={part.url}
               alt={part.name}
               title={part.name}
               loading="lazy"
+              onerror={() => markEmoteErrored(part.url)}
             />{/if}{/each}</span>
           </div>
           {/each}
@@ -2388,6 +2396,14 @@
   }
 
   .text {
+    color: var(--text-primary);
+  }
+
+  /* Fallback span rendered in place of an emote <img> whose URL failed to
+     load — mirrors the erroredBadges pattern so a broken image is
+     distinguishable from a lookup miss (the alt text would otherwise look
+     identical to plain chat text). */
+  .emote-fallback {
     color: var(--text-primary);
   }
 
