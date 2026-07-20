@@ -27,11 +27,12 @@
     quality: string
     onqualitychange: (q: string) => void
     onmpv: () => void
+    onstop: () => void
     onplayintent: (playing: boolean) => void
     activeStatus: LiveStatus
   }
 
-  const { video, visible, quality, onqualitychange, onmpv, onplayintent, activeStatus }: Props = $props()
+  const { video, visible, quality, onqualitychange, onmpv, onstop, onplayintent, activeStatus }: Props = $props()
 
   function formatViewers(n: number): string {
     if (n < 1000) return n.toString()
@@ -389,6 +390,18 @@
             <path d="M8 5v14l11-7z" fill="currentColor"/>
           </svg>
         {/if}
+      </button>
+
+      <button
+        type="button"
+        class="ctrl-btn"
+        onclick={onstop}
+        aria-label="Stop stream"
+        use:tooltip={'Stop stream'}
+      >
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/>
+        </svg>
       </button>
 
       <button

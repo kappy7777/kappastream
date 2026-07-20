@@ -160,6 +160,30 @@
     pipController.setVideoElement(videoEl)
   })
 
+  // PiP runs in a SEPARATE Tauri webview with its own <video>/hls.js, so taking
+  // over the stream does not require the main player to keep fetching segments.
+  // When PiP opens we disconnect the main player (freeing its network/CPU); when
+  // PiP closes we resume the main stream automatically. `mainStoppedForPip`
+  // distinguishes a PiP-driven stop (auto-resumed) from a deliberate Stop-button
+  // press (stays stopped until the user hits Resume).
+  let mainStoppedForPip = false
+  $effect(() => {
+    const pipOpen = pipController.isOpen
+    if (pipOpen) {
+      if (channelJoined && (playerStatus === 'playing' || playerStatus === 'paused')) {
+        disconnectStream(true)
+        mainStoppedForPip = true
+      }
+    } else if (mainStoppedForPip) {
+      mainStoppedForPip = false
+      if (channelJoined && status === 'connected') void loadStream(channelJoined, quality)
+    }
+  })
+
+  function resumeStream(): void {
+    if (channelJoined && status === 'connected') void loadStream(channelJoined, quality)
+  }
+
   let socket: WebSocket | null = null
   let hls: Hls | null = null
   let streamGeneration = 0
@@ -311,10 +335,12 @@
     return 'justinfan' + n.toString().padStart(6, '0')
   }
 
-  function teardownPlayer(): void {
+  function teardownPlayer(keepPip = false): void {
     streamGeneration++
-    // No stream anymore; close the floating PiP window if it is open.
-    pipController.clearStream()
+    // No stream anymore; close the floating PiP window if it is open (unless
+    // we are stopping the main player *because* PiP just took over — then the
+    // PiP stream must keep playing).
+    if (!keepPip) pipController.clearStream()
     if (manifestTimeout) {
       clearTimeout(manifestTimeout)
       manifestTimeout = null
@@ -333,6 +359,18 @@
         videoEl.load()
       } catch (_e) { /* ignore */ }
     }
+  }
+
+  // Centralized video-only disconnect: tears down HLS + the <video> element and
+  // returns the player to its idle state, but leaves the IRC chat connection
+  // intact. This is the single entry point shared by the Stop button, the mpv
+  // handoff, close-to-tray (via disconnect()), and the PiP takeover.
+  // `keepPip` keeps the floating PiP window alive (used when stopping the main
+  // player because PiP just became the active player).
+  function disconnectStream(keepPip = false): void {
+    teardownPlayer(keepPip)
+    playerStatus = 'idle'
+    playerError = ''
   }
 
   async function resolveStream(channel: string, q: string): Promise<{ ok: true; url: string } | { ok: false; offline: boolean; unavailable?: boolean; error?: string }> {
@@ -362,7 +400,14 @@
         quality,
         lowLatency: settings.lowLatency,
       })) as { ok: boolean; error?: string | null }
-      showNotifToast(r.ok ? 'Launching in mpv…' : (r.error || 'Could not launch mpv'))
+      if (r.ok) {
+        // mpv is now the sole player; stop the in-app stream (HLS + video) to
+        // free network/system resources. The IRC chat connection is left intact.
+        disconnectStream()
+        showNotifToast('Launching in mpv…')
+      } else {
+        showNotifToast(r.error || 'Could not launch mpv')
+      }
     } catch (err) {
       const msg = typeof err === 'string' ? err : (err as Error)?.message ?? 'Could not launch mpv'
       showNotifToast(msg)
@@ -690,7 +735,7 @@
 
       fireMentionNotification(parsed.message, parsed.displayName, parsed.color)
 
-      if (messages.length > 500) messages.splice(0, messages.length - 500)
+      if (stickyBottom && messages.length > 500) messages.splice(0, messages.length - 500)
     }
   }
 
@@ -708,14 +753,13 @@
       socket.close()
       socket = null
     }
-    teardownPlayer()
+    disconnectStream()
+    mainStoppedForPip = false
     channelJoined = null
     status = 'idle'
     messages = []
     emoteStatus = 'idle'
     thirdPartyMap = new Map()
-    playerStatus = 'idle'
-    playerError = ''
   }
 
   function selectChannel(name: string): void {
@@ -869,7 +913,9 @@
   // hides to the tray instead of quitting — keeping the app running in the
   // background so favorite live-notifications still fire. The process is
   // fully quit via the tray's Quit menu item. Reading settings.closeToTray
-  // at event time keeps this reactive to the Settings toggle.
+  // at event time keeps this reactive to the Settings toggle. Before hiding we
+  // tear down the stream (video AND chat) so nothing keeps downloading
+  // segments or playing audio while the window is hidden.
   onMount(() => {
     if (!isTauri()) return
     let unlistenClose: (() => void) | null = null
@@ -877,6 +923,7 @@
       .onCloseRequested((event) => {
         if (settings.closeToTray) {
           event.preventDefault()
+          disconnect()
           void getCurrentWindow().hide().catch(() => { /* ignore */ })
         }
       })
@@ -1187,7 +1234,7 @@
         onplaying={onVideoPlaying}
         onpause={onVideoPause}
       ></video>
-        <PlayerControls video={videoEl} visible={status === 'connected' && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={() => void handoffToPlayer()} onplayintent={(p) => { userPaused = !p }} {activeStatus} />
+        <PlayerControls video={videoEl} visible={status === 'connected' && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={() => void handoffToPlayer()} onstop={() => disconnect()} onplayintent={(p) => { userPaused = !p }} {activeStatus} />
         {#if showPlayerOverlay}
           <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
             {#if isPlayerBusy}
@@ -1200,6 +1247,16 @@
               <p class="overlay-title">{playerLabel.error}</p>
               <p class="overlay-sub">{playerError}</p>
             {/if}
+          </div>
+        {:else if playerStatus === 'idle' && pipController.isOpen}
+          <div class="player-overlay">
+            <p class="overlay-title">Playing in Picture-in-Picture</p>
+            <p class="overlay-sub">Close the PiP window to resume here</p>
+          </div>
+        {:else if playerStatus === 'idle'}
+          <div class="player-overlay">
+            <p class="overlay-title">Stream stopped</p>
+            <button type="button" class="overlay-action" onclick={resumeStream}>Resume stream</button>
           </div>
         {/if}
       {:else}
@@ -2159,6 +2216,25 @@
     margin: 0;
     font-size: 13px;
     color: var(--text-secondary);
+  }
+
+  .overlay-action {
+    margin-top: 4px;
+    padding: 7px 16px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 150ms, color 150ms;
+  }
+
+  .overlay-action:hover {
+    background: var(--accent);
+    color: var(--bg-panel);
   }
 
   .spinner {

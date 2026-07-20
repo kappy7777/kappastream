@@ -33,6 +33,7 @@
   let hls: Hls | null = null
   let muted = $state(false)
   let volume = $state(1)
+  let paused = $state(true)
   let loading = $state(true)
   let errorMsg = $state('')
   let needsGesture = $state(false)
@@ -97,6 +98,12 @@
   }
   function toggleMuted(): void {
     applyMuted(!muted)
+  }
+
+  function togglePlay(): void {
+    if (!videoEl) return
+    if (videoEl.paused) void videoEl.play()
+    else videoEl.pause()
   }
 
   async function gesturePlay(): Promise<void> {
@@ -246,6 +253,8 @@
     playsinline
     data-tauri-drag-region
     onclick={gesturePlay}
+    onplay={() => { paused = false; bumpControls() }}
+    onpause={() => { paused = true; bumpControls() }}
   ></video>
 
   {#if loading}
@@ -272,6 +281,25 @@
     <button
       type="button"
       class="pip-btn"
+      onclick={togglePlay}
+      aria-label={paused ? 'Play' : 'Pause'}
+      aria-pressed={!paused}
+    >
+      {#if paused}
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M8 5v14l11-7z" fill="currentColor"/>
+        </svg>
+      {:else}
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <rect x="6" y="5" width="4" height="14" fill="currentColor"/>
+          <rect x="14" y="5" width="4" height="14" fill="currentColor"/>
+        </svg>
+      {/if}
+    </button>
+
+    <button
+      type="button"
+      class="pip-btn"
       onclick={toggleMuted}
       aria-label={muted ? 'Unmute' : 'Mute'}
       aria-pressed={muted}
@@ -293,10 +321,12 @@
       min="0"
       max="1"
       step="0.05"
-      value={volume}
+      value={muted ? 0 : volume}
       aria-label="Volume"
       oninput={(e) => applyVolume(parseFloat((e.currentTarget as HTMLInputElement).value))}
     />
+
+    <div class="pip-spacer" aria-hidden="true"></div>
 
     <button
       type="button"
@@ -424,10 +454,13 @@
     background: rgba(255, 255, 255, 0.15);
   }
   .pip-volume {
-    flex: 1 1 auto;
-    min-width: 0;
+    flex: 0 1 90px;
+    min-width: 40px;
     height: 4px;
     accent-color: #6d5dd3;
     cursor: pointer;
+  }
+  .pip-spacer {
+    flex: 1 1 auto;
   }
 </style>
