@@ -6,7 +6,10 @@ const TRAY_ID: &str = "main-tray";
 const MENU_SHOW: &str = "show";
 const MENU_HIDE: &str = "hide";
 const MENU_QUIT: &str = "quit";
-const MAIN_WINDOW: &str = "main";
+/// The main window label (matches the unlabeled window in tauri.conf.json,
+/// whose label defaults to "main"). Shared with the single-instance plugin
+/// callback in lib.rs.
+pub(crate) const MAIN_WINDOW: &str = "main";
 
 /// Build the system-tray icon + its context menu.
 ///

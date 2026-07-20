@@ -31,6 +31,10 @@ url = "2"
 tauri = { version = "2.11.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-notification = "2.3.3"
+# Single-instance guard: a second launch (e.g. clicking the dock/AppImage
+# while the window is hidden to the tray) surfaces the existing window and
+# exits the new process instead of starting a duplicate. Desktop-only.
+tauri-plugin-single-instance = "2"
 
 [dev-dependencies]
 # Used in resolve.rs tests to set/unset env vars without mutating the global
