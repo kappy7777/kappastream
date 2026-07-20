@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-20
+
+### Added
+
+- **Stop / Disconnect button** in the video controls (between play/pause and
+  mute). It fully tears down the active stream — video playback, HLS segment
+  fetching, and the IRC chat connection — and returns the UI to its idle
+  "no stream loaded" state.
+- **Pause button in the PiP window**, and the PiP volume slider no longer
+  stretches across the whole window.
+
+### Changed
+
+- **mpv handoff now frees the in-app player.** Launching a stream in mpv stops
+  playback inside kappastream (HLS + video) so it is no longer fetching segments
+  or using resources in parallel with mpv. The IRC chat connection is left
+  running.
+- **Close-to-tray disconnects the stream.** When the window is hidden to the
+  tray, both video and chat are torn down so nothing keeps downloading or
+  playing audio in the background.
+- **PiP now takes over the stream.** Because the PiP window is a separate
+  webview with its own `<video>`/hls.js instance, opening PiP disconnects the
+  main-window player (freeing its resources) while the floating window is the
+  active player; closing PiP resumes the main stream automatically.
+- GitHub release notes now use a short, consistent body (a link to CHANGELOG.md
+  and a pointer to SHA256SUMS) instead of the per-artifact breakdown.
+
+### Fixed
+
+- **Chat no longer jumps while reading history.** The 500-message buffer trim
+  previously fired unconditionally; trimming from the front while you were
+  scrolled up shifted the visible messages. The trim now only runs while
+  following live at the bottom, so the history stays frozen until you press
+  "Back to bottom".
+
 ## [0.1.10] - 2026-07-19
 
 ### Fixed
@@ -294,7 +329,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.0
+[0.1.10]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.10
 [0.1.9]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.9
 [0.1.8]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.8
 [0.1.7]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.7

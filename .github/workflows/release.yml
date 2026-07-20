@@ -363,33 +363,15 @@ jobs:
         run: |
           set -euo pipefail
           cd release-staging
-          # Capture the actual asset basenames straight from release-staging
-          # (each was already asserted to exist exactly once by the previous
-          # step). Interpolating them — instead of guessing
-          # kappastream_<version>_… literals — means filename drift (e.g. the
-          # `-1` release suffix rpmbuild appends to *.x86_64.rpm) can't make
-          # the release notes lie about what was uploaded.
-          appimage="$(basename *.AppImage)"
-          deb="$(basename *_amd64.deb)"
-          rpm="$(basename *.x86_64.rpm)"
-          tarball="$(basename *-x86_64.tar.gz)"
-          glibc_req="$(cat appimage-glibc-requirement.txt)"
+          # Short, consistent release body (matches v0.1.7 and earlier): a
+          # link to the changelog and a pointer to the checksum file. The
+          # artifact list below the notes is self-evident from the attached
+          # assets, and the AppImage's measured glibc requirement stays on the
+          # run summary (job summary) where the build-appimage job writes it.
           {
-            echo "## Kappastream ${RELEASE_TAG}"
+            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_TAG}/CHANGELOG.md) for what changed in this release."
             echo
-            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_TAG}/CHANGELOG.md) for what changed."
-            echo
-            echo "### Artifacts"
-            echo
-            echo "- \`${appimage}\` — portable build (built on **Ubuntu 24.04**). Requires glibc ≥ \`${glibc_req}\`; if it fails to start on an older distribution (e.g. Debian 11, Ubuntu 20.04), use the native package or the AUR build instead."
-            echo "- \`${deb}\` — Debian/Ubuntu (built on Ubuntu 22.04)."
-            echo "- \`${rpm}\` — Fedora (built on Ubuntu 22.04)."
-            echo "- \`${tarball}\` — source for the AUR \`kappastream-bin\` package (Ubuntu 22.04 binary)."
-            echo
-            echo "Verify with the published \`SHA256SUMS\`:"
-            echo '```bash'
-            echo "sha256sum -c SHA256SUMS"
-            echo '```'
+            echo "Artifacts attached below include the AppImage, \`.deb\`, and \`.rpm\` packages. Verify them with the published \`SHA256SUMS\`."
           } > release-notes.md
 
           # On a tag push the git tag already exists; on a manual dispatch it

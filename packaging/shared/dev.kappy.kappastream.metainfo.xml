@@ -74,6 +74,23 @@
   </content_rating>
 
   <releases>
+    <release version="0.2.0" date="2026-07-20">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.0</url>
+      <description>
+        <p>Stream disconnect and resource management overhaul. A new Stop
+        button in the video controls fully tears down the active stream
+        (video and chat) and returns to the idle screen. Handing a stream
+        off to mpv now stops the in-app player to free its network and
+        system resources while chat keeps running, and closing to the tray
+        disconnects everything so nothing keeps downloading or playing in
+        the background. Opening Picture-in-Picture (a separate window with
+        its own player) now pauses the main player while the floating
+        window is the active player, resuming it automatically on close;
+        the PiP controls gained a pause button and a properly sized volume
+        slider. Scrolling up in chat also no longer fights the user: the
+        history stays put until you jump back to the bottom.</p>
+      </description>
+    </release>
     <release version="0.1.10" date="2026-07-19">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.1.10</url>
       <description>
