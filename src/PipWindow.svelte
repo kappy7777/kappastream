@@ -427,7 +427,7 @@
     flex: 1 1 auto;
     min-width: 0;
     height: 4px;
-    accent-color: #9147ff;
+    accent-color: #6d5dd3;
     cursor: pointer;
   }
 </style>

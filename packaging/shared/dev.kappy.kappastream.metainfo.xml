@@ -185,7 +185,7 @@
   </releases>
 
   <branding>
-    <color type="primary" scheme_preference="light">#9147FF</color>
-    <color type="primary" scheme_preference="dark">#9147FF</color>
+    <color type="primary" scheme_preference="light">#A970CD</color>
+    <color type="primary" scheme_preference="dark">#664181</color>
   </branding>
 </component>

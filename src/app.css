@@ -1,5 +1,5 @@
 :root,
-:root[data-theme='twitch'] {
+:root[data-theme='amethyst'] {
   --bg-app: #0E0E10;
   --bg-panel: #18181B;
   --bg-chat: #18181B;
@@ -10,8 +10,8 @@
   --text-primary: #EFEFF1;
   --text-secondary: #ADADB8;
   --text-dim: #848494;
-  --accent: #9147FF;
-  --accent-hover: #772CE8;
+  --accent: #6D5DD3;
+  --accent-hover: #5A4AB8;
   --live: #EB0400;
   --track: #3A3A3D;
   --track-hover: #4A4A4F;
@@ -102,8 +102,8 @@
   --text-primary: #2B2317;
   --text-secondary: #73614E;
   --text-dim: #9C8A75;
-  --accent: #9147FF;
-  --accent-hover: #772CE8;
+  --accent: #8452D6;
+  --accent-hover: #6D3FB8;
   --live: #EB0400;
   --track: #C4B89E;
   --track-hover: #ADA081;

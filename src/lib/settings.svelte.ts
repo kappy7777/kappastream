@@ -27,7 +27,7 @@ export type ThemeId =
   | 'synthwave'
   | 'orange'
   | 'tokyo-night'
-  | 'twitch'
+  | 'amethyst'
 
 export type SortMode = 'auto' | 'manual'
 
@@ -66,7 +66,7 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
   { id: 'synthwave', label: 'Synthwave', swatch: '#FF7ED4' },
   { id: 'orange', label: 'Tangerine', swatch: '#E07414' },
   { id: 'tokyo-night', label: 'Tokyo Night', swatch: '#7AA2F7' },
-  { id: 'twitch', label: 'Twitch', swatch: '#9147FF' },
+  { id: 'amethyst', label: 'Amethyst', swatch: '#6D5DD3' },
 ]
 
 const THEME_KEY = 'app-theme-v1'
@@ -107,7 +107,7 @@ function safeWrite(key: string, value: string): void {
 function readTheme(): ThemeId {
   const v = safeRead(THEME_KEY)
   if (v && THEMES.some((t) => t.id === v)) return v as ThemeId
-  return 'twitch'
+  return 'amethyst'
 }
 
 function readChatVisible(): boolean {
