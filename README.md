@@ -171,9 +171,9 @@ The application contacts only the services required for playback, chat, metadata
 | **7TV, BTTV and FFZ** | Load third-party emotes |
 | **DecAPI** | Fallback for live status when GQL is unreachable (network error / non-2xx / timeout) |
 
-These third-party services can see the normal information associated with a network request, such as your IP address. kappastream does not send them a Twitch account, OAuth token, personal profile, or kappastream identifier.
+These third-party services can see normal request info like your IP address — never your Twitch account, an OAuth token, or your profile.
 
-**Data sources.** Favorites are resolved primarily through a single batched anonymous Twitch GQL request (`users(logins:)`) per refresh — one request covers the whole list. DecAPI is used only as a fallback when that GQL request fails at the transport layer; a channel reported offline by GQL is a successful result and never triggers the fallback. Both endpoints are queried with the public Twitch web client identifier; kappastream still performs no authentication and never acts on a Twitch account's behalf.
+**Data sources.** Favorites load through one batched, anonymous Twitch request per refresh. DecAPI is only used if that fails.
 
 kappastream does not use Twitch Helix or Kraken and cannot authenticate as you.
 
