@@ -74,6 +74,21 @@
   </content_rating>
 
   <releases>
+    <release version="0.2.1" date="2026-07-21">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.1</url>
+      <description>
+        <p>Favorites now resolve via Twitch GQL as the primary data source.
+        A single batched anonymous request per refresh covers the whole list
+        — live/offline state, title, game, viewers, and avatar — where
+        previously each channel needed several DecAPI calls. DecAPI remains
+        as a per-channel fallback, used only when the GQL request fails to
+        reach the network. The favorites limit was raised from 100 to 1000,
+        and the one-hour cached status cache was removed so channels always
+        start fresh instead of showing stale state. Emote user-ID lookups
+        for 7TV/BTTV/FFZ channel emotes also go through the batched GQL path
+        now.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-07-20">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.0</url>
       <description>

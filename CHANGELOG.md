@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-21
+
 ### Changed
 
 - **Favorites now resolve via Twitch GQL as the primary data source.** A
@@ -349,7 +351,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.1
 [0.2.0]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.0
 [0.1.10]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.10
 [0.1.9]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.9
