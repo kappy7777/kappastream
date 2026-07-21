@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { resolveUserIds } from './gql'
 
 export type EmoteProvider = 'twitch' | '7tv' | 'bttv' | 'ffz'
 
@@ -47,9 +47,14 @@ function ffzUrl(id: string): string {
 export async function getTwitchUserId(username: string, signal?: AbortSignal): Promise<string | null> {
   try {
     if (signal?.aborted) return null
-    const id = await invoke<string>('decapi_fetch', { path: `twitch/id/${username}`, timeoutMs: FETCH_TIMEOUT_MS })
+    // Batched GQL lookup (one users(logins:) request) replaces the per-user
+    // DecAPI /twitch/id/<user> text call. emotes only ever resolves ONE id at
+    // a time (per channel-join), so this passes a single-element list — the
+    // batching pays off for the favorites refresh, not here, but the transport
+    // (gql_fetch) and primary/DecAPI posture stay uniform across the app.
+    const ids = await resolveUserIds([username], signal)
     if (signal?.aborted) return null
-    return typeof id === 'string' && /^\d+$/.test(id) ? id : null
+    return ids.get(username) ?? null
   } catch {
     return null
   }

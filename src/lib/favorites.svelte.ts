@@ -1,6 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { settings } from './settings.svelte.ts'
 import { notifications } from './notifications.svelte.ts'
+import { fetchChannelStatuses, GQL_REFRESH_INTERVAL_MS, type ChannelStatus } from './gql'
 
 export interface FavoriteEntry {
   name: string
@@ -23,20 +24,14 @@ export interface FavoriteStatus {
 }
 
 const STORAGE_KEY = 'twitch-favorites-v1'
-const STATUS_CACHE_KEY = 'fav-status-cache-v1'
-const STATUS_CACHE_TS_KEY = 'fav-status-cache-ts-v1'
-const STATUS_CACHE_MAX_AGE_MS = 60 * 60 * 1000
 const NOTIF_CHANNELS_KEY = 'fav-notif-channels-v1'
-export const MAX_FAVORITES = 100
+export const MAX_FAVORITES = 1000
 
-const POLL_INTERVAL_MS = 600_000
-const OFFLINE_INITIAL_POLL_INTERVAL_MS = 120_000
-// Small spread between channels at startup / on poll. The global DecAPI
-// limiter (MIN_FETCH_GAP_MS) serializes all requests, so this no longer gates
-// total sync time — it only avoids spawning every channel's async chain in the
-// same tick and keeps the limiter queue from being slammed all at once (which
-// would starve user-triggered refreshes for the whole drain window). Kept
-// small so the tail channel doesn't wait minutes merely to *start*.
+// Favorites are polled primarily via ONE batched Twitch GQL request per refresh
+// (see gql.ts). The per-channel DecAPI path below (fetchOne / enrich / limiter
+// / circuit breaker) is the FALLBACK, used only when that single GQL request
+// fails at the transport layer — so its stagger / retry / breaker constants
+// remain meaningful. GQL succeeds → one request covers the whole list.
 const PER_FAV_STAGGER_MS = 200
 const REQUEST_TIMEOUT_MS = 8_000
 const METADATA_REFRESH_MS = 10 * 60 * 1000
@@ -92,65 +87,6 @@ function loadFromStorage(): FavoriteEntry[] {
 function saveToStorage(favorites: FavoriteEntry[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(favorites))
-  } catch {
-    /* quota or disabled */
-  }
-}
-
-function isLiveOrOfflineStatus(s: unknown): boolean {
-  return !!s && typeof s === 'object' && ((s as { state?: unknown }).state === 'live' || (s as { state?: unknown }).state === 'offline')
-}
-
-function loadStatusCache(): Map<string, FavoriteStatus> {
-  const out = new Map<string, FavoriteStatus>()
-  try {
-    const tsRaw = localStorage.getItem(STATUS_CACHE_TS_KEY)
-    const ts = tsRaw ? parseInt(tsRaw, 10) : NaN
-    if (!Number.isFinite(ts) || Date.now() - ts > STATUS_CACHE_MAX_AGE_MS) {
-      return out
-    }
-    const raw = localStorage.getItem(STATUS_CACHE_KEY)
-    if (!raw) return out
-    const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object') return out
-    for (const [name, entry] of Object.entries(parsed as Record<string, unknown>)) {
-      if (
-        entry && typeof entry === 'object' &&
-        typeof (entry as FavoriteStatus).name === 'string' &&
-        isValidChannelName((entry as FavoriteStatus).name) &&
-        isLiveOrOfflineStatus((entry as FavoriteStatus).status)
-      ) {
-        out.set(name, {
-          name,
-          status: (entry as FavoriteStatus).status,
-          lastFetched: typeof (entry as FavoriteStatus).lastFetched === 'number'
-            ? (entry as FavoriteStatus).lastFetched
-            : Date.now(),
-          lastError: null,
-          updateDelayed: false,
-        })
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  return out
-}
-
-function saveStatusCache(statuses: Map<string, FavoriteStatus>): void {
-  try {
-    const obj: Record<string, unknown> = {}
-    for (const [name, s] of statuses) {
-      if (s.status.state === 'live' || s.status.state === 'offline') {
-        obj[name] = {
-          name: s.name,
-          status: s.status,
-          lastFetched: s.lastFetched,
-        }
-      }
-    }
-    localStorage.setItem(STATUS_CACHE_KEY, JSON.stringify(obj))
-    localStorage.setItem(STATUS_CACHE_TS_KEY, String(Date.now()))
   } catch {
     /* quota or disabled */
   }
@@ -234,6 +170,26 @@ async function fetchText(path: string, timeoutMs: number = REQUEST_TIMEOUT_MS): 
 
 function isOfflineMessage(channel: string, body: string): boolean {
   return body.toLowerCase().endsWith(channel.toLowerCase() + ' is offline')
+}
+
+// Convert a GQL stream `createdAt` (ISO-8601) into a DecAPI-style uptime
+// string for the LiveStatus type. The sidebar doesn't render uptime (only the
+// active-channel path does, via fetchLiveStatus/DecAPI); this keeps the field
+// populated + sane for the status cache and any future caller. Stale by up to
+// one refresh interval (GQL_REFRESH_INTERVAL_MS) — acceptable since it isn't
+// displayed for favorites.
+function formatUptime(startedAtIso: string): string {
+  if (!startedAtIso) return ''
+  const start = Date.parse(startedAtIso)
+  if (!Number.isFinite(start)) return ''
+  let s = Math.max(0, Math.floor((Date.now() - start) / 1000))
+  const h = Math.floor(s / 3600)
+  s -= h * 3600
+  const m = Math.floor(s / 60)
+  s -= m * 60
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
 }
 
 export interface FetchLiveStatusOptions {
@@ -345,40 +301,34 @@ export class FavoritesStore {
   // settle, the deferred enrichment is flushed.
   private classifyBatchPending = 0
   private deferredEnrich = new Map<string, number>()
+  // Guards against overlapping batch GQL polls (start() + a fired poll timer +
+  // an import all racing). A single-channel resolve (resolveSingle, from add())
+  // bypasses this — it's one channel and must not block the next batch. If a
+  // second pollOnce is requested while one is in flight (e.g. an import lands
+  // mid-poll, adding entries the in-flight request won't cover), pollRequested
+  // triggers one re-run after the current poll settles.
+  private polling = false
+  private pollRequested = false
 
   rateLimited: boolean = $state(false)
 
   constructor() {
     this.entries = loadFromStorage()
     this.notifChannels = loadNotifChannels()
-    const cached = loadStatusCache()
+    // No persisted status cache: every channel starts 'unknown' and is
+    // resolved fresh by the first GQL poll (~1s after launch). The previous
+    // 1h localStorage cache (fav-status-cache-v1 / -ts-v1) was removed — GQL
+    // now repopulates the whole list fast enough that a brief "Loading…"
+    // flash is preferable to showing up-to-1h-stale live/title/viewers state.
     for (const e of this.entries) {
       this.entryVersions.set(e.name, 1)
-      const c = cached.get(e.name)
-      if (c) {
-        this.statuses.set(e.name, c)
-        // Reuse persisted avatar + live metadata so the first poll after
-        // restart does not re-request them. The status cache is at most
-        // STATUS_CACHE_MAX_AGE_MS (1h) old, so these are fresh enough to show
-        // immediately; live metadata is refreshed again after
-        // METADATA_REFRESH_MS via shouldFetchMetadata().
-        const cs = c.status
-        if ((cs.state === 'live' || cs.state === 'offline') && cs.avatarUrl) {
-          this.avatarCache.set(e.name, cs.avatarUrl)
-        }
-        if (cs.state === 'live') {
-          this.metadataCache.set(e.name, { title: cs.title, viewers: cs.viewers, game: cs.game })
-          this.metadataFetchedAt.set(e.name, c.lastFetched ?? Date.now())
-        }
-      } else {
-        this.statuses.set(e.name, {
-          name: e.name,
-          status: { state: 'unknown' },
-          lastFetched: null,
-          lastError: null,
-          updateDelayed: false,
-        })
-      }
+      this.statuses.set(e.name, {
+        name: e.name,
+        status: { state: 'unknown' },
+        lastFetched: null,
+        lastError: null,
+        updateDelayed: false,
+      })
     }
   }
 
@@ -461,7 +411,7 @@ export class FavoritesStore {
     this.consecutiveFailures.delete(n)
     this.clearRetryTimer(n)
     this.notify()
-    void this.fetchOne(n, 0)
+    void this.resolveSingle(n)
     this.scheduleNextPoll()
     return true
   }
@@ -489,7 +439,6 @@ export class FavoritesStore {
     this.consecutiveFailures.delete(n)
     this.clearRetryTimer(n)
     saveNotifChannels(this.notifChannels)
-    saveStatusCache(this.statuses)
     this.notify()
   }
 
@@ -567,30 +516,22 @@ export class FavoritesStore {
       this.entries = [...this.entries, ...newEntries]
       saveToStorage(this.entries)
       this.notify()
+      // Resolve via the GQL batch poll (covers the whole list in one request).
+      // On GQL transport failure pollOnce falls back to the per-channel DecAPI
+      // path, which batch-classifies (uptime before enrichment) so a large
+      // restore doesn't let avatars delay later channels' status resolution.
       this.scheduleNextPoll()
-      // Batch-classify like start(): enqueue every uptime before any
-      // enrichment so a large restore doesn't let avatars delay later
-      // channels' status resolution.
-      this.classifyBatchPending = newEntries.length
-      for (let i = 0; i < newEntries.length; i++) {
-        void this.fetchOne(newEntries[i].name, i * PER_FAV_STAGGER_MS, false, true)
-      }
+      void this.pollOnce()
     }
     return { added, skipped, invalid }
   }
 
   start(): void {
     if (this.disposed) return
-    // The initial pass classifies every favorite (uptime first). Enrichment
-    // (avatar + live metadata) is deferred until all uptime requests have been
-    // queued, so cosmetic calls can't push a later channel's uptime down the
-    // FIFO limiter queue.
-    if (this.entries.length > 0) {
-      this.classifyBatchPending = this.entries.length
-      for (let i = 0; i < this.entries.length; i++) {
-        void this.fetchOne(this.entries[i].name, i * PER_FAV_STAGGER_MS, false, true)
-      }
-    }
+    // Initial pass: one GQL request classifies the whole favorites list. On
+    // transport failure it falls back to the per-channel DecAPI path, whose
+    // two-phase (uptime → enrichment) ordering is preserved inside fetchOne.
+    if (this.entries.length > 0) void this.pollOnce()
     this.scheduleNextPoll()
   }
 
@@ -618,37 +559,145 @@ export class FavoritesStore {
     this.listeners.clear()
   }
 
-  private isInAggressivePhase(): boolean {
-    return Date.now() - this.startedAt < NOTIFY_STARTUP_GRACE_MS
-  }
-
   private scheduleNextPoll(): void {
     if (this.disposed) return
     if (this.pollTimer) clearTimeout(this.pollTimer)
-    const aggressiveAtSchedule = this.isInAggressivePhase()
-    const interval = aggressiveAtSchedule ? OFFLINE_INITIAL_POLL_INTERVAL_MS : POLL_INTERVAL_MS
+    // One GQL request per refresh covers the WHOLE favorites list, so there's
+    // no per-channel filtering / aggressive phase (unlike the old DecAPI poll):
+    // every channel is cheaply re-resolved every GQL_REFRESH_INTERVAL_MS. The
+    // old startup-grace re-poll of non-live channels is moot — the batch
+    // already includes them.
     this.pollTimer = setTimeout(() => {
       this.pollTimer = null
       if (this.disposed) return
-      const aggressiveAtFire = this.isInAggressivePhase()
-      const targets = this.entries.filter((e) => {
-        if (!aggressiveAtFire) return true
-        const st = this.statuses.get(e.name)?.status
-        // During the startup grace period, re-poll every channel that is NOT
-        // confirmed live — offline, unknown (never resolved, e.g. skipped
-        // during an earlier cooldown), and transient error states all need
-        // another attempt. Live channels already poll on the normal cadence
-        // (and refresh metadata), so they are excluded to avoid waste.
-        return st?.state !== 'live'
-      })
-      // Batch-classify so cosmetic enrichment from earlier targets can't push
-      // a later target's uptime down the FIFO limiter queue.
-      if (targets.length > 0) this.classifyBatchPending = targets.length
-      for (let i = 0; i < targets.length; i++) {
-        void this.fetchOne(targets[i].name, i * PER_FAV_STAGGER_MS, false, true)
-      }
+      void this.pollOnce()
       this.scheduleNextPoll()
-    }, interval)
+    }, GQL_REFRESH_INTERVAL_MS)
+  }
+
+  // The primary refresh path: ONE batched GQL request resolves every
+  // favorite's live/offline + title/game/viewers/avatar in a single round
+  // trip. On any transport-level failure (network, non-2xx, malformed body,
+  // timeout) it falls back to the per-channel DecAPI path — which preserves
+  // the two-phase (uptime → enrichment) ordering, the rate limiter, and the
+  // circuit breaker. A channel that's simply OFFLINE (stream: null) is a
+  // SUCCESS here and must never trigger the fallback.
+  private async pollOnce(): Promise<void> {
+    if (this.disposed) return
+    if (this.polling) {
+      // A poll is in flight (its snapshot already left us). Remember to re-run
+      // so newly-added/imported entries are covered instead of waiting a full
+      // GQL_REFRESH_INTERVAL_MS for the next scheduled poll.
+      this.pollRequested = true
+      return
+    }
+    const names = this.entries.map((e) => e.name)
+    if (names.length === 0) return
+    this.polling = true
+    try {
+      const statuses = await fetchChannelStatuses(names)
+      if (this.disposed) return
+      this.applyGqlStatuses(statuses)
+    } catch {
+      if (this.disposed) return
+      this.runDecapiFallback(names)
+    } finally {
+      this.polling = false
+      if (this.pollRequested && !this.disposed) {
+        this.pollRequested = false
+        void this.pollOnce()
+      }
+    }
+  }
+
+  // Single-channel GQL resolve for a freshly-added favorite (good UX: the new
+  // channel resolves immediately instead of waiting up to GQL_REFRESH_INTERVAL
+  // for the next batch). Falls back to fetchOne on transport failure.
+  private async resolveSingle(name: string): Promise<void> {
+    if (this.disposed) return
+    try {
+      const statuses = await fetchChannelStatuses([name])
+      if (this.disposed) return
+      this.applyGqlStatuses(statuses)
+    } catch {
+      if (this.disposed) return
+      void this.fetchOne(name, 0)
+    }
+  }
+
+  // DecAPI per-channel fallback. Identical to the pre-GQL startup/poll
+  // behavior: enqueue every uptime (batch=true) before any cosmetic
+  // enrichment so a large fallback can't let avatars delay a later channel's
+  // status resolution. The global limiter (MIN_FETCH_GAP_MS) serializes the
+  // actual requests; PER_FAV_STAGGER_MS just avoids spawning every async
+  // chain in one tick.
+  private runDecapiFallback(names: string[]): void {
+    if (this.disposed || names.length === 0) return
+    this.classifyBatchPending = names.length
+    for (let i = 0; i < names.length; i++) {
+      void this.fetchOne(names[i], i * PER_FAV_STAGGER_MS, false, true)
+    }
+  }
+
+  // Apply a successful GQL batch. Collapses what the DecAPI path needed 4–5
+  // calls per channel (uptime + avatar + title + viewers + game) into the one
+  // response we just got. Writes avatar/metadata caches too, so a later
+  // DecAPI fallback (if GQL goes down) re-fetches only uptime per channel.
+  // Offline (stream: null) and nonexistent (null entry) channels are both
+  // successes — never a fallback trigger.
+  private applyGqlStatuses(statuses: ChannelStatus[]): void {
+    if (this.disposed) return
+    let changed = false
+    for (const cs of statuses) {
+      if (this.disposed) return
+      if (!cs.login || !isValidChannelName(cs.login)) continue
+      if (!this.has(cs.login)) continue // removed mid-flight
+      const prev = this.statuses.get(cs.login)
+      const prevStatus = prev?.status
+      const wasLive = prevStatus?.state === 'live'
+
+      let status: LiveStatus
+      if (cs.live) {
+        if (cs.avatarUrl) this.avatarCache.set(cs.login, cs.avatarUrl)
+        this.metadataCache.set(cs.login, {
+          title: cs.title,
+          viewers: cs.viewersCount,
+          game: cs.game,
+        })
+        this.metadataFetchedAt.set(cs.login, Date.now())
+        status = {
+          state: 'live',
+          title: cs.title,
+          viewers: cs.viewersCount,
+          uptime: formatUptime(cs.startedAt),
+          game: cs.game,
+          avatarUrl: cs.avatarUrl,
+        }
+      } else {
+        if (cs.avatarUrl) this.avatarCache.set(cs.login, cs.avatarUrl)
+        status = { state: 'offline', avatarUrl: cs.avatarUrl }
+      }
+
+      this.consecutiveFailures.delete(cs.login)
+      this.clearRetryTimer(cs.login)
+      this.statuses.set(cs.login, {
+        name: cs.login,
+        status,
+        lastFetched: Date.now(),
+        lastError: null,
+        updateDelayed: false,
+      })
+      if (!wasLive && cs.live && Date.now() - this.startedAt >= NOTIFY_STARTUP_GRACE_MS) {
+        this.fireLiveNotification(cs.login, status)
+      }
+      changed = true
+    }
+    // A clean GQL batch is proof DecAPI is not currently 429-ing us, so let a
+    // lapsed breaker clear (it can only have been tripped by the fallback).
+    this.clearCircuitBreakerIfExpired()
+    if (changed) {
+      this.notify()
+    }
   }
 
   private clearRetryTimer(name: string): void {
@@ -794,7 +843,6 @@ export class FavoritesStore {
         this.fireLiveNotification(name, status)
       }
       if (this.isCurrentEntry(name, version)) {
-        saveStatusCache(this.statuses)
         this.notify()
       }
 
@@ -828,7 +876,6 @@ export class FavoritesStore {
           lastError: errorMessage,
           updateDelayed: isStale,
         })
-        saveStatusCache(this.statuses)
         this.notify()
       }
     } finally {
@@ -990,7 +1037,6 @@ export class FavoritesStore {
       }
     }
     this.statuses.set(name, { ...existing, status: next, lastFetched: Date.now() })
-    saveStatusCache(this.statuses)
     this.notify()
   }
 

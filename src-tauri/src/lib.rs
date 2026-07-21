@@ -1,6 +1,7 @@
 mod decapi;
 mod env_spawn;
 mod export;
+mod gql;
 mod opener;
 mod player;
 mod resolve;
@@ -17,6 +18,7 @@ use tauri::Manager;
 pub fn run() {
     let mut builder = tauri::Builder::default()
         .manage(decapi::DecApiClient::new().expect("failed to build DecAPI HTTP client"))
+        .manage(gql::GqlClient::new().expect("failed to build GQL HTTP client"))
         .plugin(tauri_plugin_notification::init());
 
     // Single-instance guard: a second launch (e.g. the user clicks the
@@ -53,6 +55,7 @@ pub fn run() {
             player::launch_player,
             opener::open_url_robust,
             decapi::decapi_fetch,
+            gql::gql_fetch,
             export::save_favorites_export,
         ])
         .run(tauri::generate_context!())

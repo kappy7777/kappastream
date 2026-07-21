@@ -7,10 +7,10 @@ import type { RenderedMessagePart } from './emotes'
  * The 7TV / FFZ parsing functions are not exported individually, so the
  * alias, PERSONAL/LISTED, and FFZ-global cases are exercised end-to-end via
  * loadChannelEmotes / loadGlobalEmotes. fetch is stubbed per-test to return
- * canned provider responses, and `invoke('decapi_fetch')` (used by
- * getTwitchUserId) is mocked via vi.mock. The module-level emote cache is
- * reset between tests with vi.resetModules + a fresh dynamic import (same
- * pattern as favorites.test.ts).
+ * canned provider responses, and `invoke('gql_fetch')` (used by
+ * getTwitchUserId via resolveUserIds) is mocked via vi.mock. The module-level
+ * emote cache is reset between tests with vi.resetModules + a fresh dynamic
+ * import (same pattern as favorites.test.ts).
  *
  * The trailing-punctuation and emoteOnly cases exercise the pure
  * renderMessage path with a hand-built emote map — no network mocking.
@@ -60,7 +60,15 @@ describe('7TV set-entry alias', () => {
     // A channel renames catErm to erm; chatters type "erm". The 7TV v3
     // set-entry shape is { name: "erm", data: { name: "catErm" } } — the
     // top-level name is the alias active in that set.
-    tauriInvoke.handler = async () => '12345' // twitch/id/<channel>
+    tauriInvoke.handler = async (cmd: string) => {
+      // getTwitchUserId now resolves via the batched GQL command, not
+      // decapi_fetch('twitch/id/<user>'). Return a valid single-user response
+      // so resolveUserIds maps 'somenick' -> '12345'.
+      if (cmd === 'gql_fetch') {
+        return JSON.stringify({ data: { users: [{ id: '12345', login: 'somenick' }] } })
+      }
+      throw new Error('unexpected invoke: ' + cmd)
+    }
     fetchImpl = async (url) => {
       if (url.startsWith('https://7tv.io/v3/users/twitch/')) {
         return jsonRes({
@@ -91,7 +99,12 @@ describe('7TV PERSONAL/LISTED state', () => {
     // Real responses carry state: ["PERSONAL", "LISTED"] on ordinary public
     // listed emotes; the old isPublicSevenTv filter dropped these. Verify
     // such an entry now lands in the map.
-    tauriInvoke.handler = async () => '12345'
+    tauriInvoke.handler = async (cmd: string) => {
+      if (cmd === 'gql_fetch') {
+        return JSON.stringify({ data: { users: [{ id: '12345', login: 'somenick' }] } })
+      }
+      throw new Error('unexpected invoke: ' + cmd)
+    }
     fetchImpl = async (url) => {
       if (url.startsWith('https://7tv.io/v3/users/twitch/')) {
         return jsonRes({

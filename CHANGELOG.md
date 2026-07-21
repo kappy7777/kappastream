@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Favorites now resolve via Twitch GQL as the primary data source.** A
+  single batched anonymous `users(logins:)` request per refresh covers the
+  whole list (live/offline, title, game, viewers, avatar, thumbnail) — what
+  previously took 4–5 DecAPI calls per channel is now one round trip for
+  everyone. DecAPI remains as a per-channel fallback, used only when the GQL
+  request fails at the transport layer (network error / non-2xx / timeout);
+  a channel GQL reports as offline is a success and never triggers the
+  fallback. Refresh interval is 150 s.
+- **Favorites limit raised from 100 to 1000.** Larger lists are fetched as
+  sequential chunks of 100 logins (still well inside the refresh window).
+- **Removed the 1-hour localStorage status cache** (`fav-status-cache-v1` /
+  `fav-status-cache-ts-v1`). Every channel now starts fresh on launch and is
+  repopulated by the first GQL poll (~1 s), so stale up-to-1-hour-old
+  live/title/viewers state is no longer shown. Old keys left in localStorage
+  are ignored.
+- Emote user-ID lookups (for 7TV/BTTV/FFZ channel emotes) now go through the
+  same batched GQL path instead of per-user DecAPI `/twitch/id` calls.
+
 ## [0.2.0] - 2026-07-20
 
 ### Added

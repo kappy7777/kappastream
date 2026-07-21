@@ -18,12 +18,26 @@ const decapi = vi.hoisted(() => ({
   calls: [] as { path: string; ts: number }[],
 }))
 
+const gql = vi.hoisted(() => ({
+  handler: async (_body: string): Promise<string> => {
+    throw new Error('gql handler not configured for this test')
+  },
+  calls: [] as { body: string; ts: number }[],
+}))
+
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (cmd: string, args: Record<string, unknown>): Promise<unknown> => {
-    if (cmd !== 'decapi_fetch') return Promise.reject(new Error('unexpected invoke: ' + cmd))
-    const path = String(args.path ?? '')
-    decapi.calls.push({ path, ts: Date.now() })
-    return Promise.resolve(decapi.handler(path))
+    if (cmd === 'decapi_fetch') {
+      const path = String(args.path ?? '')
+      decapi.calls.push({ path, ts: Date.now() })
+      return Promise.resolve(decapi.handler(path))
+    }
+    if (cmd === 'gql_fetch') {
+      const body = String(args.body ?? '')
+      gql.calls.push({ body, ts: Date.now() })
+      return Promise.resolve(gql.handler(body))
+    }
+    return Promise.reject(new Error('unexpected invoke: ' + cmd))
   },
   isTauri: () => false,
 }))
@@ -41,29 +55,6 @@ function seedFavorites(names: string[]): void {
     'twitch-favorites-v1',
     JSON.stringify(names.map((name, i) => ({ name, addedAt: now + i, order: i + 1 }))),
   )
-}
-
-function seedStatusCache(
-  entries: Record<string, { live?: boolean; avatar?: string; title?: string; viewers?: number; game?: string }>,
-  ageMs = 60_000,
-): void {
-  const ts = Date.now() - ageMs
-  const obj: Record<string, unknown> = {}
-  for (const [name, e] of Object.entries(entries)) {
-    const status = e.live
-      ? {
-          state: 'live',
-          title: e.title ?? 'title-' + name,
-          viewers: e.viewers ?? 7,
-          uptime: '1h',
-          game: e.game ?? 'game-' + name,
-          avatarUrl: e.avatar ?? 'https://img/' + name + '.png',
-        }
-      : { state: 'offline', avatarUrl: e.avatar ?? 'https://img/' + name + '.png' }
-    obj[name] = { name, status, lastFetched: ts }
-  }
-  localStorage.setItem('fav-status-cache-v1', JSON.stringify(obj))
-  localStorage.setItem('fav-status-cache-ts-v1', String(ts))
 }
 
 /** Build a handler that resolves canned responses per channel. */
@@ -99,6 +90,10 @@ beforeEach(async () => {
   decapi.handler = async () => {
     throw new Error('decapi handler not configured')
   }
+  gql.calls.length = 0
+  gql.handler = async () => {
+    throw new Error('gql handler not configured')
+  }
   F = await import('./favorites.svelte')
 })
 
@@ -129,26 +124,9 @@ describe('fetchLiveStatus ordering', () => {
   })
 })
 
-describe('avatar / metadata cache hydration', () => {
-  it('reuses a persisted avatar after store hydration (no avatar request)', async () => {
-    seedFavorites(['cached'])
-    seedStatusCache({ cached: { avatar: 'https://img/cached.png' } }) // offline, fresh
-    decapi.handler = multiHandler({ cached: {} })
-    const store = new F.FavoritesStore()
-    store.start()
-    await delay(1500) // uptime-only (avatar cached) -> ~1 limiter slot
-    expect(invokes({ channel: 'cached', endpoint: 'avatar' })).toHaveLength(0)
-    expect(invokes({ channel: 'cached', endpoint: 'uptime' })).toHaveLength(1)
-    const s = store.getStatus('cached')!.status
-    expect(s.state).toBe('offline')
-    if (s.state === 'offline') expect(s.avatarUrl).toBe('https://img/cached.png')
-  })
-})
-
 describe('stale-response guard', () => {
   it('an older in-flight request cannot overwrite a newer result', async () => {
     seedFavorites(['stale'])
-    seedStatusCache({ stale: { live: true } }) // live+fresh -> metadata cached, avatar cached
     let staleCalls = 0
     let resolveOld!: (v: string) => void
     const oldPromise = new Promise<string>((r) => {
@@ -328,14 +306,16 @@ describe('FavoritesStore — startup polling', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0) // deterministic jitter
   })
 
-  it('does not re-poll already-live channels during the aggressive phase', async () => {
+  it('a live favorite resolves once and is not re-fetched within a poll interval', async () => {
+    // GQL is unconfigured here, so pollOnce falls back to the per-channel
+    // DecAPI path. The channel classifies via a single uptime call; the next
+    // poll isn't for GQL_REFRESH_INTERVAL_MS (150s), so advancing 135s yields
+    // exactly one uptime fetch.
     seedFavorites(['live1'])
-    seedStatusCache({ live1: { live: true } }) // fresh metadata -> uptime-only at startup
     decapi.handler = multiHandler({ live1: { live: true } })
     const store = new F.FavoritesStore()
     store.start()
-    await vi.advanceTimersByTimeAsync(135_000) // startup fetch + 120s aggressive poll
-    // live => excluded from the aggressive poll: only the startup fetch fires
+    await vi.advanceTimersByTimeAsync(135_000) // < GQL_REFRESH_INTERVAL_MS -> no second poll
     expect(invokes({ channel: 'live1', endpoint: 'uptime' })).toHaveLength(1)
   })
 
@@ -686,4 +666,109 @@ describe('enrichment respects latest state', () => {
     expect(s.state).toBe('live')
     if (s.state === 'live') expect(s.title).toBe('FRESH_TITLE') // not the stale value
   }, 30000)
+})
+
+describe('GQL primary path (batched)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+  })
+
+  /** Build a gql_fetch handler returning a canned users(logins:) response. */
+  function gqlHandler(
+    cfg: Record<string, { live?: boolean; viewers?: number; title?: string; game?: string; avatar?: string } | null>,
+    opts: { fail?: 'transport' } = {},
+  ): (body: string) => Promise<string> {
+    return async (body) => {
+      if (opts.fail === 'transport') throw new Error('HTTP 500')
+      const logins: string[] = JSON.parse(body).variables.logins
+      const users = logins.map((login) => {
+        const c = cfg[login]
+        if (!c) return null // nonexistent login -> positional null entry
+        if (!c.live) {
+          return {
+            id: 'id-' + login,
+            login,
+            displayName: login,
+            profileImageURL: c.avatar ?? 'https://img/' + login + '.png',
+            stream: null,
+          }
+        }
+        return {
+          id: 'id-' + login,
+          login,
+          displayName: login,
+          profileImageURL: c.avatar ?? 'https://img/' + login + '.png',
+          stream: {
+            id: 's-' + login,
+            title: c.title ?? 'title-' + login,
+            type: 'live',
+            viewersCount: c.viewers ?? 11,
+            createdAt: new Date(Date.now() - 3600_000).toISOString(),
+            previewImageURL: 'https://thumb/' + login + '.jpg',
+            game: { id: 'g', name: c.game ?? 'game-' + login, displayName: c.game ?? 'game-' + login, boxArtURL: 'https://box/' + login + '.jpg' },
+          },
+        }
+      })
+      return JSON.stringify({ data: { users } })
+    }
+  }
+
+  it('resolves the whole favorites list from a SINGLE GQL request (no DecAPI)', async () => {
+    seedFavorites(['alpha', 'beta', 'gamma'])
+    gql.handler = gqlHandler({
+      alpha: { live: true, viewers: 42, title: 'AlphaTitle', game: 'AlphaGame' },
+      beta: { live: false },
+      gamma: { live: true },
+    })
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    const a = store.getStatus('alpha')!.status
+    const b = store.getStatus('beta')!.status
+    const g = store.getStatus('gamma')!.status
+    expect(a.state).toBe('live')
+    if (a.state === 'live') {
+      expect(a.title).toBe('AlphaTitle')
+      expect(a.game).toBe('AlphaGame')
+      expect(a.viewers).toBe(42)
+    }
+    expect(b.state).toBe('offline')
+    expect(g.state).toBe('live')
+    // One batched gql_fetch for the whole list; the DecAPI fallback never ran.
+    expect(gql.calls).toHaveLength(1)
+    expect(decapi.calls).toHaveLength(0)
+  })
+
+  it('falls back to per-channel DecAPI when GQL fails at the transport layer', async () => {
+    seedFavorites(['alpha', 'beta'])
+    gql.handler = gqlHandler({}, { fail: 'transport' }) // every GQL call throws
+    decapi.handler = multiHandler({ alpha: {}, beta: {} }) // both offline via DecAPI
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(store.getStatus('alpha')!.status.state).toBe('offline')
+    expect(store.getStatus('beta')!.status.state).toBe('offline')
+    expect(gql.calls.length).toBeGreaterThanOrEqual(1) // GQL was attempted first
+    expect(decapi.calls.length).toBeGreaterThan(0) // DecAPI fallback fired
+    expect(decapi.calls.some((c) => c.path.includes('/uptime/alpha'))).toBe(true)
+    expect(decapi.calls.some((c) => c.path.includes('/uptime/beta'))).toBe(true)
+  })
+
+  it('an offline channel (stream: null) is a SUCCESS — never triggers DecAPI fallback', async () => {
+    // A channel GQL reports as offline must NOT cause a fallback: offline is a
+    // legitimate, fully-resolved state. Only a transport failure falls back.
+    seedFavorites(['liveone', 'offone'])
+    gql.handler = gqlHandler({
+      liveone: { live: true },
+      offone: { live: false }, // stream: null
+    })
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(store.getStatus('liveone')!.status.state).toBe('live')
+    expect(store.getStatus('offone')!.status.state).toBe('offline') // resolved from GQL
+    expect(gql.calls).toHaveLength(1) // one successful batch
+    expect(decapi.calls).toHaveLength(0) // offline did NOT trigger any DecAPI call
+  })
 })
