@@ -320,7 +320,7 @@ jobs:
       # clean basenames (no per-artifact subdirs), so the four release files
       # end up side by side.
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-staging
           merge-multiple: true
