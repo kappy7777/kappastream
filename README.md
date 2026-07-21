@@ -196,7 +196,6 @@ A successful result confirms that the downloaded file matches the checksum publi
 
 - **Linux only.** kappastream currently targets X11 and Wayland; no Windows or macOS builds are provided.
 - **streamlink is required.** Playback cannot be resolved without the local helper binary.
-- **Live metadata depends on DecAPI.** If DecAPI is unavailable or rate-limiting requests, live status, viewer counts, titles, and game information may stop updating. Playback and IRC chat remain independent.
 - **Read-only by design.** Sending chat messages, following, subscribing, redeeming channel points, and other authenticated Twitch features are intentionally outside the project's scope.
 
 ## Build from source
