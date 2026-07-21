@@ -74,6 +74,18 @@
   </content_rating>
 
   <releases>
+    <release version="0.2.2" date="2026-07-21">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.2</url>
+      <description>
+        <p>The Twitch GQL transport (used for favorites status and emote
+        user-ID lookups) now sends a generic browser User-Agent instead of an
+        app-identifying one. gql.twitch.tv is Twitch's unofficial internal
+        endpoint, and an app-specific User-Agent was a single-rule block
+        target that could have disabled every install at once. The DecAPI
+        transport continues to identify itself honestly, since DecAPI is a
+        small donation-funded service the project depends on as a guest.</p>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-07-21">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.1</url>
       <description>

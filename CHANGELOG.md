@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-21
+
+### Changed
+
+- **The Twitch GQL transport now sends a generic browser User-Agent** instead
+  of an app-identifying `Kappastream/<version>` one. `gql.twitch.tv` is
+  Twitch's unofficial internal endpoint, and an app-specific User-Agent was a
+  single-rule block target — one server-side filter on that string would have
+  disabled every kappastream install at once. (The DecAPI transport
+  intentionally continues to identify itself honestly, since DecAPI is a
+  small donation-funded service the project depends on as a guest.) A unit
+  test guards the constant against a silent revert.
+
 ## [0.2.1] - 2026-07-21
 
 ### Changed
@@ -351,7 +364,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.2
 [0.2.1]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.1
 [0.2.0]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.0
 [0.1.10]: https://github.com/kappy7777/kappastream/releases/tag/v0.1.10
