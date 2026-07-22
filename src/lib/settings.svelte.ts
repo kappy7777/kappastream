@@ -79,6 +79,12 @@ const QUALITY_PREFIX = 'app-quality:'
 const UI_SCALE_KEY = 'app-ui-scale-v1'
 const LOW_LATENCY_KEY = 'app-low-latency-v1'
 const CLOSE_TO_TRAY_KEY = 'app-close-to-tray-v1'
+// Tier 2 chat-feature toggles (sections 1–6). All default OFF — the baseline
+// chat is byte-identical with every one of these false.
+const CHAT_SUBNOTICES_KEY = 'app-chat-subnotices-v1'
+const CHAT_ROOMSTATE_KEY = 'app-chat-roomstate-v1'
+const CHAT_MODERATION_KEY = 'app-chat-moderation-v1'
+const CHAT_BITS_KEY = 'app-chat-bits-v1'
 
 export const UI_SCALE_MIN = 0.5
 export const UI_SCALE_MAX = 4
@@ -149,6 +155,20 @@ function readCloseToTray(): boolean {
   return safeRead(CLOSE_TO_TRAY_KEY) !== 'false'
 }
 
+// All four Tier 2 chat-feature toggles default OFF.
+function readChatSubnotices(): boolean {
+  return safeRead(CHAT_SUBNOTICES_KEY) === 'true'
+}
+function readChatRoomstate(): boolean {
+  return safeRead(CHAT_ROOMSTATE_KEY) === 'true'
+}
+function readChatModeration(): boolean {
+  return safeRead(CHAT_MODERATION_KEY) === 'true'
+}
+function readChatBits(): boolean {
+  return safeRead(CHAT_BITS_KEY) === 'true'
+}
+
 const SORT_MODE_KEY = 'app-fav-sort-v1'
 
 function readSortMode(): SortMode {
@@ -178,6 +198,10 @@ class SettingsStore {
   uiScale: number = $state(readUiScale())
   lowLatency: boolean = $state(readLowLatency())
   closeToTray: boolean = $state(readCloseToTray())
+  chatSubnotices: boolean = $state(readChatSubnotices())
+  chatRoomstate: boolean = $state(readChatRoomstate())
+  chatModeration: boolean = $state(readChatModeration())
+  chatBits: boolean = $state(readChatBits())
   theaterMode: boolean = $state(false)
 
   constructor() {
@@ -264,6 +288,42 @@ class SettingsStore {
 
   toggleCloseToTray(): void {
     this.setCloseToTray(!this.closeToTray)
+  }
+
+  setChatSubnotices(v: boolean): void {
+    this.chatSubnotices = v
+    safeWrite(CHAT_SUBNOTICES_KEY, v ? 'true' : 'false')
+  }
+
+  toggleChatSubnotices(): void {
+    this.setChatSubnotices(!this.chatSubnotices)
+  }
+
+  setChatRoomstate(v: boolean): void {
+    this.chatRoomstate = v
+    safeWrite(CHAT_ROOMSTATE_KEY, v ? 'true' : 'false')
+  }
+
+  toggleChatRoomstate(): void {
+    this.setChatRoomstate(!this.chatRoomstate)
+  }
+
+  setChatModeration(v: boolean): void {
+    this.chatModeration = v
+    safeWrite(CHAT_MODERATION_KEY, v ? 'true' : 'false')
+  }
+
+  toggleChatModeration(): void {
+    this.setChatModeration(!this.chatModeration)
+  }
+
+  setChatBits(v: boolean): void {
+    this.chatBits = v
+    safeWrite(CHAT_BITS_KEY, v ? 'true' : 'false')
+  }
+
+  toggleChatBits(): void {
+    this.setChatBits(!this.chatBits)
   }
 
   setSortMode(m: SortMode): void {

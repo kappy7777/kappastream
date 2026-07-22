@@ -7,6 +7,7 @@
 
   let open = $state(false)
   let themeOpen = $state(false)
+  let chatOpen = $state(false)
   let scaleOpen = $state(false)
   let panelEl: HTMLElement | undefined = $state()
   let buttonEl: HTMLButtonElement | undefined = $state()
@@ -18,6 +19,10 @@
     THEMES.find((t) => t.id === settings.theme)?.label ?? 'Theme',
   )
 
+  // Compact state shown on the Chat disclosure row. Surfaces the headline
+  // (chat visible or hidden) so the panel is scannable without expanding it.
+  let chatSummary = $derived(settings.chatVisible ? 'On' : 'Off')
+
   function toggle(): void {
     open = !open
   }
@@ -28,6 +33,10 @@
 
   function toggleTheme(): void {
     themeOpen = !themeOpen
+  }
+
+  function toggleChat(): void {
+    chatOpen = !chatOpen
   }
 
   function toggleScale(): void {
@@ -119,6 +128,7 @@ async function exportFavorites(): Promise<void> {
     function onKey(e: KeyboardEvent): void {
       if (e.key === 'Escape') {
         if (themeOpen) themeOpen = false
+        else if (chatOpen) chatOpen = false
         else if (scaleOpen) scaleOpen = false
         else open = false
       }
@@ -185,36 +195,129 @@ async function exportFavorites(): Promise<void> {
       </section>
 
       <section class="panel-section">
-        <div class="toggle-row">
-          <span class="toggle-label" id="show-chat-label">Show chat</span>
-          <span
-            class="toggle"
-            class:toggle--on={settings.chatVisible}
-            role="switch"
-            tabindex="0"
-            aria-checked={settings.chatVisible}
-            aria-labelledby="show-chat-label"
-            onclick={() => settings.toggleChatVisible()}
-            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatVisible() } }}
-          >
-            <span class="toggle-knob"></span>
-          </span>
-        </div>
-        <div class="toggle-row">
-          <span class="toggle-label" id="chat-timestamps-label">Chat timestamps</span>
-          <span
-            class="toggle"
-            class:toggle--on={settings.chatTimestamps}
-            role="switch"
-            tabindex="0"
-            aria-checked={settings.chatTimestamps}
-            aria-labelledby="chat-timestamps-label"
-            onclick={() => settings.toggleChatTimestamps()}
-            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatTimestamps() } }}
-          >
-            <span class="toggle-knob"></span>
-          </span>
-        </div>
+        <button
+          type="button"
+          class="disclosure"
+          class:disclosure--open={chatOpen}
+          aria-expanded={chatOpen}
+          onclick={toggleChat}
+        >
+          <span class="disclosure-label">Chat</span>
+          <span class="disclosure-value">{chatSummary}</span>
+          <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        {#if chatOpen}
+          <div class="disclosure-body" transition:slide={{ duration: 150 }}>
+            <div class="toggle-row">
+              <span class="toggle-label" id="show-chat-label">Show chat</span>
+              <span
+                class="toggle"
+                class:toggle--on={settings.chatVisible}
+                role="switch"
+                tabindex="0"
+                aria-checked={settings.chatVisible}
+                aria-labelledby="show-chat-label"
+                onclick={() => settings.toggleChatVisible()}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatVisible() } }}
+              >
+                <span class="toggle-knob"></span>
+              </span>
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label" id="chat-timestamps-label">Chat timestamps</span>
+              <span
+                class="toggle"
+                class:toggle--on={settings.chatTimestamps}
+                role="switch"
+                tabindex="0"
+                aria-checked={settings.chatTimestamps}
+                aria-labelledby="chat-timestamps-label"
+                onclick={() => settings.toggleChatTimestamps()}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatTimestamps() } }}
+              >
+                <span class="toggle-knob"></span>
+              </span>
+            </div>
+            <div class="chat-subgroup-label">Features</div>
+            <div class="toggle-row">
+              <span class="toggle-label" id="chat-subnotices-label">
+                Sub and raid notices
+                <span class="toggle-hint">subs, resubs, gifts, raids, announcements</span>
+              </span>
+              <span
+                class="toggle"
+                class:toggle--on={settings.chatSubnotices}
+                role="switch"
+                tabindex="0"
+                aria-checked={settings.chatSubnotices}
+                aria-labelledby="chat-subnotices-label"
+                onclick={() => settings.toggleChatSubnotices()}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatSubnotices() } }}
+              >
+                <span class="toggle-knob"></span>
+              </span>
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label" id="chat-roomstate-label">
+                Chat mode indicator
+                <span class="toggle-hint">sub/followers-only, slow, emote-only, r9k</span>
+              </span>
+              <span
+                class="toggle"
+                class:toggle--on={settings.chatRoomstate}
+                role="switch"
+                tabindex="0"
+                aria-checked={settings.chatRoomstate}
+                aria-labelledby="chat-roomstate-label"
+                onclick={() => settings.toggleChatRoomstate()}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatRoomstate() } }}
+              >
+                <span class="toggle-knob"></span>
+              </span>
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label" id="chat-moderation-label">
+                Show moderation actions
+                <span class="toggle-hint">deleted messages and timeouts/bans shown struck through</span>
+              </span>
+              <span
+                class="toggle"
+                class:toggle--on={settings.chatModeration}
+                role="switch"
+                tabindex="0"
+                aria-checked={settings.chatModeration}
+                aria-labelledby="chat-moderation-label"
+                onclick={() => settings.toggleChatModeration()}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatModeration() } }}
+              >
+                <span class="toggle-knob"></span>
+              </span>
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label" id="chat-bits-label">
+                Show bits
+                <span class="toggle-hint">cheer amounts on messages</span>
+              </span>
+              <span
+                class="toggle"
+                class:toggle--on={settings.chatBits}
+                role="switch"
+                tabindex="0"
+                aria-checked={settings.chatBits}
+                aria-labelledby="chat-bits-label"
+                onclick={() => settings.toggleChatBits()}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatBits() } }}
+              >
+                <span class="toggle-knob"></span>
+              </span>
+            </div>
+          </div>
+        {/if}
+      </section>
+
+      <section class="panel-section">
         <div class="toggle-row">
           <span class="toggle-label" id="low-latency-label">
             Low latency
@@ -571,6 +674,20 @@ async function exportFavorites(): Promise<void> {
 
   .disclosure-body {
     padding: 2px 0 0;
+  }
+
+  /* Mini label separating the chat visibility toggles from the optional
+     feature toggles inside the Chat dropdown. Mirrors .panel-label but a hair
+     smaller and indented so it reads as a sub-group, not a top-level section. */
+  .chat-subgroup-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
   }
 
   .toggle-row {

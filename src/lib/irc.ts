@@ -13,11 +13,125 @@ export interface ParsedMessage {
   twitchEmotes: EmoteRange[]
   badges: BadgeInfo[]
   timestamp: number
+  // `user-id` tag — the stable join key CLEARCHAT matches on (never a display
+  // name, which can change). Null only if Twitch omits the tag (it never does
+  // on a tagged PRIVMSG).
+  userId: string | null
+  // `bits` tag amount for cheers (Tier 2 section 6). Null on a normal message.
+  bits: number | null
 }
 
 const ACTION_PREFIX = '\u0001ACTION '
 
-export function parseIrcLine(line: string): ParsedMessage | null {
+// ---------------------------------------------------------------------------
+// Tier 2 chat completeness — event parsing.
+//
+// `parseIrcLine` below still returns ONLY PRIVMSG (back-compat: the existing
+// tests and the baseline chat path call it). `parseIrcEvent` is the new entry
+// point that also surfaces USERNOTICE / ROOMSTATE / CLEARMSG / CLEARCHAT. It
+// shares the exact same PRIVMSG builder, so PRIVMSG output is byte-identical
+// to the legacy function (plus the two new nullable fields). The baseline
+// chat (all toggles off) never calls into the new render paths.
+//
+// Per the architecture rule, PARSING IS UNGATED: every supported event is
+// parsed and stored by the caller regardless of settings; only PRESENTATION is
+// gated. See App.svelte.
+// ---------------------------------------------------------------------------
+
+export type IrcEvent =
+  | (ParsedMessage & { type: 'PRIVMSG' })
+  | UsernoticeEvent
+  | RoomstateEvent
+  | ClearmsgEvent
+  | ClearchatEvent
+
+export interface UsernoticeEvent {
+  type: 'USERNOTICE'
+  channel: string
+  // `msg-id` selects the event kind (sub, raid, …). Unknown ids are surfaced
+  // generically rather than dropped — Twitch adds new ones.
+  msgId: string
+  // Twitch's own rendered string (the `system-msg` tag, IRCv3-unescaped). The
+  // preferred display text; we only fall back to msg-param composition when it
+  // is empty.
+  systemMsg: string
+  // `login` of the acting user, if present.
+  login: string | null
+  // All decoded tags — passed to composeUsernoticeFallback for the rare case
+  // system-msg is absent, and so the render layer can read msg-param-* values.
+  tags: Record<string, string>
+  // Trailing parameter: the user's message (resub comments, announcements).
+  // Null when the USERNOTICE carries no message.
+  message: string | null
+  // Raw `emotes` tag for the trailing message (parsed by the caller).
+  emotes: string | undefined
+}
+
+export interface RoomstateEvent {
+  type: 'ROOMSTATE'
+  channel: string
+  // Each field is null when the tag is ABSENT from this message. The JOIN
+  // message carries ALL tags; later change messages carry ONLY the changed
+  // tag. Callers must merge (mergeRoomState), never replace — null means
+  // "leave the existing value alone".
+  emoteOnly: boolean | null
+  // -1 = off, 0 = any follower, N = must follow for N minutes.
+  followersOnly: number | null
+  subsOnly: boolean | null
+  // Seconds (0 = off).
+  slow: number | null
+  r9k: boolean | null
+}
+
+export interface ClearmsgEvent {
+  type: 'CLEARMSG'
+  channel: string
+  // `target-msg-id` — matches ParsedMessage.id of the deleted PRIVMSG.
+  targetMsgId: string
+  // `login` of the moderator who deleted it.
+  login: string
+}
+
+export interface ClearchatEvent {
+  type: 'CLEARCHAT'
+  channel: string
+  // `target-user-id` tag. Null => whole room cleared.
+  targetUserId: string | null
+  // `ban-duration` tag. Null => permanent ban (or room-wide clear).
+  banDuration: number | null
+  // Trailing parameter: the target's login, if a single user was targeted.
+  login: string | null
+}
+
+interface IrcFrame {
+  tags: Record<string, string>
+  prefixText: string | null
+  command: string
+  channel: string | null
+  middle: string[]
+  trailing: string | null
+}
+
+export function parseIrcEvent(line: string): IrcEvent | null {
+  const frame = tokenize(line)
+  if (!frame) return null
+  switch (frame.command) {
+    case 'PRIVMSG':
+      return buildPrivmsg(frame)
+    case 'USERNOTICE':
+      return buildUsernotice(frame)
+    case 'ROOMSTATE':
+      return buildRoomstate(frame)
+    case 'CLEARMSG':
+      return buildClearmsg(frame)
+    case 'CLEARCHAT':
+      return buildClearchat(frame)
+    default:
+      return null
+  }
+}
+
+function tokenize(line: string): IrcFrame | null {
   if (!line || !line.startsWith('@')) return null
 
   const spaceIdx = line.indexOf(' ')
@@ -26,30 +140,51 @@ export function parseIrcLine(line: string): ParsedMessage | null {
   const tagsPart = line.slice(1, spaceIdx)
   const rest = line.slice(spaceIdx + 1)
 
-  const prefixEnd = rest.startsWith(':') ? rest.indexOf(' ') : 0
-  const commandStart = prefixEnd === 0 ? 0 : prefixEnd + 1
-  const remainder = prefixEnd === 0 ? rest : rest.slice(commandStart)
-  const commandEnd = remainder.indexOf(' ')
-  if (commandEnd === -1) return null
+  let prefixText: string | null = null
+  let s = rest
+  if (s.startsWith(':')) {
+    const prefixEnd = s.indexOf(' ')
+    if (prefixEnd === -1) return null
+    prefixText = s.slice(1, prefixEnd)
+    s = s.slice(prefixEnd + 1)
+  }
 
-  const command = remainder.slice(0, commandEnd)
-  if (command !== 'PRIVMSG') return null
+  const cmdSpace = s.indexOf(' ')
+  const command = cmdSpace === -1 ? s : s.slice(0, cmdSpace)
+  const afterCommand = cmdSpace === -1 ? '' : s.slice(cmdSpace + 1)
 
-  const paramsPart = remainder.slice(commandEnd + 1)
-  const paramsSpace = paramsPart.indexOf(' :')
-  if (paramsSpace === -1) return null
+  const { middle, trailing } = splitParams(afterCommand)
+  const tags = parseTags(tagsPart)
 
-  const channel = paramsPart.slice(0, paramsSpace).replace(/^#/, '').toLowerCase()
-  const messageBody = paramsPart.slice(paramsSpace + 2)
+  let channel: string | null = null
+  if (middle.length > 0) channel = middle[0].replace(/^#/, '').toLowerCase()
+
+  return { tags, prefixText, command, channel, middle, trailing }
+}
+
+// Split IRC params into the leading "middle" tokens and the optional trailing
+// parameter (the part after the first " :", per the IRC framing convention
+// the legacy PRIVMSG parser already relied on).
+function splitParams(src: string): { middle: string[]; trailing: string | null } {
+  const idx = src.indexOf(' :')
+  if (idx === -1) return { middle: src.split(' ').filter(Boolean), trailing: null }
+  const middlePart = src.slice(0, idx)
+  const trailing = src.slice(idx + 2)
+  return { middle: middlePart.split(' ').filter(Boolean), trailing }
+}
+
+function buildPrivmsg(frame: IrcFrame): (ParsedMessage & { type: 'PRIVMSG' }) | null {
+  const messageBody = frame.trailing
+  if (messageBody === null) return null
 
   let username = 'user'
-  if (prefixEnd !== 0) {
-    const prefixText = rest.slice(1, prefixEnd)
+  if (frame.prefixText !== null) {
+    const prefixText = frame.prefixText
     const bang = prefixText.indexOf('!')
     username = bang === -1 ? prefixText.toLowerCase() : prefixText.slice(0, bang).toLowerCase()
   }
 
-  const tags = parseTags(tagsPart)
+  const tags = frame.tags
   const displayName = tags['display-name'] || username || 'user'
   const color = normalizeColor(tags.color)
   const id = tags.id ?? ''
@@ -63,8 +198,9 @@ export function parseIrcLine(line: string): ParsedMessage | null {
   }
 
   return {
+    type: 'PRIVMSG',
     id,
-    channel,
+    channel: frame.channel ?? '',
     username,
     displayName,
     color,
@@ -74,7 +210,145 @@ export function parseIrcLine(line: string): ParsedMessage | null {
     twitchEmotes,
     badges: parseBadges(tags.badges ? tags.badges.split(',').filter(Boolean) : []),
     timestamp: tags['tmi-sent-ts'] ? Number(tags['tmi-sent-ts']) : Date.now(),
+    userId: tags['user-id'] ?? null,
+    bits: tags.bits ? Number(tags.bits) : null,
   }
+}
+
+function buildUsernotice(frame: IrcFrame): UsernoticeEvent {
+  const tags = frame.tags
+  return {
+    type: 'USERNOTICE',
+    channel: frame.channel ?? '',
+    msgId: tags['msg-id'] ?? '',
+    systemMsg: tags['system-msg'] ?? '',
+    login: tags.login ?? null,
+    tags,
+    message: frame.trailing ?? null,
+    emotes: tags.emotes,
+  }
+}
+
+function buildRoomstate(frame: IrcFrame): RoomstateEvent {
+  const t = frame.tags
+  return {
+    type: 'ROOMSTATE',
+    channel: frame.channel ?? '',
+    emoteOnly: hasTag(t, 'emote-only') ? t['emote-only'] === '1' : null,
+    followersOnly: hasTag(t, 'followers-only') ? Number(t['followers-only']) : null,
+    subsOnly: hasTag(t, 'subs-only') ? t['subs-only'] === '1' : null,
+    slow: hasTag(t, 'slow') ? Number(t['slow']) : null,
+    r9k: hasTag(t, 'r9k') ? t['r9k'] === '1' : null,
+  }
+}
+
+function buildClearmsg(frame: IrcFrame): ClearmsgEvent {
+  const t = frame.tags
+  return {
+    type: 'CLEARMSG',
+    channel: frame.channel ?? '',
+    targetMsgId: t['target-msg-id'] ?? '',
+    login: t.login ?? '',
+  }
+}
+
+function buildClearchat(frame: IrcFrame): ClearchatEvent {
+  const t = frame.tags
+  return {
+    type: 'CLEARCHAT',
+    channel: frame.channel ?? '',
+    targetUserId: hasTag(t, 'target-user-id') ? t['target-user-id'] : null,
+    banDuration: hasTag(t, 'ban-duration') ? Number(t['ban-duration']) : null,
+    login: frame.trailing ?? null,
+  }
+}
+
+// A tag key is "present" only if it appeared in the raw tag string. parseTags
+// stores every parsed key (even with an empty value), so a direct lookup
+// distinguishes "absent" (later change message) from "present but empty".
+function hasTag(tags: Record<string, string>, key: string): boolean {
+  return key in tags
+}
+
+// Merge a ROOMSTATE event into accumulated state. Only non-null fields
+// overwrite — a null field means "this message did not carry that tag", so the
+// previous value is preserved. Critical: the JOIN message carries every tag,
+// but each subsequent change message carries only the one that changed. A naive
+// replace silently resets the other chat modes.
+export interface RoomState {
+  emoteOnly?: boolean
+  followersOnly?: number
+  subsOnly?: boolean
+  slow?: number
+  r9k?: boolean
+}
+
+export function mergeRoomState(prev: RoomState, ev: RoomstateEvent): RoomState {
+  const next: RoomState = { ...prev }
+  if (ev.emoteOnly !== null) next.emoteOnly = ev.emoteOnly
+  if (ev.followersOnly !== null) next.followersOnly = ev.followersOnly
+  if (ev.subsOnly !== null) next.subsOnly = ev.subsOnly
+  if (ev.slow !== null) next.slow = ev.slow
+  if (ev.r9k !== null) next.r9k = ev.r9k
+  return next
+}
+
+// Compose a display line from msg-param-* only when Twitch did not send a
+// usable system-msg. In practice system-msg is always present; this is the
+// safety net so an absent system-msg never renders a blank line. Handles the
+// known msg-ids explicitly and any future/unknown id generically.
+export function composeUsernoticeFallback(msgId: string, tags: Record<string, string>): string {
+  const login = tags.login || tags['display-name'] || 'Someone'
+  switch (msgId) {
+    case 'raid': {
+      const viewers = tags['msg-param-viewerCount'] ?? '?'
+      return `${login} is raiding with a party of ${viewers}`
+    }
+    case 'sub':
+    case 'resub':
+      return `${login} subscribed`
+    case 'subgift':
+    case 'anonsubgift': {
+      const recipient =
+        tags['msg-param-recipient-display-name'] || tags['msg-param-recipient-user-name'] || 'someone'
+      return `${login} gifted a sub to ${recipient}`
+    }
+    case 'submysterygift':
+      return `${login} is gifting community subs`
+    case 'giftpaidupgrade':
+      return `${login} is continuing the gift they received`
+    case 'announcement':
+      return `${login} sent an announcement`
+    case 'bitsbadgetier':
+      return `${login} earned a new bits badge tier`
+    case 'viewermilestone':
+      return `${login} reached a viewer milestone`
+    case 'unraid':
+      return 'The raid was cancelled'
+    default:
+      // Unknown msg-id — do not drop it. Twitch ships new ids over time.
+      return msgId ? `Channel event: ${msgId}` : 'Channel event'
+  }
+}
+
+// Single source of truth for how a deleted/timed-out message is PRESENTED.
+// Today it is strikethrough with the original text left visible. Tradeoff:
+// this still shows content a moderator removed — an explicit product choice.
+// Centralising the decision here (one predicate, one CSS class —
+// DELETED_MESSAGE_CLASS) means a future "collapsed placeholder" presentation
+// can swap the implementation without touching the render path.
+export const DELETED_MESSAGE_CLASS = 'message--deleted'
+
+export function isMessageStricken(showModeration: boolean, deleted: boolean): boolean {
+  return showModeration && deleted
+}
+
+// Legacy PRIVMSG-only entry point. Kept for the existing tests and any caller
+// that wants only chat messages. Non-PRIVMSG events return null, exactly as
+// before — the baseline chat path is unchanged.
+export function parseIrcLine(line: string): ParsedMessage | null {
+  const ev = parseIrcEvent(line)
+  return ev && ev.type === 'PRIVMSG' ? ev : null
 }
 
 function parseTags(raw: string): Record<string, string> {

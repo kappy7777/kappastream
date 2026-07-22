@@ -3,9 +3,9 @@
   import Hls from 'hls.js'
   import { invoke, isTauri } from '@tauri-apps/api/core'
   import { getCurrentWindow } from '@tauri-apps/api/window'
-  import { loadChannelEmotes, loadGlobalEmotes, buildEmoteMap, renderMessage, type Emote, type RenderedMessagePart } from './lib/emotes'
+  import { loadChannelEmotes, loadGlobalEmotes, buildEmoteMap, renderMessage, parseTwitchEmoteTag, type Emote, type RenderedMessagePart } from './lib/emotes'
   import './lib/emote.css'
-  import { parseIrcLine, type ParsedMessage, type BadgeInfo } from './lib/irc'
+  import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, DELETED_MESSAGE_CLASS, isMessageStricken, type ParsedMessage, type BadgeInfo, type IrcEvent, type RoomState } from './lib/irc'
   import Sidebar from './lib/Sidebar.svelte'
   import PlayerControls from './lib/PlayerControls.svelte'
   import Settings from './lib/Settings.svelte'
@@ -25,6 +25,11 @@
   type PlayerStatus = 'idle' | 'resolving' | 'loading' | 'playing' | 'paused' | 'offline' | 'error'
 
   interface ChatMessage {
+    // 'message' = normal PRIVMSG; 'notice' = a USERNOTICE line (subs, raids,
+    // announcements). Notices render only when the chat-subnotices toggle is
+    // on; with all toggles off a notice entry produces no DOM, so the baseline
+    // chat is byte-identical.
+    kind: 'message' | 'notice'
     id: string
     username: string
     color: string
@@ -34,6 +39,22 @@
     isAction: boolean
     emoteOnly: boolean
     timestamp: number
+    // bits amount for cheers (Toggle D), null otherwise. Always stored; the
+    // bits indicator is rendered only under settings.chatBits.
+    bits: number | null
+    // `user-id` of the sender — the stable key CLEARCHAT matches on. Always
+    // stored on a PRIVMSG.
+    userId: string | null
+    // Moderation (Toggle C). ALWAYS recorded from CLEARMSG / CLEARCHAT
+    // regardless of settings, so flipping the toggle on retroactively strikes
+    // already-deleted messages still in the buffer. Presentation is gated by
+    // isMessageStricken(settings.chatModeration, deleted).
+    deleted: boolean
+    deletedReason: string | null
+    // USERNOTICE-only (kind === 'notice'): Twitch's rendered system line and
+    // the msg-id (sub/raid/…). Null for normal messages.
+    systemText: string | null
+    noticeMsgId: string | null
   }
 
   let channelInput = $state('')
@@ -41,6 +62,10 @@
   let channelJoined: string | null = $state(null)
   let status: ConnectionStatus = $state('idle')
   let messages: ChatMessage[] = $state([])
+  // Current chat modes for the joined channel (Toggle B). Merged from
+  // ROOMSTATE events via mergeRoomState — never replaced, so a single-tag
+  // change message does not reset the other modes. Reset on disconnect.
+  let roomState = $state<RoomState>({})
   let emoteStatus = $state<'idle' | 'loading' | 'ready' | 'error'>('idle')
 
   let playerStatus = $state<PlayerStatus>('idle')
@@ -705,41 +730,145 @@
         ws.send('PONG ' + line.slice(5))
         continue
       }
-      const parsed: ParsedMessage | null = parseIrcLine(line)
-      if (!parsed) continue
-      if (!channelJoined || parsed.channel !== channelJoined) continue
+      const ev: IrcEvent | null = parseIrcEvent(line)
+      if (!ev) continue
+      if (!channelJoined || ev.channel !== channelJoined) continue
 
-      const parts = renderMessage({
-        message: parsed.message,
-        thirdParty: thirdPartyMap,
-        twitchRanges: parsed.twitchEmotes,
-      })
-
-      // Derive emoteOnly once from the rendered parts: at least one emote
-      // and every non-emote part whitespace-only. The old expression
-      // (`/^\s*$/.test(msg.raw.replace(/\s/g, ''))`) could only ever be true
-      // for a whitespace-only message and the .emote-only CSS rule did not
-      // exist, so the class was inert.
-      const emoteOnly =
-        parts.some((p) => p.type === 'emote') &&
-        parts.every((p) => p.type === 'emote' || p.text.trim() === '')
-
-      messages.push({
-        id: parsed.id || crypto.randomUUID(),
-        username: parsed.displayName,
-        color: parsed.color,
-        raw: parsed.message,
-        parts,
-        badges: parsed.badges,
-        isAction: parsed.isAction,
-        emoteOnly,
-        timestamp: parsed.timestamp,
-      })
-
-      fireMentionNotification(parsed.message, parsed.displayName, parsed.color)
-
-      if (stickyBottom && messages.length > 500) messages.splice(0, messages.length - 500)
+      switch (ev.type) {
+        case 'PRIVMSG':
+          handlePrivmsg(ev)
+          break
+        case 'USERNOTICE':
+          handleUsernotice(ev)
+          break
+        case 'ROOMSTATE':
+          // PARSING IS UNGATED: state is always merged; only the indicator's
+          // visibility keys off settings.chatRoomstate in the template.
+          roomState = mergeRoomState(roomState, ev)
+          break
+        case 'CLEARMSG':
+          // Record the deletion always; presentation is gated.
+          markMessageDeleted(ev.targetMsgId, 'Message deleted')
+          break
+        case 'CLEARCHAT':
+          handleClearchat(ev)
+          break
+      }
     }
+  }
+
+  function handlePrivmsg(ev: Extract<IrcEvent, { type: 'PRIVMSG' }>): void {
+    const parts = renderMessage({
+      message: ev.message,
+      thirdParty: thirdPartyMap,
+      twitchRanges: ev.twitchEmotes,
+    })
+
+    // Derive emoteOnly once from the rendered parts: at least one emote
+    // and every non-emote part whitespace-only. The old expression
+    // (`/^\s*$/.test(msg.raw.replace(/\s/g, ''))`) could only ever be true
+    // for a whitespace-only message and the .emote-only CSS rule did not
+    // exist, so the class was inert.
+    const emoteOnly =
+      parts.some((p) => p.type === 'emote') &&
+      parts.every((p) => p.type === 'emote' || p.text.trim() === '')
+
+    messages.push({
+      kind: 'message',
+      id: ev.id || crypto.randomUUID(),
+      username: ev.displayName,
+      color: ev.color,
+      raw: ev.message,
+      parts,
+      badges: ev.badges,
+      isAction: ev.isAction,
+      emoteOnly,
+      timestamp: ev.timestamp,
+      bits: ev.bits,
+      userId: ev.userId,
+      deleted: false,
+      deletedReason: null,
+      systemText: null,
+      noticeMsgId: null,
+    })
+
+    fireMentionNotification(ev.message, ev.displayName, ev.color)
+
+    if (stickyBottom && messages.length > 500) messages.splice(0, messages.length - 500)
+  }
+
+  function handleUsernotice(ev: Extract<IrcEvent, { type: 'USERNOTICE' }>): void {
+    // PREFER Twitch's own system-msg; fall back to msg-param composition only
+    // when it is absent (composeUsernoticeFallback never returns empty).
+    const systemText = ev.systemMsg || composeUsernoticeFallback(ev.msgId, ev.tags)
+
+    // A USERNOTICE may carry a user message in the trailing parameter (resub
+    // comments, announcements). Render it through the same emote pipeline so
+    // emotes in the message body work.
+    let parts: RenderedMessagePart[] = []
+    if (ev.message) {
+      const ranges = parseTwitchEmoteTag(ev.emotes, ev.message)
+      parts = renderMessage({
+        message: ev.message,
+        thirdParty: thirdPartyMap,
+        twitchRanges: ranges,
+      })
+    }
+
+    messages.push({
+      kind: 'notice',
+      id: crypto.randomUUID(),
+      username: ev.login ?? '',
+      color: '#ffffff',
+      raw: ev.message ?? '',
+      parts,
+      badges: [],
+      isAction: false,
+      emoteOnly: false,
+      timestamp: Date.now(),
+      bits: null,
+      userId: null,
+      deleted: false,
+      deletedReason: null,
+      systemText,
+      noticeMsgId: ev.msgId,
+    })
+
+    if (stickyBottom && messages.length > 500) messages.splice(0, messages.length - 500)
+  }
+
+  function handleClearchat(ev: Extract<IrcEvent, { type: 'CLEARCHAT' }>): void {
+    // No target user => whole room cleared. Otherwise match by user-id (the
+    // stable key), never by display name.
+    if (ev.targetUserId === null) {
+      for (const m of messages) {
+        if (m.kind === 'message') markEntryDeleted(m, 'Chat cleared')
+      }
+      return
+    }
+    const reason =
+      ev.banDuration !== null ? `Timed out (${ev.banDuration}s)` : 'Banned'
+    for (const m of messages) {
+      if (m.kind === 'message' && m.userId === ev.targetUserId) {
+        markEntryDeleted(m, reason)
+      }
+    }
+  }
+
+  // Strike a single message by id (CLEARMSG). A target-msg-id for a message no
+  // longer in the buffer (scrolled out / dropped past the 500 cap) is a no-op —
+  // never an error.
+  function markMessageDeleted(targetMsgId: string, reason: string): void {
+    if (!targetMsgId) return
+    for (const m of messages) {
+      if (m.kind === 'message' && m.id === targetMsgId) markEntryDeleted(m, reason)
+    }
+  }
+
+  function markEntryDeleted(m: ChatMessage, reason: string): void {
+    if (m.deleted) return
+    m.deleted = true
+    m.deletedReason = reason
   }
 
   function disconnect(): void {
@@ -761,6 +890,7 @@
     channelJoined = null
     status = 'idle'
     messages = []
+    roomState = {}
     emoteStatus = 'idle'
     thirdPartyMap = new Map()
   }
@@ -790,6 +920,44 @@
     const h = d.getHours().toString().padStart(2, '0')
     const m = d.getMinutes().toString().padStart(2, '0')
     return h + ':' + m
+  }
+
+  function formatBits(n: number): string {
+    if (n < 1000) return String(n)
+    if (n < 1_000_000) {
+      const k = n / 1000
+      return (k < 100 ? k.toFixed(1).replace(/\.0$/, '') : Math.round(k).toString()) + 'K'
+    }
+    return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
+  }
+
+  // followers-only is in minutes (-1 off, 0 any follower, N minutes); slow is
+  // in seconds. Compact labels for the chat-mode indicator (Toggle B).
+  function formatFollowersMin(n: number): string {
+    if (n <= 0) return ''
+    if (n < 60) return n + 'm'
+    const h = Math.floor(n / 60)
+    const m = n % 60
+    return m ? `${h}h ${m}m` : `${h}h`
+  }
+
+  function formatSlow(s: number): string {
+    if (s <= 0) return ''
+    if (s >= 60) {
+      const m = Math.round(s / 60)
+      return m + 'm'
+    }
+    return s + 's'
+  }
+
+  function roomStateActive(rs: RoomState): boolean {
+    return (
+      rs.emoteOnly === true ||
+      rs.subsOnly === true ||
+      rs.r9k === true ||
+      (rs.followersOnly !== undefined && rs.followersOnly >= 0) ||
+      (rs.slow !== undefined && rs.slow > 0)
+    )
   }
 
   let stickyBottom = $state(true)
@@ -1363,6 +1531,25 @@
       tabindex="0"
     ></div>
     <main class="chat" class:chat--hidden={!settings.chatVisible} style:--chat-size={`${chatSize}px`}>
+      {#if settings.chatRoomstate && channelJoined && roomStateActive(roomState)}
+        <div class="chat-modes" role="status" aria-label="Chat modes">
+          {#if roomState.subsOnly}
+            <span class="mode-pill">Subscribers-only</span>
+          {/if}
+          {#if roomState.followersOnly !== undefined && roomState.followersOnly >= 0}
+            <span class="mode-pill">Followers-only{roomState.followersOnly > 0 ? ` (${formatFollowersMin(roomState.followersOnly)})` : ''}</span>
+          {/if}
+          {#if roomState.slow !== undefined && roomState.slow > 0}
+            <span class="mode-pill">Slow ({formatSlow(roomState.slow)})</span>
+          {/if}
+          {#if roomState.emoteOnly}
+            <span class="mode-pill">Emote-only</span>
+          {/if}
+          {#if roomState.r9k}
+            <span class="mode-pill">R9K</span>
+          {/if}
+        </div>
+      {/if}
       <div class="chat-scroll" bind:this={chatEl} onscroll={onChatScroll}>
         {#if messages.length === 0}
           <p class="placeholder">
@@ -1370,7 +1557,33 @@
           </p>
         {:else}
           {#each messages as msg (msg.id)}
-          <div class="message" class:action={msg.isAction} class:emote-only={msg.emoteOnly && !msg.isAction}>
+          {#if msg.kind === 'notice'}
+            {#if settings.chatSubnotices}
+              <div class="message message--notice">
+                {#if settings.chatTimestamps}
+                  <span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span>
+                {/if}
+                <span class="notice-system">{msg.systemText}</span>
+                {#if msg.parts.length > 0}
+                  <span class="notice-msg">{#each msg.parts as part}{#if part.type === 'text'}{part.text}{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img
+                    class="emote"
+                    class:emote--twitch={part.provider === 'twitch'}
+                    src={part.url}
+                    alt={part.name}
+                    title={part.name}
+                    loading="lazy"
+                    onerror={() => markEmoteErrored(part.url)}
+                  />{/if}{/each}</span>
+                {/if}
+              </div>
+            {/if}
+          {:else}
+          <div
+            class="message{isMessageStricken(settings.chatModeration, msg.deleted) ? ' ' + DELETED_MESSAGE_CLASS : ''}"
+            class:action={msg.isAction}
+            class:emote-only={msg.emoteOnly && !msg.isAction}
+            title={isMessageStricken(settings.chatModeration, msg.deleted) ? (msg.deletedReason ?? '') : ''}
+          >
             {#if settings.chatTimestamps}
               <span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span>
             {/if}
@@ -1397,7 +1610,17 @@
               loading="lazy"
               onerror={() => markEmoteErrored(part.url)}
             />{/if}{/each}</span>
+            {#if settings.chatBits && msg.bits}
+              <span class="bits-badge" use:tooltip={`${msg.bits} bits`}>
+                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                  <path d="M8 1l5 5-5 9-5-9z" fill="currentColor"/>
+                  <path d="M3 6h10M8 1l3 5-3 9-3-9z" fill="none" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round"/>
+                </svg>
+                {formatBits(msg.bits)}
+              </span>
+            {/if}
           </div>
+          {/if}
           {/each}
         {/if}
       </div>
@@ -2501,6 +2724,90 @@
      identical to plain chat text). */
   .emote-fallback {
     color: var(--text-primary);
+  }
+
+  /* ---- Tier 2 chat features (Toggle B/C/D + USERNOTICE) ----
+     All use existing theme tokens only — no hardcoded colours, so they adapt
+     to all 29 themes. These rules are inert when the toggles are off (the
+     elements are not rendered at all). */
+
+  /* Chat-mode indicator (Toggle B). Compact bar pinned above the chat scroll. */
+  .chat-modes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-panel);
+  }
+
+  .mode-pill {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--accent);
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Deleted / timed-out message presentation (Toggle C). This single rule is
+     the source of truth for how a stricken message looks — the class is added
+     via isMessageStricken() + DELETED_MESSAGE_CLASS. Tradeoff: strikethrough
+     keeps the moderator-removed text VISIBLE. A future collapsed-placeholder
+     presentation can change only this rule + the predicate. */
+  .message--deleted .text,
+  .message--deleted .username {
+    text-decoration: line-through;
+    opacity: 0.6;
+  }
+
+  /* Bits / cheer indicator (Toggle D). Amount only — animated cheermote
+     images are out of scope. */
+  .bits-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 6px;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: var(--bg-hover);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    vertical-align: 1px;
+  }
+
+  .bits-badge svg {
+    flex: 0 0 auto;
+  }
+
+  /* USERNOTICE line (Toggle A) — subs, raids, announcements, gifts. Visually
+     distinct from normal chat: a tinted, italic, bordered line. */
+  .message--notice {
+    margin: 3px 0;
+    padding: 3px 6px;
+    border-left: 3px solid var(--accent);
+    background: var(--bg-hover);
+    border-radius: 3px;
+    font-size: 12px;
+  }
+
+  .notice-system {
+    display: block;
+    color: var(--accent);
+    font-weight: 600;
+    font-style: italic;
+  }
+
+  .notice-msg {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-secondary);
   }
 
   .chat::-webkit-scrollbar {
