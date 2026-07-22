@@ -99,39 +99,52 @@ interface RawStream {
   game?: { name: string; displayName: string } | null
 }
 
-interface GqlResponse {
-  data?: { users?: (RawUser | null)[] | null } | null
+// A 200 GQL response envelope. `data` is an untyped object keyed by the
+// operation's top-level selection set; callers narrow it via the generic on
+// gqlRequest. A top-level `errors` array means the query failed to execute.
+interface GqlEnvelope {
+  data?: Record<string, unknown> | null
   errors?: unknown
 }
 
 /**
  * POST one query body to gql_fetch. Throws on ANY transport-level problem
- * (network error, non-2xx, malformed JSON, top-level GQL `errors`). The caller
- * (favorites) treats a throw as "GQL unavailable → DecAPI fallback".
+ * (network error, non-2xx, malformed JSON, top-level GQL `errors`, or an
+ * aborted signal). The favorites caller treats a throw as "GQL unavailable →
+ * DecAPI fallback"; the discovery callers (search/browse) treat it as a
+ * visible, non-blocking error state.
+ *
+ * The Rust `gql_fetch` command has no cancellation channel, so aborting the
+ * signal cannot truly cancel the in-flight HTTP request — but checking the
+ * signal both before invoke AND after its resolution lets the caller discard
+ * a result that arrived after a newer keystroke superseded it (the JS promise
+ * rejects with 'aborted' rather than resolving with stale data).
  */
-async function gqlRequest(
+async function gqlRequest<T = Record<string, unknown>>(
   query: string,
-  variables: { logins: string[] },
+  variables: Record<string, unknown>,
   signal?: AbortSignal,
-): Promise<GqlResponse['data']> {
+): Promise<T> {
   if (signal?.aborted) throw new Error('aborted')
   const body = JSON.stringify({ query, variables })
   // Throws on non-2xx / network / timeout / oversized — same string-typed
   // error convention as decapi_fetch.
   const raw = await invoke<string>('gql_fetch', { body, timeoutMs: GQL_TIMEOUT_MS })
-  let parsed: GqlResponse
+  // A request that resolved after its AbortController fired is stale.
+  if (signal?.aborted) throw new Error('aborted')
+  let parsed: GqlEnvelope
   try {
-    parsed = JSON.parse(raw) as GqlResponse
+    parsed = JSON.parse(raw) as GqlEnvelope
   } catch {
     throw new Error('malformed gql response')
   }
   // A 200 with a top-level `errors` array means the query itself failed to
   // execute (schema drift, persistent-query issue, rate limit, …) — treat it
-  // as a transport failure so the caller falls back rather than showing stale.
-  if (!parsed || parsed.errors || typeof parsed.data !== 'object') {
+  // as a transport failure so callers surface an error rather than empty data.
+  if (!parsed || parsed.errors || typeof parsed.data !== 'object' || parsed.data === null) {
     throw new Error('gql errors')
   }
-  return parsed.data
+  return parsed.data as T
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -184,7 +197,11 @@ export async function resolveUserIds(
   const out = new Map<string, string>()
   for (const batch of chunk(logins, GQL_BATCH_SIZE)) {
     if (signal?.aborted) return out
-    const data = await gqlRequest(USER_ID_QUERY, { logins: batch }, signal)
+    const data = await gqlRequest<{ users?: (RawUser | null)[] | null }>(
+      USER_ID_QUERY,
+      { logins: batch },
+      signal,
+    )
     for (const user of data?.users ?? []) {
       if (user && typeof user.id === 'string' && user.login) {
         out.set(user.login, user.id)
@@ -207,7 +224,11 @@ export async function fetchChannelStatuses(
   const out: ChannelStatus[] = []
   for (const batch of chunk(logins, GQL_BATCH_SIZE)) {
     if (signal?.aborted) return out
-    const data = await gqlRequest(USER_STATUS_QUERY, { logins: batch }, signal)
+    const data = await gqlRequest<{ users?: (RawUser | null)[] | null }>(
+      USER_STATUS_QUERY,
+      { logins: batch },
+      signal,
+    )
     const users = data?.users ?? []
     for (let i = 0; i < batch.length; i++) {
       const status = toChannelStatus(users[i] ?? null)
@@ -218,4 +239,358 @@ export async function fetchChannelStatuses(
     }
   }
   return out
+}
+
+/*
+ * ============================================================================
+ * Channel discovery — search + browse.
+ *
+ * GQL-ONLY and anonymous throughout (same public Client-ID, no auth). There is
+ * NO DecAPI fallback for discovery, so on transport failure these throw and the
+ * caller must surface a visible, non-blocking error state. An empty result set
+ * is ALWAYS a success (matches the offline-vs-failure discipline above): never
+ * report "no results" when the request actually errored.
+ *
+ * Operation names, argument shapes and field/argument names below were verified
+ * field-by-field against the live schema dump (SuperSonicHub1/twitch-graphql-api
+ * schema.graphql):
+ *   - searchFor(userQuery, platform, target: { index: CHANNEL }) → SearchFor
+ *       .channels: SearchForResultUsers → .items: [User!]   (USER fields incl.
+ *       profileImageURL(width: Int!) + stream: Stream)
+ *   - streams(first, after) → StreamConnection.edges: [StreamEdge]
+ *       { cursor: Cursor, node: Stream }
+ *   - games(first, after) → GameConnection.edges: [GameEdge!]
+ *       { cursor: Cursor, node: Game }
+ *   - game(name:) → Game.streams(first, after) → StreamConnection
+ *   - Stream: id, title, type, viewersCount: Int, createdAt: Time,
+ *       previewImageURL(width: Int, height: Int), broadcaster: User, game: Game
+ *   - Game: id, name, displayName, boxArtURL(width: Int, height: Int)
+ *   - PageInfo: hasNextPage: Boolean!, hasPreviousPage: Boolean!
+ * Cursor is a per-edge String; pass the LAST edge's cursor as `after` for the
+ * next page. All optional filter inputs (StreamOptions / GameOptions) are
+ * omitted — we rely on the default VIEWER_COUNT sort.
+ * ============================================================================
+ */
+
+// Thumbnails / avatars are requested at explicit dimensions rather than the
+// templated default, so the CDN serves a real (smaller) image. 320×180 is 16:9;
+// box art is 3:4 (144×192); avatars 50px.
+const THUMB_W = 320
+const THUMB_H = 180
+const BOX_W = 144
+const BOX_H = 192
+const AVATAR_PX = 50
+const DISCOVERY_FIRST = 30
+
+export interface SearchChannelResult {
+  id: string
+  login: string
+  displayName: string
+  avatarUrl: string
+  live: boolean
+  title: string
+  game: string
+  viewersCount: number
+}
+
+export interface BrowseStream {
+  id: string
+  login: string
+  displayName: string
+  avatarUrl: string
+  title: string
+  game: string
+  gameName: string
+  viewersCount: number
+  thumbnailUrl: string
+}
+
+export interface BrowseCategory {
+  id: string
+  name: string
+  displayName: string
+  boxArtUrl: string
+}
+
+/** One page of streams plus the cursor for the next page (null = no more). */
+export interface StreamPage {
+  streams: BrowseStream[]
+  cursor: string | null
+}
+
+/** One page of categories plus the cursor for the next page (null = no more). */
+export interface CategoryPage {
+  categories: BrowseCategory[]
+  cursor: string | null
+}
+
+interface RawBrowseStream {
+  id: string
+  title?: string | null
+  viewersCount?: number | null
+  previewImageURL?: string | null
+  broadcaster?: { login?: string; displayName?: string; profileImageURL?: string | null } | null
+  game?: { name?: string; displayName?: string } | null
+}
+interface RawBrowseStreamEdge {
+  cursor?: string | null
+  node?: RawBrowseStream | null
+}
+interface RawBrowseStreamConnection {
+  edges?: (RawBrowseStreamEdge | null)[] | null
+}
+interface RawBrowseGame {
+  id: string
+  name?: string
+  displayName?: string
+  boxArtURL?: string | null
+}
+interface RawBrowseGameEdge {
+  cursor?: string | null
+  node?: RawBrowseGame | null
+}
+interface RawBrowseGameConnection {
+  edges?: (RawBrowseGameEdge | null)[] | null
+}
+
+const SEARCH_QUERY = `
+  query($query: String!) {
+    searchFor(userQuery: $query, platform: "web", target: { index: CHANNEL }) {
+      channels {
+        items {
+          id
+          login
+          displayName
+          profileImageURL(width: ${AVATAR_PX})
+          stream {
+            id
+            title
+            viewersCount
+            game {
+              id
+              name
+              displayName
+            }
+          }
+        }
+      }
+    }
+  }
+`
+
+const TOP_STREAMS_QUERY = `
+  query($first: Int!, $after: Cursor) {
+    streams(first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          id
+          title
+          viewersCount
+          previewImageURL(width: ${THUMB_W}, height: ${THUMB_H})
+          broadcaster {
+            id
+            login
+            displayName
+            profileImageURL(width: ${AVATAR_PX})
+          }
+          game {
+            id
+            name
+            displayName
+          }
+        }
+      }
+    }
+  }
+`
+
+const TOP_GAMES_QUERY = `
+  query($first: Int!, $after: Cursor) {
+    games(first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          id
+          name
+          displayName
+          boxArtURL(width: ${BOX_W}, height: ${BOX_H})
+        }
+      }
+    }
+  }
+`
+
+const GAME_STREAMS_QUERY = `
+  query($name: String!, $first: Int!, $after: Cursor) {
+    game(name: $name) {
+      streams(first: $first, after: $after) {
+        edges {
+          cursor
+          node {
+            id
+            title
+            viewersCount
+            previewImageURL(width: ${THUMB_W}, height: ${THUMB_H})
+            broadcaster {
+              id
+              login
+              displayName
+              profileImageURL(width: ${AVATAR_PX})
+            }
+            game {
+              id
+              name
+              displayName
+            }
+          }
+        }
+      }
+    }
+  }
+`
+
+interface RawSearchUser {
+  id: string
+  login: string
+  displayName: string
+  profileImageURL?: string | null
+  stream?: { title?: string | null; viewersCount?: number | null; game?: { name?: string; displayName?: string } | null } | null
+}
+interface RawSearchFor {
+  searchFor?: { channels?: { items?: (RawSearchUser | null)[] | null } | null } | null
+}
+
+function toSearchResult(user: RawSearchUser | null): SearchChannelResult | null {
+  if (!user || !user.login) return null
+  const stream = user.stream ?? null
+  return {
+    id: user.id ?? '',
+    login: user.login,
+    displayName: user.displayName ?? user.login,
+    avatarUrl: user.profileImageURL ?? '',
+    live: !!stream,
+    title: stream?.title ?? '',
+    game: stream?.game?.displayName ?? stream?.game?.name ?? '',
+    viewersCount: typeof stream?.viewersCount === 'number' ? stream.viewersCount : 0,
+  }
+}
+
+function toBrowseStream(node: RawBrowseStream | null | undefined): BrowseStream | null {
+  if (!node || !node.id || !node.broadcaster?.login) return null
+  return {
+    id: node.id,
+    login: node.broadcaster.login,
+    displayName: node.broadcaster.displayName ?? node.broadcaster.login,
+    avatarUrl: node.broadcaster.profileImageURL ?? '',
+    title: node.title ?? '',
+    game: node.game?.displayName ?? node.game?.name ?? '',
+    gameName: node.game?.name ?? '',
+    viewersCount: typeof node.viewersCount === 'number' ? node.viewersCount : 0,
+    thumbnailUrl: node.previewImageURL ?? '',
+  }
+}
+
+function toCategory(node: RawBrowseGame | null | undefined): BrowseCategory | null {
+  if (!node || !node.name) return null
+  return {
+    id: node.id ?? '',
+    name: node.name,
+    displayName: node.displayName ?? node.name,
+    boxArtUrl: node.boxArtURL ?? '',
+  }
+}
+
+/**
+ * Search live + offline channels by query. Returns matching channels with
+ * display name, login, avatar, and (when live) title/category/viewers. Throws
+ * on transport failure; an empty query short-circuits to an empty list without
+ * a request (the caller is expected to skip the call for empty input anyway).
+ */
+export async function searchChannels(query: string, signal?: AbortSignal): Promise<SearchChannelResult[]> {
+  const data = await gqlRequest<RawSearchFor>(SEARCH_QUERY, { query }, signal)
+  const items = data?.searchFor?.channels?.items ?? []
+  const out: SearchChannelResult[] = []
+  for (const item of items) {
+    const result = toSearchResult(item ?? null)
+    if (result) out.push(result)
+  }
+  return out
+}
+
+function parseStreamPage(conn: RawBrowseStreamConnection | null | undefined): StreamPage {
+  const edges = conn?.edges ?? []
+  const streams: BrowseStream[] = []
+  let cursor: string | null = null
+  for (const edge of edges) {
+    const node = edge?.node ?? null
+    const stream = toBrowseStream(node)
+    if (stream) {
+      streams.push(stream)
+      if (edge?.cursor) cursor = edge.cursor
+    }
+  }
+  return { streams, cursor }
+}
+
+/**
+ * Fetch the top live streams (viewer-descending) — the Browse landing list.
+ * Pass `after` (a previous page's returned cursor) to paginate.
+ */
+export async function fetchTopStreams(
+  first: number = DISCOVERY_FIRST,
+  after?: string | null,
+  signal?: AbortSignal,
+): Promise<StreamPage> {
+  const data = await gqlRequest<{ streams?: RawBrowseStreamConnection | null }>(
+    TOP_STREAMS_QUERY,
+    { first, after: after ?? null },
+    signal,
+  )
+  return parseStreamPage(data?.streams ?? null)
+}
+
+/**
+ * Fetch the top categories/games (viewer-descending) for the Browse grid.
+ * Pass `after` to paginate.
+ */
+export async function fetchTopCategories(
+  first: number = DISCOVERY_FIRST,
+  after?: string | null,
+  signal?: AbortSignal,
+): Promise<CategoryPage> {
+  const data = await gqlRequest<{ games?: RawBrowseGameConnection | null }>(
+    TOP_GAMES_QUERY,
+    { first, after: after ?? null },
+    signal,
+  )
+  const edges = data?.games?.edges ?? []
+  const categories: BrowseCategory[] = []
+  let cursor: string | null = null
+  for (const edge of edges) {
+    const cat = toCategory(edge?.node ?? null)
+    if (cat) {
+      categories.push(cat)
+      if (edge?.cursor) cursor = edge.cursor
+    }
+  }
+  return { categories, cursor }
+}
+
+/**
+ * Fetch the live streams for a single category (game `name`). Used when a user
+ * drills into a category from the Browse grid. Pass `after` to paginate.
+ */
+export async function fetchGameStreams(
+  gameName: string,
+  first: number = DISCOVERY_FIRST,
+  after?: string | null,
+  signal?: AbortSignal,
+): Promise<StreamPage> {
+  const data = await gqlRequest<{ game?: { streams?: RawBrowseStreamConnection | null } | null }>(
+    GAME_STREAMS_QUERY,
+    { name: gameName, first, after: after ?? null },
+    signal,
+  )
+  return parseStreamPage(data?.game?.streams ?? null)
 }

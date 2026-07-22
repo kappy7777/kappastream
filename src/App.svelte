@@ -10,6 +10,8 @@
   import PlayerControls from './lib/PlayerControls.svelte'
   import Settings from './lib/Settings.svelte'
   import NotifyMenu from './lib/NotifyMenu.svelte'
+  import SearchBox from './lib/SearchBox.svelte'
+  import BrowseView from './lib/BrowseView.svelte'
   import { settings } from './lib/settings.svelte.ts'
   import { buildHlsConfig } from './lib/hls-config'
   import { pipController } from './lib/pip-controller.svelte.ts'
@@ -35,6 +37,7 @@
   }
 
   let channelInput = $state('')
+  let browseOpen = $state(false)
   let channelJoined: string | null = $state(null)
   let status: ConnectionStatus = $state('idle')
   let messages: ChatMessage[] = $state([])
@@ -767,6 +770,12 @@
     void connect()
   }
 
+  // Connect from Browse — connects via the same path, then closes the overlay.
+  function browseSelectChannel(name: string): void {
+    selectChannel(name)
+    browseOpen = false
+  }
+
   function formatViewers(n: number): string {
     if (n < 1000) return n.toString()
     if (n < 1_000_000) {
@@ -1136,16 +1145,17 @@
       >
         {sidebarMode === 'full' ? '◀' : sidebarMode === 'icons' ? '⏵' : '▶'}
       </button>
+      <button
+        type="button"
+        class="browse-btn"
+        onclick={() => (browseOpen = true)}
+        aria-label="Browse channels and categories"
+      >
+        Browse
+      </button>
     </div>
     <div class="bar-center" data-tauri-drag-region>
-      <input
-        class="channel-input"
-        type="text"
-        placeholder="Search or enter channel…"
-        bind:value={channelInput}
-        onkeydown={(e) => e.key === 'Enter' && void connect()}
-        onfocus={(e) => (e.currentTarget as HTMLInputElement).select()}
-      />
+      <SearchBox onselect={selectChannel} />
     </div>
     <div class="bar-right" data-tauri-drag-region>
       <NotifyMenu />
@@ -1487,6 +1497,10 @@
     </div>
   {/if}
 
+  {#if browseOpen}
+    <BrowseView onselect={browseSelectChannel} onclose={() => (browseOpen = false)} />
+  {/if}
+
   <!-- Borderless resize handles. The main window is decorations:false, so on
        Wayland it gets no server-side resize edges; these drive tao's
        interactive resize (mirrors PipWindow.svelte, with all 8 directions
@@ -1672,6 +1686,29 @@
     color: var(--text-primary);
   }
 
+  /* Plain-text "Browse" button — sits right of the sidebar toggle. Matches the
+     surrounding title-bar buttons (transparent, themed, hover lifts) but shows
+     a word instead of an icon. */
+  .browse-btn {
+    flex: 0 0 auto;
+    height: 30px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    line-height: 1;
+    transition: background 150ms, color 150ms;
+  }
+
+  .browse-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
   .layout-toggle {
     flex: 0 0 auto;
     width: 30px;
@@ -1841,34 +1878,6 @@
     object-fit: contain;
     padding: 4px;
     box-sizing: border-box;
-  }
-
-  .channel-input {
-    width: 100%;
-    min-width: 0;
-    max-width: 336px;
-    height: 30px;
-    padding: 0 10px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg-input);
-    color: var(--text-primary);
-    font-size: 13px;
-    outline: none;
-    transition: border-color 150ms, box-shadow 150ms;
-  }
-
-  .channel-input::placeholder {
-    color: var(--text-dim);
-  }
-
-  .channel-input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent);
-  }
-
-  .channel-input:disabled {
-    opacity: 0.5;
   }
 
   .banner {
