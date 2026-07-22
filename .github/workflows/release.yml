@@ -165,7 +165,7 @@ jobs:
           find staging -maxdepth 1 -type f -printf '%f\n' | sort
 
       - name: Upload native artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-packages
           path: staging/
@@ -286,7 +286,7 @@ jobs:
           find staging -maxdepth 1 -type f -printf '%f\n' | sort
 
       - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: appimage
           path: staging/
@@ -320,7 +320,7 @@ jobs:
       # clean basenames (no per-artifact subdirs), so the four release files
       # end up side by side.
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-staging
           merge-multiple: true
