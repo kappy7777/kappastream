@@ -23,7 +23,7 @@ log = "0.4"
 tokio = { version = "1", features = ["process", "time"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-rfd = "0.15"
+rfd = "0.17"
 url = "2"
 # DevTools are enabled by default in debug builds (`tauri dev`). The `devtools`
 # Cargo feature is intentionally NOT enabled so production/release builds do
