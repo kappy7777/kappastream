@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-22
+
+### Added
+
+- **Channel discovery.** A search box and a browse overlay find live channels
+  and categories via Twitch's anonymous GQL endpoint (no login). Selecting a
+  result joins the channel.
+- **Opt-in chat-completeness features.** Four new toggles, all defaulting off
+  so the baseline chat is byte-identical with every toggle off, grouped under a
+  new **Chat** dropdown in Settings:
+  - **Sub and raid notices** (`USERNOTICE`) — subs, resubs, gifts, raids,
+    announcements. Prefers Twitch's own `system-msg`; unknown `msg-id`s render
+    generically rather than being dropped.
+  - **Chat mode indicator** (`ROOMSTATE`) — subscribers-only, followers-only,
+    slow mode, emote-only, r9k. Partial change messages merge into the
+    accumulated state instead of resetting it.
+  - **Show moderation actions** (`CLEARMSG` + `CLEARCHAT`) — single-message
+    deletions and timeouts/bans, shown struck through (matched by message id /
+    user id, never display name).
+  - **Show bits** — cheer amounts on messages (amount only; animated
+    cheermotes are out of scope).
+- Parsing runs continuously regardless of settings; only presentation is
+  gated, so toggling a feature applies live with no reconnect and
+  retroactively (e.g. enabling moderation immediately strikes messages deleted
+  earlier in the session).
+
 ## [0.2.2] - 2026-07-21
 
 ### Changed
@@ -364,7 +390,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.3
 [0.2.2]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.2
 [0.2.1]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.1
 [0.2.0]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.0
