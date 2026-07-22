@@ -257,18 +257,20 @@ export async function fetchChannelStatuses(
  *   - searchFor(userQuery, platform, target: { index: CHANNEL }) → SearchFor
  *       .channels: SearchForResultUsers → .items: [User!]   (USER fields incl.
  *       profileImageURL(width: Int!) + stream: Stream)
- *   - streams(first, after) → StreamConnection.edges: [StreamEdge]
- *       { cursor: Cursor, node: Stream }
- *   - games(first, after) → GameConnection.edges: [GameEdge!]
- *       { cursor: Cursor, node: Game }
- *   - game(name:) → Game.streams(first, after) → StreamConnection
+ *   - streams(first) → StreamConnection.edges: [StreamEdge] { node: Stream }
+ *       (root streams rejects first > 30; see TOP_STREAMS_FIRST)
+ *   - games(first) → GameConnection.edges: [GameEdge!] { node: Game }
+ *   - game(name:) → Game.streams(first) → StreamConnection
  *   - Stream: id, title, type, viewersCount: Int, createdAt: Time,
  *       previewImageURL(width: Int, height: Int), broadcaster: User, game: Game
  *   - Game: id, name, displayName, boxArtURL(width: Int, height: Int)
- *   - PageInfo: hasNextPage: Boolean!, hasPreviousPage: Boolean!
- * Cursor is a per-edge String; pass the LAST edge's cursor as `after` for the
- * next page. All optional filter inputs (StreamOptions / GameOptions) are
- * omitted — we rely on the default VIEWER_COUNT sort.
+ * NOTE: the schema supports `after: Cursor` pagination, but passing a cursor
+ * to gql.twitch.tv as an anonymous client fails with "IntegrityCheckFailed" —
+ * a server-side anti-bot control. We therefore request each list's full page
+ * in ONE shot (over-fetching to the query's hard cap) and do a client-side
+ * reveal (see browse-reveal.ts); no `after` is ever sent. All optional filter
+ * inputs (StreamOptions / GameOptions) are omitted — we rely on the default
+ * VIEWER_COUNT sort.
  * ============================================================================
  */
 
@@ -280,7 +282,17 @@ const THUMB_H = 180
 const BOX_W = 144
 const BOX_H = 192
 const AVATAR_PX = 50
-const DISCOVERY_FIRST = 30
+
+// Page sizes per discovery query. Anonymous Twitch GQL rejects `after` cursors
+// ("IntegrityCheckFailed" — an anti-bot control), so server-side pagination is
+// not viable: each list is fetched in ONE request up to its hard cap and
+// BrowseView reveals more client-side (see browse-reveal.ts). The root
+// `streams` query rejects first > 30 ("argument 'first' value must be between
+// 1 and 30"); `games(first:)` and `game(name:).streams(first:)` accept 100.
+// Do NOT raise TOP_STREAMS_FIRST past 30.
+const TOP_STREAMS_FIRST = 30
+const TOP_GAMES_FIRST = 100
+const GAME_STREAMS_FIRST = 100
 
 export interface SearchChannelResult {
   id: string
@@ -312,16 +324,14 @@ export interface BrowseCategory {
   boxArtUrl: string
 }
 
-/** One page of streams plus the cursor for the next page (null = no more). */
+/** One page of streams (cursor pagination removed — see TOP_STREAMS_FIRST). */
 export interface StreamPage {
   streams: BrowseStream[]
-  cursor: string | null
 }
 
-/** One page of categories plus the cursor for the next page (null = no more). */
+/** One page of categories (cursor pagination removed — see TOP_GAMES_FIRST). */
 export interface CategoryPage {
   categories: BrowseCategory[]
-  cursor: string | null
 }
 
 interface RawBrowseStream {
@@ -333,7 +343,6 @@ interface RawBrowseStream {
   game?: { name?: string; displayName?: string } | null
 }
 interface RawBrowseStreamEdge {
-  cursor?: string | null
   node?: RawBrowseStream | null
 }
 interface RawBrowseStreamConnection {
@@ -346,7 +355,6 @@ interface RawBrowseGame {
   boxArtURL?: string | null
 }
 interface RawBrowseGameEdge {
-  cursor?: string | null
   node?: RawBrowseGame | null
 }
 interface RawBrowseGameConnection {
@@ -379,10 +387,9 @@ const SEARCH_QUERY = `
 `
 
 const TOP_STREAMS_QUERY = `
-  query($first: Int!, $after: Cursor) {
-    streams(first: $first, after: $after) {
+  query($first: Int!) {
+    streams(first: $first) {
       edges {
-        cursor
         node {
           id
           title
@@ -406,10 +413,9 @@ const TOP_STREAMS_QUERY = `
 `
 
 const TOP_GAMES_QUERY = `
-  query($first: Int!, $after: Cursor) {
-    games(first: $first, after: $after) {
+  query($first: Int!) {
+    games(first: $first) {
       edges {
-        cursor
         node {
           id
           name
@@ -422,11 +428,10 @@ const TOP_GAMES_QUERY = `
 `
 
 const GAME_STREAMS_QUERY = `
-  query($name: String!, $first: Int!, $after: Cursor) {
+  query($name: String!, $first: Int!) {
     game(name: $name) {
-      streams(first: $first, after: $after) {
+      streams(first: $first) {
         edges {
-          cursor
           node {
             id
             title
@@ -521,30 +526,21 @@ export async function searchChannels(query: string, signal?: AbortSignal): Promi
 function parseStreamPage(conn: RawBrowseStreamConnection | null | undefined): StreamPage {
   const edges = conn?.edges ?? []
   const streams: BrowseStream[] = []
-  let cursor: string | null = null
   for (const edge of edges) {
-    const node = edge?.node ?? null
-    const stream = toBrowseStream(node)
-    if (stream) {
-      streams.push(stream)
-      if (edge?.cursor) cursor = edge.cursor
-    }
+    const stream = toBrowseStream(edge?.node ?? null)
+    if (stream) streams.push(stream)
   }
-  return { streams, cursor }
+  return { streams }
 }
 
 /**
  * Fetch the top live streams (viewer-descending) — the Browse landing list.
- * Pass `after` (a previous page's returned cursor) to paginate.
+ * Capped at TOP_STREAMS_FIRST (30): the root `streams` query rejects first > 30.
  */
-export async function fetchTopStreams(
-  first: number = DISCOVERY_FIRST,
-  after?: string | null,
-  signal?: AbortSignal,
-): Promise<StreamPage> {
+export async function fetchTopStreams(signal?: AbortSignal): Promise<StreamPage> {
   const data = await gqlRequest<{ streams?: RawBrowseStreamConnection | null }>(
     TOP_STREAMS_QUERY,
-    { first, after: after ?? null },
+    { first: TOP_STREAMS_FIRST },
     signal,
   )
   return parseStreamPage(data?.streams ?? null)
@@ -552,44 +548,35 @@ export async function fetchTopStreams(
 
 /**
  * Fetch the top categories/games (viewer-descending) for the Browse grid.
- * Pass `after` to paginate.
+ * Over-fetches TOP_GAMES_FIRST (100) so BrowseView can reveal more client-side.
  */
-export async function fetchTopCategories(
-  first: number = DISCOVERY_FIRST,
-  after?: string | null,
-  signal?: AbortSignal,
-): Promise<CategoryPage> {
+export async function fetchTopCategories(signal?: AbortSignal): Promise<CategoryPage> {
   const data = await gqlRequest<{ games?: RawBrowseGameConnection | null }>(
     TOP_GAMES_QUERY,
-    { first, after: after ?? null },
+    { first: TOP_GAMES_FIRST },
     signal,
   )
   const edges = data?.games?.edges ?? []
   const categories: BrowseCategory[] = []
-  let cursor: string | null = null
   for (const edge of edges) {
     const cat = toCategory(edge?.node ?? null)
-    if (cat) {
-      categories.push(cat)
-      if (edge?.cursor) cursor = edge.cursor
-    }
+    if (cat) categories.push(cat)
   }
-  return { categories, cursor }
+  return { categories }
 }
 
 /**
  * Fetch the live streams for a single category (game `name`). Used when a user
- * drills into a category from the Browse grid. Pass `after` to paginate.
+ * drills into a category from the Browse grid. Over-fetches GAME_STREAMS_FIRST
+ * (100) so BrowseView can reveal more client-side.
  */
 export async function fetchGameStreams(
   gameName: string,
-  first: number = DISCOVERY_FIRST,
-  after?: string | null,
   signal?: AbortSignal,
 ): Promise<StreamPage> {
   const data = await gqlRequest<{ game?: { streams?: RawBrowseStreamConnection | null } | null }>(
     GAME_STREAMS_QUERY,
-    { name: gameName, first, after: after ?? null },
+    { name: gameName, first: GAME_STREAMS_FIRST },
     signal,
   )
   return parseStreamPage(data?.game?.streams ?? null)

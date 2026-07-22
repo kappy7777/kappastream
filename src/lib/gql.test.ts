@@ -203,13 +203,12 @@ describe('gql search (searchChannels)', () => {
 })
 
 describe('gql browse — top streams', () => {
-  it('parses streams edges into BrowseStream + carries the last cursor', async () => {
+  it('parses streams edges into BrowseStream', async () => {
     gql.handler = async () =>
       ok({
         streams: {
           edges: [
             {
-              cursor: 'aa',
               node: {
                 id: 's1',
                 title: 'Live One',
@@ -220,7 +219,6 @@ describe('gql browse — top streams', () => {
               },
             },
             {
-              cursor: 'bb',
               node: {
                 id: 's2',
                 title: 'Live Two',
@@ -248,21 +246,23 @@ describe('gql browse — top streams', () => {
     })
     // A stream missing an avatar still resolves with an empty avatarUrl.
     expect(page.streams[1].avatarUrl).toBe('')
-    // Cursor is the LAST edge's cursor — the key used as `after` for pagination.
-    expect(page.cursor).toBe('bb')
   })
 
-  it('treats empty edges as a success with a null cursor', async () => {
+  it('treats empty edges as a success', async () => {
     gql.handler = async () => ok({ streams: { edges: [] } })
     const page = await G.fetchTopStreams()
     expect(page.streams).toEqual([])
-    expect(page.cursor).toBeNull()
   })
 
-  it('forwards `after` cursor and `first` as pagination variables', async () => {
+  it('sends first:30 (the hard API cap) and never an `after` cursor', async () => {
     gql.handler = async () => ok({ streams: { edges: [] } })
-    await G.fetchTopStreams(15, 'page2cursor')
-    expect(lastVars()).toMatchObject({ first: 15, after: 'page2cursor' })
+    await G.fetchTopStreams()
+    const vars = lastVars()
+    expect(vars).toMatchObject({ first: 30 })
+    expect(vars).not.toHaveProperty('after')
+    // No cursor is requested at all in the query text.
+    expect(gql.calls.at(-1) ?? '').not.toContain('$after')
+    expect(gql.calls.at(-1) ?? '').not.toContain('after:')
   })
 
   it('throws on transport failure (never an empty page from an error)', async () => {
@@ -274,13 +274,13 @@ describe('gql browse — top streams', () => {
 })
 
 describe('gql browse — top categories', () => {
-  it('parses games edges into BrowseCategory + last cursor', async () => {
+  it('parses games edges into BrowseCategory', async () => {
     gql.handler = async () =>
       ok({
         games: {
           edges: [
-            { cursor: 'c1', node: { id: 'g1', name: 'just-chatting', displayName: 'Just Chatting', boxArtURL: 'https://img/b1.jpg' } },
-            { cursor: 'c2', node: { id: 'g2', name: 'league-of-legends', displayName: 'League of Legends', boxArtURL: 'https://img/b2.jpg' } },
+            { node: { id: 'g1', name: 'just-chatting', displayName: 'Just Chatting', boxArtURL: 'https://img/b1.jpg' } },
+            { node: { id: 'g2', name: 'league-of-legends', displayName: 'League of Legends', boxArtURL: 'https://img/b2.jpg' } },
           ],
         },
       })
@@ -288,14 +288,21 @@ describe('gql browse — top categories', () => {
     const page = await G.fetchTopCategories()
     expect(page.categories).toHaveLength(2)
     expect(page.categories[0]).toMatchObject({ name: 'just-chatting', displayName: 'Just Chatting', boxArtUrl: 'https://img/b1.jpg' })
-    expect(page.cursor).toBe('c2')
   })
 
-  it('treats empty edges as success with null cursor', async () => {
+  it('treats empty edges as success', async () => {
     gql.handler = async () => ok({ games: { edges: [] } })
     const page = await G.fetchTopCategories()
     expect(page.categories).toEqual([])
-    expect(page.cursor).toBeNull()
+  })
+
+  it('over-fetches first:100 (so BrowseView can reveal client-side) with no `after`', async () => {
+    gql.handler = async () => ok({ games: { edges: [] } })
+    await G.fetchTopCategories()
+    const vars = lastVars()
+    expect(vars).toMatchObject({ first: 100 })
+    expect(vars).not.toHaveProperty('after')
+    expect(gql.calls.at(-1) ?? '').not.toContain('$after')
   })
 
   it('throws on GQL errors (not an empty list)', async () => {
@@ -312,7 +319,6 @@ describe('gql browse — game streams (drill-in)', () => {
           streams: {
             edges: [
               {
-                cursor: 'z1',
                 node: {
                   id: 'gs1',
                   title: 'Ranked',
@@ -330,7 +336,6 @@ describe('gql browse — game streams (drill-in)', () => {
     const page = await G.fetchGameStreams('valorant')
     expect(page.streams).toHaveLength(1)
     expect(page.streams[0]).toMatchObject({ login: 'pro', title: 'Ranked', viewersCount: 1234 })
-    expect(page.cursor).toBe('z1')
     expect(lastVars()).toMatchObject({ name: 'valorant' })
   })
 
@@ -338,7 +343,15 @@ describe('gql browse — game streams (drill-in)', () => {
     gql.handler = async () => ok({ game: null })
     const page = await G.fetchGameStreams('does-not-exist')
     expect(page.streams).toEqual([])
-    expect(page.cursor).toBeNull()
+  })
+
+  it('over-fetches first:100 with no `after`', async () => {
+    gql.handler = async () => ok({ game: { streams: { edges: [] } } })
+    await G.fetchGameStreams('valorant')
+    const vars = lastVars()
+    expect(vars).toMatchObject({ first: 100, name: 'valorant' })
+    expect(vars).not.toHaveProperty('after')
+    expect(gql.calls.at(-1) ?? '').not.toContain('$after')
   })
 
   it('throws on transport failure', async () => {

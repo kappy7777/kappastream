@@ -7,6 +7,7 @@
     type BrowseStream,
     type BrowseCategory,
   } from './gql'
+  import { initialVisible, revealMore, hasMoreToShow } from './browse-reveal'
 
   /*
    * Channel discovery browse overlay — top live channels and top categories,
@@ -16,9 +17,15 @@
    * Failure discipline matches the rest of the app: an empty result set is a
    * SUCCESS (just an empty grid), while a transport failure shows a visible,
    * non-blocking error with a Retry control — never silently "no results".
-   * All data is user-triggered (on open / on pagination); there is no
-   * background polling, so the favorites loop and its refresh interval are
-   * untouched.
+   * All data is user-triggered (on open); there is no background polling, so
+   * the favorites loop and its refresh interval are untouched.
+   *
+   * PAGINATION: Twitch GQL rejects `after` cursors for anonymous clients, so
+   * there is no server-side pagination. Each list over-fetches its hard cap in
+   * one request (30 streams / 100 categories / 100 category streams) and Load
+   * more is a purely LOCAL reveal of already-fetched rows — it issues NO
+   * network request. Top channels caps at the 30-row API max, so it has no
+   * Load more button at all.
    *
    * Selecting a stream funnels through the single `onselect(login)` callback,
    * which App.svelte routes into its existing selectChannel() → connect().
@@ -31,31 +38,25 @@
 
   const { onselect, onclose }: Props = $props()
 
-  const FIRST = 30
-
   type View = 'overview' | 'category'
   let view = $state<View>('overview')
   let activeCategory = $state<BrowseCategory | null>(null)
 
-  // Overview: top live channels.
+  // Overview: top live channels. Capped at the 30-row API max — no Load more.
   let streams = $state<BrowseStream[]>([])
-  let streamsCursor = $state<string | null>(null)
   let streamsLoading = $state(false)
-  let streamsLoadingMore = $state(false)
   let streamsError = $state(false)
 
-  // Overview: top categories.
+  // Overview: top categories. Over-fetched (100); revealed 30 at a time.
   let categories = $state<BrowseCategory[]>([])
-  let categoriesCursor = $state<string | null>(null)
+  let categoriesVisible = $state(initialVisible())
   let categoriesLoading = $state(false)
-  let categoriesLoadingMore = $state(false)
   let categoriesError = $state(false)
 
-  // Category drill-in: that category's live streams.
+  // Category drill-in: that category's live streams. Over-fetched (100).
   let gameStreams = $state<BrowseStream[]>([])
-  let gameCursor = $state<string | null>(null)
+  let gameStreamsVisible = $state(initialVisible())
   let gameLoading = $state(false)
-  let gameLoadingMore = $state(false)
   let gameError = $state(false)
 
   function formatViewers(n: number): string {
@@ -67,77 +68,68 @@
     return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
   }
 
-  async function loadStreams(append: boolean): Promise<void> {
-    if (append && (!streamsCursor || streamsLoadingMore)) return
-    if (append) streamsLoadingMore = true
-    else streamsLoading = true
+  async function loadStreams(): Promise<void> {
+    streamsLoading = true
     streamsError = false
     try {
-      const page = await fetchTopStreams(FIRST, append ? streamsCursor : null)
-      if (append && page.streams.length === 0) {
-        streamsCursor = null
-      } else {
-        streams = append ? [...streams, ...page.streams] : page.streams
-        streamsCursor = page.cursor
-      }
+      const page = await fetchTopStreams()
+      streams = page.streams
     } catch {
       streamsError = true
     } finally {
       streamsLoading = false
-      streamsLoadingMore = false
     }
   }
 
-  async function loadCategories(append: boolean): Promise<void> {
-    if (append && (!categoriesCursor || categoriesLoadingMore)) return
-    if (append) categoriesLoadingMore = true
-    else categoriesLoading = true
+  async function loadCategories(): Promise<void> {
+    categoriesLoading = true
     categoriesError = false
     try {
-      const page = await fetchTopCategories(FIRST, append ? categoriesCursor : null)
-      if (append && page.categories.length === 0) {
-        categoriesCursor = null
-      } else {
-        categories = append ? [...categories, ...page.categories] : page.categories
-        categoriesCursor = page.cursor
-      }
+      const page = await fetchTopCategories()
+      categories = page.categories
+      // Reset the reveal whenever the list is refetched.
+      categoriesVisible = initialVisible()
     } catch {
       categoriesError = true
     } finally {
       categoriesLoading = false
-      categoriesLoadingMore = false
     }
   }
 
-  async function loadGameStreams(append: boolean): Promise<void> {
+  async function loadGameStreams(): Promise<void> {
     if (!activeCategory) return
-    if (append && (!gameCursor || gameLoadingMore)) return
-    if (append) gameLoadingMore = true
-    else gameLoading = true
+    gameLoading = true
     gameError = false
     try {
-      const page = await fetchGameStreams(activeCategory.name, FIRST, append ? gameCursor : null)
-      if (append && page.streams.length === 0) {
-        gameCursor = null
-      } else {
-        gameStreams = append ? [...gameStreams, ...page.streams] : page.streams
-        gameCursor = page.cursor
-      }
+      const page = await fetchGameStreams(activeCategory.name)
+      gameStreams = page.streams
+      // Reset the reveal whenever the list is refetched.
+      gameStreamsVisible = initialVisible()
     } catch {
       gameError = true
     } finally {
       gameLoading = false
-      gameLoadingMore = false
     }
+  }
+
+  /** Reveal another step of categories — local only, never hits the network. */
+  function showMoreCategories(): void {
+    categoriesVisible = revealMore(categoriesVisible, categories.length)
+  }
+
+  /** Reveal another step of category streams — local only. */
+  function showMoreGameStreams(): void {
+    gameStreamsVisible = revealMore(gameStreamsVisible, gameStreams.length)
   }
 
   function openCategory(cat: BrowseCategory): void {
     activeCategory = cat
     view = 'category'
     gameStreams = []
-    gameCursor = null
+    // Reset the reveal whenever a different category is opened.
+    gameStreamsVisible = initialVisible()
     gameError = false
-    void loadGameStreams(false)
+    void loadGameStreams()
   }
 
   function closeCategory(): void {
@@ -163,8 +155,8 @@
   }
 
   onMount(() => {
-    void loadStreams(false)
-    void loadCategories(false)
+    void loadStreams()
+    void loadCategories()
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   })
@@ -197,7 +189,7 @@
         {:else if streamsError && streams.length === 0}
           <div class="browse-status browse-status--error">
             Failed to load channels.
-            <button type="button" class="retry-btn" onclick={() => loadStreams(false)}>Retry</button>
+            <button type="button" class="retry-btn" onclick={() => loadStreams()}>Retry</button>
           </div>
         {:else if streams.length === 0}
           <div class="browse-status">No live channels right now.</div>
@@ -236,22 +228,6 @@
               </button>
             {/each}
           </div>
-          {#if streamsError}
-            <div class="browse-inline-error">
-              Failed to load more.
-              <button type="button" class="retry-btn" onclick={() => loadStreams(true)}>Retry</button>
-            </div>
-          {/if}
-          {#if streamsCursor}
-            <button
-              type="button"
-              class="load-more"
-              onclick={() => loadStreams(true)}
-              disabled={streamsLoadingMore}
-            >
-              {streamsLoadingMore ? 'Loading…' : 'Load more'}
-            </button>
-          {/if}
         {/if}
       </section>
 
@@ -262,13 +238,13 @@
         {:else if categoriesError && categories.length === 0}
           <div class="browse-status browse-status--error">
             Failed to load categories.
-            <button type="button" class="retry-btn" onclick={() => loadCategories(false)}>Retry</button>
+            <button type="button" class="retry-btn" onclick={() => loadCategories()}>Retry</button>
           </div>
         {:else if categories.length === 0}
           <div class="browse-status">No categories right now.</div>
         {:else}
           <div class="browse-grid browse-grid--cats">
-            {#each categories as c (c.id)}
+            {#each categories.slice(0, categoriesVisible) as c (c.id)}
               <button type="button" class="cat-card" onclick={() => openCategory(c)}>
                 <img
                   class="cat-card-box"
@@ -283,21 +259,8 @@
               </button>
             {/each}
           </div>
-          {#if categoriesError}
-            <div class="browse-inline-error">
-              Failed to load more.
-              <button type="button" class="retry-btn" onclick={() => loadCategories(true)}>Retry</button>
-            </div>
-          {/if}
-          {#if categoriesCursor}
-            <button
-              type="button"
-              class="load-more"
-              onclick={() => loadCategories(true)}
-              disabled={categoriesLoadingMore}
-            >
-              {categoriesLoadingMore ? 'Loading…' : 'Load more'}
-            </button>
+          {#if hasMoreToShow(categoriesVisible, categories.length)}
+            <button type="button" class="load-more" onclick={showMoreCategories}>Load more</button>
           {/if}
         {/if}
       </section>
@@ -308,13 +271,13 @@
         {:else if gameError && gameStreams.length === 0}
           <div class="browse-status browse-status--error">
             Failed to load streams.
-            <button type="button" class="retry-btn" onclick={() => loadGameStreams(false)}>Retry</button>
+            <button type="button" class="retry-btn" onclick={() => loadGameStreams()}>Retry</button>
           </div>
         {:else if gameStreams.length === 0}
           <div class="browse-status">No live channels in this category right now.</div>
         {:else}
           <div class="browse-grid browse-grid--streams">
-            {#each gameStreams as s (s.id)}
+            {#each gameStreams.slice(0, gameStreamsVisible) as s (s.id)}
               <button type="button" class="stream-card" onclick={() => onselect(s.login)}>
                 <div class="stream-card-thumb">
                   <img
@@ -347,21 +310,8 @@
               </button>
             {/each}
           </div>
-          {#if gameError}
-            <div class="browse-inline-error">
-              Failed to load more.
-              <button type="button" class="retry-btn" onclick={() => loadGameStreams(true)}>Retry</button>
-            </div>
-          {/if}
-          {#if gameCursor}
-            <button
-              type="button"
-              class="load-more"
-              onclick={() => loadGameStreams(true)}
-              disabled={gameLoadingMore}
-            >
-              {gameLoadingMore ? 'Loading…' : 'Load more'}
-            </button>
+          {#if hasMoreToShow(gameStreamsVisible, gameStreams.length)}
+            <button type="button" class="load-more" onclick={showMoreGameStreams}>Load more</button>
           {/if}
         {/if}
       </section>
@@ -500,15 +450,6 @@
 
   .retry-btn:hover {
     background: var(--bg-hover);
-  }
-
-  .browse-inline-error {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 4px;
-    font-size: 12px;
-    color: var(--live);
   }
 
   .browse-grid {
@@ -683,12 +624,7 @@
     transition: background 120ms;
   }
 
-  .load-more:hover:not(:disabled) {
+  .load-more:hover {
     background: var(--bg-hover);
-  }
-
-  .load-more:disabled {
-    opacity: 0.6;
-    cursor: default;
   }
 </style>
