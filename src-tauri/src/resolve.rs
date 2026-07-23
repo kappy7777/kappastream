@@ -41,6 +41,32 @@ pub(crate) fn is_channel_name_valid(name: &str) -> bool {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
+/// A Twitch VOD id is an all-digit string (the trailing path segment of
+/// `https://twitch.tv/videos/<id>`). Bound to 20 digits (current ids are ~13).
+/// Used by `resolve_vod` to refuse anything that is not a bare numeric id, so
+/// unvalidated input can never reach a streamlink argument.
+pub(crate) fn is_vod_id_valid(id: &str) -> bool {
+    let s = id.trim();
+    let len = s.len();
+    if len == 0 || len > 20 {
+        return false;
+    }
+    s.chars().all(|c| c.is_ascii_digit())
+}
+
+/// A Twitch clip slug is alphanumeric + dashes/underscores, e.g.
+/// "ClumsyDarkPassionfruitBCouch-IAtE_BZ87kE7PQSG". Validated before the slug
+/// reaches a streamlink argument so unvalidated input can never be injected.
+pub(crate) fn is_clip_slug_valid(slug: &str) -> bool {
+    let s = slug.trim();
+    let len = s.len();
+    if len == 0 || len > 100 {
+        return false;
+    }
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 pub(crate) fn streamlink_bin() -> PathBuf {
     match env::var("STREAMLINK_BIN") {
         Ok(v) if !v.is_empty() => PathBuf::from(v),
@@ -72,7 +98,7 @@ fn include_detail() -> bool {
 
 async fn run_streamlink(
     bin: &std::path::Path,
-    channel: &str,
+    twitch_url: &str,
     quality: &str,
     low_latency: bool,
 ) -> Result<String, StreamlinkError> {
@@ -85,7 +111,7 @@ async fn run_streamlink(
         cmd.arg("--twitch-low-latency");
     }
     cmd.arg("--stream-url")
-        .arg(format!("https://twitch.tv/{}", channel))
+        .arg(twitch_url)
         .arg(quality)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -177,7 +203,13 @@ pub async fn resolve_stream(
     let q_for_spawn = q.clone();
     let low_for_spawn = low_latency.unwrap_or(false);
 
-    let result = run_streamlink(&bin, &channel_for_spawn, &q_for_spawn, low_for_spawn).await;
+    let result = run_streamlink(
+        &bin,
+        &format!("https://twitch.tv/{}", channel_for_spawn),
+        &q_for_spawn,
+        low_for_spawn,
+    )
+    .await;
 
     match result {
         Ok(url) => {
@@ -283,6 +315,303 @@ pub async fn resolve_stream(
     }
 }
 
+// VOD/clip media (resolved HLS playlists and clip MP4s) are served from
+// Twitch's CloudFront distribution (e.g. d2nvs31859zcd8.cloudfront.net), which
+// the live `resolve_stream` allowlist below intentionally does NOT include.
+// The VOD path gets its own broader host set so the live path stays untouched.
+fn is_allowed_vod_host(host: &str) -> bool {
+    host == "twitch.tv"
+        || host.ends_with(".twitch.tv")
+        || host == "ttvnw.net"
+        || host.ends_with(".ttvnw.net")
+        || host == "ttv-clips.net"
+        || host.ends_with(".ttv-clips.net")
+        || host == "cloudfront.net"
+        || host.ends_with(".cloudfront.net")
+}
+
+// Sub-only / paywalled VODs are not playable anonymously: streamlink gets a
+// 403 or an explicit subscribers-only error. Match conservatively so a plain
+// transient error is never misreported as paywalled.
+fn looks_sub_only(detail: &str) -> bool {
+    let lower = detail.to_ascii_lowercase();
+    [
+        "subscribers-only",
+        "subscriber-only",
+        "sub-only",
+        "requires a subscription",
+        "403 forbidden",
+        "sub-only content",
+    ]
+    .iter()
+    .any(|m| lower.contains(m))
+}
+
+/// Resolve a Twitch VOD (`https://twitch.tv/videos/<id>`) to a playable HLS
+/// playlist URL via streamlink. Validates the id is all-digits and the quality
+/// is on the allowlist, so unvalidated input never reaches a streamlink
+/// argument. Accepts CloudFront hosts (VOD media lives there). A sub-only VOD
+/// is reported as a clean, user-facing paywall message rather than a raw error.
+#[tauri::command]
+pub async fn resolve_vod(
+    video_id: String,
+    quality: Option<String>,
+) -> Result<ResolveResponse, String> {
+    let id = video_id.trim().to_string();
+    if !is_vod_id_valid(&id) {
+        return Ok(ResolveResponse {
+            ok: false,
+            url: None,
+            quality: None,
+            offline: false,
+            unavailable: false,
+            error: Some("invalid video id".to_string()),
+        });
+    }
+
+    let q_raw = quality.unwrap_or_else(|| "best".to_string());
+    let q = q_raw.trim().to_lowercase();
+    if !ALLOWED_QUALITIES.contains(&q.as_str()) {
+        return Ok(ResolveResponse {
+            ok: false,
+            url: None,
+            quality: None,
+            offline: false,
+            unavailable: false,
+            error: Some("invalid stream quality".to_string()),
+        });
+    }
+
+    let bin = streamlink_bin();
+    let url = format!("https://twitch.tv/videos/{}", id);
+    let q_for_spawn = q.clone();
+
+    let result = run_streamlink(&bin, &url, &q_for_spawn, false).await;
+
+    match result {
+        Ok(url) => {
+            let parsed = url::Url::parse(&url).ok().filter(|parsed| {
+                parsed.scheme() == "https"
+                    && parsed.username().is_empty()
+                    && parsed.password().is_none()
+                    && parsed.port_or_known_default() == Some(443)
+                    && parsed.host_str().is_some_and(is_allowed_vod_host)
+            });
+            if parsed.is_none() || url.lines().count() != 1 {
+                let err = if include_detail() {
+                    format!(
+                        "streamlink returned non-url: {}",
+                        url.chars().take(200).collect::<String>()
+                    )
+                } else {
+                    "streamlink returned an unexpected response".to_string()
+                };
+                return Ok(ResolveResponse {
+                    ok: false,
+                    url: None,
+                    quality: Some(q),
+                    offline: false,
+                    unavailable: false,
+                    error: Some(err),
+                });
+            }
+            Ok(ResolveResponse {
+                ok: true,
+                url: parsed.map(|parsed| parsed.to_string()),
+                quality: Some(q),
+                offline: false,
+                unavailable: false,
+                error: None,
+            })
+        }
+        Err(StreamlinkError::Spawn(msg)) => Ok(ResolveResponse {
+            ok: false,
+            url: None,
+            quality: Some(q),
+            offline: false,
+            unavailable: false,
+            error: Some(msg),
+        }),
+        Err(StreamlinkError::Timeout) => Ok(ResolveResponse {
+            ok: false,
+            url: None,
+            quality: Some(q),
+            offline: false,
+            unavailable: false,
+            error: Some(format!(
+                "streamlink timed out after {} ms",
+                RESOLVE_TIMEOUT.as_millis()
+            )),
+        }),
+        Err(StreamlinkError::Failed {
+            stdout,
+            stderr,
+            code,
+        }) => {
+            let combined = format!("{}\n{}", stderr, stdout);
+            if looks_sub_only(&combined) {
+                return Ok(ResolveResponse {
+                    ok: false,
+                    url: None,
+                    quality: Some(q),
+                    offline: false,
+                    unavailable: false,
+                    error: Some(
+                        "This video is subscriber-only and is not available without a subscription."
+                            .to_string(),
+                    ),
+                });
+            }
+            let detail_text = if include_detail() {
+                let combined_err = format!("{} {}", stderr, stdout).trim().to_string();
+                if combined_err.is_empty() {
+                    format!("streamlink exited {:?}", code)
+                } else {
+                    combined_err.chars().take(500).collect()
+                }
+            } else if code.is_some() {
+                format!("streamlink exited with code {:?}", code)
+            } else {
+                "streamlink exited unexpectedly".to_string()
+            };
+            Ok(ResolveResponse {
+                ok: false,
+                url: None,
+                quality: Some(q),
+                offline: false,
+                unavailable: false,
+                error: Some(detail_text),
+            })
+        }
+    }
+}
+
+/// Resolve a Twitch clip (`https://clips.twitch.tv/<slug>`) to a playable MP4
+/// URL via streamlink. Streamlink generates the signed CloudFront URL (with
+/// `sig` and `token` query params) — the raw `sourceURL` from GQL
+/// `videoQualities` lacks these and returns HTTP 401. Validates the slug and
+/// quality before reaching a streamlink argument. Accepts the same media-CDN
+/// host allowlist as `resolve_vod`.
+#[tauri::command]
+pub async fn resolve_clip(
+    slug: String,
+    quality: Option<String>,
+) -> Result<ResolveResponse, String> {
+    let s = slug.trim().to_string();
+    if !is_clip_slug_valid(&s) {
+        return Ok(ResolveResponse {
+            ok: false,
+            url: None,
+            quality: None,
+            offline: false,
+            unavailable: false,
+            error: Some("invalid clip slug".to_string()),
+        });
+    }
+
+    let q_raw = quality.unwrap_or_else(|| "best".to_string());
+    let q = q_raw.trim().to_lowercase();
+    if !ALLOWED_QUALITIES.contains(&q.as_str()) {
+        return Ok(ResolveResponse {
+            ok: false,
+            url: None,
+            quality: None,
+            offline: false,
+            unavailable: false,
+            error: Some("invalid stream quality".to_string()),
+        });
+    }
+
+    let bin = streamlink_bin();
+    let url = format!("https://clips.twitch.tv/{}", s);
+    let q_for_spawn = q.clone();
+
+    let result = run_streamlink(&bin, &url, &q_for_spawn, false).await;
+
+    match result {
+        Ok(url) => {
+            let parsed = url::Url::parse(&url).ok().filter(|parsed| {
+                parsed.scheme() == "https"
+                    && parsed.username().is_empty()
+                    && parsed.password().is_none()
+                    && parsed.port_or_known_default() == Some(443)
+                    && parsed.host_str().is_some_and(is_allowed_vod_host)
+            });
+            if parsed.is_none() || url.lines().count() != 1 {
+                let err = if include_detail() {
+                    format!(
+                        "streamlink returned non-url: {}",
+                        url.chars().take(200).collect::<String>()
+                    )
+                } else {
+                    "streamlink returned an unexpected response".to_string()
+                };
+                return Ok(ResolveResponse {
+                    ok: false,
+                    url: None,
+                    quality: Some(q),
+                    offline: false,
+                    unavailable: false,
+                    error: Some(err),
+                });
+            }
+            Ok(ResolveResponse {
+                ok: true,
+                url: parsed.map(|parsed| parsed.to_string()),
+                quality: Some(q),
+                offline: false,
+                unavailable: false,
+                error: None,
+            })
+        }
+        Err(StreamlinkError::Spawn(msg)) => Ok(ResolveResponse {
+            ok: false,
+            url: None,
+            quality: Some(q),
+            offline: false,
+            unavailable: false,
+            error: Some(msg),
+        }),
+        Err(StreamlinkError::Timeout) => Ok(ResolveResponse {
+            ok: false,
+            url: None,
+            quality: Some(q),
+            offline: false,
+            unavailable: false,
+            error: Some(format!(
+                "streamlink timed out after {} ms",
+                RESOLVE_TIMEOUT.as_millis()
+            )),
+        }),
+        Err(StreamlinkError::Failed {
+            stdout,
+            stderr,
+            code,
+        }) => {
+            let detail_text = if include_detail() {
+                let combined_err = format!("{} {}", stderr, stdout).trim().to_string();
+                if combined_err.is_empty() {
+                    format!("streamlink exited {:?}", code)
+                } else {
+                    combined_err.chars().take(500).collect()
+                }
+            } else if code.is_some() {
+                format!("streamlink exited with code {:?}", code)
+            } else {
+                "streamlink exited unexpectedly".to_string()
+            };
+            Ok(ResolveResponse {
+                ok: false,
+                url: None,
+                quality: Some(q),
+                offline: false,
+                unavailable: false,
+                error: Some(detail_text),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,5 +713,86 @@ mod tests {
         temp_env::with_var("STREAMLINK_BIN", Some("/custom/path/streamlink"), || {
             assert_eq!(streamlink_bin(), PathBuf::from("/custom/path/streamlink"));
         });
+    }
+
+    #[test]
+    fn vod_id_valid_basic() {
+        assert!(is_vod_id_valid("12345"));
+        assert!(is_vod_id_valid("2826461407"));
+        assert!(is_vod_id_valid("1"));
+    }
+
+    #[test]
+    fn vod_id_rejects_non_digits_and_injection() {
+        // Non-digit characters must be refused so they can never reach a
+        // streamlink argument (path/query/shell injection attempts).
+        assert!(!is_vod_id_valid("123abc"));
+        assert!(!is_vod_id_valid("12 34"));
+        assert!(!is_vod_id_valid("1-2"));
+        assert!(!is_vod_id_valid("12;rm -rf"));
+        assert!(!is_vod_id_valid("../../../etc"));
+        assert!(!is_vod_id_valid("videos/123"));
+        assert!(!is_vod_id_valid(""));
+        // Over the 20-digit cap.
+        assert!(!is_vod_id_valid(&"1".repeat(21)));
+    }
+
+    #[test]
+    fn vod_id_trims_whitespace() {
+        // resolve_vod trims; the validator also tolerates surrounding spaces.
+        assert!(is_vod_id_valid("  12345  "));
+    }
+
+    #[test]
+    fn vod_host_allowlist_accepts_cloudfront() {
+        // VOD/clip media is served from CloudFront — the live allowlist omits
+        // it, but resolve_vod's allowlist must accept it.
+        assert!(is_allowed_vod_host("d2nvs31859zcd8.cloudfront.net"));
+        assert!(is_allowed_vod_host("d1ndex63qxojbr.cloudfront.net"));
+        assert!(is_allowed_vod_host("eun12.playlist.ttvnw.net"));
+        assert!(is_allowed_vod_host("twitch.tv"));
+        // Not accepted: unrelated hosts.
+        assert!(!is_allowed_vod_host("evil.example.net"));
+        assert!(!is_allowed_vod_host("notcloudfront.net")); // suffix must be .cloudfront.net
+        assert!(!is_allowed_vod_host("cloudfront.net.evil.com"));
+    }
+
+    #[test]
+    fn sub_only_detection() {
+        assert!(looks_sub_only("error: This content is subscribers-only"));
+        assert!(looks_sub_only("HTTP 403 Forbidden"));
+        assert!(looks_sub_only("requires a subscription to view"));
+        // Plain transient errors are NOT flagged sub-only.
+        assert!(!looks_sub_only("error: No playable streams found"));
+        assert!(!looks_sub_only("transient network hiccup"));
+        assert!(!looks_sub_only(""));
+    }
+
+    #[test]
+    fn clip_slug_valid_basic() {
+        assert!(is_clip_slug_valid(
+            "ClumsyDarkPassionfruitBCouch-IAtE_BZ87kE7PQSG"
+        ));
+        assert!(is_clip_slug_valid(
+            "CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4"
+        ));
+        assert!(is_clip_slug_valid("abc"));
+        assert!(is_clip_slug_valid("a-b_c"));
+    }
+
+    #[test]
+    fn clip_slug_rejects_invalid() {
+        // Empty / whitespace-only
+        assert!(!is_clip_slug_valid(""));
+        assert!(!is_clip_slug_valid("   "));
+        // Path separators, spaces, special chars
+        assert!(!is_clip_slug_valid("bad/slug"));
+        assert!(!is_clip_slug_valid("bad slug"));
+        assert!(!is_clip_slug_valid("bad?slug"));
+        assert!(!is_clip_slug_valid("bad#slug"));
+        assert!(!is_clip_slug_valid("bad;rm -rf"));
+        assert!(!is_clip_slug_valid("../../../etc"));
+        // Over 100 chars
+        assert!(!is_clip_slug_valid(&"a".repeat(101)));
     }
 }

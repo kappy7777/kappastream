@@ -12,10 +12,12 @@
   import NotifyMenu from './lib/NotifyMenu.svelte'
   import SearchBox from './lib/SearchBox.svelte'
   import BrowseView from './lib/BrowseView.svelte'
+  import ChannelContent from './lib/ChannelContent.svelte'
   import { settings } from './lib/settings.svelte.ts'
   import { buildHlsConfig } from './lib/hls-config'
   import { pipController } from './lib/pip-controller.svelte.ts'
   import { fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
+  import type { ChannelVideo, ChannelClip } from './lib/gql'
   import { notifications } from './lib/notifications.svelte.ts'
   import { tooltip } from './lib/tooltip.ts'
   import { tooltipState } from './lib/tooltip.svelte.ts'
@@ -60,7 +62,7 @@
   let channelInput = $state('')
   let browseOpen = $state(false)
   let channelJoined: string | null = $state(null)
-  let status: ConnectionStatus = $state('idle')
+  let status = $state<ConnectionStatus>('idle')
   let messages: ChatMessage[] = $state([])
   // Current chat modes for the joined channel (Toggle B). Merged from
   // ROOMSTATE events via mergeRoomState — never replaced, so a single-tag
@@ -74,6 +76,20 @@
   let quality = $state<string>('best')
   let pendingQuality: string | null = $state(null)
   let activeStatus: LiveStatus = $state({ state: 'unknown' })
+
+  // VOD / clip playback mode. 'live' is the default (coupled chat + live
+  // stream). 'vod' / 'clip' swap the player source to a past broadcast (HLS via
+  // resolve_vod) or a clip (direct MP4 via GQL videoQualities) and STOP live
+  // chat — a VOD/clip has no live chat. `playerActive` reuses the player
+  // subtree (which otherwise renders only when chat is connected) so the
+  // <video> + controls exist in VOD/clip mode too. Restored to 'live' on any
+  // channel (re)connect (see connect()).
+  type Playback = { kind: 'live' } | { kind: 'vod'; id: string; title: string } | { kind: 'clip'; slug: string; title: string }
+  let playback = $state<Playback>({ kind: 'live' })
+  // The scroll container that reveals the channel-content sections below the
+  // fold. Reset to the top on every channel change.
+  let videoScrollEl = $state<HTMLElement | null>(null)
+  let contentRef = $state<HTMLElement | null>(null)
 
   const SIDEBAR_VIS_KEY = 'twitch-sidebar-visible-v3'
   function loadSidebarMode(): 'full' | 'icons' | 'hidden' {
@@ -197,6 +213,8 @@
   let mainStoppedForPip = false
   $effect(() => {
     const pipOpen = pipController.isOpen
+    // PiP takeover is live-only: never stop a VOD/clip to hand off to PiP.
+    if (playback.kind !== 'live') return
     if (pipOpen) {
       if (channelJoined && (playerStatus === 'playing' || playerStatus === 'paused')) {
         disconnectStream(true)
@@ -211,6 +229,14 @@
   function resumeStream(): void {
     if (channelJoined && status === 'connected') void loadStream(channelJoined, quality)
   }
+
+  // Reset the channel-content scroll position to the top whenever the joined
+  // channel changes (so a new channel always starts at the player, not partway
+  // down the previous channel's content).
+  $effect(() => {
+    void channelJoined
+    if (videoScrollEl) videoScrollEl.scrollTop = 0
+  })
 
   let socket: WebSocket | null = null
   let hls: Hls | null = null
@@ -252,12 +278,16 @@
   }
 
   function onVideoWaiting(): void {
+    // Stall recovery is live-only — VOD/clip buffering resumes natively.
+    if (playback.kind !== 'live') return
     // Buffer underrun — schedule recovery (a momentary blip refills and
     // fires `playing`, cancelling this).
     scheduleStallRecover()
   }
 
   function onVideoPause(): void {
+    // Stall recovery is live-only — never force-seek a paused VOD/clip.
+    if (playback.kind !== 'live') return
     // Ignore user-initiated pauses (togglePlay sets userPaused first). A
     // stall-induced pause in webkit2gtk lands here with userPaused still
     // false — recover it.
@@ -420,14 +450,29 @@
   }
 
   async function handoffToPlayer(): Promise<void> {
-    const channel = channelJoined
-    if (!channel) return
     try {
-      const r = (await invoke('launch_player', {
-        channel,
-        quality,
-        lowLatency: settings.lowLatency,
-      })) as { ok: boolean; error?: string | null }
+      let r: { ok: boolean; error?: string | null }
+      if (playback.kind === 'vod') {
+        r = (await invoke('launch_player', {
+          vodId: playback.id,
+          quality,
+          lowLatency: settings.lowLatency,
+        })) as { ok: boolean; error?: string | null }
+      } else if (playback.kind === 'clip') {
+        r = (await invoke('launch_player', {
+          clipSlug: playback.slug,
+          quality: 'best',
+          lowLatency: settings.lowLatency,
+        })) as { ok: boolean; error?: string | null }
+      } else {
+        const channel = channelJoined
+        if (!channel) return
+        r = (await invoke('launch_player', {
+          channel,
+          quality,
+          lowLatency: settings.lowLatency,
+        })) as { ok: boolean; error?: string | null }
+      }
       if (r.ok) {
         // mpv is now the sole player; stop the in-app stream (HLS + video) to
         // free network/system resources. The IRC chat connection is left intact.
@@ -610,6 +655,14 @@
   async function changeQuality(newQuality: string): Promise<void> {
     if (newQuality === quality) return
     quality = newQuality
+    // VOD: re-resolve at the new quality (not persisted as a channel pref).
+    if (playback.kind === 'vod') {
+      teardownPlayer()
+      await loadVod(playback.id, newQuality)
+      return
+    }
+    // Clip quality is fixed (best available from videoQualities).
+    if (playback.kind === 'clip') return
     if (channelJoined) settings.setQualityFor(channelJoined, newQuality)
     if (!channelJoined) {
       pendingQuality = newQuality
@@ -709,6 +762,8 @@
       showNotifToast('Invalid channel name.')
       return
     }
+    // Any (re)connect returns to live mode — clears a prior VOD/clip playback.
+    playback = { kind: 'live' }
     disconnect()
 
     reconnectAttempts = 0
@@ -905,6 +960,203 @@
     selectChannel(name)
     browseOpen = false
   }
+
+  // ---- VOD / clip playback -------------------------------------------------
+  // A VOD/clip has no live chat, so entering playback STOPS the IRC socket but
+  // deliberately keeps `channelJoined` so "Back to live" can restore the same
+  // channel. The live stream + chat are re-attached via the normal connect()
+  // path (backToLive → selectChannel). Stall recovery is live-only.
+
+  // Stop the IRC chat connection without clearing `channelJoined` or the video
+  // element (the caller swaps the player source). Mirrors disconnect()'s socket
+  // teardown but preserves channel identity for back-to-live.
+  function stopChatOnly(): void {
+    connectionGeneration++
+    activeConnection = null
+    emoteAbort?.abort()
+    emoteAbort = null
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    if (socket) {
+      socket.onclose = null
+      socket.close()
+      socket = null
+    }
+    status = 'idle'
+  }
+
+  // Attach an HLS source (VOD playlist) with a non-low-latency config and no
+  // live generation coupling. Reuses the live hls.js path's error discipline.
+  async function attachMediaHls(url: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!videoEl) return { ok: false, error: 'no video element' }
+    teardownPlayer()
+    clearStallRecover()
+    if (Hls.isSupported()) {
+      const instance = new Hls(buildHlsConfig(false))
+      hls = instance
+      return await new Promise((resolve) => {
+        let done = false
+        let to: ReturnType<typeof setTimeout> | null = null
+        const finish = (r: { ok: true } | { ok: false; error: string }) => {
+          if (done) return
+          done = true
+          if (to) clearTimeout(to)
+          resolve(r)
+        }
+        instance.on(Hls.Events.MANIFEST_PARSED, () => {
+          videoEl?.play().catch(() => { /* autoplay can be blocked; user presses play */ })
+          finish({ ok: true })
+        })
+        instance.on(Hls.Events.ERROR, (_e, data) => {
+          if (!data.fatal) return
+          try { instance.destroy() } catch (_e) { /* ignore */ }
+          finish({ ok: false, error: 'media error: ' + data.type })
+        })
+        instance.loadSource(url)
+        instance.attachMedia(videoEl!)
+        to = setTimeout(() => finish({ ok: false, error: 'timeout waiting for manifest' }), 20_000)
+      })
+    }
+    if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+      videoEl.src = url
+      try {
+        await videoEl.play()
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, error: 'playback failed: ' + (err as Error).message }
+      }
+    }
+    return { ok: false, error: 'HLS playback is not supported' }
+  }
+
+  // Attach a direct MP4 (clip) — native <video>, no hls.js.
+  async function attachClipMp4(url: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!videoEl) return { ok: false, error: 'no video element' }
+    teardownPlayer()
+    clearStallRecover()
+    try {
+      videoEl.src = url
+      await videoEl.play()
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: 'clip playback failed: ' + (err as Error).message }
+    }
+  }
+
+  async function loadVod(videoId: string, q: string): Promise<void> {
+    playerError = ''
+    playerStatus = 'resolving'
+    type ResolveRaw = { ok?: boolean; url?: string | null; error?: string | null }
+    let raw: ResolveRaw
+    try {
+      raw = (await invoke('resolve_vod', { videoId, quality: q })) as ResolveRaw
+    } catch (err) {
+      const msg = typeof err === 'string' ? err : err instanceof Error ? err.message : JSON.stringify(err)
+      playerStatus = 'error'
+      playerError = 'invoke failed: ' + msg
+      return
+    }
+    if (!raw.ok || !raw.url) {
+      playerStatus = 'error'
+      playerError = raw.error ?? 'failed to load video'
+      return
+    }
+    playerStatus = 'loading'
+    // Rewrite the cloudfront/ttvnw URL through the ksvod proxy: the VOD CDN
+    // doesn't send CORS headers so hls.js's XHR is blocked. The ksvod scheme is
+    // handled by a Rust URI-scheme protocol (vod_proxy.rs) that fetches via
+    // reqwest and adds Access-Control-Allow-Origin. Relative segment URLs in
+    // the manifest resolve against the ksvod base URL automatically.
+    const proxyUrl = raw.url.replace('https://', 'ksvod://localhost/')
+    const attach = await attachMediaHls(proxyUrl)
+    if (attach.ok) {
+      playerStatus = 'playing'
+      if (channelJoined) pipController.setStream({ url: proxyUrl, channel: channelJoined, quality: q })
+      return
+    }
+    playerStatus = 'error'
+    playerError = attach.error
+  }
+
+  async function playVod(video: ChannelVideo): Promise<void> {
+    if (!channelJoined) return
+    playback = { kind: 'vod', id: video.id, title: video.title || 'Past broadcast' }
+    messages = []
+    roomState = {}
+    stopChatOnly()
+    userPaused = false
+    if (videoScrollEl) videoScrollEl.scrollTop = 0
+    await loadVod(video.id, quality)
+  }
+
+  async function playClip(clip: ChannelClip): Promise<void> {
+    if (!channelJoined) return
+    playback = { kind: 'clip', slug: clip.slug, title: clip.title || 'Clip' }
+    messages = []
+    roomState = {}
+    stopChatOnly()
+    userPaused = false
+    if (videoScrollEl) videoScrollEl.scrollTop = 0
+    playerError = ''
+    playerStatus = 'resolving'
+    type ResolveRaw = { ok?: boolean; url?: string | null; error?: string | null }
+    let raw: ResolveRaw
+    try {
+      raw = (await invoke('resolve_clip', { slug: clip.slug, quality: 'best' })) as ResolveRaw
+    } catch (err) {
+      const msg = typeof err === 'string' ? err : err instanceof Error ? err.message : JSON.stringify(err)
+      playerStatus = 'error'
+      playerError = 'invoke failed: ' + msg
+      return
+    }
+    if (!raw.ok || !raw.url) {
+      playerStatus = 'error'
+      playerError = raw.error ?? 'failed to load clip'
+      return
+    }
+    playerStatus = 'loading'
+    const attach = await attachClipMp4(raw.url)
+    if (attach.ok) {
+      playerStatus = 'playing'
+      if (channelJoined) pipController.setStream({ url: raw.url, channel: channelJoined, quality: 'best', mediaKind: 'mp4' })
+      return
+    }
+    playerStatus = 'error'
+    playerError = attach.error
+  }
+
+  function scrollToContent(): void {
+    if (contentRef && videoScrollEl) {
+      const refTop = contentRef.getBoundingClientRect().top
+      const scrollTop = videoScrollEl.getBoundingClientRect().top
+      const offset = refTop - scrollTop + videoScrollEl.scrollTop
+      videoScrollEl.scrollTo({ top: offset, behavior: 'smooth' })
+    }
+  }
+
+  // Restore the live stream + chat for the current channel.
+  function backToLive(): void {
+    const ch = channelJoined
+    playback = { kind: 'live' }
+    if (ch) selectChannel(ch)
+  }
+
+  function onStopClick(): void {
+    // In VOD/clip mode, Stop returns to the live channel.
+    if (playback.kind !== 'live') {
+      backToLive()
+      return
+    }
+    disconnect()
+  }
+
+  function onMpvClick(): void {
+    void handoffToPlayer()
+  }
+
+  // --------------------------------------------------------------------------
 
   function formatViewers(n: number): string {
     if (n < 1000) return n.toString()
@@ -1280,6 +1532,11 @@
   const isPlayerBusy = $derived(
     playerStatus === 'resolving' || playerStatus === 'loading',
   )
+  // The player subtree (video + controls) renders when chat is connected OR a
+  // VOD/clip is playing. Declared alongside the other player deriveds (after
+  // status has been reassigned in connect()/disconnect(), so it is not
+  // control-flow-narrowed to its initial literal).
+  const playerActive = $derived(status === 'connected' || playback.kind !== 'live')
   const showPlayerOverlay = $derived(
     playerStatus === 'resolving' ||
       playerStatus === 'loading' ||
@@ -1400,8 +1657,16 @@
     {/if}
     <div class="main" class:main--stacked={stacked} bind:this={mainEl}>
     <div class="video-pane">
-    <section class="player" class:player--active={status === 'connected'}>
-      {#if status === 'connected'}
+    <div class="video-scroll" bind:this={videoScrollEl}>
+    <div class="player-stage">
+    {#if playback.kind !== 'live'}
+      <div class="playback-banner">
+        <button type="button" class="playback-back" onclick={backToLive}>◀ Back to live</button>
+        <span class="playback-title">{playback.title}</span>
+      </div>
+    {/if}
+    <section class="player" class:player--active={playerActive}>
+      {#if playerActive}
 <video
         bind:this={videoEl}
         class="video"
@@ -1412,7 +1677,7 @@
         onplaying={onVideoPlaying}
         onpause={onVideoPause}
       ></video>
-        <PlayerControls video={videoEl} visible={status === 'connected' && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={() => void handoffToPlayer()} onstop={() => disconnect()} onplayintent={(p) => { userPaused = !p }} {activeStatus} />
+        <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { userPaused = !p }} {activeStatus} />
         {#if showPlayerOverlay}
           <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
             {#if isPlayerBusy}
@@ -1510,10 +1775,30 @@
               </svg>
               <span class="notif-toggle-label">{channelNotifOn ? 'Notify on' : 'Notify off'}</span>
             </button>
+            {#if !stacked}
+              <button
+                type="button"
+                class="notif-toggle"
+                onclick={scrollToContent}
+                use:tooltip={'Videos & Clips'}
+              >
+                <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                  <path d="M2 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm1 2h10v8H3V4zm3 1v6l4-3-4-3z" fill="currentColor"/>
+                </svg>
+                <span class="notif-toggle-label">Videos</span>
+              </button>
+            {/if}
           </div>
         {/if}
       </div>
       {/if}
+    </div>
+    {#if !settings.theaterMode && !stacked && channelJoined}
+      <div bind:this={contentRef}>
+        <ChannelContent channel={channelJoined} onplayVod={playVod} onplayClip={playClip} />
+      </div>
+    {/if}
+    </div>
     </div>
 
     {#if settings.chatVisible}
@@ -2137,9 +2422,79 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    /* justify-content: center moved to .player-stage (the scroll container
+       must not vertically center — it scrolls). */
     background: var(--bg-app);
     overflow: hidden;
+  }
+
+  /* Scroll container that reveals the channel-content sections below the
+     player+status bar. The scrollbar is HIDDEN (zero width) so reserving a
+     gutter can never reflow the player horizontally — the default view at
+     scroll 0 stays pixel-identical whether or not sections exist. Sections are
+     reached by wheel/touch scroll. In stacked/theater mode no sections render,
+     so there is nothing to scroll. */
+  .video-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .video-scroll::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+
+  /* Holds the player + status bar, vertically centered, and fills exactly one
+     viewport height (height: 100%, definite — NOT min-height) so two things
+     hold: (a) the channel-content sections begin precisely below the fold, and
+     (b) the player's max-height:100% resolves against a definite containing
+     block so flex-shrink can keep the player from growing past the status bar.
+     With min-height the percentage was indefinite and the player overflowed,
+     pushing the status bar below the fold. */
+  .player-stage {
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  /* "Back to live" banner shown over the player while a VOD/clip is playing. */
+  .playback-banner {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100% - 16px);
+    padding: 4px 8px 4px 4px;
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 5px;
+    color: #fff;
+    font-size: 12px;
+  }
+  .playback-back {
+    flex: 0 0 auto;
+    border: none;
+    border-radius: 4px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+  .playback-back:hover {
+    filter: brightness(1.1);
+  }
+  .playback-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
 .player {

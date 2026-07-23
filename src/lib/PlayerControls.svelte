@@ -56,6 +56,10 @@
   let buffered = $state(0)
   let isFullscreen = $state(false)
   let hoverTime: number | null = $state(null)
+
+  function getZoom(): number {
+    return parseFloat(document.documentElement.style.zoom) || 1
+  }
   let menuOpen = $state(false)
   // PiP here is a custom floating Tauri window (the native HTML5
   // `requestPictureInPicture` API is unavailable on WebKitGTK). It only works
@@ -212,15 +216,17 @@
     video.currentTime = Math.max(0, Math.min(t, isFinite(duration) ? duration : t))
   }
 
-  function seekFromEvent(e: MouseEvent, el: HTMLElement): void {
-    const rect = el.getBoundingClientRect()
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+  function seekFromEvent(e: MouseEvent): void {
+    const el = e.currentTarget as HTMLElement
+    const z = getZoom()
+    const pct = Math.max(0, Math.min(1, e.offsetX / (el.offsetWidth * z)))
     seekTo(pct * (isFinite(duration) ? duration : 0))
   }
 
-  function onProgressMove(e: MouseEvent, el: HTMLElement): void {
-    const rect = el.getBoundingClientRect()
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+  function onProgressMove(e: MouseEvent): void {
+    const el = e.currentTarget as HTMLElement
+    const z = getZoom()
+    const pct = Math.max(0, Math.min(1, e.offsetX / (el.offsetWidth * z)))
     hoverTime = pct * (isFinite(duration) ? duration : 0)
   }
 
@@ -285,10 +291,10 @@
   )
 
   function onProgressClick(e: MouseEvent): void {
-    if (progressEl) seekFromEvent(e, progressEl)
+    seekFromEvent(e)
   }
   function onProgressHover(e: MouseEvent): void {
-    if (progressEl) onProgressMove(e, progressEl)
+    onProgressMove(e)
   }
   function onProgressLeave(): void {
     hoverTime = null

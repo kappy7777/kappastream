@@ -6,6 +6,7 @@ mod opener;
 mod player;
 mod resolve;
 mod tray;
+mod vod_proxy;
 
 #[cfg(target_os = "linux")]
 pub mod compat;
@@ -38,6 +39,8 @@ pub fn run() {
         }));
     }
 
+    builder = vod_proxy::register(builder);
+
     builder
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -52,6 +55,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             resolve::resolve_stream,
+            resolve::resolve_vod,
+            resolve::resolve_clip,
             player::launch_player,
             opener::open_url_robust,
             decapi::decapi_fetch,

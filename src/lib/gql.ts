@@ -581,3 +581,301 @@ export async function fetchGameStreams(
   )
   return parseStreamPage(data?.game?.streams ?? null)
 }
+
+/*
+ * ============================================================================
+ * Channel content — past broadcasts, highlights, clips.
+ *
+ * Same anonymous + GQL-only transport as discovery (no DecAPI fallback). Like
+ * discovery, `after` cursors are unusable (IntegrityCheckFailed), so each list
+ * over-fetches its hard cap (100) in ONE request and the caller reveals more
+ * client-side (see browse-reveal.ts). Empty is a SUCCESS.
+ *
+ * Verified against the live schema (see the block above):
+ *   - user(login:).videos(first, type: BroadcastType, sort: VideoSort)
+ *       BroadcastType: ARCHIVE (past broadcast) / HIGHLIGHT / UPLOAD / ...
+ *       VideoSort: TIME / TIME_ASC / VIEWS
+ *   - user(login:).clips(first, criteria: UserClipsInput)
+ *       UserClipsInput { period: ClipsPeriod, sort: ClipsSort, ... }
+ *       ClipsPeriod: LAST_DAY / LAST_WEEK / LAST_MONTH / ALL_TIME
+ *       ClipsSort: VIEWS_DESC / VIEWS_ASC / CREATED_AT_DESC / CREATED_AT_ASC
+ *   - Video: id, title, lengthSeconds (use; `duration` deprecated), viewCount,
+ *       createdAt, previewThumbnailURL(width,height), game{name,displayName}
+ *   - Clip: id, slug, title, durationSeconds, viewCount, createdAt,
+ *       thumbnailURL(width,height), game{name,displayName}, curator{login,displayName}
+ *
+ * Playback: clip media is fetched as direct MP4 URLs via clip(slug:).videoQualities
+ * (anonymous) — streamlink 8.4.0 cannot resolve clips (PersistedQueryNotFound),
+ * so clips play natively from these sourceURLs without streamlink. VODs resolve
+ * through the Rust `resolve_vod` command (streamlink, CloudFront allowlist).
+ * ============================================================================
+ */
+
+const CHANNEL_VIDEOS_FIRST = 100
+const CHANNEL_CLIPS_FIRST = 100
+
+// Clip thumbnail "valid sizes" per the schema are 86x45 / 260x147 / 480x272;
+// 480x272 is the largest crisp option. Video thumbnails are templated to 320x180.
+const CLIP_THUMB_W = 480
+const CLIP_THUMB_H = 272
+
+/** The BroadcastType values we surface as sections. */
+export type VideoBroadcastType = 'ARCHIVE' | 'HIGHLIGHT'
+
+export interface ChannelVideo {
+  id: string
+  title: string
+  lengthSeconds: number
+  viewCount: number
+  createdAt: string
+  thumbnailUrl: string
+  broadcastType: string
+  game: string
+}
+
+export interface ChannelClip {
+  id: string
+  slug: string
+  title: string
+  durationSeconds: number
+  viewCount: number
+  createdAt: string
+  thumbnailUrl: string
+  game: string
+  curator: string
+}
+
+export interface ClipQuality {
+  quality: string
+  frameRate: number
+  sourceUrl: string
+}
+
+export interface ClipMedia {
+  id: string
+  title: string
+  durationSeconds: number
+  qualities: ClipQuality[]
+}
+
+interface RawChannelVideo {
+  id: string
+  title?: string | null
+  lengthSeconds?: number | null
+  viewCount?: number | null
+  createdAt?: string | null
+  previewThumbnailURL?: string | null
+  broadcastType?: string | null
+  game?: { name?: string; displayName?: string } | null
+}
+interface RawChannelClip {
+  id: string
+  slug?: string | null
+  title?: string | null
+  durationSeconds?: number | null
+  viewCount?: number | null
+  createdAt?: string | null
+  thumbnailURL?: string | null
+  game?: { name?: string; displayName?: string } | null
+  curator?: { login?: string; displayName?: string } | null
+}
+interface RawClipQuality {
+  quality?: string | null
+  frameRate?: number | null
+  sourceURL?: string | null
+}
+interface RawClipMedia {
+  id: string
+  title?: string | null
+  durationSeconds?: number | null
+  videoQualities?: (RawClipQuality | null)[] | null
+}
+
+const CHANNEL_VIDEOS_QUERY = `
+  query($login: String!, $first: Int!, $type: BroadcastType!) {
+    user(login: $login) {
+      videos(first: $first, type: $type, sort: TIME) {
+        edges {
+          node {
+            id
+            title
+            lengthSeconds
+            viewCount
+            createdAt
+            previewThumbnailURL(width: ${THUMB_W}, height: ${THUMB_H})
+            broadcastType
+            game {
+              id
+              name
+              displayName
+            }
+          }
+        }
+      }
+    }
+  }
+`
+
+const CLIP_MEDIA_QUERY = `
+  query($slug: ID!) {
+    clip(slug: $slug) {
+      id
+      title
+      durationSeconds
+      videoQualities {
+        quality
+        frameRate
+        sourceURL
+      }
+    }
+  }
+`
+
+// Clip slugs are alphanumeric words joined by dashes/underscores, e.g.
+// "CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4". Validated before the slug is
+// sent in a GQL variable so a malformed/external value can never be issued.
+const CLIP_SLUG_RE = /^[A-Za-z0-9_-]{1,100}$/
+
+export function isValidClipSlug(slug: string): boolean {
+  return CLIP_SLUG_RE.test(slug)
+}
+
+function toChannelVideo(node: RawChannelVideo | null | undefined): ChannelVideo | null {
+  if (!node || !node.id) return null
+  return {
+    id: node.id,
+    title: node.title ?? '',
+    lengthSeconds: typeof node.lengthSeconds === 'number' ? node.lengthSeconds : 0,
+    viewCount: typeof node.viewCount === 'number' ? node.viewCount : 0,
+    createdAt: node.createdAt ?? '',
+    thumbnailUrl: node.previewThumbnailURL ?? '',
+    broadcastType: node.broadcastType ?? '',
+    game: node.game?.displayName ?? node.game?.name ?? '',
+  }
+}
+
+function toChannelClip(node: RawChannelClip | null | undefined): ChannelClip | null {
+  if (!node || !node.id || !node.slug) return null
+  return {
+    id: node.id,
+    slug: node.slug,
+    title: node.title ?? '',
+    durationSeconds: typeof node.durationSeconds === 'number' ? node.durationSeconds : 0,
+    viewCount: typeof node.viewCount === 'number' ? node.viewCount : 0,
+    createdAt: node.createdAt ?? '',
+    thumbnailUrl: node.thumbnailURL ?? '',
+    game: node.game?.displayName ?? node.game?.name ?? '',
+    curator: node.curator?.displayName ?? node.curator?.login ?? '',
+  }
+}
+
+/**
+ * Fetch a channel's videos of one broadcast type (ARCHIVE = past broadcasts,
+ * HIGHLIGHT = highlights). Returns most-recent-first; empty is a success.
+ */
+export async function fetchChannelVideos(
+  login: string,
+  type: VideoBroadcastType,
+  signal?: AbortSignal,
+): Promise<ChannelVideo[]> {
+  const data = await gqlRequest<{
+    user?: { videos?: { edges?: ({ node?: RawChannelVideo | null } | null)[] | null } | null } | null
+  }>(CHANNEL_VIDEOS_QUERY, { login, first: CHANNEL_VIDEOS_FIRST, type }, signal)
+  const edges = data?.user?.videos?.edges ?? []
+  const out: ChannelVideo[] = []
+  for (const edge of edges) {
+    const v = toChannelVideo(edge?.node ?? null)
+    if (v) out.push(v)
+  }
+  return out
+}
+
+export type ClipsPeriod = 'ALL_TIME' | 'LAST_WEEK'
+
+/**
+ * Fetch a channel's clips. `period` selects ALL_TIME (popular, VIEWS_DESC)
+ * or LAST_WEEK (recent, still VIEWS_DESC — CREATED_AT_DESC fails with a
+ * server error on anonymous GQL). Empty is a success — many channels have
+ * no clips.
+ */
+export async function fetchChannelClips(
+  login: string,
+  period: ClipsPeriod = 'ALL_TIME',
+  signal?: AbortSignal,
+): Promise<ChannelClip[]> {
+  const query = `
+  query($login: String!, $first: Int!) {
+    user(login: $login) {
+      clips(first: $first, criteria: { period: ${period}, sort: VIEWS_DESC }) {
+        edges {
+          node {
+            id
+            slug
+            title
+            durationSeconds
+            viewCount
+            createdAt
+            thumbnailURL(width: ${CLIP_THUMB_W}, height: ${CLIP_THUMB_H})
+            game {
+              id
+              name
+              displayName
+            }
+            curator {
+              id
+              login
+              displayName
+            }
+          }
+        }
+      }
+    }
+  }
+`
+  const data = await gqlRequest<{
+    user?: { clips?: { edges?: ({ node?: RawChannelClip | null } | null)[] | null } | null } | null
+  }>(query, { login, first: CHANNEL_CLIPS_FIRST }, signal)
+  const edges = data?.user?.clips?.edges ?? []
+  const out: ChannelClip[] = []
+  for (const edge of edges) {
+    const c = toChannelClip(edge?.node ?? null)
+    if (c) out.push(c)
+  }
+  return out
+}
+
+/**
+ * Resolve a clip's direct MP4 media URLs (anonymous). streamlink 8.4.0 cannot
+ * resolve clips (PersistedQueryNotFound), so clips play natively from these
+ * sourceURLs. Qualities are returned highest-first (1080→360). Throws on an
+ * unknown slug or transport failure; the caller surfaces an error.
+ */
+export async function fetchClipMedia(slug: string, signal?: AbortSignal): Promise<ClipMedia> {
+  if (!isValidClipSlug(slug)) throw new Error('invalid clip slug')
+  const data = await gqlRequest<{ clip?: RawClipMedia | null }>(
+    CLIP_MEDIA_QUERY,
+    { slug },
+    signal,
+  )
+  const clip = data?.clip ?? null
+  if (!clip || !clip.id) throw new Error('clip not found')
+  const qualities: ClipQuality[] = []
+  for (const q of clip.videoQualities ?? []) {
+    if (q && q.sourceURL && q.quality) {
+      qualities.push({
+        quality: q.quality,
+        frameRate: typeof q.frameRate === 'number' ? q.frameRate : 0,
+        sourceUrl: q.sourceURL,
+      })
+    }
+  }
+  if (qualities.length === 0) throw new Error('clip has no playable media')
+  // Highest numeric quality first (1080 before 360).
+  qualities.sort((a, b) => Number(b.quality) - Number(a.quality))
+  return {
+    id: clip.id,
+    title: clip.title ?? '',
+    durationSeconds: typeof clip.durationSeconds === 'number' ? clip.durationSeconds : 0,
+    qualities,
+  }
+}

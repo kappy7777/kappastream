@@ -382,3 +382,180 @@ describe('gql abort support', () => {
     await expect(G.searchChannels('x', controller.signal)).rejects.toThrow('aborted')
   })
 })
+
+describe('gql channel content — videos', () => {
+  it('parses video edges into ChannelVideo', async () => {
+    gql.handler = async () =>
+      ok({
+        user: {
+          videos: {
+            edges: [
+              {
+                node: {
+                  id: '111',
+                  title: 'Yesterday stream',
+                  lengthSeconds: 7200,
+                  viewCount: 1234,
+                  createdAt: '2026-07-20T00:00:00Z',
+                  previewThumbnailURL: 'https://img/t.jpg',
+                  broadcastType: 'ARCHIVE',
+                  game: { id: 'g', name: 'just-chatting', displayName: 'Just Chatting' },
+                },
+              },
+            ],
+          },
+        },
+      })
+
+    const vids = await G.fetchChannelVideos('summit1g', 'ARCHIVE')
+    expect(vids).toHaveLength(1)
+    expect(vids[0]).toMatchObject({
+      id: '111',
+      title: 'Yesterday stream',
+      lengthSeconds: 7200,
+      viewCount: 1234,
+      thumbnailUrl: 'https://img/t.jpg',
+      broadcastType: 'ARCHIVE',
+      game: 'Just Chatting',
+    })
+    // The type + first are forwarded; no `after`.
+    expect(lastVars()).toMatchObject({ login: 'summit1g', first: 100, type: 'ARCHIVE' })
+    expect(lastVars()).not.toHaveProperty('after')
+  })
+
+  it('treats an empty / no-videos channel as a success (returns [])', async () => {
+    gql.handler = async () => ok({ user: { videos: { edges: [] } } })
+    await expect(G.fetchChannelVideos('esl_csgo', 'HIGHLIGHT')).resolves.toEqual([])
+  })
+
+  it('treats a null user as a success (returns [])', async () => {
+    gql.handler = async () => ok({ user: null })
+    await expect(G.fetchChannelVideos('ghost', 'ARCHIVE')).resolves.toEqual([])
+  })
+
+  it('throws on transport failure rather than returning []', async () => {
+    gql.handler = async () => {
+      throw new Error('HTTP 500')
+    }
+    await expect(G.fetchChannelVideos('x', 'ARCHIVE')).rejects.toThrow('HTTP 500')
+  })
+})
+
+describe('gql channel content — clips', () => {
+  it('parses clip edges into ChannelClip', async () => {
+    gql.handler = async () =>
+      ok({
+        user: {
+          clips: {
+            edges: [
+              {
+                node: {
+                  id: '222',
+                  slug: 'CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4',
+                  title: 'Best moment',
+                  durationSeconds: 42,
+                  viewCount: 9999,
+                  createdAt: '2026-07-01T00:00:00Z',
+                  thumbnailURL: 'https://img/c.jpg',
+                  game: { id: 'g', name: 'valorant', displayName: 'VALORANT' },
+                  curator: { id: '9', login: 'clipper', displayName: 'Clipper' },
+                },
+              },
+            ],
+          },
+        },
+      })
+
+    const clips = await G.fetchChannelClips('kaicenat')
+    expect(clips).toHaveLength(1)
+    expect(clips[0]).toMatchObject({
+      slug: 'CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4',
+      title: 'Best moment',
+      durationSeconds: 42,
+      viewCount: 9999,
+      game: 'VALORANT',
+      curator: 'Clipper',
+    })
+    // ALL_TIME + VIEWS_DESC + first:100, no `after`.
+    expect(gql.calls.at(-1) ?? '').toContain('ALL_TIME')
+    expect(gql.calls.at(-1) ?? '').toContain('VIEWS_DESC')
+    expect(lastVars()).toMatchObject({ login: 'kaicenat', first: 100 })
+  })
+
+  it('treats a channel with no clips as a success (returns [])', async () => {
+    gql.handler = async () => ok({ user: { clips: { edges: [] } } })
+    await expect(G.fetchChannelClips('no-clips-channel')).resolves.toEqual([])
+  })
+
+  it('throws on transport failure rather than returning []', async () => {
+    gql.handler = async () => gqlErrors()
+    await expect(G.fetchChannelClips('x')).rejects.toThrow()
+  })
+})
+
+describe('gql channel content — clip media', () => {
+  it('parses videoQualities sorted highest quality first', async () => {
+    gql.handler = async () =>
+      ok({
+        clip: {
+          id: '333',
+          title: 'broo',
+          durationSeconds: 5,
+          videoQualities: [
+            { quality: '480', frameRate: 30, sourceURL: 'https://d.cloudfront.net/480.mp4' },
+            { quality: '1080', frameRate: 60, sourceURL: 'https://d.cloudfront.net/1080.mp4' },
+            { quality: '720', frameRate: 60, sourceURL: 'https://d.cloudfront.net/720.mp4' },
+          ],
+        },
+      })
+
+    const media = await G.fetchClipMedia('SomeSlug-abc123')
+    expect(media.id).toBe('333')
+    expect(media.qualities.map((q) => q.quality)).toEqual(['1080', '720', '480'])
+    expect(media.qualities[0].sourceUrl).toBe('https://d.cloudfront.net/1080.mp4')
+  })
+
+  it('throws "clip not found" for an unknown slug (null clip)', async () => {
+    gql.handler = async () => ok({ clip: null })
+    await expect(G.fetchClipMedia('NoSuchSlug-x')).rejects.toThrow('clip not found')
+  })
+
+  it('throws if the slug fails validation before any request', async () => {
+    gql.handler = async () => ok({ clip: { id: '1', videoQualities: [] } })
+    await expect(G.fetchClipMedia('bad slug!')).rejects.toThrow('invalid clip slug')
+    await expect(G.fetchClipMedia('')).rejects.toThrow('invalid clip slug')
+    // No request should have been issued for the invalid slug.
+    expect(gql.calls).toHaveLength(0)
+  })
+
+  it('throws when the clip has no playable media', async () => {
+    gql.handler = async () => ok({ clip: { id: '1', videoQualities: [] } })
+    await expect(G.fetchClipMedia('GoodSlug-1')).rejects.toThrow('no playable media')
+  })
+
+  it('throws on transport failure', async () => {
+    gql.handler = async () => {
+      throw new Error('HTTP 502')
+    }
+    await expect(G.fetchClipMedia('GoodSlug-1')).rejects.toThrow('HTTP 502')
+  })
+})
+
+describe('gql channel content — clip slug validator', () => {
+  it('accepts real Twitch clip slugs', () => {
+    expect(G.isValidClipSlug('CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4')).toBe(true)
+    expect(G.isValidClipSlug('SwissManlyKangarooPRChase-fCO_OHO9QUIuPGlg')).toBe(true)
+    expect(G.isValidClipSlug('GoodAlertBurritoTheTarFu')).toBe(true)
+  })
+
+  it('rejects malformed / injection slugs', () => {
+    expect(G.isValidClipSlug('')).toBe(false)
+    expect(G.isValidClipSlug('bad slug')).toBe(false) // space
+    expect(G.isValidClipSlug('bad/slug')).toBe(false) // path separator
+    expect(G.isValidClipSlug('bad?slug')).toBe(false) // query
+    expect(G.isValidClipSlug('bad#slug')).toBe(false) // fragment
+    expect(G.isValidClipSlug("bad'slug")).toBe(false) // quote
+    expect(G.isValidClipSlug('twitch.tv/x/clip/slug')).toBe(false) // url
+    expect(G.isValidClipSlug('a'.repeat(101))).toBe(false) // too long
+  })
+})

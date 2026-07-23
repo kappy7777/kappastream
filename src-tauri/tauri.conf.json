@@ -50,7 +50,10 @@
           "https://twitch.tv",
           "https://*.twitch.tv",
           "https://ttv-clips.net",
-          "https://*.ttv-clips.net"
+          "https://*.ttv-clips.net",
+          "https://cloudfront.net",
+          "https://*.cloudfront.net",
+          "ksvod:"
         ],
         "media-src": [
           "'self'",
@@ -60,7 +63,9 @@
           "https://twitch.tv",
           "https://*.twitch.tv",
           "https://ttv-clips.net",
-          "https://*.ttv-clips.net"
+          "https://*.ttv-clips.net",
+          "https://cloudfront.net",
+          "https://*.cloudfront.net"
         ],
         "worker-src": ["'self'", "blob:"],
         "child-src": ["'self'", "blob:"]
@@ -95,7 +100,10 @@
           "https://twitch.tv",
           "https://*.twitch.tv",
           "https://ttv-clips.net",
-          "https://*.ttv-clips.net"
+          "https://*.ttv-clips.net",
+          "https://cloudfront.net",
+          "https://*.cloudfront.net",
+          "ksvod:"
         ],
         "media-src": [
           "'self'",
@@ -105,7 +113,9 @@
           "https://twitch.tv",
           "https://*.twitch.tv",
           "https://ttv-clips.net",
-          "https://*.ttv-clips.net"
+          "https://*.ttv-clips.net",
+          "https://cloudfront.net",
+          "https://*.cloudfront.net"
         ],
         "worker-src": ["'self'", "blob:"],
         "child-src": ["'self'", "blob:"]

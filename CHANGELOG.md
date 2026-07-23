@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Channel content: past broadcasts, highlights, and clips.** With a
+  channel open in side-by-side mode, scroll past the status bar to browse
+  that channel's Past Broadcasts, Highlights, Recent Clips, and Popular
+  Clips. A **Videos** button next to the notify toggle smooth-scrolls down
+  to the content.
+- **VOD and clip playback.** Selecting a past broadcast, highlight, or clip
+  plays it in the main player. mpv handoff and Picture-in-Picture work for
+  VODs and clips too. A **Back to live** control returns to the stream.
+
+### Fixed
+
+- **Seek-bar offset at UI scale above 1×.** The seek bar tooltip and click
+  position no longer drift to the right when the UI scale is increased.
+
 ## [0.2.3] - 2026-07-22
 
 ### Added

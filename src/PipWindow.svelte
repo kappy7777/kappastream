@@ -24,9 +24,11 @@
     url: string
     volume: number
     muted: boolean
+    mediaKind?: 'hls' | 'mp4'
   }
   interface StreamPayload {
     url: string
+    mediaKind?: 'hls' | 'mp4'
   }
 
   let videoEl: HTMLVideoElement | undefined = $state()
@@ -48,12 +50,21 @@
   let snapTimer: ReturnType<typeof setTimeout> | null = null
   let suppressSnapUntil = 0
 
-  function loadSource(url: string): void {
+  function loadSource(url: string, mediaKind: 'hls' | 'mp4' = 'hls'): void {
     if (!videoEl) return
     loading = true
     errorMsg = ''
     needsGesture = false
     if (hls) { try { hls.destroy() } catch { /* ignore */ } hls = null }
+
+    if (mediaKind === 'mp4') {
+      videoEl.src = url
+      videoEl.play().then(() => { loading = false }).catch(() => {
+        needsGesture = true
+        loading = false
+      })
+      return
+    }
 
     if (Hls.isSupported()) {
       const inst = new Hls(buildHlsConfig(settings.lowLatency))
@@ -179,12 +190,12 @@
       volume = typeof p.volume === 'number' ? Math.max(0, Math.min(1, p.volume)) : 1
       muted = !!p.muted
       if (videoEl) { videoEl.volume = volume; videoEl.muted = muted }
-      loadSource(p.url)
+      loadSource(p.url, p.mediaKind ?? 'hls')
     })
     unlisteners.push(uInit)
 
     const uStream = await listen<StreamPayload>(EV_STREAM, (e) => {
-      loadSource(e.payload.url)
+      loadSource(e.payload.url, e.payload.mediaKind ?? 'hls')
     })
     unlisteners.push(uStream)
 

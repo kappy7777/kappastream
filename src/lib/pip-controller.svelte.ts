@@ -10,8 +10,8 @@ import { settings } from './settings.svelte.ts'
 // while open and the main video is force-muted (without persisting that mute).
 //
 // Everything is coordinated over Tauri global events:
-//   main -> pip   ks://pip-init       { url, channel, quality, volume, muted }
-//   main -> pip   ks://pip-stream     { url }              (channel/quality change)
+//   main -> pip   ks://pip-init       { url, channel, quality, volume, muted, mediaKind? }
+//   main -> pip   ks://pip-stream     { url, mediaKind? }    (channel/quality change)
 //   main -> pip   ks://pip-do-close                        (main requests close)
 //   pip  -> main  ks://pip-ready                           (pip listening, wants init)
 //   pip  -> main  ks://pip-volume     { volume, muted }    (pip is audio authority)
@@ -38,6 +38,7 @@ interface StreamInfo {
   url: string
   channel: string
   quality: string
+  mediaKind?: 'hls' | 'mp4'
 }
 
 function readRect(): PipRect | null {
@@ -107,7 +108,7 @@ class PipController {
     this.currentStream = info
     if (!this.isOpen) return
     if (!isTauri()) return
-    void emit(EV_STREAM, { url: info.url })
+    void emit(EV_STREAM, { url: info.url, mediaKind: info.mediaKind ?? 'hls' })
   }
 
   /** Called when the stream tears down (channel change, stop). Closes PiP. */
@@ -163,9 +164,8 @@ class PipController {
       url: this.currentStream.url,
       channel: this.currentStream.channel,
       quality: this.currentStream.quality,
+      mediaKind: this.currentStream.mediaKind ?? 'hls',
       volume: settings.volume,
-      // PiP opens unmuted even if the persisted state was muted; it is the
-      // audio source. The user can mute it from the PiP controls.
       muted: false,
     })
   }
