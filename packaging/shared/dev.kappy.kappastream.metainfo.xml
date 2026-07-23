@@ -74,6 +74,17 @@
   </content_rating>
 
   <releases>
+    <release version="0.2.4" date="2026-07-23">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.4</url>
+      <description>
+        <p>Channel content and VOD playback. Browse a channel's past
+        broadcasts, highlights, and clips below the status bar (a Videos
+        button smooth-scrolls to them). Play VODs and clips in the main
+        player, with mpv handoff and Picture-in-Picture support. A Back to
+        live control returns to the stream. Also fixes a seek-bar offset
+        issue at UI scales above 1×.</p>
+      </description>
+    </release>
     <release version="0.2.3" date="2026-07-22">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.3</url>
       <description>
