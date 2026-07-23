@@ -54,7 +54,10 @@ export async function getTwitchUserId(username: string, signal?: AbortSignal): P
     // (gql_fetch) and primary/DecAPI posture stay uniform across the app.
     const ids = await resolveUserIds([username], signal)
     if (signal?.aborted) return null
-    return ids.get(username) ?? null
+    // Twitch returns `login` in canonical lowercase, so the map is keyed
+    // lowercase. Match that here — a mixed-case channel name (e.g. "Lirik")
+    // would otherwise miss and silently drop that channel's third-party emotes.
+    return ids.get(username.toLowerCase()) ?? null
   } catch {
     return null
   }

@@ -142,9 +142,30 @@ async function gqlRequest<T = Record<string, unknown>>(
   // execute (schema drift, persistent-query issue, rate limit, …) — treat it
   // as a transport failure so callers surface an error rather than empty data.
   if (!parsed || parsed.errors || typeof parsed.data !== 'object' || parsed.data === null) {
-    throw new Error('gql errors')
+    const reason = parsed?.errors ? gqlErrorReason(parsed.errors) : 'no data'
+    throw new Error('gql: ' + reason)
   }
   return parsed.data as T
+}
+
+/**
+ * Best-effort human reason from a GQL `errors[]` payload (unknown shape).
+ * Returns the first entry's `message` when one is present, else a generic
+ * label. Surfaced through the thrown Error so discovery callers can show WHY a
+ * request failed instead of a bare "failed" — e.g. the real
+ * "IntegrityCheckFailed" an anonymous-cursor attempt produces, which previously
+ * took a multi-step curl to find because the flat `'gql errors'` hid it.
+ */
+function gqlErrorReason(errors: unknown): string {
+  if (Array.isArray(errors)) {
+    for (const e of errors) {
+      if (e && typeof e === 'object' && 'message' in e) {
+        const msg = (e as { message: unknown }).message
+        if (typeof msg === 'string' && msg.length > 0) return msg
+      }
+    }
+  }
+  return 'gql errors'
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -230,6 +251,15 @@ export async function fetchChannelStatuses(
       signal,
     )
     const users = data?.users ?? []
+    // A short `users` array (fewer entries than requested) is anomalous — a
+    // legitimate batch always returns one positional entry per login (null for
+    // unknown). Zipping positionally with `users[i] ?? null` would silently mark
+    // every unreturned channel offline; throw so the caller falls back to DecAPI
+    // rather than reporting a wrong status. (Note: `{"data":null}` is already
+    // rejected upstream in gqlRequest via the `data === null` check.)
+    if (users.length !== batch.length) {
+      throw new Error('gql short response')
+    }
     for (let i = 0; i < batch.length; i++) {
       const status = toChannelStatus(users[i] ?? null)
       // Preserve the input login for null (nonexistent) entries, since the

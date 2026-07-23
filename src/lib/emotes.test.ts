@@ -94,6 +94,22 @@ describe('7TV set-entry alias', () => {
   })
 })
 
+describe('getTwitchUserId case-insensitivity', () => {
+  it('resolves a mixed-case channel name against Twitch lowercase logins', async () => {
+    // Twitch returns `login` lowercase; the lookup must lowercase to match, or
+    // a mixed-case channel name (from search/browse/ChannelContent) silently
+    // drops that channel's third-party emotes.
+    tauriInvoke.handler = async (cmd: string) => {
+      if (cmd === 'gql_fetch') {
+        return JSON.stringify({ data: { users: [{ id: '12345', login: 'lirik' }] } })
+      }
+      throw new Error('unexpected invoke: ' + cmd)
+    }
+    const id = await E.getTwitchUserId('Lirik')
+    expect(id).toBe('12345')
+  })
+})
+
 describe('7TV PERSONAL/LISTED state', () => {
   it('survives into the channel map (PERSONAL is an eligibility flag, not a filter)', async () => {
     // Real responses carry state: ["PERSONAL", "LISTED"] on ordinary public

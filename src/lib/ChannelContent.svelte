@@ -48,6 +48,17 @@
   let pcStatus = $state<Status>('idle')
   let rcStatus = $state<Status>('idle')
 
+  // Last failure reason per section ('' when none) — surfaced from the rejected
+  // Promise so the Retry UI shows WHY a fetch failed, not just that it did.
+  let aErrorMessage = $state('')
+  let hErrorMessage = $state('')
+  let pcErrorMessage = $state('')
+  let rcErrorMessage = $state('')
+
+  function reasonOf(reason: unknown): string {
+    return reason instanceof Error ? reason.message : reason == null ? '' : String(reason)
+  }
+
   // The channel we have fetched for (null = not yet fetched). Guards the
   // IntersectionObserver so it only fires once per channel.
   let fetchedChannel = $state<string | null>(null)
@@ -67,6 +78,10 @@
     hStatus = 'idle'
     pcStatus = 'idle'
     rcStatus = 'idle'
+    aErrorMessage = ''
+    hErrorMessage = ''
+    pcErrorMessage = ''
+    rcErrorMessage = ''
     fetchedChannel = null
   }
 
@@ -80,6 +95,10 @@
     hStatus = 'loading'
     pcStatus = 'loading'
     rcStatus = 'loading'
+    aErrorMessage = ''
+    hErrorMessage = ''
+    pcErrorMessage = ''
+    rcErrorMessage = ''
 
     const [a, h, pc, rc] = await Promise.allSettled([
       fetchChannelVideos(ch, 'ARCHIVE', signal),
@@ -95,29 +114,37 @@
       archives = a.value
       archivesVisible = CC_VOD_INITIAL
       aStatus = 'ready'
+      aErrorMessage = ''
     } else {
       aStatus = 'error'
+      aErrorMessage = reasonOf(a.reason)
     }
     if (h.status === 'fulfilled') {
       highlights = h.value
       highlightsVisible = CC_VOD_INITIAL
       hStatus = 'ready'
+      hErrorMessage = ''
     } else {
       hStatus = 'error'
+      hErrorMessage = reasonOf(h.reason)
     }
     if (pc.status === 'fulfilled') {
       popularClips = pc.value
       popularClipsVisible = CC_CLIP_INITIAL
       pcStatus = 'ready'
+      pcErrorMessage = ''
     } else {
       pcStatus = 'error'
+      pcErrorMessage = reasonOf(pc.reason)
     }
     if (rc.status === 'fulfilled') {
       recentClips = rc.value
       recentClipsVisible = CC_CLIP_INITIAL
       rcStatus = 'ready'
+      rcErrorMessage = ''
     } else {
       rcStatus = 'error'
+      rcErrorMessage = reasonOf(rc.reason)
     }
   }
 
@@ -202,6 +229,7 @@
     {:else if aStatus === 'error'}
       <div class="cc-status cc-status--error">
         Failed to load past broadcasts.
+        {#if aErrorMessage}<span class="cc-status-reason">{aErrorMessage}</span>{/if}
         <button type="button" class="cc-retry" onclick={retryAll}>Retry</button>
       </div>
     {:else if aStatus === 'ready' && archives.length === 0}
@@ -234,6 +262,7 @@
     {:else if hStatus === 'error'}
       <div class="cc-status cc-status--error">
         Failed to load highlights.
+        {#if hErrorMessage}<span class="cc-status-reason">{hErrorMessage}</span>{/if}
         <button type="button" class="cc-retry" onclick={retryAll}>Retry</button>
       </div>
     {:else if hStatus === 'ready' && highlights.length === 0}
@@ -266,6 +295,7 @@
     {:else if rcStatus === 'error'}
       <div class="cc-status cc-status--error">
         Failed to load recent clips.
+        {#if rcErrorMessage}<span class="cc-status-reason">{rcErrorMessage}</span>{/if}
         <button type="button" class="cc-retry" onclick={retryAll}>Retry</button>
       </div>
     {:else if rcStatus === 'ready' && recentClips.length === 0}
@@ -298,6 +328,7 @@
     {:else if pcStatus === 'error'}
       <div class="cc-status cc-status--error">
         Failed to load popular clips.
+        {#if pcErrorMessage}<span class="cc-status-reason">{pcErrorMessage}</span>{/if}
         <button type="button" class="cc-retry" onclick={retryAll}>Retry</button>
       </div>
     {:else if pcStatus === 'ready' && popularClips.length === 0}
@@ -359,7 +390,15 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .cc-status-reason {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-style: italic;
+    word-break: break-word;
   }
 
   .cc-retry {

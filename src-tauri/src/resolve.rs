@@ -319,7 +319,10 @@ pub async fn resolve_stream(
 // Twitch's CloudFront distribution (e.g. d2nvs31859zcd8.cloudfront.net), which
 // the live `resolve_stream` allowlist below intentionally does NOT include.
 // The VOD path gets its own broader host set so the live path stays untouched.
-fn is_allowed_vod_host(host: &str) -> bool {
+// Shared (pub(crate)) with vod_proxy.rs so the proxy validates fetches against
+// the SAME single list — two copies would silently drift (a security-relevant
+// failure mode). The proxy comment used to say "mirrors"; it now uses this.
+pub(crate) fn is_allowed_vod_host(host: &str) -> bool {
     host == "twitch.tv"
         || host.ends_with(".twitch.tv")
         || host == "ttvnw.net"

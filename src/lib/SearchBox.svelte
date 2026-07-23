@@ -36,6 +36,7 @@
   let activeIndex = $state(-1)
   type Phase = 'idle' | 'loading' | 'results' | 'empty' | 'error'
   let phase = $state<Phase>('idle')
+  let errorMessage = $state('')
   let focused = $state(false)
 
   let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -64,11 +65,13 @@
       results = []
       activeIndex = -1
       phase = 'idle'
+      errorMessage = ''
       return
     }
     // Opening a query flips to loading immediately so the panel appears.
     phase = 'loading'
     activeIndex = -1
+    errorMessage = ''
     const query = q
     searchTimer = setTimeout(async () => {
       const controller = new AbortController()
@@ -80,12 +83,13 @@
         results = res
         activeIndex = -1
         phase = res.length > 0 ? 'results' : 'empty'
-      } catch {
+      } catch (err) {
         if (searchController !== controller) return
         // An abort from a newer keystroke is not a user-facing error.
         if (controller.signal.aborted) return
         results = []
         activeIndex = -1
+        errorMessage = err instanceof Error ? err.message : ''
         phase = 'error'
       } finally {
         if (searchController === controller) searchController = null
@@ -175,6 +179,7 @@
     results = []
     activeIndex = -1
     phase = 'idle'
+    errorMessage = ''
     if (searchController) {
       searchController.abort()
       searchController = null
@@ -224,6 +229,7 @@
       {:else if phase === 'error'}
         <div class="search-status search-status--error">
           Search failed — press Enter to connect to the typed name directly.
+          {#if errorMessage}<span class="search-status-reason">{errorMessage}</span>{/if}
         </div>
       {:else if phase === 'empty'}
         <div class="search-status">No channels found — press Enter to connect directly.</div>
@@ -336,6 +342,15 @@
 
   .search-status--error {
     color: var(--live);
+  }
+
+  .search-status-reason {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-style: italic;
+    word-break: break-word;
   }
 
   .search-opt {

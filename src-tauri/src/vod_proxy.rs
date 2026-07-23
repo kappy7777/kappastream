@@ -1,3 +1,4 @@
+use futures_util::StreamExt;
 use std::borrow::Cow;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -19,35 +20,46 @@ use std::time::Duration;
 // also go through the proxy automatically.
 
 const PROXY_TIMEOUT: Duration = Duration::from_secs(30);
+// Bound only the connect (TCP + TLS handshake) phase, independently of the
+// overall request timeout. A hung connection (e.g. a blackholed CDN edge) then
+// fails fast instead of holding the handler for the full PROXY_TIMEOUT. The
+// overall `.timeout()` still bounds headers + body; with Range support the body
+// is a small byte-range segment, so 30 s overall is ample for a progressing
+// download. (See finding #12: `.timeout()` alone covers the whole request.)
+const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+// Upper bound on a single proxied response (manifest or segment). hls.js fetches
+// one resource per request; a multi-hour VOD `index-dvr.m3u8` can run to a few
+// MB and a full un-ranged .ts resource backing many byte-range segments can be
+// tens of MB, so 64 MB is generous for any legitimate payload while still
+// bounding memory against a hostile or broken upstream. Mirrors the streaming
+// cap in gql.rs (far smaller there because GQL payloads are kilobytes).
+const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 
 static PROXY_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 fn proxy_client() -> &'static reqwest::Client {
     PROXY_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
+            // Redirects are disabled on purpose: `reconstruct_https_url`
+            // validates only the *initial* URL against the shared VOD allowlist,
+            // so following a 302 would let an allowlisted host bounce the fetch
+            // to an arbitrary destination and relay the body back to the WebView
+            // (with CORS *). A redirect surfaces as its 3xx status instead; if a
+            // path genuinely needs one, re-validate each hop via `Policy::custom`
+            // rather than re-enabling the default (10-hop) follower.
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(PROXY_CONNECT_TIMEOUT)
             .timeout(PROXY_TIMEOUT)
             .build()
             .expect("failed to build VOD proxy HTTP client")
     })
 }
 
-/// Only Twitch media CDNs are proxied — the handler refuses anything else so
-/// it can never be abused as a general-purpose open proxy. Mirrors the VOD
-/// host allowlist in resolve.rs.
-fn is_allowed_media_host(host: &str) -> bool {
-    host == "cloudfront.net"
-        || host.ends_with(".cloudfront.net")
-        || host == "ttvnw.net"
-        || host.ends_with(".ttvnw.net")
-        || host == "ttv-clips.net"
-        || host.ends_with(".ttv-clips.net")
-        || host == "twitch.tv"
-        || host.ends_with(".twitch.tv")
-}
-
 /// Parse the custom-scheme URI (`ksvod://localhost/host/path?q=1`) and
 /// reconstruct the original HTTPS URL (`https://host/path?q=1`). Returns
-/// `None` if the host extracted from the path is not on the allowlist.
+/// `None` if the host extracted from the path is not on the shared VOD
+/// allowlist (see `resolve::is_allowed_vod_host`).
 fn reconstruct_https_url(raw_uri: &str) -> Option<String> {
     // The path component after "ksvod://localhost/" encodes the original
     // "host/path?query". Strip the prefix, prepend "https://", and validate.
@@ -64,7 +76,7 @@ fn reconstruct_https_url(raw_uri: &str) -> Option<String> {
         return None;
     }
     let host = parsed.host_str()?;
-    if !is_allowed_media_host(host) {
+    if !crate::resolve::is_allowed_vod_host(host) {
         return None;
     }
     Some(target)
@@ -90,9 +102,23 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
                 return;
             }
         };
+        // Forward the Range header so hls.js can fetch byte-range segments from
+        // VOD playlists that use #EXT-X-BYTERANGE (Twitch VODs do): without it
+        // each byte-range segment would pull the whole backing resource. Clips
+        // bypass the proxy entirely (native <video src=https> hits CloudFront
+        // directly), so this only matters for the HLS path.
+        let range_header = request
+            .headers()
+            .get("range")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.to_string());
         tauri::async_runtime::spawn(async move {
             let client = proxy_client();
-            let result = client.get(&target).send().await;
+            let mut upstream = client.get(&target);
+            if let Some(range) = range_header.as_deref() {
+                upstream = upstream.header("range", range);
+            }
+            let result = upstream.send().await;
             match result {
                 Ok(resp) => {
                     let status = resp.status();
@@ -102,15 +128,85 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("application/octet-stream")
                         .to_string();
-                    let bytes = resp.bytes().await.unwrap_or_default();
-                    responder.respond(
-                        tauri::http::Response::builder()
-                            .status(status.as_u16())
-                            .header("content-type", content_type)
-                            .header("access-control-allow-origin", "*")
-                            .body(Cow::from(bytes.to_vec()))
-                            .unwrap(),
-                    );
+                    // Forward the ranged-response headers so hls.js sees the
+                    // slice bounds (206 + content-range) and knows the resource
+                    // is rangeable (accept-ranges).
+                    let content_range = resp
+                        .headers()
+                        .get("content-range")
+                        .and_then(|v| v.to_str().ok())
+                        .map(String::from);
+                    let accept_ranges = resp
+                        .headers()
+                        .get("accept-ranges")
+                        .and_then(|v| v.to_str().ok())
+                        .map(String::from);
+
+                    if resp
+                        .content_length()
+                        .is_some_and(|len| len > MAX_RESPONSE_BYTES as u64)
+                    {
+                        responder.respond(
+                            tauri::http::Response::builder()
+                                .status(413u16)
+                                .header("access-control-allow-origin", "*")
+                                .body(Cow::from(b"response too large".to_vec()))
+                                .unwrap(),
+                        );
+                        return;
+                    }
+
+                    // Stream the body with a running cap (saturating_add guards
+                    // against overflow) instead of `bytes().await` so neither a
+                    // lying Content-Length nor a chunked, unbounded body can grow
+                    // memory past MAX_RESPONSE_BYTES.
+                    let mut buf = Vec::new();
+                    let mut stream = resp.bytes_stream();
+                    let mut oversize = false;
+                    while let Some(chunk) = stream.next().await {
+                        let chunk = match chunk {
+                            Ok(c) => c,
+                            Err(_) => {
+                                // Mid-transfer read failure: surface as 502, not
+                                // a 200 with an empty body (see #4 rationale).
+                                responder.respond(
+                                    tauri::http::Response::builder()
+                                        .status(502u16)
+                                        .header("access-control-allow-origin", "*")
+                                        .body(Cow::from(b"proxy read failed".to_vec()))
+                                        .unwrap(),
+                                );
+                                return;
+                            }
+                        };
+                        if buf.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+                            oversize = true;
+                            break;
+                        }
+                        buf.extend_from_slice(&chunk);
+                    }
+                    if oversize {
+                        responder.respond(
+                            tauri::http::Response::builder()
+                                .status(413u16)
+                                .header("access-control-allow-origin", "*")
+                                .body(Cow::from(b"response too large".to_vec()))
+                                .unwrap(),
+                        );
+                        return;
+                    }
+
+                    let mut builder = tauri::http::Response::builder()
+                        .status(status.as_u16())
+                        .header("content-type", content_type)
+                        .header("access-control-allow-origin", "*");
+                    if let Some(cr) = content_range {
+                        builder = builder.header("content-range", cr);
+                    }
+                    if let Some(ar) = accept_ranges {
+                        builder = builder.header("accept-ranges", ar);
+                    }
+                    responder.respond(builder.body(Cow::from(buf)).unwrap());
                 }
                 Err(_) => {
                     responder.respond(

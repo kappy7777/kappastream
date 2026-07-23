@@ -165,7 +165,7 @@ The application contacts only the services required for playback, chat, metadata
 |---|---|
 | **Twitch IRC** — `irc-ws.chat.twitch.tv` | Read anonymous chat messages |
 | **streamlink** — local process | Resolve the selected Twitch stream |
-| **Twitch video infrastructure** — `twitch.tv`, `ttvnw.net` | Deliver video playlists and media segments |
+| **Twitch video infrastructure** — `twitch.tv`, `ttvnw.net`, `*.cloudfront.net` | Deliver live video, and VOD/clip media (CloudFront) |
 | **Twitch static CDN** — `static-cdn.jtvnw.net` | Load native emotes and chat badges |
 | **Twitch GQL** — `gql.twitch.tv` | Primary source for favorites live status, viewer count, title, game, avatar, and Twitch user-ID lookup |
 | **7TV, BTTV and FFZ** | Load third-party emotes |
@@ -174,6 +174,8 @@ The application contacts only the services required for playback, chat, metadata
 These third-party services can see normal request info like your IP address — never your Twitch account, an OAuth token, or your profile.
 
 **Data sources.** Favorites load through one batched, anonymous Twitch request per refresh. DecAPI is only used if that fails.
+
+**VODs and clips.** Past broadcasts and clips are served from Twitch's CloudFront CDN. Because CloudFront sends no CORS headers, past-broadcast HLS is fetched through a small in-app proxy (the `ksvod` URI scheme) and handed to the player; clips play directly. The proxy contacts only Twitch's own media hosts.
 
 kappastream does not use Twitch Helix or Kraken and cannot authenticate as you.
 

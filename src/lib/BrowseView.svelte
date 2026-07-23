@@ -59,6 +59,17 @@
   let gameLoading = $state(false)
   let gameError = $state(false)
 
+  // Last failure reason for each section ('' when none). Surfaced from the
+  // thrown Error so the Retry UI shows WHY a request failed, not just that it
+  // did — e.g. the real "gql: IntegrityCheckFailed" instead of a bare "failed".
+  let streamsErrorMessage = $state('')
+  let categoriesErrorMessage = $state('')
+  let gameErrorMessage = $state('')
+
+  function errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : err == null ? '' : String(err)
+  }
+
   function formatViewers(n: number): string {
     if (n < 1000) return n.toString()
     if (n < 1_000_000) {
@@ -71,11 +82,13 @@
   async function loadStreams(): Promise<void> {
     streamsLoading = true
     streamsError = false
+    streamsErrorMessage = ''
     try {
       const page = await fetchTopStreams()
       streams = page.streams
-    } catch {
+    } catch (err) {
       streamsError = true
+      streamsErrorMessage = errorMessage(err)
     } finally {
       streamsLoading = false
     }
@@ -84,13 +97,15 @@
   async function loadCategories(): Promise<void> {
     categoriesLoading = true
     categoriesError = false
+    categoriesErrorMessage = ''
     try {
       const page = await fetchTopCategories()
       categories = page.categories
       // Reset the reveal whenever the list is refetched.
       categoriesVisible = initialVisible()
-    } catch {
+    } catch (err) {
       categoriesError = true
+      categoriesErrorMessage = errorMessage(err)
     } finally {
       categoriesLoading = false
     }
@@ -100,13 +115,15 @@
     if (!activeCategory) return
     gameLoading = true
     gameError = false
+    gameErrorMessage = ''
     try {
       const page = await fetchGameStreams(activeCategory.name)
       gameStreams = page.streams
       // Reset the reveal whenever the list is refetched.
       gameStreamsVisible = initialVisible()
-    } catch {
+    } catch (err) {
       gameError = true
+      gameErrorMessage = errorMessage(err)
     } finally {
       gameLoading = false
     }
@@ -189,6 +206,7 @@
         {:else if streamsError && streams.length === 0}
           <div class="browse-status browse-status--error">
             Failed to load channels.
+            {#if streamsErrorMessage}<span class="browse-status-reason">{streamsErrorMessage}</span>{/if}
             <button type="button" class="retry-btn" onclick={() => loadStreams()}>Retry</button>
           </div>
         {:else if streams.length === 0}
@@ -238,6 +256,7 @@
         {:else if categoriesError && categories.length === 0}
           <div class="browse-status browse-status--error">
             Failed to load categories.
+            {#if categoriesErrorMessage}<span class="browse-status-reason">{categoriesErrorMessage}</span>{/if}
             <button type="button" class="retry-btn" onclick={() => loadCategories()}>Retry</button>
           </div>
         {:else if categories.length === 0}
@@ -271,6 +290,7 @@
         {:else if gameError && gameStreams.length === 0}
           <div class="browse-status browse-status--error">
             Failed to load streams.
+            {#if gameErrorMessage}<span class="browse-status-reason">{gameErrorMessage}</span>{/if}
             <button type="button" class="retry-btn" onclick={() => loadGameStreams()}>Retry</button>
           </div>
         {:else if gameStreams.length === 0}
@@ -435,7 +455,15 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .browse-status-reason {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-style: italic;
+    word-break: break-word;
   }
 
   .retry-btn {

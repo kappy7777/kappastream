@@ -102,6 +102,17 @@ describe('gql favorites layer (refactor smoke)', () => {
     // A null (nonexistent) entry keeps its input login + empty fields.
     expect(statuses[2]).toMatchObject({ login: 'ghost', live: false })
   })
+
+  it('throws on a short users array instead of marking channels offline', async () => {
+    // A legitimate batch returns one positional entry per login (null for
+    // unknown). A short array is anomalous; zipping positionally would
+    // silently report every channel as offline. It must throw so favorites
+    // falls back to DecAPI rather than committing a wrong status.
+    gql.handler = async () => ok({ users: [] })
+    await expect(G.fetchChannelStatuses(['alpha', 'beta'])).rejects.toThrow(
+      'gql short response',
+    )
+  })
 })
 
 describe('gql search (searchChannels)', () => {
