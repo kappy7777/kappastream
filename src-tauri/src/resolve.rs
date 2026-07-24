@@ -74,6 +74,32 @@ pub(crate) fn streamlink_bin() -> PathBuf {
     }
 }
 
+/// A clear, actionable message for the case where the streamlink binary is not
+/// installed / not on PATH. This is a first-class user-facing state on Windows
+/// (where nothing declares streamlink as a dependency and the NSIS installer
+/// cannot provide it) rather than an obscure spawn error: it tells the user
+/// exactly what's missing, how to install it, and how to override the path via
+/// `STREAMLINK_BIN`. The debug build additionally names the path we looked for
+/// so a misconfigured override is easy to diagnose; release builds stay clean
+/// of local paths. Shared by `resolve_stream`/`resolve_vod`/`resolve_clip`
+/// (resolve.rs) and `launch_player` (player.rs).
+pub(crate) fn streamlink_missing_message(bin: &std::path::Path) -> String {
+    let detail = if include_detail() {
+        format!(" (looked for '{}')", bin.display())
+    } else {
+        String::new()
+    };
+    if cfg!(target_os = "windows") {
+        format!(
+            "streamlink is not installed or not on PATH{detail}. Install it from https://streamlink.io/installation.html (or run 'pip install streamlink'), then restart kappastream. To point at a specific location, set the STREAMLINK_BIN environment variable to streamlink.exe's full path."
+        )
+    } else {
+        format!(
+            "streamlink is not installed or not on PATH{detail}. Install it via your package manager (e.g. 'sudo apt install streamlink'), then restart kappastream. Set the STREAMLINK_BIN environment variable to override the path."
+        )
+    }
+}
+
 fn is_offline(detail: &str) -> bool {
     STREAMLINK_OFFLINE_MARKERS
         .iter()
@@ -118,19 +144,15 @@ async fn run_streamlink(
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
     crate::env_spawn::configure(cmd.as_std_mut(), None);
+    // A Windows GUI app would otherwise pop a console window for the
+    // short-lived streamlink resolve call (which happens on every live/VOD/
+    // clip play). No-op on Unix.
+    crate::env_spawn::hide_console(cmd.as_std_mut());
 
     let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let msg = if include_detail() {
-                format!(
-                    "streamlink binary not found at '{}': set STREAMLINK_BIN to override the path",
-                    bin.display()
-                )
-            } else {
-                "streamlink binary not found: set STREAMLINK_BIN to override the path".to_string()
-            };
-            return Err(StreamlinkError::Spawn(msg));
+            return Err(StreamlinkError::Spawn(streamlink_missing_message(bin)));
         }
         Err(e) => return Err(StreamlinkError::Spawn(e.to_string())),
     };

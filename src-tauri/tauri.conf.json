@@ -53,7 +53,8 @@
           "https://*.ttv-clips.net",
           "https://cloudfront.net",
           "https://*.cloudfront.net",
-          "ksvod:"
+          "ksvod:",
+          "http://ksvod.localhost"
         ],
         "media-src": [
           "'self'",
@@ -103,7 +104,8 @@
           "https://*.ttv-clips.net",
           "https://cloudfront.net",
           "https://*.cloudfront.net",
-          "ksvod:"
+          "ksvod:",
+          "http://ksvod.localhost"
         ],
         "media-src": [
           "'self'",
@@ -124,12 +126,18 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["appimage", "deb", "rpm"],
+    "targets": ["appimage", "deb", "rpm", "nsis", "msi"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png"
     ],
+    "windows": {
+      "minimumWebview2Version": "110.0.1531.0",
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
     "linux": {
       "appimage": {
         "bundleMediaFramework": true

@@ -1045,6 +1045,20 @@
     }
   }
 
+  // Tauri v2 fronts a registered URI scheme differently per webview engine:
+  //   Linux/macOS (WebKit)  -> ksvod://localhost/host/path
+  //   Windows   (WebView2)  -> http://ksvod.localhost/host/path
+  // The Rust proxy (vod_proxy.rs) accepts BOTH forms; the frontend must emit
+  // the one its engine actually routes, or the request never reaches the
+  // handler and VOD/clip playback fails with a generic network error.
+  function toKsvodProxyUrl(httpsUrl: string): string {
+    const isWindows =
+      typeof navigator !== 'undefined' &&
+      navigator.userAgent.toLowerCase().includes('windows')
+    const prefix = isWindows ? 'http://ksvod.localhost/' : 'ksvod://localhost/'
+    return httpsUrl.replace('https://', prefix)
+  }
+
   async function loadVod(videoId: string, q: string): Promise<void> {
     playerError = ''
     playerStatus = 'resolving'
@@ -1065,11 +1079,12 @@
     }
     playerStatus = 'loading'
     // Rewrite the cloudfront/ttvnw URL through the ksvod proxy: the VOD CDN
-    // doesn't send CORS headers so hls.js's XHR is blocked. The ksvod scheme is
-    // handled by a Rust URI-scheme protocol (vod_proxy.rs) that fetches via
+    // doesn't send CORS headers so hls.js's XHR is blocked. The ksvod scheme
+    // is handled by a Rust URI-scheme protocol (vod_proxy.rs) that fetches via
     // reqwest and adds Access-Control-Allow-Origin. Relative segment URLs in
-    // the manifest resolve against the ksvod base URL automatically.
-    const proxyUrl = raw.url.replace('https://', 'ksvod://localhost/')
+    // the manifest resolve against the ksvod base URL automatically. The exact
+    // scheme form differs per platform (see toKsvodProxyUrl).
+    const proxyUrl = toKsvodProxyUrl(raw.url)
     const attach = await attachMediaHls(proxyUrl)
     if (attach.ok) {
       playerStatus = 'playing'

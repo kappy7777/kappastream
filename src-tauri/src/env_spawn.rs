@@ -1,5 +1,15 @@
 use std::process::Command;
 
+// Windows process-creation flags. Used by hide_console()/detach() below;
+// defined here (not imported from the winapi) so the flag names live next to
+// the only code that sets them. Mirrors the SDK constants in winbase.h.
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(target_os = "windows")]
+const DETACHED_PROCESS: u32 = 0x0000_0008;
+#[cfg(target_os = "windows")]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
 /// Safe-to-forward env vars when running from an AppImage. Deliberately
 /// excludes LD_LIBRARY_PATH, LD_PRELOAD, GTK_*, QT_*, XDG_DATA_DIRS,
 /// PYTHONHOME, PYTHONPATH — anything an AppImage might pollute the parent
@@ -78,4 +88,40 @@ pub fn configure(cmd: &mut Command, path_override: Option<&str>) {
         };
         cmd.env(k, v);
     }
+}
+
+/// Suppress the console window a Windows GUI app would otherwise pop up for a
+/// spawned console subprocess (streamlink, mpv, an opener). No-op on Unix,
+/// where there is no per-process console window. Use for short-lived /
+/// controlled children (resolve, the mpv probe, the URL opener).
+pub fn hide_console(cmd: &mut Command) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    // No-op on non-Windows (no per-process console window to suppress).
+    #[cfg(not(target_os = "windows"))]
+    let _ = cmd;
+}
+
+/// Fully detach a subprocess so it survives the parent independently (the
+/// external-player / streamlink handoff in player.rs). On Unix this is already
+/// the behaviour of dropping a non-`kill_on_drop` child handle (reparented to
+/// init), so this is a no-op there. On Windows:
+///   - DETACHED_PROCESS: the child inherits no console, so no window appears.
+///   - CREATE_NEW_PROCESS_GROUP: the child gets its own group, so a Ctrl-C /
+///     Ctrl-Break in the (GUI) parent never reaches it.
+///   - the child survives the parent by default (no Job Object is attached),
+///     and player.rs intentionally does NOT set `kill_on_drop`, mirroring the
+///     Unix "drop the handle -> it keeps running" contract.
+pub fn detach(cmd: &mut Command) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    // No-op on non-Windows (dropping the child handle already reparents it).
+    #[cfg(not(target_os = "windows"))]
+    let _ = cmd;
 }

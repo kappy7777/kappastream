@@ -56,15 +56,26 @@ fn proxy_client() -> &'static reqwest::Client {
     })
 }
 
-/// Parse the custom-scheme URI (`ksvod://localhost/host/path?q=1`) and
-/// reconstruct the original HTTPS URL (`https://host/path?q=1`). Returns
-/// `None` if the host extracted from the path is not on the shared VOD
-/// allowlist (see `resolve::is_allowed_vod_host`).
+/// Parse the custom-scheme URI and reconstruct the original HTTPS URL
+/// (`https://host/path?q=1`). Returns `None` if the host extracted from the
+/// path is not on the shared VOD allowlist (see `resolve::is_allowed_vod_host`).
+///
+/// Tauri v2 fronts a registered URI scheme differently per webview engine: on
+/// Linux/macOS (WebKit) it is `ksvod://localhost/host/path?q=1`, on Windows
+/// (WebView2) it is `http://ksvod.localhost/host/path?q=1`. Both forms are
+/// accepted here so the proxy is robust regardless of which engine fronts it
+/// (a frontend form mismatch surfaces a 403 instead of silently 404-ing). The
+/// host allowlist still validates the extracted host, so accepting the Windows
+/// http prefix does not widen what can be fetched.
 fn reconstruct_https_url(raw_uri: &str) -> Option<String> {
-    // The path component after "ksvod://localhost/" encodes the original
-    // "host/path?query". Strip the prefix, prepend "https://", and validate.
+    // The path component after the prefix encodes the original
+    // "host/path?query". Strip whichever prefix form arrived, prepend
+    // "https://", and validate.
     let rest = raw_uri
         .strip_prefix("ksvod://localhost/")
+        // Windows (WebView2): http://ksvod.localhost/host/path
+        .or_else(|| raw_uri.strip_prefix("http://ksvod.localhost/"))
+        // Bare ksvod:// without the localhost authority (defensive).
         .or_else(|| raw_uri.strip_prefix("ksvod://"))?;
     // Guard against double slashes or empty host.
     if rest.is_empty() || rest.starts_with('/') {
@@ -254,6 +265,51 @@ mod tests {
             "ksvod://localhost/euc13.playlist.ttvnw.net/v1/playlist/abc.m3u8",
         );
         assert!(url.is_some());
+    }
+
+    // Tauri v2 fronts a custom URI scheme as http://<scheme>.localhost on
+    // Windows (WebView2) rather than <scheme>://localhost. reconstruct must
+    // accept BOTH forms so VOD/clip playback works cross-platform.
+    #[test]
+    fn reconstruct_windows_http_prefix() {
+        // Same CloudFront manifest as above, via the Windows form.
+        let url = reconstruct_https_url(
+            "http://ksvod.localhost/d2nvs31859zcd8.cloudfront.net/abc/index-dvr.m3u8",
+        );
+        assert_eq!(
+            url.as_deref(),
+            Some("https://d2nvs31859zcd8.cloudfront.net/abc/index-dvr.m3u8")
+        );
+    }
+
+    #[test]
+    fn reconstruct_windows_http_prefix_with_query() {
+        let url = reconstruct_https_url(
+            "http://ksvod.localhost/d1ndex63qxojbr.cloudfront.net/v/foo.mp4?token=abc&sig=def",
+        );
+        assert_eq!(
+            url.as_deref(),
+            Some("https://d1ndex63qxojbr.cloudfront.net/v/foo.mp4?token=abc&sig=def")
+        );
+    }
+
+    #[test]
+    fn reconstruct_windows_prefix_still_validates_host() {
+        // The Windows http form does NOT bypass the allowlist.
+        assert_eq!(
+            reconstruct_https_url("http://ksvod.localhost/evil.example.net/steal"),
+            None
+        );
+        assert_eq!(
+            reconstruct_https_url("http://ksvod.localhost/notcloudfront.net/x"),
+            None
+        );
+        // Empty / malformed under the Windows prefix.
+        assert_eq!(reconstruct_https_url("http://ksvod.localhost/"), None);
+        assert_eq!(
+            reconstruct_https_url("http://ksvod.localhost//double"),
+            None
+        );
     }
 
     #[test]

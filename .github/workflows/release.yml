@@ -293,6 +293,93 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # ── Windows: NSIS setup .exe (+ best-effort WiX .msi) ─────────────────
+  # Built on windows-latest (MSVC + WebView2). INTENTIONALLY NOT listed in
+  # publish-release's `needs:` yet: a failing Windows build must not block
+  # Linux releases while this target is being brought up. Build jobs upload
+  # artifacts globally, but publish-release's download-artifact step only
+  # consumes Linux-glob files (`*.AppImage *_amd64.deb *.x86_64.rpm
+  # *-x86_64.tar.gz`) and its manifest verify uses per-pattern assert_one, so
+  # the Windows artifact is downloaded-then-ignored by the publish flow
+  # today. Add this job to `needs:` (and extend the verify/upload/SHA256SUMS
+  # globs for `*-setup.exe` / `*.msi`) only once it's proven stable.
+  build-windows:
+    name: build windows (nsis/msi) · windows-latest
+    needs: [check]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      # Separate cache key from the Linux jobs (different target triple).
+      - name: Cache Cargo (~/.cargo + src-tauri/target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: windows-x86_64
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Verify release tag matches package version
+        # Enforced only on real tag pushes (a smoke-test dispatch may build a
+        # not-yet-bumped tree). Kept identical to the Linux build jobs so a
+        # manual dispatch with a throwaway tag still works.
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          set -eu
+          pkgver="$(node -p "require('./package.json').version")"
+          tagver="${RELEASE_TAG#v}"
+          if [ "$pkgver" != "$tagver" ]; then
+            echo "ERROR: tag '${RELEASE_TAG}' (v-stripped '${tagver}') != package.json version '${pkgver}'" >&2
+            exit 1
+          fi
+          echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
+
+      # NSIS is the reliable, cross-platform-capable Windows target and the
+      # one the test checklist depends on, so it GATES this job. It must
+      # always produce a downloadable *-setup.exe.
+      - name: Build NSIS setup .exe
+        run: npm run tauri -- build --bundles nsis
+
+      # WiX MSI is best-effort: it can only be produced on Windows (WiX
+      # Toolset), needs the optional VBSCRIPT feature on the build host, and
+      # is not required for any test-checklist item. continue-on-error keeps
+      # a flaky MSI from losing the NSIS .exe above.
+      - name: Build WiX .msi (best-effort)
+        continue-on-error: true
+        run: npm run tauri -- build --bundles msi
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p staging
+          # NSIS setup executable (always present after the gated step).
+          cp "src-tauri/target/release/bundle/nsis/"*-setup.exe staging/ 2>/dev/null || true
+          # WiX MSI (present only if the best-effort step produced one).
+          cp "src-tauri/target/release/bundle/msi/"*.msi staging/ 2>/dev/null || true
+          echo "Staged Windows artifacts:"
+          find staging -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-installer
+          path: staging/
+          if-no-files-found: error
+          retention-days: 7
+
   # ── Single publication job ────────────────────────────────────────────
   # The ONLY job that creates/edits the GitHub release. Build jobs have read
   # permissions only and never touch the release, so two builds can never race
