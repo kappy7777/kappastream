@@ -47,7 +47,7 @@ no-account, no-tracking native Twitch viewer). Before opening one:
 
 ## Scope notes
 
-- **Linux only** (X11 + Wayland). Don't add macOS or Windows paths.
+- **Linux and Windows.** Linux targets X11 + Wayland; Windows is also a first-class target. macOS is not supported — don't add macOS paths.
 - **Persistence is `localStorage` only** — there is no backend and there
   shouldn't be one.
 - **`main` is the public release branch.** Keep commit history readable;
@@ -55,7 +55,7 @@ no-account, no-tracking native Twitch viewer). Before opening one:
 
 ## Releasing
 
-Releases ship to GitHub Releases (AppImage / `.deb` / `.rpm` / tarball) and the
+Releases ship to GitHub Releases (AppImage / `.deb` / `.rpm` / tarball / Windows installer) and the
 AUR (`kappastream-git`, `kappastream-bin`). The release workflow (`release.yml`)
 is triggered by pushing a `v*` tag.
 

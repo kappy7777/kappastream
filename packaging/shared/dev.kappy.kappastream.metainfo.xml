@@ -14,7 +14,7 @@
   <project_license>GPL-3.0-only</project_license>
 
   <name>kappastream</name>
-  <summary>Lightweight, account-free Twitch viewer for Linux</summary>
+  <summary>Lightweight, account-free Twitch viewer</summary>
 
   <url type="homepage">https://github.com/kappy7777/kappastream</url>
   <url type="bugtracker">https://github.com/kappy7777/kappastream/issues</url>
@@ -22,19 +22,21 @@
 
   <description>
     <p>
-      kappastream is a lightweight Twitch viewer for Linux: live stream,
-      IRC chat, favorites with live status, mentions, and per-channel
+      kappastream is a lightweight, account-free Twitch viewer: live
+      streams, past broadcasts, highlights and clips, IRC chat, favorites
+      with live status, channel discovery, mentions, and per-channel
       desktop notifications.
     </p>
     <p>
       It is account-free and read-only — no Twitch login, no OAuth, no
       client ID. Chat is read from the public IRC WebSocket; live status
-      and metadata come from DecAPI. Streams are resolved locally via
+      and metadata come from Twitch's anonymous GQL endpoint (DecAPI is
+      used only as a fallback). Streams are resolved locally via
       streamlink and played back with hls.js in a Tauri WebView.
     </p>
     <p>
-      Favorites poll DecAPI for uptime/viewers/game with retry backoff
-      and a circuit breaker on rate limits. Everything — favorites,
+      Favorites poll Twitch GQL in a single batched request (with retry
+      backoff and a circuit breaker on rate limits). Everything — favorites,
       settings, cached state — stays in local storage. No telemetry, no
       accounts, no server.
     </p>

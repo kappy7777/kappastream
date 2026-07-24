@@ -2,7 +2,7 @@
 
 <img src="public/kappastream-wordmark.svg" alt="kappastream" width="520">
 
-### A lightweight, private Twitch viewer for Linux
+### A lightweight, private Twitch viewer for Linux and Windows
 
 **No account. No ads. No tracking. No recommendations.**  
 Just the stream and the chat.
@@ -15,7 +15,7 @@ Just the stream and the chat.
 [![CI](https://github.com/kappy7777/kappastream/actions/workflows/ci.yml/badge.svg)](https://github.com/kappy7777/kappastream/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/kappy7777/kappastream?label=release)](../../releases/latest)
 [![License](https://img.shields.io/github/license/kappy7777/kappastream)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-Linux-1793d1)
+![Platform](https://img.shields.io/badge/platform-Linux%20%26%20Windows-1793d1)
 
 </div>
 
@@ -24,7 +24,7 @@ Just the stream and the chat.
 
 ## About
 
-kappastream is a native Linux client for watching Twitch without signing in or handing an application your Twitch credentials.
+kappastream is a native desktop client for watching Twitch without signing in or handing an application your Twitch credentials.
 
 It is designed for people who want to open a stream, read the real chat, and get out of the way. There is no login flow, social feed, recommendation engine, account integration, or kappastream backend.
 
@@ -48,8 +48,10 @@ Chat is read anonymously through Twitch IRC. Stream playback is resolved locally
 | | |
 |---|---|
 | **Live playback** | HLS playback with quality selection, fullscreen, theater mode, per-channel quality preferences, and an optional low-latency mode. |
+| **VODs and clips** | Browse a channel's past broadcasts, highlights, recent and popular clips, and play them in the main player — with mpv handoff and Picture-in-Picture support. A Back-to-live control returns to the stream. |
 | **Anonymous chat** | Read-only Twitch IRC chat with native Twitch emotes, 7TV, BTTV and FFZ emotes, badges, colored usernames, timestamps, and mention highlighting. |
 | **Favorites** | Save channels locally, drag to reorder them, and see live status, viewer count, game, and stream title at a glance. |
+| **Channel discovery** | Search for live channels and browse top streams and categories, all anonymously via Twitch GQL. Selecting a result joins the channel. |
 | **Notifications** | Opt in per channel for go-live notifications and receive desktop alerts for chat mentions. |
 | **Picture-in-Picture** | A borderless floating player that maintains a 16:9 aspect ratio and remembers its position. |
 | **mpv handoff** | Open the current stream in a standalone `mpv` player through streamlink. |
@@ -130,11 +132,29 @@ If kappastream was installed before the codec dependency was added, repair the e
 sudo dnf swap --allowerasing ffmpeg-free ffmpeg
 ```
 
+### Windows
+
+Download the `*-setup.exe` installer from the [latest release](../../releases/latest) and run it. It installs per-user (no administrator prompt) and provides an NSIS uninstaller.
+
+The [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) is required (preinstalled on Windows 11 and recent Windows 10); the installer will prompt you to install it if it is missing.
+
+Install [streamlink](https://streamlink.github.io/install.html#windows-binaries) separately — kappastream needs it to resolve streams:
+
+```bash
+pip install --user streamlink
+```
+
+If `streamlink` is not on your `PATH`, set it before launching kappastream:
+
+```powershell
+$env:STREAMLINK_BIN = "C:\path\to\streamlink.exe"
+```
+
 ## streamlink
 
 kappastream uses [streamlink](https://streamlink.github.io/) as a local helper to resolve Twitch streams.
 
-The `.deb` and `.rpm` packages install it as a dependency. AppImage users must install it separately:
+The `.deb` and `.rpm` packages install it as a dependency. AppImage and Windows users must install it separately:
 
 ```bash
 sudo pacman -S streamlink       # Arch Linux
@@ -183,7 +203,7 @@ kappastream does not use Twitch Helix or Kraken and cannot authenticate as you.
 
 Release packages are built by GitHub Actions from the repository source. The [release workflow](.github/workflows/release.yml) and its [public build logs](../../actions) can be inspected directly.
 
-Each release includes a `SHA256SUMS` file covering the published AppImage, Debian package, RPM package, and AUR binary archive.
+Each release includes a `SHA256SUMS` file covering every published artifact: the AppImage, Debian package, RPM package, Windows installer, and source tarball.
 
 Download the artifacts into the same directory and verify them with:
 
@@ -196,7 +216,6 @@ A successful result confirms that the downloaded file matches the checksum publi
 
 ## Known limitations
 
-- **Linux only.** kappastream currently targets X11 and Wayland; no Windows or macOS builds are provided.
 - **streamlink is required.** Playback cannot be resolved without the local helper binary.
 - **Read-only by design.** Sending chat messages, following, subscribing, redeeming channel points, and other authenticated Twitch features are intentionally outside the project's scope.
 
@@ -204,10 +223,12 @@ A successful result confirms that the downloaded file matches the checksum publi
 
 ### Requirements
 
-- Linux
 - Node.js 22 or a compatible current release
 - Rust stable
 - `streamlink`
+
+#### Linux
+
 - The [Tauri 2 Linux prerequisites](https://v2.tauri.app/start/prerequisites/)
 - WebKitGTK 4.1, GTK 3, Soup 3, librsvg, and Ayatana AppIndicator development packages
 
@@ -224,6 +245,12 @@ sudo apt install \
   patchelf
 ```
 
+#### Windows
+
+- Windows 10 or 11
+- [Microsoft Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+- [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)
+
 ### Build
 
 ```bash
@@ -233,26 +260,26 @@ cd kappastream
 npm ci
 npm run check
 npm run build
-npm run tauri -- build --bundles appimage
+npm run tauri -- build --bundles appimage   # Linux (use --bundles nsis on Windows)
 ```
 
-The AppImage is written to:
+The bundles are written to:
 
 ```text
-src-tauri/target/release/bundle/appimage/
+src-tauri/target/release/bundle/<appimage|nsis>/
 ```
 
 The first Rust build can take considerably longer than subsequent builds.
 
 ## Technology
 
-- **Tauri 2 and Rust** — native shell, window management, subprocess handling, notifications, tray integration, and Linux packaging
+- **Tauri 2 and Rust** — native shell, window management, subprocess handling, notifications, tray integration, and native packaging
 - **Svelte 5 and TypeScript** — user interface and local application state
 - **Vite** — frontend compilation
 - **hls.js** — HLS playback
 - **Twitch IRC over WebSocket** — anonymous, read-only chat
 - **streamlink** — local stream resolution
-- **WebKitGTK** — system webview, avoiding a bundled Chromium runtime
+- **System webview** — WebKitGTK on Linux and WebView2 on Windows, avoiding a bundled Chromium runtime
 
 ## Repository structure
 
@@ -277,9 +304,8 @@ Bug reports and focused pull requests are welcome.
 
 Before contributing, read [CONTRIBUTING.md](CONTRIBUTING.md). When reporting a bug, include:
 
-- your Linux distribution;
-- your desktop environment or compositor;
-- whether you are using X11 or Wayland;
+- your operating system and version (Linux distribution or Windows release);
+- on Linux, your desktop environment or compositor, and whether you are using X11 or Wayland;
 - the kappastream version;
 - your `streamlink --version` output;
 - clear reproduction steps.
