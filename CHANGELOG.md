@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-07-24
+
+### Added
+
+- **Windows support.** kappastream now ships a Windows installer alongside
+  the Linux packages — live and VOD/clip playback, chat, favorites,
+  notifications, and Picture-in-Picture all work on Windows.
+- **Clearer errors when streamlink or mpv is missing.** Neither is bundled, so
+  when one isn't installed the affected feature now explains what's missing
+  and how to install it, instead of failing with an obscure error.
+
+### Fixed
+
+- **Live streams didn't play on Windows** (VODs and clips were fine). Live
+  now works on Windows.
+
 ## [0.2.4] - 2026-07-23
 
 ### Added

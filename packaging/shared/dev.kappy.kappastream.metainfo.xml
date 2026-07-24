@@ -74,6 +74,17 @@
   </content_rating>
 
   <releases>
+    <release version="0.2.5" date="2026-07-24">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.5</url>
+      <description>
+        <p>Windows support. kappastream now ships a Windows NSIS installer
+        alongside the Linux AppImage, .deb, and .rpm packages. Live, VOD, and
+        clip playback, chat, favorites, notifications, and Picture-in-Picture
+        all work on Windows. streamlink and mpv are not bundled — when either
+        is missing, the affected feature degrades with a clear, actionable
+        message rather than failing opaquely.</p>
+      </description>
+    </release>
     <release version="0.2.4" date="2026-07-23">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.4</url>
       <description>
