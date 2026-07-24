@@ -293,7 +293,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ── Windows: NSIS setup .exe (+ best-effort WiX .msi) ─────────────────
+  # ── Windows: NSIS setup .exe ─────────────────────────────────────────
   # Built on windows-latest (MSVC + WebView2). INTENTIONALLY NOT listed in
   # publish-release's `needs:` yet: a failing Windows build must not block
   # Linux releases while this target is being brought up. Build jobs upload
@@ -302,9 +302,12 @@ jobs:
   # *-x86_64.tar.gz`) and its manifest verify uses per-pattern assert_one, so
   # the Windows artifact is downloaded-then-ignored by the publish flow
   # today. Add this job to `needs:` (and extend the verify/upload/SHA256SUMS
-  # globs for `*-setup.exe` / `*.msi`) only once it's proven stable.
+  # globs for `*-setup.exe`) only once it's proven stable. (WiX MSI is
+  # deliberately omitted for now: it needs the VBSCRIPT feature on the build
+  # host and adds a second bundling path that isn't needed to validate the
+  # port — add `msi` back to bundle.targets + a build step when wanted.)
   build-windows:
-    name: build windows (nsis/msi) · windows-latest
+    name: build windows (nsis) · windows-latest
     needs: [check]
     runs-on: windows-latest
     steps:
@@ -352,14 +355,6 @@ jobs:
       - name: Build NSIS setup .exe
         run: npm run tauri -- build --bundles nsis
 
-      # WiX MSI is best-effort: it can only be produced on Windows (WiX
-      # Toolset), needs the optional VBSCRIPT feature on the build host, and
-      # is not required for any test-checklist item. continue-on-error keeps
-      # a flaky MSI from losing the NSIS .exe above.
-      - name: Build WiX .msi (best-effort)
-        continue-on-error: true
-        run: npm run tauri -- build --bundles msi
-
       - name: Stage artifacts
         shell: bash
         run: |
@@ -367,8 +362,6 @@ jobs:
           mkdir -p staging
           # NSIS setup executable (always present after the gated step).
           cp "src-tauri/target/release/bundle/nsis/"*-setup.exe staging/ 2>/dev/null || true
-          # WiX MSI (present only if the best-effort step produced one).
-          cp "src-tauri/target/release/bundle/msi/"*.msi staging/ 2>/dev/null || true
           echo "Staged Windows artifacts:"
           find staging -maxdepth 1 -type f -printf '%f\n' | sort
 
