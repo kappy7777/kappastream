@@ -23,6 +23,23 @@
   import { tooltipState } from './lib/tooltip.svelte.ts'
   import kappaUrl from './assets/kappa.png'
 
+  // Tauri v2 webview origin differs by engine, and that changes whether a
+  // DIRECT cross-origin XHR (hls.js fetching a live manifest) is allowed:
+  //   Linux/macOS (WebKit) -> origin `tauri://localhost` (opaque scheme;
+  //     WebKit is lenient about cross-origin XHR from a non-http origin, so
+  //     the live CDN can be hit directly without CORS).
+  //   Windows   (WebView2) -> origin `http://tauri.localhost` (a real origin;
+  //     Chromium enforces CORS strictly). Twitch's live weaver playlist does
+  //     not reliably send Access-Control-Allow-Origin, so a direct manifest
+  //     GET fails with `networkError (manifestLoadError)`.
+  // Fix: on Windows the live manifest (and its segments) are routed through
+  // the ksvod Rust proxy (fetch via reqwest + CORS header), exactly like VODs.
+  // VODs always go through the proxy on every platform; clips use native
+  // <video> (CORS-exempt). See toKsvodProxyUrl / attachStream.
+  const IS_WINDOWS =
+    typeof navigator !== 'undefined' &&
+    navigator.userAgent.toLowerCase().includes('windows')
+
   type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error'
   type PlayerStatus = 'idle' | 'resolving' | 'loading' | 'playing' | 'paused' | 'offline' | 'error'
 
@@ -512,7 +529,12 @@
     if (!videoEl) return { ok: false, error: 'no video element' }
     if (!isCurrentStream(generation, channel, q)) return { ok: false, error: 'stale stream request' }
 
-    const sourceUrl = url
+    // On Windows the live manifest must go through the ksvod proxy (Chromium
+    // WebView2 enforces CORS on the real `http://tauri.localhost` origin and
+    // Twitch's live CDN doesn't send CORS headers — a direct GET fails with a
+    // manifestLoadError). Linux keeps the direct fetch (lower latency; WebKit
+    // allows it). See IS_WINDOWS.
+    const sourceUrl = IS_WINDOWS ? toKsvodProxyUrl(url) : url
 
     if (Hls.isSupported()) {
       if (hls) {
@@ -645,7 +667,10 @@
     if (attach.ok) {
       // Hand the resolved playlist URL to the PiP controller. If the floating
       // window is open it reloads; otherwise it is ready for the next open.
-      pipController.setStream({ url: resolved.url, channel, quality: q })
+      // Mirror attachStream: route through the ksvod proxy on Windows so the
+      // PiP WebView2 can load the manifest (it would hit the same CORS block).
+      const pipUrl = IS_WINDOWS ? toKsvodProxyUrl(resolved.url) : resolved.url
+      pipController.setStream({ url: pipUrl, channel, quality: q })
       return
     }
     playerStatus = 'error'
@@ -1045,17 +1070,16 @@
     }
   }
 
-  // Tauri v2 fronts a registered URI scheme differently per webview engine:
+  // Rewrite an https URL to its ksvod-proxy form. Tauri v2 fronts a custom
+  // URI scheme differently per webview engine:
   //   Linux/macOS (WebKit)  -> ksvod://localhost/host/path
   //   Windows   (WebView2)  -> http://ksvod.localhost/host/path
   // The Rust proxy (vod_proxy.rs) accepts BOTH forms; the frontend must emit
   // the one its engine actually routes, or the request never reaches the
-  // handler and VOD/clip playback fails with a generic network error.
+  // handler. Used for VOD playback (always) and live playback (Windows only —
+  // see IS_WINDOWS).
   function toKsvodProxyUrl(httpsUrl: string): string {
-    const isWindows =
-      typeof navigator !== 'undefined' &&
-      navigator.userAgent.toLowerCase().includes('windows')
-    const prefix = isWindows ? 'http://ksvod.localhost/' : 'ksvod://localhost/'
+    const prefix = IS_WINDOWS ? 'http://ksvod.localhost/' : 'ksvod://localhost/'
     return httpsUrl.replace('https://', prefix)
   }
 

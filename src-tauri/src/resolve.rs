@@ -91,7 +91,7 @@ pub(crate) fn streamlink_missing_message(bin: &std::path::Path) -> String {
     };
     if cfg!(target_os = "windows") {
         format!(
-            "streamlink is not installed or not on PATH{detail}. Install it from https://streamlink.io/installation.html (or run 'pip install streamlink'), then restart kappastream. To point at a specific location, set the STREAMLINK_BIN environment variable to streamlink.exe's full path."
+            "streamlink is not installed or not on PATH{detail}. Install it from https://streamlink.github.io/install.html (or run 'pip install streamlink'), then restart kappastream. To point at a specific location, set the STREAMLINK_BIN environment variable to streamlink.exe's full path."
         )
     } else {
         format!(
