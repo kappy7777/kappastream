@@ -4,7 +4,7 @@
 
 ### A lightweight, private Twitch viewer for Linux and Windows
 
-**No account. No ads. No tracking. No recommendations.**  
+**No account. No tracking. No recommendations.**  
 Just the stream and the chat.
 
 [Download](../../releases/latest) ·
