@@ -189,8 +189,11 @@ The application contacts only the services required for playback, chat, metadata
 | **Twitch static CDN** — `static-cdn.jtvnw.net` | Load native emotes and chat badges |
 | **Twitch GQL** — `gql.twitch.tv` | Source for favorites live status, viewer count, title, game, avatar, and Twitch user-ID lookup |
 | **7TV, BTTV and FFZ** | Load third-party emotes |
+| **GitHub Releases** — `github.com/kappy7777/kappastream/releases` | On startup, check whether a newer kappastream release is available and, if so, offer to download, verify (minisign signature), and install it (AppImage / .deb / .rpm / Windows). AUR installs never make this request. |
 
 These third-party services can see normal request info like your IP address — never your Twitch account, an OAuth token, or your profile.
+
+The update check is a single anonymous HTTPS GET to the project's own GitHub Releases (your IP is visible to GitHub as with any release download; no account or token is sent). It can be disabled only by using the AUR packages, which are built without the updater.
 
 **Data sources.** Favorites load through one batched, anonymous Twitch request per refresh. If that request fails, the app holds each channel's last known status and retries with backoff — there is no second data source.
 

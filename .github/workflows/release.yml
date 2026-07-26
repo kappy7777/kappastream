@@ -144,13 +144,30 @@ jobs:
 
       # `tauri build` always compiles src-tauri/target/release/kappastream
       # first, then produces only the selected bundle formats. The compiled
-      # native binary is reused by the AUR tarball step below.
+      # native binary is reused by the AUR tarball step below. The signing env
+      # vars make tauri-cli emit `*.deb.sig` / `*.rpm.sig` next to the packages
+      # (createUpdaterArtifacts:true in tauri.conf.json) for the updater.
       - name: Build .deb and .rpm
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri -- build --bundles deb,rpm
 
       # Packages the just-compiled 22.04 native binary with desktop/metainfo/
       # wrapper/icons/LICENSE into packaging/aur/dist/kappastream-<ver>-x86_64.tar.gz
       # (consumed by the kappastream-bin AUR PKGBUILD).
+      #
+      # IMPORTANT: the -bin tarball must NOT carry the in-app updater. pacman
+      # owns updates on Arch and an AUR -bin install must never show an update
+      # prompt. So we recompile the native binary WITHOUT the default `updater`
+      # Cargo feature (overwriting target/release/kappastream) right before
+      # packaging. The .deb/.rpm built above already embedded their own
+      # updater-ON binaries, so they are unaffected. This recompile is
+      # incremental (only the kappastream crate + relink; deps stay cached).
+      - name: Recompile native binary for AUR (updater off)
+        working-directory: src-tauri
+        run: cargo build --release --locked --no-default-features --features tauri/custom-protocol
+
       - name: Build AUR -bin tarball
         run: packaging/aur/build-release-tarball.sh
 
@@ -159,7 +176,9 @@ jobs:
           set -eu
           mkdir -p staging
           cp src-tauri/target/release/bundle/deb/*.deb staging/
+          cp src-tauri/target/release/bundle/deb/*.deb.sig staging/
           cp src-tauri/target/release/bundle/rpm/*.rpm staging/
+          cp src-tauri/target/release/bundle/rpm/*.rpm.sig staging/
           cp packaging/aur/dist/*.tar.gz staging/
           echo "Staged native artifacts:"
           find staging -maxdepth 1 -type f -printf '%f\n' | sort
@@ -242,6 +261,9 @@ jobs:
           echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
 
       - name: Build AppImage
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri -- build --bundles appimage
 
       # Measure the actual highest GLIBC_* requirement across every ELF file
@@ -282,6 +304,7 @@ jobs:
         run: |
           set -eu
           cp src-tauri/target/release/bundle/appimage/*.AppImage staging/
+          cp src-tauri/target/release/bundle/appimage/*.AppImage.sig staging/
           echo "Staged AppImage artifacts:"
           find staging -maxdepth 1 -type f -printf '%f\n' | sort
 
@@ -346,8 +369,12 @@ jobs:
 
       # NSIS is the reliable, cross-platform-capable Windows target and the
       # one the test checklist depends on, so it GATES this job. It must
-      # always produce a downloadable *-setup.exe.
+      # always produce a downloadable *-setup.exe. The signing env makes
+      # tauri-cli emit `*-setup.exe.sig` for the updater.
       - name: Build NSIS setup .exe
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri -- build --bundles nsis
 
       - name: Stage artifacts
@@ -355,8 +382,10 @@ jobs:
         run: |
           set -eu
           mkdir -p staging
-          # NSIS setup executable (always present after the gated step).
+          # NSIS setup executable + updater signature (always present after the
+          # gated step).
           cp "src-tauri/target/release/bundle/nsis/"*-setup.exe staging/ 2>/dev/null || true
+          cp "src-tauri/target/release/bundle/nsis/"*-setup.exe.sig staging/ 2>/dev/null || true
           echo "Staged Windows artifacts:"
           find staging -maxdepth 1 -type f -printf '%f\n' | sort
 
@@ -421,16 +450,81 @@ jobs:
             fi
           }
           assert_one '*.AppImage' AppImage
+          assert_one '*.AppImage.sig' 'AppImage signature'
           assert_one '*_amd64.deb' 'Debian package'
+          assert_one '*_amd64.deb.sig' 'Debian signature'
           assert_one '*.x86_64.rpm' 'RPM package'
+          assert_one '*.x86_64.rpm.sig' 'RPM signature'
           assert_one '*-x86_64.tar.gz' 'AUR tarball'
           assert_one '*-setup.exe' 'Windows setup .exe'
+          assert_one '*-setup.exe.sig' 'Windows setup signature'
           # The glibc-requirement token produced by build-appimage must exist.
           if [ ! -s appimage-glibc-requirement.txt ]; then
             echo "ERROR: appimage-glibc-requirement.txt missing or empty" >&2
             exit 1
           fi
           echo "=== All expected artifacts present exactly once ==="
+
+      # Build the tauri-plugin-updater manifest from the actual signed artifacts
+      # just downloaded. The updater validates the WHOLE file, so an incomplete
+      # or malformed latest.json would silently break updates for everyone —
+      # this step fails the job (and hence the release) if any input is missing.
+      # Platform keys are format-specific (linux-x86_64-{appimage,deb,rpm}) so
+      # each install resolves to its OWN format via bundle_type(); we publish NO
+      # bare `linux-x86_64` fallback to avoid handing one format's artifact to a
+      # different format's install. The `signature` field is base64 of the .sig
+      # file content (the updater base64-decodes it before minisign parsing).
+      - name: Generate latest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-staging
+          appimage_file="$(find . -maxdepth 1 -type f -name '*.AppImage' | head -n1)"
+          deb_file="$(find . -maxdepth 1 -type f -name '*_amd64.deb' | head -n1)"
+          rpm_file="$(find . -maxdepth 1 -type f -name '*.x86_64.rpm' | head -n1)"
+          exe_file="$(find . -maxdepth 1 -type f -name '*-setup.exe' | head -n1)"
+          for f in "$appimage_file" "$deb_file" "$rpm_file" "$exe_file"; do
+            if [ -z "$f" ] || [ ! -f "$f.sig" ]; then
+              echo "ERROR: missing artifact or .sig for ${f:-<none>}" >&2
+              exit 1
+            fi
+          done
+          version="${RELEASE_TAG#v}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          jq -n \
+            --arg version "$version" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg notes "kappastream ${version}" \
+            --arg appurl "${base}/${appimage_file#./}" --arg appsig "$(base64 -w0 "${appimage_file}.sig")" \
+            --arg deburl "${base}/${deb_file#./}"       --arg debsig "$(base64 -w0 "${deb_file}.sig")" \
+            --arg rpmurl "${base}/${rpm_file#./}"       --arg rpmsig "$(base64 -w0 "${rpm_file}.sig")" \
+            --arg exeurl "${base}/${exe_file#./}"       --arg exesig "$(base64 -w0 "${exe_file}.sig")" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: {
+                "linux-x86_64-appimage": { signature: $appsig, url: $appurl },
+                "linux-x86_64-deb":      { signature: $debsig, url: $deburl },
+                "linux-x86_64-rpm":      { signature: $rpmsig, url: $rpmurl },
+                "windows-x86_64":        { signature: $exesig, url: $exeurl }
+              }
+            }' > latest.json
+          echo "=== latest.json ==="
+          cat latest.json
+          # Sanity: all four platform keys present with non-empty url+signature.
+          jq -e '
+            .version and .pub_date and
+            (.platforms["linux-x86_64-appimage"].url | length > 0) and
+            (.platforms["linux-x86_64-deb"].url      | length > 0) and
+            (.platforms["linux-x86_64-rpm"].url      | length > 0) and
+            (.platforms["windows-x86_64"].url        | length > 0) and
+            (.platforms["linux-x86_64-appimage"].signature | length > 0) and
+            (.platforms["linux-x86_64-deb"].signature      | length > 0) and
+            (.platforms["linux-x86_64-rpm"].signature      | length > 0) and
+            (.platforms["windows-x86_64"].signature        | length > 0)
+          ' latest.json > /dev/null
+          echo "=== latest.json valid ==="
 
       - name: Create draft release
         shell: bash
@@ -454,17 +548,32 @@ jobs:
           # may not. Create the release for the existing tag when present
           # (passing --target to an existing tag errors "reference already
           # exists"); otherwise pin the tag to the commit this run built.
+          #
+          # Prerelease detection: a semver with a `-` pre-release segment (e.g.
+          # 0.2.6-rc1) is published with --prerelease so GitHub's
+          # /releases/latest alias SKIPS it. This is load-bearing: the in-app
+          # updater's production endpoint is .../releases/latest/download/latest.json,
+          # which must never resolve to an rc — otherwise every real install would
+          # be offered a pre-release. A real release (no `-`) stays a full release
+          # and becomes the new latest.
+          version_for_flag="${RELEASE_TAG#v}"
+          case "$version_for_flag" in
+            *-*) prerelease_flag="--prerelease" ;;
+            *)   prerelease_flag="" ;;
+          esac
           if git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
             gh release create "${RELEASE_TAG}" \
               --title "${RELEASE_TAG}" \
               --notes-file release-notes.md \
-              --draft
+              --draft \
+              $prerelease_flag
           else
             gh release create "${RELEASE_TAG}" \
               --target "${GITHUB_SHA}" \
               --title "${RELEASE_TAG}" \
               --notes-file release-notes.md \
-              --draft
+              --draft \
+              $prerelease_flag
           fi
 
       - name: Upload release assets
@@ -474,12 +583,19 @@ jobs:
           set -eu
           cd release-staging
           gh release upload "${RELEASE_TAG}" \
-            *.AppImage *_amd64.deb *.x86_64.rpm *-x86_64.tar.gz *-setup.exe
+            *.AppImage *.AppImage.sig \
+            *_amd64.deb *_amd64.deb.sig \
+            *.x86_64.rpm *.x86_64.rpm.sig \
+            *-x86_64.tar.gz \
+            *-setup.exe *-setup.exe.sig \
+            latest.json
 
       # Generated LAST, over exactly the artifacts just uploaded, so the
       # checksum set can never lag behind the asset set. Basenames match the
       # release asset names so `sha256sum -c SHA256SUMS` works from a download
-      # directory.
+      # directory. Includes the updater .sig files and latest.json so the whole
+      # updater payload is verifiable end-to-end (the .sig files are what real
+      # installs verify update packages against).
       - name: Generate and upload SHA256SUMS
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -488,7 +604,12 @@ jobs:
           set -euo pipefail
           cd release-staging
           sha256sum \
-            *.AppImage *_amd64.deb *.x86_64.rpm *-x86_64.tar.gz *-setup.exe \
+            *.AppImage *.AppImage.sig \
+            *_amd64.deb *_amd64.deb.sig \
+            *.x86_64.rpm *.x86_64.rpm.sig \
+            *-x86_64.tar.gz \
+            *-setup.exe *-setup.exe.sig \
+            latest.json \
             | sort -k2 > SHA256SUMS
           echo "Generated checksums:"
           cat SHA256SUMS

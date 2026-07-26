@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **In-app updates (AppImage, .deb, .rpm, Windows).** kappastream now checks
+  GitHub Releases on startup and, when a newer version exists, shows a small
+  dismissible banner to download, verify (minisign signature), and install it
+  — relaunching automatically. The check is silent on any failure (no banner),
+  nothing auto-downloads, and nothing installs without an explicit click. AUR
+  installs are deliberately excluded: those packages are built without the
+  updater and stay on pacman for updates. Existing 0.2.5-and-earlier installs
+  cannot self-update to the first updater-enabled release (the updater ships
+  with it) — one manual install is needed, after which all future updates are
+  in-app.
+
 ### Changed
 
 - **DecAPI removed; Twitch GQL is now the sole data source.** The DecAPI

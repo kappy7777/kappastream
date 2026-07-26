@@ -20,6 +20,19 @@ pub fn run() {
         .manage(gql::GqlClient::new().expect("failed to build GQL HTTP client"))
         .plugin(tauri_plugin_notification::init());
 
+    // In-app self-update. Gated behind the `updater` Cargo feature (default
+    // on). AUR builds compile with `--no-default-features`, so neither the
+    // updater nor the process (relaunch) plugin is registered there — pacman
+    // owns updates and a second self-update path must never fire. With the
+    // plugins absent the JS `check()` call rejects immediately and is
+    // swallowed silently by the frontend, so no AUR user ever sees a prompt.
+    #[cfg(feature = "updater")]
+    {
+        builder = builder
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init());
+    }
+
     // Single-instance guard: a second launch (e.g. the user clicks the
     // dock/AppImage while the window is hidden to the tray) must NOT start a
     // duplicate process — instead it surfaces + focuses the existing window

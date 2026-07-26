@@ -14,11 +14,32 @@ rust-version = "1.77.2"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# In-app self-update. The `updater` feature is default-on so CI release builds
+# (AppImage/.deb/.rpm/NSIS) register the updater + process plugins. AUR builds
+# pass `--no-default-features`, which skips the `.plugin(...)` registration in
+# lib.rs — so the JS `check()` call rejects immediately and is swallowed
+# silently by the frontend, and no AUR user ever sees an update prompt (pacman
+# owns updates there; a second self-update path would fight it).
+#
+# Why the crates are NON-optional even though registration is feature-gated:
+# Tauri's capability validator (tauri-build) hard-errors if a capability
+# references a permission whose providing plugin is absent from the Cargo
+# dependency graph ("Permission updater:default not found"). So the crate must
+# remain in the graph for the schema to resolve. In release builds the
+# unregistered crates' code is unreferenced and dropped by the linker/LTO, so
+# the shipped AUR binary carries no updater runtime — only the build compiles it.
+[features]
+default = ["updater"]
+updater = []
+
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
+# Direct dep: `tauri::generate_context!()` references `serde_json` at the crate
+# root to deserialize `plugins.updater` (and other plugin config) at build time.
+serde_json = "1"
 log = "0.4"
 tokio = { version = "1", features = ["process", "time"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
@@ -35,6 +56,11 @@ tauri-plugin-notification = "2.3.3"
 # while the window is hidden to the tray) surfaces the existing window and
 # exits the new process instead of starting a duplicate. Desktop-only.
 tauri-plugin-single-instance = "2"
+# In-app self-update (tauri-plugin-updater) + relaunch (tauri-plugin-process).
+# Non-optional so the capability schema resolves; registration is gated by the
+# `updater` feature in lib.rs (see the note above).
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [dev-dependencies]
 # Used in resolve.rs tests to set/unset env vars without mutating the global

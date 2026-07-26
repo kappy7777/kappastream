@@ -13,6 +13,8 @@
   import SearchBox from './lib/SearchBox.svelte'
   import BrowseView from './lib/BrowseView.svelte'
   import ChannelContent from './lib/ChannelContent.svelte'
+  import UpdateBanner from './lib/UpdateBanner.svelte'
+  import { updateStore } from './lib/update.svelte.ts'
   import { settings } from './lib/settings.svelte.ts'
   import { buildHlsConfig } from './lib/hls-config'
   import { pipController } from './lib/pip-controller.svelte.ts'
@@ -1400,6 +1402,14 @@
     return () => { try { unlistenClose?.() } catch { /* ignore */ } }
   })
 
+  // Check for an app update on startup (non-blocking, silent on failure). On a
+  // network error or a 404 on latest.json the store stays `idle` and nothing is
+  // shown; on an AUR build the updater plugin isn't registered and the call
+  // rejects immediately (swallowed) — no AUR user ever sees a prompt.
+  onMount(() => {
+    void updateStore.check()
+  })
+
   const playerLabel: Record<PlayerStatus, string> = {
     idle: '',
     resolving: 'Resolving stream…',
@@ -1683,6 +1693,8 @@
       </div>
     </div>
   </header>
+
+  <UpdateBanner />
 
   {#if emoteStatus === 'loading'}
     <div class="banner">Loading emotes…</div>

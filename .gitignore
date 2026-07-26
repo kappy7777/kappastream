@@ -36,6 +36,14 @@ src-tauri/gen/schemas/
 *.pem
 *.key
 
+# Tauri updater signing keys (tauri signer generate). The PRIVATE key
+# (*.key) is the one-way secret: losing it strands every shipped install.
+# Defense-in-depth in case `tauri signer generate -w` is ever pointed at a
+# repo-relative path. (Default output ~/.tauri/ is outside the repo anyway.)
+*.tauri.key
+*.tauri.key.pub
+tauri-*.key
+
 # Local tooling config (opencode) — environment-specific, not for public release
 .opencode-global/
 opencode.json

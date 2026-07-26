@@ -25,6 +25,17 @@ cd "$ROOT"
 
 PKG_VER=$(node -p 'require("./package.json").version')
 
+# A prerelease version (e.g. 0.2.6-rc1, anything with a `-` pre-release tail)
+# is a throwaway release-channel tag used for updater smoke-tests. The metainfo
+# <releases> block and the AUR -bin PKGBUILD track STABLE releases only, so
+# during a prerelease they legitimately still carry the previous stable version
+# — those drift checks are skipped below. The three authoritative-source
+# equality checks (package.json == Cargo.toml == Cargo.lock) ALWAYS run.
+case "$PKG_VER" in
+  *-*) IS_PRERELEASE=true ;;
+  *)   IS_PRERELEASE=false ;;
+esac
+
 # [package] version = first unindented `version = "..."` in Cargo.toml. Dependency
 # versions live inside `name = { version = "..." }` (indented / not at col 0) or
 # after `rust-version =`, neither of which matches the anchored pattern.
@@ -54,19 +65,34 @@ fi
 # block is newest-first, so the first <release version="..."> is the latest.
 # Older history entries are legitimate, so the metainfo is deliberately NOT
 # included in the generic scan_file semver scan below.
+#
+# Skipped for prereleases: the metainfo tracks stable releases only, so a
+# prerelease current version is allowed to differ from the latest metainfo
+# <release> (which stays at the prior stable).
 METAINFO_PATH="packaging/shared/dev.kappy.kappastream.metainfo.xml"
-METAINFO_VER=$(grep -oE '<release version="[^"]+"' "$METAINFO_PATH" 2>/dev/null \
-    | head -n 1 | sed -E 's/.*version="([^"]+)".*/\1/')
-[ -n "$METAINFO_VER" ] \
-    || fail "could not read latest <release> version from $METAINFO_PATH"
-if [ "$METAINFO_VER" != "$PKG_VER" ]; then
-    fail "$METAINFO_PATH latest <release> ($METAINFO_VER) != package.json ($PKG_VER)"
+if [ "$IS_PRERELEASE" = "true" ]; then
+  echo "check-versions: prerelease ($PKG_VER) — skipping metainfo <release> equality check"
+else
+  METAINFO_VER=$(grep -oE '<release version="[^"]+"' "$METAINFO_PATH" 2>/dev/null \
+      | head -n 1 | sed -E 's/.*version="([^"]+)".*/\1/')
+  [ -n "$METAINFO_VER" ] \
+      || fail "could not read latest <release> version from $METAINFO_PATH"
+  if [ "$METAINFO_VER" != "$PKG_VER" ]; then
+      fail "$METAINFO_PATH latest <release> ($METAINFO_VER) != package.json ($PKG_VER)"
+  fi
 fi
 
 # Hardcoded-semver scan. A semver anywhere in a scanned file must equal the
 # current version; anything else (a stale release number) is drift. READMEs
 # avoid this entirely by using `<version>` placeholders or dynamic commands.
-SEMVER_RE='[0-9]+\.[0-9]+\.[0-9]+'
+#
+# The regex captures an OPTIONAL SemVer pre-release tail (`-rc1`, `-beta.2`)
+# so a prerelease version in a scanned file is matched whole rather than
+# truncated to its numeric core (which would then mismatch the prerelease
+# PKG_VER). Skipped entirely for prerelease current versions: the AUR -bin
+# PKGBUILD (and packaging READMEs) legitimately carry the previous STABLE
+# version during a prerelease, which is not drift.
+SEMVER_RE='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?'
 failures=$(mktemp)
 trap 'rm -f "$failures"' EXIT INT TERM HUP
 
@@ -83,19 +109,23 @@ scan_file() {
     done
 }
 
-# Tracked README.md files under packaging/ (git ls-files skips the gitignored
-# makepkg artifacts in packaging/aur/{src,dist} that hold nested stale copies).
-git ls-files packaging | grep -E '(^|/)README\.md$' | while IFS= read -r f; do
-    scan_file "$f"
-done
-# Plus the one PKGBUILD whose pkgver must track the current version.
-scan_file "packaging/aur/PKGBUILD-bin"
+if [ "$IS_PRERELEASE" = "true" ]; then
+  echo "check-versions: prerelease ($PKG_VER) — skipping packaging semver-drift scan"
+else
+  # Tracked README.md files under packaging/ (git ls-files skips the gitignored
+  # makepkg artifacts in packaging/aur/{src,dist} that hold nested stale copies).
+  git ls-files packaging | grep -E '(^|/)README\.md$' | while IFS= read -r f; do
+      scan_file "$f"
+  done
+  # Plus the one PKGBUILD whose pkgver must track the current version.
+  scan_file "packaging/aur/PKGBUILD-bin"
 
-if [ -s "$failures" ]; then
-    echo "check-versions: ERROR: hardcoded version drift detected:" >&2
-    sed 's/^/    /' "$failures" >&2
-    echo "    (bump the stale files to $PKG_VER, or replace the literal with a <version> placeholder)" >&2
-    exit 1
+  if [ -s "$failures" ]; then
+      echo "check-versions: ERROR: hardcoded version drift detected:" >&2
+      sed 's/^/    /' "$failures" >&2
+      echo "    (bump the stale files to $PKG_VER, or replace the literal with a <version> placeholder)" >&2
+      exit 1
+  fi
 fi
 
 echo "check-versions: OK — package.json, Cargo.toml and Cargo.lock all at $PKG_VER; no stale packaging versions."

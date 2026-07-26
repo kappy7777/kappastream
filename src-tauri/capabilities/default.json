@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Notification operations + the window/webview/event permissions that power the custom Picture-in-Picture window and the custom title bar",
+  "description": "Notification operations + the window/webview/event permissions that power the custom Picture-in-Picture window and the custom title bar + the in-app updater (gated out at compile time on AUR builds)",
   "windows": [
     "main",
     "pip"
@@ -26,6 +26,9 @@
     "core:window:allow-outer-size",
 
     "core:event:allow-emit",
-    "core:event:allow-listen"
+    "core:event:allow-listen",
+
+    "updater:default",
+    "process:allow-restart"
   ]
 }
