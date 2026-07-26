@@ -156,7 +156,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFFM0ZBNjc0MkM4REJGQzQKUldURXY0MHNkS1kvSHBlbFBTUHZqWjFDazVKU0h1TlZvdFk5Q0IwNWlITS9IaXB3YWw4eEhNTTIK",
       "endpoints": [
-        "https://github.com/kappy7777/kappastream/releases/latest/download/latest.json"
+        "https://github.com/kappy7777/kappastream/releases/download/v0.2.6-rc2/latest.json"
       ],
       "windows": {
         "installMode": "passive"
