@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-07-26
+
 ### Added
 
 - **In-app updates (AppImage, .deb, .rpm, Windows).** kappastream now checks
@@ -15,10 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   — relaunching automatically. The check is silent on any failure (no banner),
   nothing auto-downloads, and nothing installs without an explicit click. AUR
   installs are deliberately excluded: those packages are built without the
-  updater and stay on pacman for updates. Existing 0.2.5-and-earlier installs
-  cannot self-update to the first updater-enabled release (the updater ships
-  with it) — one manual install is needed, after which all future updates are
-  in-app.
+  updater and stay on pacman for updates. **Existing 0.2.5-and-earlier installs
+  cannot self-update to 0.2.6** (the updater ships with it) — one manual
+  install is needed, after which all future updates are in-app.
 
 ### Changed
 
@@ -33,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   5 min). Because GQL already returns avatar, title, viewers, game, and
   stream-start in one request, the separate two-phase avatar/metadata
   enrichment pass is gone too.
+
+### Fixed
+
+- **The chat-popout button did nothing on Windows.** `open_url_robust` only
+  knew Linux browser-openers (xdg-open / gio / sensible-browser /
+  x-www-browser with hardcoded Unix paths), so on Windows every candidate
+  failed and clicking the popout never opened twitch.tv. It now opens the
+  URL via `cmd.exe /C start "" <url>` (primary, registered https handler)
+  with a `rundll32 url.dll,FileProtocolHandler` fallback, both resolved
+  under `%SystemRoot%\System32` without flashing a console. Linux is
+  unchanged.
 
 ## [0.2.5] - 2026-07-24
 

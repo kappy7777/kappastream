@@ -76,6 +76,18 @@
   </content_rating>
 
   <releases>
+    <release version="0.2.6" date="2026-07-26">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.6</url>
+      <description>
+        <p>In-app self-update. kappastream now checks for new releases on
+        startup and, when one is available, offers to download, verify
+        (minisign signature), and install it — for the AppImage, .deb, .rpm,
+        and Windows packages. The check is silent on any failure and nothing
+        installs without an explicit click; AUR packages keep using pacman.
+        This release also removes the DecAPI fallback (Twitch GQL is now the
+        sole data source) and fixes the chat-popout button on Windows.</p>
+      </description>
+    </release>
     <release version="0.2.5" date="2026-07-24">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.5</url>
       <description>

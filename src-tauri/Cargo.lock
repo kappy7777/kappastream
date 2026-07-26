@@ -2017,7 +2017,7 @@ dependencies = [
 
 [[package]]
 name = "kappastream"
-version = "0.2.6-rc2"
+version = "0.2.6"
 dependencies = [
  "futures-util",
  "log",
