@@ -472,8 +472,17 @@ jobs:
       # Platform keys are format-specific (linux-x86_64-{appimage,deb,rpm}) so
       # each install resolves to its OWN format via bundle_type(); we publish NO
       # bare `linux-x86_64` fallback to avoid handing one format's artifact to a
-      # different format's install. The `signature` field is base64 of the .sig
-      # file content (the updater base64-decodes it before minisign parsing).
+      # different format's install.
+      #
+      # IMPORTANT — signature field format: tauri signer writes each `.sig` file
+      # as base64(armored-minisign-signature) (a single base64 line). The
+      # updater base64-DECODES the `signature` field exactly ONCE before
+      # minisign parsing, so the field MUST be the RAW `.sig` file content
+      # (NOT base64 of it — that double-encodes and fails with
+      # "invalid encoding in minisign data"). This mirrors `plugins.updater.pubkey`
+      # in tauri.conf.json, which is likewise the raw `.pub` content (base64 of
+      # the armored key). `tr -d '[:space:]'` strips any stray newline so the
+      # strict base64 decoder in the plugin doesn't choke on trailing whitespace.
       - name: Generate latest.json
         shell: bash
         run: |
@@ -491,14 +500,19 @@ jobs:
           done
           version="${RELEASE_TAG#v}"
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          # Raw .sig content (already base64(armored)); single-decode on the client.
+          appsig="$(tr -d '[:space:]' < "${appimage_file}.sig")"
+          debsig="$(tr -d '[:space:]' < "${deb_file}.sig")"
+          rpmsig="$(tr -d '[:space:]' < "${rpm_file}.sig")"
+          exesig="$(tr -d '[:space:]' < "${exe_file}.sig")"
           jq -n \
             --arg version "$version" \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg notes "kappastream ${version}" \
-            --arg appurl "${base}/${appimage_file#./}" --arg appsig "$(base64 -w0 "${appimage_file}.sig")" \
-            --arg deburl "${base}/${deb_file#./}"       --arg debsig "$(base64 -w0 "${deb_file}.sig")" \
-            --arg rpmurl "${base}/${rpm_file#./}"       --arg rpmsig "$(base64 -w0 "${rpm_file}.sig")" \
-            --arg exeurl "${base}/${exe_file#./}"       --arg exesig "$(base64 -w0 "${exe_file}.sig")" \
+            --arg appurl "${base}/${appimage_file#./}" --arg appsig "$appsig" \
+            --arg deburl "${base}/${deb_file#./}"       --arg debsig "$debsig" \
+            --arg rpmurl "${base}/${rpm_file#./}"       --arg rpmsig "$rpmsig" \
+            --arg exeurl "${base}/${exe_file#./}"       --arg exesig "$exesig" \
             '{
               version: $version,
               notes: $notes,
@@ -512,7 +526,9 @@ jobs:
             }' > latest.json
           echo "=== latest.json ==="
           cat latest.json
-          # Sanity: all four platform keys present with non-empty url+signature.
+          # Sanity: all four platform keys present with non-empty url+signature,
+          # AND each signature base64-decodes ONCE to an armored minisign block
+          # (catches a double-encoding regression like the rc1/rc2 bug).
           jq -e '
             .version and .pub_date and
             (.platforms["linux-x86_64-appimage"].url | length > 0) and
@@ -524,7 +540,12 @@ jobs:
             (.platforms["linux-x86_64-rpm"].signature      | length > 0) and
             (.platforms["windows-x86_64"].signature        | length > 0)
           ' latest.json > /dev/null
-          echo "=== latest.json valid ==="
+          # The one-decode → armored check: @base64d decodes once; the result
+          # must start with the minisign "untrusted comment:" header.
+          jq -r '.platforms["linux-x86_64-appimage"].signature' latest.json \
+            | base64 -d | head -n1 | grep -q '^untrusted comment:' \
+            || { echo "ERROR: signature does not decode to armored minisign (double-encoded?)" >&2; exit 1; }
+          echo "=== latest.json valid (single-base64 signatures confirmed) ==="
 
       - name: Create draft release
         shell: bash
