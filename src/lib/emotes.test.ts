@@ -61,9 +61,8 @@ describe('7TV set-entry alias', () => {
     // set-entry shape is { name: "erm", data: { name: "catErm" } } — the
     // top-level name is the alias active in that set.
     tauriInvoke.handler = async (cmd: string) => {
-      // getTwitchUserId now resolves via the batched GQL command, not
-      // decapi_fetch('twitch/id/<user>'). Return a valid single-user response
-      // so resolveUserIds maps 'somenick' -> '12345'.
+      // getTwitchUserId resolves via the batched GQL command. Return a valid
+      // single-user response so resolveUserIds maps 'somenick' -> '12345'.
       if (cmd === 'gql_fetch') {
         return JSON.stringify({ data: { users: [{ id: '12345', login: 'somenick' }] } })
       }

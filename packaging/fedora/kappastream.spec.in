@@ -65,8 +65,8 @@ BuildArch:      x86_64
 %description
 kappastream is a lightweight Twitch viewer: live stream playback via
 streamlink + hls.js, read-only IRC chat over the public Twitch WebSocket,
-favorites with DecAPI live status / retry backoff / circuit breaker, and
-per-channel desktop notifications.
+favorites with Twitch GQL live status / retry backoff / circuit breaker,
+and per-channel desktop notifications.
 
 Account-free and read-only — no Twitch login, no OAuth, no client ID.
 Everything stays in local storage. On NVIDIA Wayland the binary disables

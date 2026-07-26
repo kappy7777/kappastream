@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **DecAPI removed; Twitch GQL is now the sole data source.** The DecAPI
+  HTTP fallback service is gone entirely (the Rust `decapi_fetch` proxy,
+  the per-channel fallback path, and the request rate limiter). Favorites
+  and the active-channel status bar now resolve exclusively through the
+  batched anonymous Twitch GQL request. On a GQL transport failure the app
+  no longer falls over to a second service: it keeps each channel's last
+  known live/offline status, shows a "having trouble reaching Twitch"
+  banner, and retries the same GQL batch with exponential backoff (30s →
+  5 min). Because GQL already returns avatar, title, viewers, game, and
+  stream-start in one request, the separate two-phase avatar/metadata
+  enrichment pass is gone too.
+
 ## [0.2.5] - 2026-07-24
 
 ### Added

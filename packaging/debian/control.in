@@ -10,8 +10,8 @@ Depends: libwebkit2gtk-4.1-0, libjavascriptcoregtk-4.1-0, libgtk-3-0, libglib2.0
 Description: lightweight, account-free Twitch viewer for Linux
  kappastream is a lightweight Twitch viewer: live stream playback via
  streamlink + hls.js, read-only IRC chat over the public Twitch WebSocket,
- favorites with DecAPI live status / retry backoff / circuit breaker, and
- per-channel desktop notifications.
+ favorites with Twitch GQL live status / retry backoff / circuit breaker,
+ and per-channel desktop notifications.
  .
  Account-free and read-only — no Twitch login, no OAuth, no client ID.
  Everything stays in local storage. On NVIDIA Wayland the binary disables

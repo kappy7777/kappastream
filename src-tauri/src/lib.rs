@@ -1,4 +1,3 @@
-mod decapi;
 mod env_spawn;
 mod export;
 mod gql;
@@ -18,7 +17,6 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
-        .manage(decapi::DecApiClient::new().expect("failed to build DecAPI HTTP client"))
         .manage(gql::GqlClient::new().expect("failed to build GQL HTTP client"))
         .plugin(tauri_plugin_notification::init());
 
@@ -59,7 +57,6 @@ pub fn run() {
             resolve::resolve_clip,
             player::launch_player,
             opener::open_url_robust,
-            decapi::decapi_fetch,
             gql::gql_fetch,
             export::save_favorites_export,
         ])

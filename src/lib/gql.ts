@@ -9,7 +9,9 @@ import { invoke } from '@tauri-apps/api/core'
  * returns its stream object; an offline channel returns `stream: null`; a
  * nonexistent login returns a `null` entry at its position. All three are
  * transport SUCCESSES — only a network/HTTP/parse failure is treated as an
- * error and triggers the DecAPI per-channel fallback in favorites.svelte.
+ * error, and GQL is the ONLY data source, so such a failure leaves channels
+ * on their last-known status until the next successful poll (see
+ * favorites.svelte).
  *
  * Field names + argument signatures confirmed against the live endpoint (see
  * the STEP 1 spike): `profileImageURL(width:)`, `previewImageURL` (+ optional
@@ -26,7 +28,7 @@ import { invoke } from '@tauri-apps/api/core'
 export const GQL_BATCH_SIZE = 100
 
 // Favorites refresh cadence. One batched request covers the whole list, so a
-// short interval is cheap (unlike the per-channel DecAPI path it replaces).
+// short interval is cheap.
 export const GQL_REFRESH_INTERVAL_MS = 150_000
 
 const GQL_TIMEOUT_MS = 8_000
@@ -77,7 +79,7 @@ export interface ChannelStatus {
   startedAt: string
   thumbnailUrl: string
   // profileImageURL — surfaced alongside status so favorites gets the avatar
-  // "for free" in the same request (DecAPI needed a separate /avatar call).
+  // "for free" in the same request.
   avatarUrl: string
 }
 
@@ -111,8 +113,8 @@ interface GqlEnvelope {
  * POST one query body to gql_fetch. Throws on ANY transport-level problem
  * (network error, non-2xx, malformed JSON, top-level GQL `errors`, or an
  * aborted signal). The favorites caller treats a throw as "GQL unavailable →
- * DecAPI fallback"; the discovery callers (search/browse) treat it as a
- * visible, non-blocking error state.
+ * keep last-known status + back off and retry"; the discovery callers
+ * (search/browse) treat it as a visible, non-blocking error state.
  *
  * The Rust `gql_fetch` command has no cancellation channel, so aborting the
  * signal cannot truly cancel the in-flight HTTP request — but checking the
@@ -127,8 +129,7 @@ async function gqlRequest<T = Record<string, unknown>>(
 ): Promise<T> {
   if (signal?.aborted) throw new Error('aborted')
   const body = JSON.stringify({ query, variables })
-  // Throws on non-2xx / network / timeout / oversized — same string-typed
-  // error convention as decapi_fetch.
+  // Throws on non-2xx / network / timeout / oversized — string-typed errors.
   const raw = await invoke<string>('gql_fetch', { body, timeoutMs: GQL_TIMEOUT_MS })
   // A request that resolved after its AbortController fired is stale.
   if (signal?.aborted) throw new Error('aborted')
@@ -207,9 +208,10 @@ function toChannelStatus(user: RawUser | null): ChannelStatus {
 }
 
 /**
- * Resolve Twitch user IDs for a set of logins. Replaces emotes.ts's per-user
- * `decapi_fetch('twitch/id/<user>')` calls with one batched GQL request per
- * GQL_BATCH_SIZE logins. Nonexistent logins (null entries) are omitted.
+ * Resolve Twitch user IDs for a set of logins in one batched request (per
+ * GQL_BATCH_SIZE logins). Used by emotes.ts to turn a channel login into the
+ * numeric ID the 7TV/BTTV/FFZ channel endpoints expect. Nonexistent logins
+ * (null entries) are omitted from the returned map.
  */
 export async function resolveUserIds(
   logins: string[],
@@ -254,9 +256,10 @@ export async function fetchChannelStatuses(
     // A short `users` array (fewer entries than requested) is anomalous — a
     // legitimate batch always returns one positional entry per login (null for
     // unknown). Zipping positionally with `users[i] ?? null` would silently mark
-    // every unreturned channel offline; throw so the caller falls back to DecAPI
-    // rather than reporting a wrong status. (Note: `{"data":null}` is already
-    // rejected upstream in gqlRequest via the `data === null` check.)
+    // every unreturned channel offline; throw so the caller treats it as a
+    // transport failure (favorites keeps last-known status) rather than
+    // committing a wrong status. (Note: `{"data":null}` is already rejected
+    // upstream in gqlRequest via the `data === null` check.)
     if (users.length !== batch.length) {
       throw new Error('gql short response')
     }
@@ -275,11 +278,11 @@ export async function fetchChannelStatuses(
  * ============================================================================
  * Channel discovery — search + browse.
  *
- * GQL-ONLY and anonymous throughout (same public Client-ID, no auth). There is
- * NO DecAPI fallback for discovery, so on transport failure these throw and the
- * caller must surface a visible, non-blocking error state. An empty result set
- * is ALWAYS a success (matches the offline-vs-failure discipline above): never
- * report "no results" when the request actually errored.
+ * GQL-ONLY and anonymous throughout (same public Client-ID, no auth). On
+ * transport failure these throw and the caller must surface a visible,
+ * non-blocking error state. An empty result set is ALWAYS a success (matches
+ * the offline-vs-failure discipline above): never report "no results" when the
+ * request actually errored.
  *
  * Operation names, argument shapes and field/argument names below were verified
  * field-by-field against the live schema dump (SuperSonicHub1/twitch-graphql-api
@@ -616,10 +619,10 @@ export async function fetchGameStreams(
  * ============================================================================
  * Channel content — past broadcasts, highlights, clips.
  *
- * Same anonymous + GQL-only transport as discovery (no DecAPI fallback). Like
- * discovery, `after` cursors are unusable (IntegrityCheckFailed), so each list
- * over-fetches its hard cap (100) in ONE request and the caller reveals more
- * client-side (see browse-reveal.ts). Empty is a SUCCESS.
+ * Same anonymous + GQL-only transport as discovery. Like discovery, `after`
+ * cursors are unusable (IntegrityCheckFailed), so each list over-fetches its
+ * hard cap (100) in ONE request and the caller reveals more client-side (see
+ * browse-reveal.ts). Empty is a SUCCESS.
  *
  * Verified against the live schema (see the block above):
  *   - user(login:).videos(first, type: BroadcastType, sort: VideoSort)

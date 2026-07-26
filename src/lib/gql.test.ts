@@ -10,10 +10,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * response (or throw, to simulate a transport failure). This exercises the
  * parsing + error-discipline logic in gql.ts without touching the network.
  *
- * Discovery is GQL-only with NO DecAPI fallback, so the central rule under
- * test is: an empty result set is a SUCCESS (returns []), while a transport
- * failure (HTTP error, malformed body, top-level GQL `errors`) THROWS so the
- * caller can surface a visible error instead of silently showing "no results".
+ * Discovery is GQL-only, so the central rule under test is: an empty result
+ * set is a SUCCESS (returns []), while a transport failure (HTTP error,
+ * malformed body, top-level GQL `errors`) THROWS so the caller can surface a
+ * visible error instead of silently showing "no results".
  */
 
 const gql = vi.hoisted(() => ({
@@ -107,7 +107,8 @@ describe('gql favorites layer (refactor smoke)', () => {
     // A legitimate batch returns one positional entry per login (null for
     // unknown). A short array is anomalous; zipping positionally would
     // silently report every channel as offline. It must throw so favorites
-    // falls back to DecAPI rather than committing a wrong status.
+    // treats it as a transport failure (keeps last-known status) rather than
+    // committing a wrong status.
     gql.handler = async () => ok({ users: [] })
     await expect(G.fetchChannelStatuses(['alpha', 'beta'])).rejects.toThrow(
       'gql short response',

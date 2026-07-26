@@ -23,7 +23,7 @@ persistence is local (`localStorage` only).
 
 The desktop build (Tauri) does expose a small set of local IPC commands
 to its WebView: stream resolution (shells out to the local `streamlink`
-binary), a DecAPI HTTP proxy, window/PiP controls, and OS notifications.
+binary), a Twitch GQL HTTP proxy, window/PiP controls, and OS notifications.
 Channel names and stream qualities are validated against strict allowlists
 before any subprocess or network call is made.
 

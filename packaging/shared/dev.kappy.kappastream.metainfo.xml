@@ -30,15 +30,15 @@
     <p>
       It is account-free and read-only — no Twitch login, no OAuth, no
       client ID. Chat is read from the public IRC WebSocket; live status
-      and metadata come from Twitch's anonymous GQL endpoint (DecAPI is
-      used only as a fallback). Streams are resolved locally via
-      streamlink and played back with hls.js in a Tauri WebView.
+      and metadata come from Twitch's anonymous GQL endpoint. Streams are
+      resolved locally via streamlink and played back with hls.js in a
+      Tauri WebView.
     </p>
     <p>
       Favorites poll Twitch GQL in a single batched request (with retry
-      backoff and a circuit breaker on rate limits). Everything — favorites,
-      settings, cached state — stays in local storage. No telemetry, no
-      accounts, no server.
+      backoff and a circuit breaker on transport failures). Everything —
+      favorites, settings, cached state — stays in local storage. No
+      telemetry, no accounts, no server.
     </p>
   </description>
 

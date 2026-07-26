@@ -47,11 +47,10 @@ function ffzUrl(id: string): string {
 export async function getTwitchUserId(username: string, signal?: AbortSignal): Promise<string | null> {
   try {
     if (signal?.aborted) return null
-    // Batched GQL lookup (one users(logins:) request) replaces the per-user
-    // DecAPI /twitch/id/<user> text call. emotes only ever resolves ONE id at
-    // a time (per channel-join), so this passes a single-element list — the
-    // batching pays off for the favorites refresh, not here, but the transport
-    // (gql_fetch) and primary/DecAPI posture stay uniform across the app.
+    // Batched GQL lookup (one users(logins:) request). emotes only ever
+    // resolves ONE id at a time (per channel-join), so this passes a
+    // single-element list — the batching pays off for the favorites refresh,
+    // not here, but the transport (gql_fetch) stays uniform across the app.
     const ids = await resolveUserIds([username], signal)
     if (signal?.aborted) return null
     // Twitch returns `login` in canonical lowercase, so the map is keyed
@@ -238,8 +237,8 @@ export async function loadChannelEmotes(channel: string, signal?: AbortSignal): 
   const userId = await getTwitchUserId(channel, signal)
   if (signal?.aborted) return []
   if (!userId) {
-    // Do NOT cache the empty result. A null userId is most often a DecAPI
-    // 429/timeout (getTwitchUserId swallows the error and returns null), and
+    // Do NOT cache the empty result. A null userId is most often a transient
+    // GQL failure (getTwitchUserId swallows the error and returns null), and
     // cache is consulted first on the next call — caching [] here would cost
     // that channel its third-party emotes for the rest of the process while
     // loadEmotes still reported emoteStatus = 'ready'. Returning [] uncached

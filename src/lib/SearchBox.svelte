@@ -11,10 +11,10 @@
    * the single `onselect(login)` callback, which App.svelte routes into its
    * existing selectChannel() → connect() logic (validation + toast included).
    *
-   * Search is GQL-only with NO DecAPI fallback, so a transport failure is
-   * surfaced in the dropdown as a visible, non-blocking error — never silently
-   * shown as "no results". An empty result set is a success (a distinct
-   * "no channels found" row that still leaves the Enter fast path available).
+   * Search is GQL-only, so a transport failure is surfaced in the dropdown as
+   * a visible, non-blocking error — never silently shown as "no results". An
+   * empty result set is a success (a distinct "no channels found" row that
+   * still leaves the Enter fast path available).
    *
    * Input is debounced ~300ms; each new keystroke aborts the in-flight request
    * via AbortController (gqlRequest checks the signal before AND after the

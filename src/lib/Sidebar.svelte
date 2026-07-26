@@ -270,7 +270,7 @@
     {/if}
     {#if store.rateLimited}
       <div class="rate-limit-banner" role="status">
-        DecAPI rate-limited — live statuses may be stale
+        Having trouble reaching Twitch — live statuses may be stale
       </div>
     {/if}
   </div>

@@ -5,9 +5,9 @@ use std::time::Duration;
 // the well-known public Client-ID). The Rust command below is a thin
 // CORS-bypassing transport — it POSTs whatever JSON body the JS side builds,
 // with the Client-ID pinned here so the (untrusted) webview cannot override
-// it, and returns the raw response body for JS to JSON.parse. Mirrors the
-// shape/conventions of `decapi.rs` (timeout clamp, streaming body cap,
-// string-typed errors).
+// it, and returns the raw response body for JS to JSON.parse. String-typed
+// errors, timeout clamp, and streaming body cap follow the usual reqwest
+// conventions for these proxy commands.
 const GQL_URL: &str = "https://gql.twitch.tv/gql";
 const CLIENT_ID: &str = "kimne78kx3ncx6brgo4mv6wki5h1ko";
 const MIN_TIMEOUT_MS: u64 = 1_000;
@@ -34,10 +34,6 @@ const MAX_REQUEST_BYTES: usize = 64 * 1024;
 // Chrome UA with no client hints is unremarkable; hints that disagree with the
 // UA string are a *worse* fingerprint than none (a real Chrome always sends
 // matching hints, so the mismatch flags us as an impostor).
-//
-// NOTE the asymmetry with decapi.rs, which keeps the honest "Kappastream/<ver>"
-// UA on purpose: DecAPI is a small donation-funded service we depend on as a
-// guest, and identifying ourselves there is correct. Do not "harmonize" them.
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) \
     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
 
@@ -116,7 +112,7 @@ mod tests {
     // app-identifying string. gql.twitch.tv is Twitch's unofficial internal
     // endpoint, and a "Kappastream/..." UA is a single-rule block target —
     // one filter on it disables every install at once. See the USER_AGENT
-    // rationale above. (decapi.rs intentionally keeps the honest UA.)
+    // rationale above.
     #[test]
     fn gql_user_agent_is_not_app_identifying() {
         assert!(

@@ -2023,7 +2023,7 @@
       <p class="about-modal-body">
         No login, project telemetry, analytics, or project-operated backend. Chat connects anonymously —
         nothing tied to who you are. Network calls go only to the services needed to watch:
-        Twitch infrastructure and the open community APIs (7TV, BTTV, FFZ, DecAPI) that power
+        Twitch infrastructure and the open community APIs (7TV, BTTV, FFZ) that power
         emotes and stream info.
       </p>
       <p class="about-modal-body">Stream resolution powered by streamlink.</p>

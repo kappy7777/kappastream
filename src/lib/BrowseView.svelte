@@ -12,7 +12,7 @@
   /*
    * Channel discovery browse overlay — top live channels and top categories,
    * with the ability to drill into a category's live streams. Read-only and
-   * anonymous; backed entirely by the GQL transport (no DecAPI fallback).
+   * anonymous; backed entirely by the GQL transport.
    *
    * Failure discipline matches the rest of the app: an empty result set is a
    * SUCCESS (just an empty grid), while a transport failure shows a visible,
