@@ -1,7 +1,7 @@
 <script lang="ts">
   import { slide } from 'svelte/transition'
   import { onMount } from 'svelte'
-  import { settings, THEMES, UI_SCALE_PRESETS, UI_SCALE_MIN, UI_SCALE_MAX, UI_SCALE_STEP, UI_SCALE_DEFAULT, type ThemeId, type SortMode } from './settings.svelte.ts'
+  import { settings, THEMES, UI_SCALE_PRESETS, UI_SCALE_MIN, UI_SCALE_MAX, UI_SCALE_STEP, UI_SCALE_DEFAULT, MAX_MUTED_USERS, type ThemeId, type SortMode } from './settings.svelte.ts'
   import { favoritesStore, type FavoriteStatus } from './favorites.svelte'
   import { tooltip } from './tooltip.ts'
 
@@ -53,6 +53,39 @@
 
   function resetUiScale(): void {
     settings.resetUiScale()
+  }
+
+  // ---- Chat mute list -----------------------------------------------------
+  // A client-side, login-keyed hide list. Adding/removing applies live to the
+  // chat buffer (no reconnect) because the render predicate reads
+  // settings.mutedUsers reactively.
+  let muteInput = $state('')
+  let muteStatus = $state('')
+  let muteStatusTimer: ReturnType<typeof setTimeout> | null = null
+  function setMuteStatus(msg: string): void {
+    muteStatus = msg
+    if (muteStatusTimer) clearTimeout(muteStatusTimer)
+    muteStatusTimer = setTimeout(() => { muteStatus = '' }, 3000)
+  }
+  function addMuted(): void {
+    const raw = muteInput
+    muteInput = ''
+    if (!raw.trim()) return
+    const added = settings.addMutedUser(raw)
+    if (!added) {
+      setMuteStatus(
+        settings.mutedUsers.length >= MAX_MUTED_USERS ? 'Mute list is full' : 'Already muted or invalid',
+      )
+    }
+  }
+  function removeMuted(name: string): void {
+    settings.removeMutedUser(name)
+  }
+  function onMuteInputKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      addMuted()
+    }
   }
 
   onMount(() => {
@@ -313,6 +346,42 @@ async function exportFavorites(): Promise<void> {
                 <span class="toggle-knob"></span>
               </span>
             </div>
+            <div class="chat-subgroup-label">Muted users <span class="mute-count">{settings.mutedUsers.length || ''}</span></div>
+            <div class="mute-input-row">
+              <span class="mention-prefix" aria-hidden="true">@</span>
+              <input
+                type="text"
+                class="mention-input mute-input"
+                placeholder="hide by login"
+                value={muteInput}
+                oninput={(e) => { muteInput = (e.currentTarget as HTMLInputElement).value }}
+                onkeydown={onMuteInputKeydown}
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+                maxlength="25"
+                aria-label="Add a user to the mute list"
+              />
+              <button type="button" class="mute-add" onclick={addMuted} disabled={!muteInput.trim()}>Add</button>
+            </div>
+            {#if muteStatus}
+              <p class="mute-status" role="status">{muteStatus}</p>
+            {/if}
+            {#if settings.mutedUsers.length > 0}
+              <ul class="mute-list" role="list">
+                {#each settings.mutedUsers as name (name)}
+                  <li class="mute-item">
+                    <span class="mute-name" title={`@${name}`}>@{name}</span>
+                    <button
+                      type="button"
+                      class="mute-remove"
+                      onclick={() => removeMuted(name)}
+                      aria-label={`Unmute @${name}`}
+                    >×</button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
           </div>
         {/if}
       </section>
@@ -821,6 +890,116 @@ async function exportFavorites(): Promise<void> {
     color: var(--accent);
     font-weight: 600;
     font-family: 'Menlo', 'Consolas', monospace;
+  }
+
+  .mute-count {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-weight: 600;
+    margin-left: 2px;
+  }
+
+  .mute-input-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .mute-input-row .mention-prefix {
+    position: absolute;
+    left: 8px;
+  }
+
+  .mute-input {
+    flex: 1 1 auto;
+    width: auto;
+  }
+
+  .mute-add {
+    flex: 0 0 auto;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 150ms, color 150ms, border-color 150ms;
+  }
+
+  .mute-add:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--accent);
+  }
+
+  .mute-add:disabled {
+    color: var(--text-dim);
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  .mute-status {
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .mute-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 132px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .mute-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    transition: background 150ms;
+  }
+
+  .mute-item:hover {
+    background: var(--bg-hover);
+  }
+
+  .mute-name {
+    font-size: 12px;
+    color: var(--text-primary);
+    font-family: 'Menlo', 'Consolas', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mute-remove {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 150ms, color 150ms;
+  }
+
+  .mute-remove:hover {
+    background: var(--bg-hover);
+    color: var(--live);
   }
 
   .seg {

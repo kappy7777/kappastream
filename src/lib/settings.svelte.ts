@@ -90,6 +90,14 @@ const CHAT_SUBNOTICES_KEY = 'app-chat-subnotices-v1'
 const CHAT_ROOMSTATE_KEY = 'app-chat-roomstate-v1'
 const CHAT_MODERATION_KEY = 'app-chat-moderation-v1'
 const CHAT_BITS_KEY = 'app-chat-bits-v1'
+// Client-side chat mute list. Login names the user never wants to see in chat.
+// Matching is done on the STABLE `login` field (parsed & lowercased from the
+// IRC nick prefix), never on display-name (user-settable capitalization — the
+// same trap CLEARCHAT avoids) and never on userId (the user types a name, and
+// resolving a name → userId would need a network call the read-only/no-network
+// posture forbids). Cap keeps localStorage bounded.
+const MUTED_USERS_KEY = 'app-chat-muted-v1'
+export const MAX_MUTED_USERS = 100
 
 export const UI_SCALE_MIN = 0.5
 export const UI_SCALE_MAX = 4
@@ -181,6 +189,36 @@ function readChatBits(): boolean {
   return safeRead(CHAT_BITS_KEY) === 'true'
 }
 
+// Normalize a user-entered mute entry to a lowercase login, or null if it has
+// no usable characters (empty / whitespace / punctuation). Mirrors the lenient
+// cleaning used for the mention username so pasting "@Troll!" yields "troll".
+function normalizeMutedName(raw: string): string | null {
+  const cleaned = raw.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 25)
+  return cleaned.length >= 1 ? cleaned : null
+}
+
+function readMutedUsers(): string[] {
+  try {
+    const raw = localStorage.getItem(MUTED_USERS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    const out: string[] = []
+    const seen = new Set<string>()
+    for (const item of parsed) {
+      if (typeof item !== 'string') continue
+      const n = normalizeMutedName(item)
+      if (!n || seen.has(n)) continue
+      seen.add(n)
+      out.push(n)
+      if (out.length >= MAX_MUTED_USERS) break
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
 const SORT_MODE_KEY = 'app-fav-sort-v1'
 
 function readSortMode(): SortMode {
@@ -215,6 +253,10 @@ class SettingsStore {
   chatRoomstate: boolean = $state(readChatRoomstate())
   chatModeration: boolean = $state(readChatModeration())
   chatBits: boolean = $state(readChatBits())
+  // Client-side chat mute list (logins). Reactive so adding/removing an entry
+  // re-renders messages already in the buffer — same "gate presentation, not
+  // parsing" architecture as the Tier 2 toggles.
+  mutedUsers: string[] = $state(readMutedUsers())
   theaterMode: boolean = $state(false)
 
   constructor() {
@@ -346,6 +388,39 @@ class SettingsStore {
 
   toggleChatBits(): void {
     this.setChatBits(!this.chatBits)
+  }
+
+  // ---- Chat mute list -----------------------------------------------------
+  // Add a login to the mute list. Returns the normalized login actually added
+  // (null if the input was empty/whitespace or already present). A login past
+  // the cap is rejected with the list unchanged so the caller can surface it.
+  addMutedUser(raw: string): string | null {
+    const n = normalizeMutedName(raw)
+    if (!n) return null
+    if (this.mutedUsers.includes(n)) return null
+    if (this.mutedUsers.length >= MAX_MUTED_USERS) return null
+    this.mutedUsers = [...this.mutedUsers, n]
+    safeWrite(MUTED_USERS_KEY, JSON.stringify(this.mutedUsers))
+    return n
+  }
+
+  removeMutedUser(raw: string): void {
+    const n = normalizeMutedName(raw)
+    if (!n) return
+    if (!this.mutedUsers.includes(n)) return
+    this.mutedUsers = this.mutedUsers.filter((u) => u !== n)
+    safeWrite(MUTED_USERS_KEY, JSON.stringify(this.mutedUsers))
+  }
+
+  // True if `login` is in the mute list. `login` is the PRIVMSG sender's login
+  // (lowercased IRC nick) — the stable identity. An empty/null login (e.g. an
+  // anon USERNOTICE) never matches, so it is shown (safe fallback: we cannot
+  // identify it to hide it).
+  isMuted(login: string | null | undefined): boolean {
+    if (!login) return false
+    const n = normalizeMutedName(login)
+    if (!n) return false
+    return this.mutedUsers.includes(n)
   }
 
   setSortMode(m: SortMode): void {

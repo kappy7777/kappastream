@@ -82,6 +82,11 @@
     // `user-id` of the sender — the stable key CLEARCHAT matches on. Always
     // stored on a PRIVMSG.
     userId: string | null
+    // Sender's login (lowercased IRC nick from the PRIVMSG prefix, or the
+    // USERNOTICE `login` tag). The STABLE identity the client-side mute list
+    // matches on — never the displayName (user-settable caps). Always stored so
+    // a mute applied mid-stream retroactively hides already-buffered messages.
+    login: string | null
     // Moderation (Toggle C). ALWAYS recorded from CLEARMSG / CLEARCHAT
     // regardless of settings, so flipping the toggle on retroactively strikes
     // already-deleted messages still in the buffer. Presentation is gated by
@@ -884,6 +889,7 @@
       timestamp: ev.timestamp,
       bits: ev.bits,
       userId: ev.userId,
+      login: ev.username,
       deleted: false,
       deletedReason: null,
       systemText: null,
@@ -926,6 +932,7 @@
       timestamp: Date.now(),
       bits: null,
       userId: null,
+      login: ev.login,
       deleted: false,
       deletedReason: null,
       systemText,
@@ -1912,7 +1919,7 @@
         {:else}
           {#each messages as msg (msg.id)}
           {#if msg.kind === 'notice'}
-            {#if settings.chatSubnotices}
+            {#if settings.chatSubnotices && !settings.isMuted(msg.login)}
               <div class="message message--notice">
                 {#if settings.chatTimestamps}
                   <span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span>
@@ -1931,7 +1938,7 @@
                 {/if}
               </div>
             {/if}
-          {:else}
+          {:else if !settings.isMuted(msg.login)}
           <div
             class="message{isMessageStricken(settings.chatModeration, msg.deleted) ? ' ' + DELETED_MESSAGE_CLASS : ''}"
             class:action={msg.isAction}
