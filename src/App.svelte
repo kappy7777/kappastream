@@ -38,9 +38,25 @@
   // the ksvod Rust proxy (fetch via reqwest + CORS header), exactly like VODs.
   // VODs always go through the proxy on every platform; clips use native
   // <video> (CORS-exempt). See toKsvodProxyUrl / attachStream.
-  const IS_WINDOWS =
-    typeof navigator !== 'undefined' &&
-    navigator.userAgent.toLowerCase().includes('windows')
+  //
+  // `isWindows` is the switch that picks the routing above. It is resolved
+  // AUTHORITATIVELY from the Rust binary's compile-time target via the
+  // `target_os` command (std::env::consts::OS) — NOT from navigator.userAgent:
+  // WebView2's UA is Chromium's and is not contractually stable, and this
+  // codebase already overrides the UA for GQL, so a substring match was the
+  // wrong tool for a load-bearing switch whose failure is silent and total
+  // (manifestLoadError). isTauri() can't substitute either — it's true on both
+  // Linux and Windows, so it can't tell the engines apart. Resolved once on
+  // mount; every use site (attachStream, PiP, the proxy prefix in
+  // toKsvodProxyUrl) is user-triggered and runs after that resolves.
+  let isWindows = $state(false)
+
+  onMount(() => {
+    if (!isTauri()) return
+    void invoke<string>('target_os')
+      .then((os) => { isWindows = os === 'windows' })
+      .catch((e) => { console.error('[platform] target_os failed; assuming non-Windows (live playback may regress on Windows)', e) })
+  })
 
   type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error'
   type PlayerStatus = 'idle' | 'resolving' | 'loading' | 'playing' | 'paused' | 'offline' | 'error'
@@ -535,8 +551,8 @@
     // WebView2 enforces CORS on the real `http://tauri.localhost` origin and
     // Twitch's live CDN doesn't send CORS headers — a direct GET fails with a
     // manifestLoadError). Linux keeps the direct fetch (lower latency; WebKit
-    // allows it). See IS_WINDOWS.
-    const sourceUrl = IS_WINDOWS ? toKsvodProxyUrl(url) : url
+    // allows it). See isWindows.
+    const sourceUrl = isWindows ? toKsvodProxyUrl(url) : url
 
     if (Hls.isSupported()) {
       if (hls) {
@@ -671,7 +687,7 @@
       // window is open it reloads; otherwise it is ready for the next open.
       // Mirror attachStream: route through the ksvod proxy on Windows so the
       // PiP WebView2 can load the manifest (it would hit the same CORS block).
-      const pipUrl = IS_WINDOWS ? toKsvodProxyUrl(resolved.url) : resolved.url
+      const pipUrl = isWindows ? toKsvodProxyUrl(resolved.url) : resolved.url
       pipController.setStream({ url: pipUrl, channel, quality: q })
       return
     }
@@ -1079,9 +1095,9 @@
   // The Rust proxy (vod_proxy.rs) accepts BOTH forms; the frontend must emit
   // the one its engine actually routes, or the request never reaches the
   // handler. Used for VOD playback (always) and live playback (Windows only —
-  // see IS_WINDOWS).
+  // see isWindows).
   function toKsvodProxyUrl(httpsUrl: string): string {
-    const prefix = IS_WINDOWS ? 'http://ksvod.localhost/' : 'ksvod://localhost/'
+    const prefix = isWindows ? 'http://ksvod.localhost/' : 'ksvod://localhost/'
     return httpsUrl.replace('https://', prefix)
   }
 

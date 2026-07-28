@@ -2,6 +2,7 @@ mod env_spawn;
 mod export;
 mod gql;
 mod opener;
+mod platform;
 mod player;
 mod resolve;
 mod tray;
@@ -69,6 +70,7 @@ pub fn run() {
             resolve::resolve_vod,
             resolve::resolve_clip,
             player::launch_player,
+            platform::target_os,
             opener::open_url_robust,
             gql::gql_fetch,
             export::save_favorites_export,
