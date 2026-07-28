@@ -61,15 +61,19 @@
       .catch((e) => { console.error('[platform] target_os failed; assuming non-Windows (live playback may regress on Windows)', e) })
   })
 
-  // Sleep timer expiry = pause the current <video> (NOT close the app). Pausing
-  // without flagging a user pause would let the live stall-recovery watcher
-  // (onVideoPause) treat it as a stall and seek back to the live edge, so we set
-  // a deliberate pause first.
+  // Sleep timer expiry = STOP playback completely (not just pause): tear down
+  // the HLS player (no more segment fetches) and, on a live stream, also drop
+  // the IRC chat connection and clear the buffer. VOD/clip playback has no live
+  // chat to stop, so only the video/segments are torn down (channel identity is
+  // kept so the user can resume / return to live).
   onMount(() => {
     sleepTimer.setOnFire(() => {
-      userPaused = true
-      videoEl?.pause()
-      showNotifToast('Sleep timer: playback paused')
+      if (playback.kind === 'live') {
+        disconnect()
+      } else {
+        disconnectStream()
+      }
+      showNotifToast('Sleep timer: playback stopped')
     })
   })
 

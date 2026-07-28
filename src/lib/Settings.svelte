@@ -59,6 +59,33 @@
     sleepTimer.cancel()
   }
 
+  // Custom duration entry (minutes), for values outside the presets.
+  let sleepCustom = $state('')
+  const SLEEP_CUSTOM_MIN = 1
+  const SLEEP_CUSTOM_MAX = 600
+  let sleepCustomError = $state('')
+  function parsedCustomMinutes(): number | null {
+    const n = parseInt(sleepCustom, 10)
+    if (!Number.isFinite(n) || n < SLEEP_CUSTOM_MIN || n > SLEEP_CUSTOM_MAX) return null
+    return n
+  }
+  function armCustomSleep(): void {
+    const n = parsedCustomMinutes()
+    if (n === null) {
+      sleepCustomError = `Enter ${SLEEP_CUSTOM_MIN}–${SLEEP_CUSTOM_MAX} min`
+      return
+    }
+    sleepCustomError = ''
+    sleepCustom = ''
+    onarmsleep?.(n)
+  }
+  function onSleepCustomKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      armCustomSleep()
+    }
+  }
+
   let sleepSummary = $derived(
     sleepTimer.armed ? formatSleepRemaining(sleepTimer.remainingMs) : 'Off',
   )
@@ -495,6 +522,30 @@ async function exportFavorites(): Promise<void> {
                 >{preset}m</button>
               {/each}
             </div>
+            <div class="sleep-custom-row">
+              <input
+                type="number"
+                class="sleep-custom-input"
+                placeholder="custom"
+                min={SLEEP_CUSTOM_MIN}
+                max={SLEEP_CUSTOM_MAX}
+                step="1"
+                value={sleepCustom}
+                oninput={(e) => { sleepCustom = (e.currentTarget as HTMLInputElement).value; sleepCustomError = '' }}
+                onkeydown={onSleepCustomKeydown}
+                aria-label="Custom sleep timer duration in minutes"
+              />
+              <span class="sleep-custom-unit">min</span>
+              <button
+                type="button"
+                class="mute-add"
+                onclick={armCustomSleep}
+                disabled={parsedCustomMinutes() === null}
+              >Set</button>
+            </div>
+            {#if sleepCustomError}
+              <p class="sleep-custom-error" role="status">{sleepCustomError}</p>
+            {/if}
             {#if sleepTimer.armed}
               <div class="sleep-armed-row">
                 <span class="sleep-armed-text">
@@ -503,7 +554,7 @@ async function exportFavorites(): Promise<void> {
                 <button type="button" class="sleep-cancel" onclick={cancelSleep}>Cancel</button>
               </div>
             {:else}
-              <p class="sleep-help">Pauses the current stream after the chosen time. Cancels automatically if you switch channels.</p>
+              <p class="sleep-help">Stops the current stream after the chosen time. Cancels automatically if you switch channels.</p>
             {/if}
           </div>
         {/if}
@@ -1116,6 +1167,49 @@ async function exportFavorites(): Promise<void> {
     margin: 2px 0 0;
     font-size: 11px;
     color: var(--text-dim);
+  }
+
+  .sleep-custom-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+  }
+
+  .sleep-custom-input {
+    flex: 1 1 auto;
+    width: auto;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    font-variant-numeric: tabular-nums;
+    transition: border-color 150ms, background 150ms;
+  }
+
+  .sleep-custom-input:hover {
+    border-color: var(--track-hover);
+  }
+
+  .sleep-custom-input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .sleep-custom-unit {
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  .sleep-custom-error {
+    margin: 0;
+    font-size: 11px;
+    color: var(--live);
   }
 
   .shortcut-hint {
