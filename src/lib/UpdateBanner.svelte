@@ -40,7 +40,30 @@
     }
     return 'the update could not be installed'
   }
-</script>
+
+  // Relative "released Nd ago" from the manifest's pub_date, shown next to the
+  // available version so the user has a sense of freshness before installing.
+  // Returns null for a missing/unparseable date or one in the future (clock
+  // skew) so nothing misleading is rendered. Computed once per render — it is a
+  // banner, not a live clock.
+  function fmtReleased(pubDate: string | null): string | null {
+    if (!pubDate) return null
+    const then = Date.parse(pubDate)
+    if (!Number.isFinite(then)) return null
+    const diffMs = Date.now() - then
+    if (diffMs < 0) return null
+    const mins = Math.floor(diffMs / 60000)
+    if (mins < 1) return 'released just now'
+    if (mins < 60) return `released ${mins}m ago`
+    const hours = Math.floor(mins / 60)
+    if (hours < 24) return `released ${hours}h ago`
+    const days = Math.floor(hours / 24)
+    if (days < 30) return `released ${days}d ago`
+    const months = Math.floor(days / 30)
+    if (months < 12) return `released ${months}mo ago`
+    return `released ${Math.floor(months / 12)}y ago`
+  }
+  </script>
 
 {#if updateStore.visible}
   <div class="update-banner" role="status" aria-live="polite">
@@ -77,6 +100,7 @@
         <span class="update-banner__text">
           kappastream v{updateStore.version} is available
           {#if updateStore.currentVersion}<span class="update-banner__reason"> (you have v{updateStore.currentVersion})</span>{/if}
+          {#if fmtReleased(updateStore.pubDate)}<span class="update-banner__reason"> · {fmtReleased(updateStore.pubDate)}</span>{/if}
         </span>
         <button type="button" class="update-banner__btn update-banner__btn--primary" onclick={() => updateStore.apply()}>Update</button>
         <button type="button" class="update-banner__btn update-banner__btn--ghost" onclick={() => updateStore.dismiss()} aria-label="Dismiss update notice">×</button>
