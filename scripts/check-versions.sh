@@ -128,4 +128,25 @@ else
   fi
 fi
 
-echo "check-versions: OK — package.json, Cargo.toml and Cargo.lock all at $PKG_VER; no stale packaging versions."
+# AUR updater opt-out guard (packaging integrity, not version drift).
+#
+# kappastream's default `updater` Cargo feature (src-tauri/Cargo.toml
+# [features] default = ["updater"]) registers tauri-plugin-updater +
+# tauri-plugin-process in lib.rs. pacman owns updates on Arch, so an AUR
+# install must NEVER register them — both kappastream-git PKGBUILDs build with
+# --no-default-features so the feature is off. These two files drifted apart in
+# the v0.1.3→v0.2.6 window (the top-level template kept the old updater-ON
+# cargo line while submit/ was fixed); this assertion makes a silent reversion
+# fail CI instead of shipping a pacman-conflicting package. Runs unconditionally
+# — the invariant holds for every release, prerelease or not.
+for aur_pkgbuild in \
+    "packaging/aur/PKGBUILD" \
+    "packaging/aur/submit/kappastream-git/PKGBUILD"; do
+    # Match the actual cargo command line (indented inside build()), not the
+    # explanatory comment, so the flag can't be "present" only in prose.
+    if ! grep -qE '^[[:space:]]*cargo build .*--no-default-features' "$aur_pkgbuild"; then
+        fail "$aur_pkgbuild: AUR -git build is missing --no-default-features — the updater plugins would be registered on an Arch install (pacman owns updates). See src-tauri/Cargo.toml [features] default = [\"updater\"] and src-tauri/src/lib.rs."
+    fi
+done
+
+echo "check-versions: OK — package.json, Cargo.toml and Cargo.lock all at $PKG_VER; no stale packaging versions; AUR -git builds are updater-off."

@@ -23,6 +23,8 @@ The recipes live in this directory:
 | `.gitignore` | Excludes makepkg output, local clones, and `dist/`. |
 | `README.md` | This file. |
 
+The recipes in this directory (`PKGBUILD`, `PKGBUILD-bin`) are the **editable templates**. `submit/kappastream-{git,bin}/` holds the **published AUR snapshot** (PKGBUILD + its derived `.SRCINFO` + README). Keep the template and its `submit/` copy in sync — `scripts/check-versions.sh` asserts both `-git` PKGBUILDs build with `--no-default-features` (the updater opt-out) and fails CI otherwise.
+
 Shared assets (also used by the Debian/Fedora packages, live in
 `packaging/shared/`):
 
