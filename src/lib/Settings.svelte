@@ -354,6 +354,24 @@ async function exportFavorites(): Promise<void> {
             <span class="toggle-knob"></span>
           </span>
         </div>
+        <div class="toggle-row">
+          <span class="toggle-label" id="check-updates-label">
+            Check for updates
+            <span class="toggle-hint">check for new versions on startup (AUR builds skip this)</span>
+          </span>
+          <span
+            class="toggle"
+            class:toggle--on={settings.checkUpdates}
+            role="switch"
+            tabindex="0"
+            aria-checked={settings.checkUpdates}
+            aria-labelledby="check-updates-label"
+            onclick={() => settings.toggleCheckUpdates()}
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleCheckUpdates() } }}
+          >
+            <span class="toggle-knob"></span>
+          </span>
+        </div>
         <div class="mention-row">
           <label class="panel-label" for="mention-username-input">Your Twitch username</label>
           <div class="mention-input-wrap">

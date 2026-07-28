@@ -1405,9 +1405,11 @@
   // Check for an app update on startup (non-blocking, silent on failure). On a
   // network error or a 404 on latest.json the store stays `idle` and nothing is
   // shown; on an AUR build the updater plugin isn't registered and the call
-  // rejects immediately (swallowed) — no AUR user ever sees a prompt.
+  // rejects immediately (swallowed) — no AUR user ever sees a prompt. Gated on
+  // settings.checkUpdates (default on): this is the one outbound request that
+  // isn't a direct consequence of a user action, so it's user-toggleable.
   onMount(() => {
-    void updateStore.check()
+    if (settings.checkUpdates) void updateStore.check()
   })
 
   const playerLabel: Record<PlayerStatus, string> = {

@@ -193,7 +193,7 @@ The application contacts only the services required for playback, chat, metadata
 
 These third-party services can see normal request info like your IP address — never your Twitch account, an OAuth token, or your profile.
 
-The update check is a single anonymous HTTPS GET to the project's own GitHub Releases (your IP is visible to GitHub as with any release download; no account or token is sent). It can be disabled only by using the AUR packages, which are built without the updater.
+The update check is a single anonymous HTTPS GET to the project's own GitHub Releases (your IP is visible to GitHub as with any release download; no account or token is sent). It runs once on startup and can be turned off in **Settings → "Check for updates"**. AUR packages are built without the updater, so the check never runs there regardless of that setting.
 
 **Data sources.** Favorites load through one batched, anonymous Twitch request per refresh. If that request fails, the app holds each channel's last known status and retries with backoff — there is no second data source.
 

@@ -79,6 +79,11 @@ const QUALITY_PREFIX = 'app-quality:'
 const UI_SCALE_KEY = 'app-ui-scale-v1'
 const LOW_LATENCY_KEY = 'app-low-latency-v1'
 const CLOSE_TO_TRAY_KEY = 'app-close-to-tray-v1'
+// In-app update check on startup. Default ON (the updater has checked on every
+// launch since v0.2.6); users who want a fully silent launch opt out here. On
+// an AUR build the updater plugins are unregistered, so `check()` is a no-op
+// regardless of this setting — the toggle is simply inert there.
+const CHECK_UPDATES_KEY = 'app-check-updates-v1'
 // Tier 2 chat-feature toggles (sections 1–6). All default OFF — the baseline
 // chat is byte-identical with every one of these false.
 const CHAT_SUBNOTICES_KEY = 'app-chat-subnotices-v1'
@@ -155,6 +160,13 @@ function readCloseToTray(): boolean {
   return safeRead(CLOSE_TO_TRAY_KEY) !== 'false'
 }
 
+function readCheckUpdates(): boolean {
+  // Default ON: the updater check has run on every launch since v0.2.6. Only
+  // an explicit 'false' opts out — this is the one outbound request that is
+  // not a direct consequence of a user action, so it's the one worth gating.
+  return safeRead(CHECK_UPDATES_KEY) !== 'false'
+}
+
 // All four Tier 2 chat-feature toggles default OFF.
 function readChatSubnotices(): boolean {
   return safeRead(CHAT_SUBNOTICES_KEY) === 'true'
@@ -198,6 +210,7 @@ class SettingsStore {
   uiScale: number = $state(readUiScale())
   lowLatency: boolean = $state(readLowLatency())
   closeToTray: boolean = $state(readCloseToTray())
+  checkUpdates: boolean = $state(readCheckUpdates())
   chatSubnotices: boolean = $state(readChatSubnotices())
   chatRoomstate: boolean = $state(readChatRoomstate())
   chatModeration: boolean = $state(readChatModeration())
@@ -288,6 +301,15 @@ class SettingsStore {
 
   toggleCloseToTray(): void {
     this.setCloseToTray(!this.closeToTray)
+  }
+
+  setCheckUpdates(v: boolean): void {
+    this.checkUpdates = v
+    safeWrite(CHECK_UPDATES_KEY, v ? 'true' : 'false')
+  }
+
+  toggleCheckUpdates(): void {
+    this.setCheckUpdates(!this.checkUpdates)
   }
 
   setChatSubnotices(v: boolean): void {

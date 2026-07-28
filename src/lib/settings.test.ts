@@ -116,3 +116,39 @@ describe('Toggle C is retroactive (live, no reconnect)', () => {
     expect(presented).toBe(true)
   })
 })
+
+describe('update-check toggle (default on, opt-out)', () => {
+  // The startup update check is the one outbound request that is not a direct
+  // consequence of a user action, so it is the one worth gating. It defaults
+  // ON (matches the pre-toggle v0.2.6 behaviour); only an explicit 'false'
+  // opts out — same shape as close-to-tray.
+  const KEY = 'app-check-updates-v1'
+
+  it('defaults to true on a fresh store', () => {
+    expect(S.settings.checkUpdates).toBe(true)
+  })
+
+  it('a stored "false" is respected (opt-out persists across reloads)', async () => {
+    localStorage.setItem(KEY, 'false')
+    vi.resetModules()
+    const mod = await import('./settings.svelte')
+    expect(mod.settings.checkUpdates).toBe(false)
+  })
+
+  it('a junk value is treated as true (default on)', async () => {
+    localStorage.setItem(KEY, 'garbage')
+    vi.resetModules()
+    const mod = await import('./settings.svelte')
+    expect(mod.settings.checkUpdates).toBe(true)
+  })
+
+  it('toggleCheckUpdates flips the value and persists', () => {
+    expect(S.settings.checkUpdates).toBe(true)
+    S.settings.toggleCheckUpdates()
+    expect(S.settings.checkUpdates).toBe(false)
+    expect(localStorage.getItem(KEY)).toBe('false')
+    S.settings.toggleCheckUpdates()
+    expect(S.settings.checkUpdates).toBe(true)
+    expect(localStorage.getItem(KEY)).toBe('true')
+  })
+})
