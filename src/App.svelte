@@ -19,6 +19,7 @@
   import { buildHlsConfig } from './lib/hls-config'
   import { pipController } from './lib/pip-controller.svelte.ts'
   import { sleepTimer, formatSleepRemaining, type PlaybackKind as SleepPlaybackKind } from './lib/sleep-timer.svelte.ts'
+  import { vodPositions } from './lib/vod-positions.svelte.ts'
   import { fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
   import { notifications } from './lib/notifications.svelte.ts'
@@ -143,6 +144,14 @@
   // fold. Reset to the top on every channel change.
   let videoScrollEl = $state<HTMLElement | null>(null)
   let contentRef = $state<HTMLElement | null>(null)
+
+  // VOD resume: a transient bar shown after auto-resuming so the user can see
+  // they were resumed and restart in one action. Null when no bar is shown.
+  interface ResumeBar { vodId: string; position: number }
+  let resumeBar = $state<ResumeBar | null>(null)
+  let resumeBarTimer: ReturnType<typeof setTimeout> | null = null
+  let lastVodSaveAt = 0
+  const VOD_SAVE_INTERVAL_MS = 5_000
 
   const SIDEBAR_VIS_KEY = 'twitch-sidebar-visible-v3'
   function loadSidebarMode(): 'full' | 'icons' | 'hidden' {
@@ -307,6 +316,22 @@
     }
   })
 
+  // VOD resume: force-flush the current position when the user LEAVES a VOD
+  // (switches channel, opens another VOD/clip, or returns to live). Captures
+  // the previous VOD id so the final checkpoint lands before the source swaps.
+  let prevVodId: string | null = null
+  $effect(() => {
+    const currentId = playback.kind === 'vod' ? playback.id : null
+    if (prevVodId !== null && prevVodId !== currentId) {
+      const el = videoEl
+      if (el) {
+        vodPositions.save(prevVodId, el.currentTime, Number.isFinite(el.duration) ? el.duration : 0)
+      }
+      dismissResumeBar()
+    }
+    prevVodId = currentId
+  })
+
   // Reset the channel-content scroll position to the top whenever the joined
   // channel changes (so a new channel always starts at the player, not partway
   // down the previous channel's content).
@@ -363,6 +388,8 @@
   }
 
   function onVideoPause(): void {
+    // Flush the VOD resume checkpoint on any pause (works for every kind).
+    saveVodPosition(true)
     // Stall recovery is live-only — never force-seek a paused VOD/clip.
     if (playback.kind !== 'live') return
     // Ignore user-initiated pauses (togglePlay sets userPaused first). A
@@ -375,6 +402,11 @@
   function onVideoPlaying(): void {
     clearStallRecover()
     userPaused = false
+  }
+
+  function onVideoTimeUpdate(): void {
+    // Throttled VOD position checkpoint (live + clips are ignored inside).
+    saveVodPosition()
   }
   let cancelPendingAttach: (() => void) | null = null
   let emoteAbort: AbortController | null = null
@@ -1145,6 +1177,86 @@
     return httpsUrl.replace('https://', prefix)
   }
 
+  // ---- VOD resume position ------------------------------------------------
+  // `position` is playlist-relative (the VOD runs through the ksvod proxy and
+  // currentTime is relative to that playlist). The same player writes and reads
+  // it, so it is self-consistent — but it does NOT match Twitch's broadcast
+  // offset. Clips are out of scope (too short). See vod-positions.svelte.ts for
+  // the bounded storage + thresholds.
+
+  function formatVodTime(s: number): string {
+    if (!Number.isFinite(s) || s < 0) s = 0
+    const total = Math.floor(s)
+    const h = Math.floor(total / 3600)
+    const m = Math.floor((total % 3600) / 60)
+    const sec = total % 60
+    const mm = h > 0 ? m.toString().padStart(2, '0') : String(m)
+    return (h > 0 ? h + ':' : '') + mm + ':' + sec.toString().padStart(2, '0')
+  }
+
+  function showResumeBar(vodId: string, position: number): void {
+    resumeBar = { vodId, position }
+    if (resumeBarTimer) clearTimeout(resumeBarTimer)
+    resumeBarTimer = setTimeout(() => { resumeBar = null; resumeBarTimer = null }, 8000)
+  }
+
+  function dismissResumeBar(): void {
+    if (resumeBarTimer) { clearTimeout(resumeBarTimer); resumeBarTimer = null }
+    resumeBar = null
+  }
+
+  function restartVod(): void {
+    const el = videoEl
+    if (el) {
+      try { el.currentTime = 0 } catch { /* ignore */ }
+      void el.play().catch(() => { /* ignore */ })
+    }
+    if (playback.kind === 'vod') vodPositions.clear(playback.id)
+    dismissResumeBar()
+  }
+
+  // Seek the just-loaded VOD to its saved position (if any) once the seekable
+  // range covers it, and surface a "Resumed from … — Restart" bar. HLS VOD
+  // playlists list every segment, so seekable usually covers the full duration
+  // right after manifest parse; we poll briefly as a safety net.
+  function restoreVodPosition(videoId: string): void {
+    const saved = vodPositions.get(videoId)
+    if (!saved || saved.position < 30) return
+    const el = videoEl
+    if (!el) return
+    let tries = 0
+    const attempt = (): boolean => {
+      const seekable = el.seekable
+      if (seekable.length === 0) return false
+      if (saved.position > seekable.end(seekable.length - 1)) return false
+      try { el.currentTime = saved.position } catch { /* ignore */ }
+      return true
+    }
+    if (attempt()) { showResumeBar(videoId, saved.position); return }
+    const onProgress = (): void => {
+      if (attempt()) {
+        el.removeEventListener('progress', onProgress)
+        showResumeBar(videoId, saved.position)
+      } else if (++tries > 200) {
+        el.removeEventListener('progress', onProgress)
+      }
+    }
+    el.addEventListener('progress', onProgress)
+  }
+
+  // Throttled save of the current VOD position. Called from timeupdate (every
+  // frame, throttled to VOD_SAVE_INTERVAL_MS) and force-flushed on pause and on
+  // leaving the VOD. No-op outside VOD playback.
+  function saveVodPosition(force = false): void {
+    if (playback.kind !== 'vod') return
+    const el = videoEl
+    if (!el) return
+    const now = Date.now()
+    if (!force && now - lastVodSaveAt < VOD_SAVE_INTERVAL_MS) return
+    lastVodSaveAt = now
+    vodPositions.save(playback.id, el.currentTime, Number.isFinite(el.duration) ? el.duration : 0)
+  }
+
   async function loadVod(videoId: string, q: string): Promise<void> {
     playerError = ''
     playerStatus = 'resolving'
@@ -1175,6 +1287,7 @@
     if (attach.ok) {
       playerStatus = 'playing'
       if (channelJoined) pipController.setStream({ url: proxyUrl, channel: channelJoined, quality: q })
+      restoreVodPosition(videoId)
       return
     }
     playerStatus = 'error'
@@ -1804,6 +1917,7 @@
         onwaiting={onVideoWaiting}
         onplaying={onVideoPlaying}
         onpause={onVideoPause}
+        ontimeupdate={onVideoTimeUpdate}
       ></video>
         <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { userPaused = !p }} {activeStatus} />
         {#if showPlayerOverlay}
@@ -1828,6 +1942,13 @@
           <div class="player-overlay">
             <p class="overlay-title">Stream stopped</p>
             <button type="button" class="overlay-action" onclick={resumeStream}>Resume stream</button>
+          </div>
+        {/if}
+        {#if resumeBar}
+          <div class="resume-bar" role="status">
+            <span class="resume-bar-text">Resumed from {formatVodTime(resumeBar.position)}</span>
+            <button type="button" class="resume-bar-btn" onclick={restartVod}>Restart</button>
+            <button type="button" class="resume-bar-close" onclick={dismissResumeBar} aria-label="Dismiss resume notice">×</button>
           </div>
         {/if}
       {:else}
@@ -2941,6 +3062,68 @@
 
   .player-overlay--error {
     background: var(--bg-overlay-strong);
+  }
+
+  /* VOD resume notice — non-modal, sits over the lower-left of the player for a
+     few seconds after auto-resuming. One-action "Restart" revert. */
+  .resume-bar {
+    position: absolute;
+    left: 10px;
+    bottom: 56px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px 6px 12px;
+    border-radius: 6px;
+    background: var(--bg-overlay-strong);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 12px;
+    box-shadow: var(--shadow-menu);
+    z-index: 20;
+    max-width: calc(100% - 20px);
+  }
+
+  .resume-bar-text {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .resume-bar-btn {
+    flex: 0 0 auto;
+    padding: 3px 10px;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 150ms, color 150ms;
+  }
+
+  .resume-bar-btn:hover {
+    background: var(--accent);
+    color: var(--text-primary);
+  }
+
+  .resume-bar-close {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 150ms, color 150ms;
+  }
+
+  .resume-bar-close:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
   }
 
   .overlay-title {
