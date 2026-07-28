@@ -435,6 +435,48 @@ async function exportFavorites(): Promise<void> {
       </section>
 
       <section class="panel-section">
+        <button
+          type="button"
+          class="disclosure"
+          class:disclosure--open={scaleOpen}
+          aria-expanded={scaleOpen}
+          onclick={toggleScale}
+        >
+          <span class="disclosure-label">UI scale</span>
+          <span class="disclosure-value">{Math.round(settings.uiScale * 100)}%</span>
+          <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        {#if scaleOpen}
+          <div class="disclosure-body" transition:slide={{ duration: 150 }}>
+            <div class="scale-grid" role="radiogroup" aria-label="UI scale">
+              {#each UI_SCALE_PRESETS as preset (preset)}
+                <button
+                  type="button"
+                  class="scale-btn"
+                  class:scale-btn--active={Math.abs(settings.uiScale - preset) < 0.001}
+                  role="radio"
+                  aria-checked={Math.abs(settings.uiScale - preset) < 0.001}
+                  onclick={() => onUiScalePick(preset)}
+                >{preset}×</button>
+              {/each}
+            </div>
+            <div class="scale-foot">
+              <span class="scale-foot-label">{UI_SCALE_MIN}× min</span>
+              <button
+                type="button"
+                class="scale-reset"
+                onclick={resetUiScale}
+                disabled={settings.uiScale === UI_SCALE_DEFAULT}
+              >Reset to {UI_SCALE_DEFAULT}×</button>
+              <span class="scale-foot-label">{UI_SCALE_MAX}× max</span>
+            </div>
+          </div>
+        {/if}
+      </section>
+
+      <section class="panel-section">
         <div class="toggle-row">
           <span class="toggle-label" id="low-latency-label">
             Low latency
@@ -653,48 +695,6 @@ async function exportFavorites(): Promise<void> {
         <p class="shortcut-hint">
           Player keyboard shortcuts: <kbd>Space</kbd> play, <kbd>M</kbd> mute, <kbd>F</kbd> fullscreen, <kbd>T</kbd> theater, arrows seek/volume. Press <kbd>?</kbd> for the full list.
         </p>
-      </section>
-
-      <section class="panel-section">
-        <button
-          type="button"
-          class="disclosure"
-          class:disclosure--open={scaleOpen}
-          aria-expanded={scaleOpen}
-          onclick={toggleScale}
-        >
-          <span class="disclosure-label">UI scale</span>
-          <span class="disclosure-value">{Math.round(settings.uiScale * 100)}%</span>
-          <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-            <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
-        {#if scaleOpen}
-          <div class="disclosure-body" transition:slide={{ duration: 150 }}>
-            <div class="scale-grid" role="radiogroup" aria-label="UI scale">
-              {#each UI_SCALE_PRESETS as preset (preset)}
-                <button
-                  type="button"
-                  class="scale-btn"
-                  class:scale-btn--active={Math.abs(settings.uiScale - preset) < 0.001}
-                  role="radio"
-                  aria-checked={Math.abs(settings.uiScale - preset) < 0.001}
-                  onclick={() => onUiScalePick(preset)}
-                >{preset}×</button>
-              {/each}
-            </div>
-            <div class="scale-foot">
-              <span class="scale-foot-label">{UI_SCALE_MIN}× min</span>
-              <button
-                type="button"
-                class="scale-reset"
-                onclick={resetUiScale}
-                disabled={settings.uiScale === UI_SCALE_DEFAULT}
-              >Reset to {UI_SCALE_DEFAULT}×</button>
-              <span class="scale-foot-label">{UI_SCALE_MAX}× max</span>
-            </div>
-          </div>
-        {/if}
       </section>
 
     </div>
