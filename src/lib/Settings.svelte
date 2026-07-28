@@ -599,6 +599,12 @@ async function exportFavorites(): Promise<void> {
       </section>
 
       <section class="panel-section">
+        <p class="shortcut-hint">
+          Player keyboard shortcuts: <kbd>Space</kbd> play, <kbd>M</kbd> mute, <kbd>F</kbd> fullscreen, <kbd>T</kbd> theater, arrows seek/volume. Press <kbd>?</kbd> for the full list.
+        </p>
+      </section>
+
+      <section class="panel-section">
         <button
           type="button"
           class="disclosure"
@@ -1110,6 +1116,26 @@ async function exportFavorites(): Promise<void> {
     margin: 2px 0 0;
     font-size: 11px;
     color: var(--text-dim);
+  }
+
+  .shortcut-hint {
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+  }
+
+  .shortcut-hint kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-family: 'Menlo', 'Consolas', monospace;
+    font-size: 10px;
+    line-height: 1.3;
   }
 
   .seg {

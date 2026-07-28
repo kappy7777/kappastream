@@ -20,6 +20,7 @@
   import { pipController } from './lib/pip-controller.svelte.ts'
   import { sleepTimer, formatSleepRemaining, type PlaybackKind as SleepPlaybackKind } from './lib/sleep-timer.svelte.ts'
   import { vodPositions } from './lib/vod-positions.svelte.ts'
+  import { resolveShortcut } from './lib/shortcuts'
   import { fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
   import { notifications } from './lib/notifications.svelte.ts'
@@ -253,10 +254,98 @@
   function closeAbout(): void {
     aboutOpen = false
   }
-  function onAboutKeydown(e: KeyboardEvent): void {
-    if (aboutOpen && e.key === 'Escape') {
-      e.preventDefault()
-      closeAbout()
+  let shortcutsHelpOpen = $state(false)
+
+  // Player keyboard shortcuts (space/k play-pause, m mute, f fullscreen, t
+  // theater, arrows seek-VOD / volume, ? help). Resolution is pure
+  // (lib/shortcuts.ts) so suppression is testable; this handler owns the side
+  // effects. Suppression: never while typing in any editable target, and never
+  // behind an open modal/overlay (about / browse / this help). See shortcuts.ts.
+  function toggleVideoPlay(): void {
+    const el = videoEl
+    if (!el) return
+    if (el.paused) {
+      userPaused = false
+      void el.play().catch(() => { /* ignore */ })
+    } else {
+      // Flag the user pause BEFORE pausing so the live stall-recovery watcher
+      // doesn't treat it as a stall and auto-resume.
+      userPaused = true
+      el.pause()
+    }
+  }
+  function toggleVideoMute(): void {
+    const el = videoEl
+    if (!el) return
+    el.muted = !el.muted
+  }
+  function toggleVideoFullscreen(): void {
+    const el = videoEl
+    if (!el) return
+    if (document.fullscreenElement) {
+      void document.exitFullscreen()
+    } else {
+      const target = el.parentElement ?? el
+      void target.requestFullscreen?.()
+    }
+  }
+  function seekVideoBy(delta: number): void {
+    const el = videoEl
+    if (!el) return
+    let next = el.currentTime + delta
+    if (Number.isFinite(el.duration) && el.duration > 0) next = Math.min(next, el.duration)
+    try { el.currentTime = Math.max(0, next) } catch { /* ignore */ }
+  }
+  function nudgeVolume(delta: number): void {
+    const el = videoEl
+    if (!el) return
+    const cur = el.muted ? 0 : el.volume
+    const next = Math.max(0, Math.min(1, cur + delta))
+    el.volume = next
+    if (next > 0 && el.muted) el.muted = false
+  }
+
+  function onGlobalKeydown(e: KeyboardEvent): void {
+    const action = resolveShortcut(e, {
+      aboutOpen,
+      browseOpen,
+      helpOpen: shortcutsHelpOpen,
+      isLive: playback.kind === 'live',
+    })
+    if (!action) return
+    switch (action.type) {
+      case 'close-about':
+        e.preventDefault()
+        closeAbout()
+        return
+      case 'close-help':
+        e.preventDefault()
+        shortcutsHelpOpen = false
+        return
+      case 'toggle-help':
+        shortcutsHelpOpen = !shortcutsHelpOpen
+        return
+      case 'play-pause':
+        e.preventDefault()
+        toggleVideoPlay()
+        return
+      case 'toggle-mute':
+        toggleVideoMute()
+        return
+      case 'toggle-fullscreen':
+        toggleVideoFullscreen()
+        return
+      case 'toggle-theater':
+        settings.toggleTheaterMode()
+        return
+      case 'seek':
+        e.preventDefault()
+        seekVideoBy(action.delta)
+        return
+      case 'volume':
+        e.preventDefault()
+        nudgeVolume(action.delta)
+        return
     }
   }
 
@@ -1769,7 +1858,7 @@
   )
 </script>
 
-<svelte:window onkeydown={onAboutKeydown} />
+<svelte:window onkeydown={onGlobalKeydown} />
 
 <div class="app" class:app--sidebar-icons={sidebarMode === 'icons'} class:app--sidebar-hidden={sidebarMode === 'hidden'}>
   <!-- svelte-ignore a11y_no_static_element_interactions
@@ -2254,6 +2343,29 @@
     </div>
   {/if}
 
+  {#if shortcutsHelpOpen}
+    <div class="about-backdrop" onclick={() => (shortcutsHelpOpen = false)} role="presentation"></div>
+    <div class="about-modal shortcuts-modal" role="dialog" aria-label="Keyboard shortcuts">
+      <button
+        type="button"
+        class="about-close"
+        onclick={() => (shortcutsHelpOpen = false)}
+        aria-label="Close shortcuts help"
+      >×</button>
+      <h2 id="shortcuts-title" class="shortcuts-title">Keyboard shortcuts</h2>
+      <ul class="shortcuts-list" aria-labelledby="shortcuts-title">
+        <li><span class="shortcut-keys"><kbd>Space</kbd> <span class="shortcut-or">/</span> <kbd>K</kbd></span><span class="shortcut-desc">Play / pause</span></li>
+        <li><span class="shortcut-keys"><kbd>M</kbd></span><span class="shortcut-desc">Mute / unmute</span></li>
+        <li><span class="shortcut-keys"><kbd>F</kbd></span><span class="shortcut-desc">Toggle fullscreen</span></li>
+        <li><span class="shortcut-keys"><kbd>T</kbd></span><span class="shortcut-desc">Toggle theater mode</span></li>
+        <li><span class="shortcut-keys"><kbd>←</kbd> <span class="shortcut-or">/</span> <kbd>→</kbd></span><span class="shortcut-desc">Seek 10s (VOD &amp; clips) · volume (live)</span></li>
+        <li><span class="shortcut-keys"><kbd>↑</kbd> <span class="shortcut-or">/</span> <kbd>↓</kbd></span><span class="shortcut-desc">Volume up / down</span></li>
+        <li><span class="shortcut-keys"><kbd>?</kbd></span><span class="shortcut-desc">Show / hide this help</span></li>
+      </ul>
+      <p class="shortcuts-note">Shortcuts are disabled while typing in any text field (chat, search, inputs).</p>
+    </div>
+  {/if}
+
   {#if browseOpen}
     <BrowseView onselect={browseSelectChannel} onclose={() => (browseOpen = false)} />
   {/if}
@@ -2577,6 +2689,67 @@
   .about-close:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
+  }
+
+  /* Keyboard-shortcuts help overlay (?). Reuses .about-modal chrome. */
+  .shortcuts-modal {
+    max-width: 420px;
+    width: min(420px, calc(100vw - 32px));
+  }
+  .shortcuts-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .shortcuts-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .shortcuts-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .shortcut-keys {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 96px;
+  }
+  .shortcut-or {
+    color: var(--text-dim);
+    font-size: 11px;
+  }
+  .shortcut-desc {
+    flex: 1 1 auto;
+    text-align: right;
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+  .shortcuts-list kbd {
+    display: inline-block;
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-family: 'Menlo', 'Consolas', monospace;
+    font-size: 12px;
+    line-height: 1.4;
+    min-width: 16px;
+    text-align: center;
+  }
+  .shortcuts-note {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--text-dim);
   }
   .about-modal-name {
     font-size: 20px;
