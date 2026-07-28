@@ -2,7 +2,7 @@
 Type=Application
 Name=kappastream
 GenericName=Twitch Viewer
-Comment=A lightweight, account-free Twitch viewer (live stream, chat, favorites)
+Comment=A lightweight, anonymous Twitch viewer (live stream, chat, favorites)
 Exec=kappastream
 Icon=kappastream
 StartupNotify=true

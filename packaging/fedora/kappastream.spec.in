@@ -12,7 +12,7 @@
 Name:           kappastream
 Version:        @VERSION@
 Release:        1%{?dist}
-Summary:        Lightweight, account-free Twitch viewer for Linux
+Summary:        Lightweight, anonymous Twitch viewer for Linux
 
 License:        GPL-3.0-only
 URL:            https://github.com/kappy7777/kappastream
@@ -65,13 +65,17 @@ BuildArch:      x86_64
 %description
 kappastream is a lightweight Twitch viewer: live stream playback via
 streamlink + hls.js, read-only IRC chat over the public Twitch WebSocket,
-favorites with Twitch GQL live status / retry backoff / circuit breaker,
-and per-channel desktop notifications.
+favorites with Twitch GQL live status (each channel's last-known status
+is kept and the request retried with backoff on a network failure), and
+per-channel desktop notifications.
 
-Account-free and read-only — no Twitch login, no OAuth, no client ID.
-Everything stays in local storage. On NVIDIA Wayland the binary disables
-EGL-Wayland explicit sync at startup to avoid a WebKitGTK launch crash,
-retaining accelerated compositing; AMD, Intel and X11 are unaffected.
+Anonymous and read-only — no Twitch login, no OAuth, and no user
+credentials. Live status and metadata use Twitch's public web Client-ID
+(the same one twitch.tv itself uses), pinned in the native binary so the
+page cannot change it. Everything stays in local storage. On NVIDIA
+Wayland the binary disables EGL-Wayland explicit sync at startup to
+avoid a WebKitGTK launch crash, retaining accelerated compositing; AMD,
+Intel and X11 are unaffected.
 
 %prep
 %setup -q

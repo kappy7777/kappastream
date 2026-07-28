@@ -14,7 +14,7 @@
   <project_license>GPL-3.0-only</project_license>
 
   <name>kappastream</name>
-  <summary>Lightweight, account-free Twitch viewer</summary>
+  <summary>Lightweight, anonymous Twitch viewer</summary>
 
   <url type="homepage">https://github.com/kappy7777/kappastream</url>
   <url type="bugtracker">https://github.com/kappy7777/kappastream/issues</url>
@@ -22,23 +22,25 @@
 
   <description>
     <p>
-      kappastream is a lightweight, account-free Twitch viewer: live
+      kappastream is a lightweight, anonymous Twitch viewer: live
       streams, past broadcasts, highlights and clips, IRC chat, favorites
       with live status, channel discovery, mentions, and per-channel
       desktop notifications.
     </p>
     <p>
-      It is account-free and read-only — no Twitch login, no OAuth, no
-      client ID. Chat is read from the public IRC WebSocket; live status
-      and metadata come from Twitch's anonymous GQL endpoint. Streams are
+      It is anonymous and read-only — no Twitch login, no OAuth, and no
+      user credentials. Chat is read from the public IRC WebSocket; live
+      status and metadata come from Twitch's anonymous GQL endpoint,
+      queried with the same public Client-ID twitch.tv's own web client
+      uses (pinned in the native binary, never user-supplied). Streams are
       resolved locally via streamlink and played back with hls.js in a
       Tauri WebView.
     </p>
     <p>
-      Favorites poll Twitch GQL in a single batched request (with retry
-      backoff and a circuit breaker on transport failures). Everything —
-      favorites, settings, cached state — stays in local storage. No
-      telemetry, no accounts, no server.
+      Favorites poll Twitch GQL in a single batched request; on a transport
+      failure each channel keeps its last-known status and the request is
+      retried with backoff. Everything — favorites, settings, cached state
+      — stays in local storage. No telemetry, no accounts, no server.
     </p>
   </description>
 

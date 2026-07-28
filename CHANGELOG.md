@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Corrected inaccurate product descriptions.** The `.deb`, `.rpm`,
+  AppStream metainfo, and AUR summaries no longer claim "no client ID" —
+  kappastream sends Twitch's public web Client-ID (the one twitch.tv
+  itself uses), pinned in the native binary. The stale "circuit breaker"
+  phrasing was replaced with a plain description of the actual behaviour:
+  on a network failure each channel keeps its last-known status and the
+  request is retried with backoff. `package.json` and `Cargo.toml` now
+  describe the app as available for Linux and Windows rather than a
+  Linux-only AppImage, and the tagline adjective was standardised to
+  "anonymous" across the README, package metadata, desktop entry, and
+  metainfo. SECURITY.md's IPC surface list now also covers the `ksvod`
+  media proxy, the URL opener, favorites export, mpv handoff, and the
+  `target_os` query.
+
+### Added
+
+- The README features table now lists the chat mute list, sleep timer,
+  VOD resume, and player keyboard shortcuts shipped in 0.2.7.
+
 ## [0.2.7] - 2026-07-28
 
 ### Added

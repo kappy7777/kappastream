@@ -2,7 +2,7 @@
 
 <img src="public/kappastream-wordmark.svg" alt="kappastream" width="520">
 
-### A lightweight, private Twitch viewer for Linux and Windows
+### A lightweight, anonymous Twitch viewer for Linux and Windows
 
 **No account. No tracking. No recommendations.**  
 Just the stream and the chat.
@@ -47,9 +47,9 @@ Chat is read anonymously through Twitch IRC. Stream playback is resolved locally
 
 | | |
 |---|---|
-| **Live playback** | HLS playback with quality selection, fullscreen, theater mode, per-channel quality preferences, and an optional low-latency mode. |
-| **VODs and clips** | Browse a channel's past broadcasts, highlights, recent and popular clips, and play them in the main player — with mpv handoff and Picture-in-Picture support. A Back-to-live control returns to the stream. |
-| **Anonymous chat** | Read-only Twitch IRC chat with native Twitch emotes, 7TV, BTTV and FFZ emotes, badges, colored usernames, timestamps, and mention highlighting. |
+| **Live playback** | HLS playback with quality selection, fullscreen, theater mode, per-channel quality preferences, an optional low-latency mode, player keyboard shortcuts, and a sleep timer. |
+| **VODs and clips** | Browse a channel's past broadcasts, highlights, recent and popular clips, and play them in the main player — with mpv handoff and Picture-in-Picture support. A Back-to-live control returns to the stream. Past broadcasts resume from where you left off, with a one-click restart. |
+| **Anonymous chat** | Read-only Twitch IRC chat with native Twitch emotes, 7TV, BTTV and FFZ emotes, badges, colored usernames, timestamps, mention highlighting, and a client-side mute list. |
 | **Favorites** | Save channels locally, drag to reorder them, and see live status, viewer count, game, and stream title at a glance. |
 | **Channel discovery** | Search for live channels and browse top streams and categories, all anonymously via Twitch GQL. Selecting a result joins the channel. |
 | **Notifications** | Opt in per channel for go-live notifications and receive desktop alerts for chat mentions. |
@@ -58,7 +58,7 @@ Chat is read anonymously through Twitch IRC. Stream playback is resolved locally
 | **System tray** | Show, hide, or quit from the tray, with optional close-to-tray behavior. |
 | **Customization** | 29 themes and interface scaling from 0.5× to 4×. |
 | **Import and export** | Back up and restore favorites and settings as local JSON files. |
-| **Resilient status checks** | Cached state, retry backoff, and rate-limit protection keep temporary API failures from disrupting playback or chat. |
+| **Resilient status checks** | When a status request fails, each channel keeps its last-known status and the request is retried with backoff, so a temporary Twitch outage doesn't clear your favorites or disrupt playback or chat. |
 
 ## Installation
 
