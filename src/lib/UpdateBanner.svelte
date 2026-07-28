@@ -11,6 +11,35 @@
     const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)))
     return `${(n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
   }
+
+  // Map raw tauri-plugin-updater errors to plain-language copy. The raw string
+  // is already logged to the console (update.svelte.ts apply() catch), so the
+  // banner surfaces only a friendly reason — a non-technical user should not
+  // see "invalid encoding in minisign data" or a bare HTTP status. Unknown
+  // failures fall back to a generic message; the detail stays in the console.
+  function friendlyError(raw: string | null): string | null {
+    if (!raw) return null
+    const s = raw.toLowerCase()
+    if (s.includes('minisign') || s.includes('signature') || s.includes('verif')) {
+      return 'the update signature could not be verified'
+    }
+    if (s.includes('timeout') || s.includes('timed out')) {
+      return 'the download timed out'
+    }
+    if (s.includes('network') || s.includes('connect') || s.includes('dns') || s.includes('resolve')) {
+      return 'a network problem blocked the download'
+    }
+    if (s.includes('status') || /\b[45]\d\d\b/.test(s)) {
+      return 'the update could not be downloaded'
+    }
+    if (s.includes('enospc') || s.includes('disk') || s.includes('no space') || s.includes('space')) {
+      return 'not enough disk space to install the update'
+    }
+    if (s.includes('permission') || s.includes('denied') || s.includes('eacces') || s.includes('eperm')) {
+      return 'the update could not be written (check permissions)'
+    }
+    return 'the update could not be installed'
+  }
 </script>
 
 {#if updateStore.visible}
@@ -37,7 +66,7 @@
         <span class="update-banner__icon update-banner__icon--error" aria-hidden="true">!</span>
         <span class="update-banner__text">
           Update to v{updateStore.version} failed
-          {#if updateStore.errorMsg}<span class="update-banner__reason"> — {updateStore.errorMsg}</span>{/if}
+          {#if friendlyError(updateStore.errorMsg)}<span class="update-banner__reason"> — {friendlyError(updateStore.errorMsg)}</span>{/if}
         </span>
         <button type="button" class="update-banner__btn update-banner__btn--primary" onclick={() => updateStore.apply()}>Retry</button>
         <button type="button" class="update-banner__btn update-banner__btn--ghost" onclick={() => updateStore.dismiss()} aria-label="Dismiss update notice">×</button>
