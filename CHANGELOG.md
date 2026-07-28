@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-07-28
+
+### Added
+
+- **Chat mute list.** Hide messages from users you don't want to see, entirely
+  client-side (it never touches Twitch). Add a login under Settings → Chat and
+  their messages — and their sub/raid notices — disappear (hidden, not struck
+  through; strikethrough is the moderator-transparency treatment). Matching is
+  on the stable account login, never a display name, and adding or removing a
+  name re-applies to messages already in the buffer with no reconnect.
+
+- **Sleep timer.** Stop playback after a chosen time — presets or a custom
+  1–600 minutes. The remaining time shows in the top bar while armed.
+
+- **VOD resume.** kappastream now remembers where you got to in a past broadcast
+  and resumes from there next time, with a one-click "Restart" to start over.
+  Positions below 30s or past 95% aren't stored, and the cache is capped
+  (oldest dropped first) so it can't grow without bound. Clips are out of scope.
+
+- **Player keyboard shortcuts.** Space/K play-pause, M mute, F fullscreen, T
+  theater, and arrows that seek on a VOD/clip but adjust volume on a live
+  stream. They never fire while typing in any text field, and ? shows the full
+  list.
+
 ## [0.2.6] - 2026-07-26
 
 ### Added

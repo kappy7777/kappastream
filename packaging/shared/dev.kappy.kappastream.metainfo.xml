@@ -76,6 +76,16 @@
   </content_rating>
 
   <releases>
+    <release version="0.2.7" date="2026-07-28">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.7</url>
+      <description>
+        <p>Quality-of-life playback features. A client-side chat mute list hides
+        users by login; a sleep timer stops the current stream after a chosen
+        time; past broadcasts now resume from where you left off; and player
+        keyboard shortcuts (space, m, f, t, arrows) are available, listed via a
+        ? overlay.</p>
+      </description>
+    </release>
     <release version="0.2.6" date="2026-07-26">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.6</url>
       <description>
