@@ -474,7 +474,7 @@ async function exportFavorites(): Promise<void> {
         <div class="toggle-row">
           <span class="toggle-label" id="check-updates-label">
             Check for updates
-            <span class="toggle-hint">check for new versions on startup (AUR builds skip this)</span>
+            <span class="toggle-hint">check for new versions on startup</span>
           </span>
           <span
             class="toggle"
