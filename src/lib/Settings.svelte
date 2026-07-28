@@ -3,12 +3,16 @@
   import { onMount } from 'svelte'
   import { settings, THEMES, UI_SCALE_PRESETS, UI_SCALE_MIN, UI_SCALE_MAX, UI_SCALE_STEP, UI_SCALE_DEFAULT, MAX_MUTED_USERS, type ThemeId, type SortMode } from './settings.svelte.ts'
   import { favoritesStore, type FavoriteStatus } from './favorites.svelte'
+  import { sleepTimer, formatSleepRemaining, SLEEP_PRESETS } from './sleep-timer.svelte'
   import { tooltip } from './tooltip.ts'
+
+  let { onarmsleep }: { onarmsleep?: (minutes: number) => void } = $props()
 
   let open = $state(false)
   let themeOpen = $state(false)
   let chatOpen = $state(false)
   let scaleOpen = $state(false)
+  let sleepOpen = $state(false)
   let panelEl: HTMLElement | undefined = $state()
   let buttonEl: HTMLButtonElement | undefined = $state()
   let fileInputEl: HTMLInputElement | undefined = $state()
@@ -42,6 +46,22 @@
   function toggleScale(): void {
     scaleOpen = !scaleOpen
   }
+
+  function toggleSleep(): void {
+    sleepOpen = !sleepOpen
+  }
+
+  function armSleep(minutes: number): void {
+    onarmsleep?.(minutes)
+  }
+
+  function cancelSleep(): void {
+    sleepTimer.cancel()
+  }
+
+  let sleepSummary = $derived(
+    sleepTimer.armed ? formatSleepRemaining(sleepTimer.remainingMs) : 'Off',
+  )
 
   function pickTheme(id: ThemeId): void {
     settings.setTheme(id)
@@ -163,6 +183,7 @@ async function exportFavorites(): Promise<void> {
         if (themeOpen) themeOpen = false
         else if (chatOpen) chatOpen = false
         else if (scaleOpen) scaleOpen = false
+        else if (sleepOpen) sleepOpen = false
         else open = false
       }
     }
@@ -441,6 +462,51 @@ async function exportFavorites(): Promise<void> {
             <span class="toggle-knob"></span>
           </span>
         </div>
+        <button
+          type="button"
+          class="disclosure"
+          class:disclosure--open={sleepOpen}
+          aria-expanded={sleepOpen}
+          onclick={toggleSleep}
+        >
+          <span class="disclosure-label">Sleep timer</span>
+          <span class="disclosure-value">{sleepSummary}</span>
+          <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        {#if sleepOpen}
+          <div class="disclosure-body" transition:slide={{ duration: 150 }}>
+            <div class="seg" role="group" aria-label="Sleep timer duration">
+              <button
+                type="button"
+                class="seg-btn"
+                class:seg-btn--active={!sleepTimer.armed}
+                aria-pressed={!sleepTimer.armed}
+                onclick={cancelSleep}
+              >Off</button>
+              {#each SLEEP_PRESETS as preset (preset)}
+                <button
+                  type="button"
+                  class="seg-btn"
+                  class:seg-btn--active={sleepTimer.armed && sleepTimer.armedMinutes === preset}
+                  aria-pressed={sleepTimer.armed && sleepTimer.armedMinutes === preset}
+                  onclick={() => armSleep(preset)}
+                >{preset}m</button>
+              {/each}
+            </div>
+            {#if sleepTimer.armed}
+              <div class="sleep-armed-row">
+                <span class="sleep-armed-text">
+                  Stops playback in <span class="sleep-armed-time">{formatSleepRemaining(sleepTimer.remainingMs)}</span>
+                </span>
+                <button type="button" class="sleep-cancel" onclick={cancelSleep}>Cancel</button>
+              </div>
+            {:else}
+              <p class="sleep-help">Pauses the current stream after the chosen time. Cancels automatically if you switch channels.</p>
+            {/if}
+          </div>
+        {/if}
         <div class="mention-row">
           <label class="panel-label" for="mention-username-input">Your Twitch username</label>
           <div class="mention-input-wrap">
@@ -1000,6 +1066,50 @@ async function exportFavorites(): Promise<void> {
   .mute-remove:hover {
     background: var(--bg-hover);
     color: var(--live);
+  }
+
+  .sleep-armed-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .sleep-armed-text {
+    font-size: 12px;
+    color: var(--text-primary);
+  }
+
+  .sleep-armed-time {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+  }
+
+  .sleep-cancel {
+    flex: 0 0 auto;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 150ms, color 150ms, border-color 150ms;
+  }
+
+  .sleep-cancel:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--accent);
+  }
+
+  .sleep-help {
+    margin: 2px 0 0;
+    font-size: 11px;
+    color: var(--text-dim);
   }
 
   .seg {

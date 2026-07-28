@@ -18,6 +18,7 @@
   import { settings } from './lib/settings.svelte.ts'
   import { buildHlsConfig } from './lib/hls-config'
   import { pipController } from './lib/pip-controller.svelte.ts'
+  import { sleepTimer, formatSleepRemaining, type PlaybackKind as SleepPlaybackKind } from './lib/sleep-timer.svelte.ts'
   import { fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
   import { notifications } from './lib/notifications.svelte.ts'
@@ -56,6 +57,18 @@
     void invoke<string>('target_os')
       .then((os) => { isWindows = os === 'windows' })
       .catch((e) => { console.error('[platform] target_os failed; assuming non-Windows (live playback may regress on Windows)', e) })
+  })
+
+  // Sleep timer expiry = pause the current <video> (NOT close the app). Pausing
+  // without flagging a user pause would let the live stall-recovery watcher
+  // (onVideoPause) treat it as a stall and seek back to the live edge, so we set
+  // a deliberate pause first.
+  onMount(() => {
+    sleepTimer.setOnFire(() => {
+      userPaused = true
+      videoEl?.pause()
+      showNotifToast('Sleep timer: playback paused')
+    })
   })
 
   type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error'
@@ -269,6 +282,30 @@
   function resumeStream(): void {
     if (channelJoined && status === 'connected') void loadStream(channelJoined, quality)
   }
+
+  // Arm the sleep timer against the CURRENT stream identity, so a later channel
+  // change / VOD switch / teardown cancels it (see the $effect below).
+  function armSleep(minutes: number): void {
+    sleepTimer.arm(
+      { channel: channelJoined, playbackKind: playback.kind, streamGen: streamGeneration },
+      minutes,
+    )
+  }
+
+  // A stale armed timer must never fire against a different stream than the one
+  // it was set for: cancel when the channel or playback kind changes, or when
+  // the player stops / the stream ends (idle / offline / error). Transient
+  // resolving/loading states within the SAME stream do not cancel.
+  $effect(() => {
+    void channelJoined
+    void playback.kind
+    void playerStatus
+    if (playerStatus === 'idle' || playerStatus === 'offline' || playerStatus === 'error') {
+      sleepTimer.cancel()
+    } else {
+      sleepTimer.cancelIfStale(channelJoined, playback.kind, streamGeneration)
+    }
+  })
 
   // Reset the channel-content scroll position to the top whenever the joined
   // channel changes (so a new channel always starts at the player, not partway
@@ -1658,6 +1695,21 @@
     </div>
     <div class="bar-right" data-tauri-drag-region>
       <NotifyMenu />
+      {#if sleepTimer.armed}
+        <button
+          type="button"
+          class="sleep-chip"
+          onclick={() => sleepTimer.cancel()}
+          use:tooltip={`Sleep timer ${formatSleepRemaining(sleepTimer.remainingMs)} — click to cancel`}
+          aria-label={`Sleep timer ${formatSleepRemaining(sleepTimer.remainingMs)}, click to cancel`}
+        >
+          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="8" cy="9" r="5"/>
+            <path d="M8 6.5V9l1.6 1.6M6 1h4M8 1v2"/>
+          </svg>
+          <span class="sleep-chip-time">{formatSleepRemaining(sleepTimer.remainingMs)}</span>
+        </button>
+      {/if}
       <button
         type="button"
         class="layout-toggle"
@@ -1675,7 +1727,7 @@
           {/if}
         </svg>
       </button>
-      <Settings />
+      <Settings onarmsleep={armSleep} />
       <div class="win-controls">
         <button
           type="button"
@@ -2313,6 +2365,36 @@
   .layout-toggle:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
+  }
+
+  /* Sleep-timer countdown chip — shown in the top bar only while a timer is
+     armed. Clicking cancels (quick explicit cancel); the countdown itself is
+     the "visible while armed" requirement. */
+  .sleep-chip {
+    flex: 0 0 auto;
+    height: 26px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    background: var(--bg-hover);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: background 150ms, border-color 150ms, color 150ms;
+  }
+
+  .sleep-chip:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+  }
+
+  .sleep-chip-time {
+    line-height: 1;
   }
 
   .logo-btn {
