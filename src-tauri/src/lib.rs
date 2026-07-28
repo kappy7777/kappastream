@@ -27,6 +27,13 @@ pub fn run() {
     // owns updates and a second self-update path must never fire. With the
     // plugins absent the JS `check()` call rejects immediately and is
     // swallowed silently by the frontend, so no AUR user ever sees a prompt.
+    //
+    // CSP note: the updater fetches latest.json + the signed artifacts via
+    // reqwest here in Rust, NOT from the webview, so its HTTP never crosses
+    // tauri.conf.json's CSP. Do NOT "fix" the absence of github.com / the
+    // releases CDN from `connect-src` — that would only widen the page's
+    // network surface for no benefit. (tauri.conf.json is parsed as strict
+    // JSON, which is why this rationale lives here instead of in the CSP.)
     #[cfg(feature = "updater")]
     {
         builder = builder
