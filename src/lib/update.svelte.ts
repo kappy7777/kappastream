@@ -15,6 +15,7 @@
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { isTauri } from '@tauri-apps/api/core'
+import { isVersionNewer } from './version'
 
 export type UpdateStatus =
   | 'idle' // no update / not yet checked / check failed silently
@@ -74,7 +75,7 @@ class UpdateStore {
     if (!isTauri()) return
     try {
       const update = await check({ timeout: 20000 })
-      if (update) {
+      if (update && isVersionNewer(update.version, update.currentVersion)) {
         this.pending = update
         this.version = update.version
         this.currentVersion = update.currentVersion
@@ -83,6 +84,15 @@ class UpdateStore {
         this.status = 'available'
         this.dismissed = false
         this.errorMsg = null
+      } else if (update) {
+        // Downgrade guard: the plugin normally returns null for an equal/older
+        // version, but treat a non-null older/equal result as "no update" too.
+        // A malformed or retagged latest.json must never walk an install back to
+        // an older legitimately-signed build — signature verification would not
+        // catch that, since every archived release is signed by the same key.
+        console.warn(
+          `[update] ignoring non-newer version ${update.version} (current ${update.currentVersion})`,
+        )
       }
       // else: no update available — stay idle, no UI.
     } catch (err) {
