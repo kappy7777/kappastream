@@ -430,6 +430,32 @@ async function exportFavorites(): Promise<void> {
                 {/each}
               </ul>
             {/if}
+            <div class="mention-row">
+              <label class="panel-label" for="mention-username-input">Your Twitch username</label>
+              <div class="mention-input-wrap">
+                <span class="mention-prefix" aria-hidden="true">@</span>
+                <input
+                  id="mention-username-input"
+                  type="text"
+                  class="mention-input"
+                  placeholder="notify on mention"
+                  value={settings.mentionUsername}
+                  oninput={(e) => settings.setMentionUsername((e.currentTarget as HTMLInputElement).value)}
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  maxlength="25"
+                  aria-describedby="mention-help"
+                />
+              </div>
+              <p class="mention-help" id="mention-help">
+                {#if !settings.mentionUsername}
+                  Get a desktop notification when chat messages mention @{''}you.
+                {:else}
+                  You'll be notified when someone writes <span class="mention-pill">@{settings.mentionUsername}</span> in chat.
+                {/if}
+              </p>
+            </div>
           </div>
         {/if}
       </section>
@@ -600,32 +626,6 @@ async function exportFavorites(): Promise<void> {
             {/if}
           </div>
         {/if}
-        <div class="mention-row">
-          <label class="panel-label" for="mention-username-input">Your Twitch username</label>
-          <div class="mention-input-wrap">
-            <span class="mention-prefix" aria-hidden="true">@</span>
-            <input
-              id="mention-username-input"
-              type="text"
-              class="mention-input"
-              placeholder="notify on mention"
-              value={settings.mentionUsername}
-              oninput={(e) => settings.setMentionUsername((e.currentTarget as HTMLInputElement).value)}
-              autocomplete="off"
-              autocapitalize="off"
-              spellcheck="false"
-              maxlength="25"
-              aria-describedby="mention-help"
-            />
-          </div>
-          <p class="mention-help" id="mention-help">
-            {#if !settings.mentionUsername}
-              Get a desktop notification when chat messages mention @{''}you.
-            {:else}
-              You'll be notified when someone writes <span class="mention-pill">@{settings.mentionUsername}</span> in chat.
-            {/if}
-          </p>
-        </div>
       </section>
 
       <section class="panel-section">
