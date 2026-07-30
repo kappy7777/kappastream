@@ -5,7 +5,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { loadChannelEmotes, loadGlobalEmotes, buildEmoteMap, renderMessage, parseTwitchEmoteTag, type Emote, type RenderedMessagePart } from './lib/emotes'
   import './lib/emote.css'
-  import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, DELETED_MESSAGE_CLASS, isMessageStricken, type BadgeInfo, type IrcEvent, type RoomState } from './lib/irc'
+  import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, DELETED_MESSAGE_CLASS, isMessageStricken, resolveBadgeImageUrl, type BadgeInfo, type IrcEvent, type RoomState } from './lib/irc'
   import Sidebar from './lib/Sidebar.svelte'
   import PlayerControls from './lib/PlayerControls.svelte'
   import Settings from './lib/Settings.svelte'
@@ -23,6 +23,8 @@
   import { resolveShortcut } from './lib/shortcuts'
   import { fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
+  import { fetchChannelBadges } from './lib/gql'
+  import { initBadgeRefresh } from './lib/badges'
   import { notifications } from './lib/notifications.svelte.ts'
   import { tooltip } from './lib/tooltip.ts'
   import { tooltipState } from './lib/tooltip.svelte.ts'
@@ -1628,6 +1630,32 @@
     })()
   })
 
+  // Per-channel custom badge override: setID -> { version -> image uuid }.
+  // Applied at RENDER time (see the badge <img> block) ON TOP of the global
+  // map, so a channel's custom subscriber/founder art overrides the global
+  // default. Reactive: when the fetch lands, every buffered message (including
+  // ones parsed before it completed) re-renders with the override. Cleared to
+  // null on every channel change so the previous channel's custom badges can
+  // never bleed into the new one (worse than the global default).
+  let channelBadgeOverride = $state<Record<string, Record<string, string>> | null>(null)
+  let channelBadgeToken = 0
+  $effect(() => {
+    const channel = channelJoined
+    // Clear immediately on any channel change (or leaving a channel).
+    channelBadgeOverride = null
+    if (!channel) return
+    const myToken = ++channelBadgeToken
+    void (async () => {
+      try {
+        const override = await fetchChannelBadges(channel)
+        if (myToken !== channelBadgeToken) return // superseded by a later join
+        channelBadgeOverride = override
+      } catch {
+        /* leave null -> global default badges */
+      }
+    })()
+  })
+
   onMount(() => () => disconnect())
 
   // Track maximize state so the title-bar control shows restore vs. maximize.
@@ -1676,6 +1704,10 @@
   // isn't a direct consequence of a user action, so it's user-toggleable.
   onMount(() => {
     if (settings.checkUpdates) void updateStore.check()
+    // Weekly global badge refresh: install cached/baseline map synchronously,
+    // refresh in the background if stale. Never blocks startup; silent on
+    // failure (degrades to baseline). No new host (reuses gql.twitch.tv).
+    void initBadgeRefresh()
   })
 
   const playerLabel: Record<PlayerStatus, string> = {
@@ -2212,14 +2244,15 @@
               <span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span>
             {/if}
             {#each msg.badges as b (b.id + b.version)}
-              {#if b.imageUrl && !erroredBadges.has(b.imageUrl)}
+              {@const effUrl = resolveBadgeImageUrl(b, channelBadgeOverride)}
+              {#if effUrl && !erroredBadges.has(effUrl)}
                 <img
                   class="badge badge--{b.id}"
-                  src={b.imageUrl}
+                  src={effUrl}
                   alt={b.label}
                   use:tooltip={b.label}
                   loading="lazy"
-                  onerror={() => markBadgeErrored(b.imageUrl!)}
+                  onerror={() => markBadgeErrored(effUrl!)}
                 />
               {/if}
             {/each}

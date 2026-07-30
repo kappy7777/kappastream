@@ -1,13 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import {
   parseIrcLine,
   parseIrcEvent,
   mergeRoomState,
   composeUsernoticeFallback,
   isMessageStricken,
+  setGlobalBadges,
+  resolveBadgeImageUrl,
   type RoomstateEvent,
   type RoomState,
 } from './irc'
+import { BASELINE_BADGES } from './badges.generated'
 
 /*
  * Tests for the IRCv3 tag-value escape decoder inside parseIrcLine
@@ -325,5 +328,193 @@ describe('moderation presentation predicate (Toggle C, retroactive)', () => {
   it('a non-deleted message is never stricken regardless of the toggle', () => {
     expect(isMessageStricken(true, false)).toBe(false)
     expect(isMessageStricken(false, false)).toBe(false)
+  })
+})
+
+/*
+ * Badge resolution (parseBadges via parseIrcLine on the PRIVMSG `badges` tag).
+ * Each badge must resolve to a static-cdn URL of the form
+ *   https://static-cdn.jtvnw.net/badges/v1/<uuid>/1
+ * where <uuid> is the version-specific image UUID and the trailing segment is
+ * the image SIZE index (1 = 18px NORMAL), not the IRC version. Unknown ids are
+ * dropped silently (badgeUrl returns null), so they never produce a broken img.
+ */
+describe('parseBadges (global chat badges via PRIVMSG badges tag)', () => {
+  function badgesOf(badgesTag: string) {
+    const msg = parseIrcLine(
+      `@badges=${badgesTag};display-name=X;id=b;tmi-sent-ts=0 :x!x@x PRIVMSG #c :hi`,
+    )
+    return msg!.badges
+  }
+
+  it('resolves a newly added single-version badge to its CDN URL', () => {
+    const b = badgesOf('lead_moderator/1')
+    expect(b).toHaveLength(1)
+    expect(b[0].id).toBe('lead_moderator')
+    expect(b[0].version).toBe('1')
+    expect(b[0].label).toBe('Lead Moderator')
+    expect(b[0].imageUrl).toBe(
+      'https://static-cdn.jtvnw.net/badges/v1/0822047b-65e0-46f2-94a9-d1091d685d33/1',
+    )
+  })
+
+  it('picks the correct per-version UUID for a versioned badge (numeric version)', () => {
+    const b = badgesOf('moments/5')
+    expect(b).toHaveLength(1)
+    // version 5 carries its own UUID, distinct from the tier-1 default
+    expect(b[0].imageUrl).toBe(
+      'https://static-cdn.jtvnw.net/badges/v1/c8a0d95a-856e-4097-9fc0-7765300a4f58/1',
+    )
+    expect(b[0].label).toBe('Moments Badge - Tier 5')
+  })
+
+  it('picks the correct per-version UUID for a versioned badge (color-version key)', () => {
+    const b = badgesOf('predictions/blue-3')
+    expect(b).toHaveLength(1)
+    expect(b[0].imageUrl).toBe(
+      'https://static-cdn.jtvnw.net/badges/v1/f2ab9a19-8ef7-4f9f-bd5d-9cf4e603f845/1',
+    )
+    expect(b[0].label).toBe('Predicted Blue (3)')
+  })
+
+  it('drops an unknown badge id cleanly (fallback must not regress)', () => {
+    expect(badgesOf('totally-fake-badge/1')).toHaveLength(0)
+    // A known badge alongside an unknown one survives; the unknown is skipped.
+    const b = badgesOf('lead_moderator/1,totally-fake-badge/1,broadcaster/1')
+    expect(b.map((x) => x.id)).toEqual(['lead_moderator', 'broadcaster'])
+  })
+
+  it('a version absent from perVersion falls back to the default UUID + base label', () => {
+    const b = badgesOf('moments/999')
+    expect(b).toHaveLength(1)
+    expect(b[0].imageUrl).toBe(
+      'https://static-cdn.jtvnw.net/badges/v1/bf370830-d79a-497b-81c6-a365b2b60dda/1',
+    )
+    expect(b[0].label).toBe('Moments')
+  })
+
+  it('keeps an existing version-1 badge URL byte-identical (behavior-preserving)', () => {
+    const b = badgesOf('broadcaster/1')
+    expect(b[0].imageUrl).toBe(
+      'https://static-cdn.jtvnw.net/badges/v1/5527c58c-fb7d-422d-b71b-f309dcb85cc1/1',
+    )
+  })
+
+  it('resolves an existing versioned badge to a valid size-1 URL (bits/100 fix)', () => {
+    const b = badgesOf('bits/100')
+    expect(b).toHaveLength(1)
+    // The per-version UUID is selected; the trailing segment is the size (1),
+    // not the IRC version (100) — which previously produced a 404.
+    expect(b[0].imageUrl).toBe(
+      'https://static-cdn.jtvnw.net/badges/v1/09d93036-e7ce-431c-9a9e-7044297133f2/1',
+    )
+    expect(b[0].label).toBe('100 bits')
+  })
+})
+
+/*
+ * PHASE 2 — the global badge map is mutable: a cached/refreshed map installed
+ * via setGlobalBadges is what parseBadges resolves against. These tests mutate
+ * that module state, so afterEach restores the shipped baseline to keep the
+ * rest of the suite (and other files' view of the module) intact.
+ */
+describe('global badge map swap (cached map beats baseline)', () => {
+  function badgesOf(badgesTag: string) {
+    const msg = parseIrcLine(
+      `@badges=${badgesTag};display-name=X;id=b;tmi-sent-ts=0 :x!x@x PRIVMSG #c :hi`,
+    )
+    return msg!.badges
+  }
+  afterEach(() => {
+    setGlobalBadges(BASELINE_BADGES)
+  })
+
+  it('a cached/refreshed map overrides the baseline UUID', () => {
+    setGlobalBadges({
+      broadcaster: { label: 'Host', uuid: '11111111-1111-1111-1111-111111111111' },
+    })
+    const b = badgesOf('broadcaster/1')
+    expect(b).toHaveLength(1)
+    expect(b[0].imageUrl).toBe(
+      'https://static-cdn.jtvnw.net/badges/v1/11111111-1111-1111-1111-111111111111/1',
+    )
+  })
+
+  it('an empty cached map drops every badge (degrades gracefully, no throw)', () => {
+    setGlobalBadges({})
+    expect(badgesOf('broadcaster/1,subscriber/12,bits/100')).toHaveLength(0)
+  })
+
+  it('a per-version UUID in a swapped map is selected by version', () => {
+    setGlobalBadges({
+      bits: {
+        label: 'Bits',
+        uuid: '00000000-0000-0000-0000-000000000001',
+        perVersion: { '100': '22222222-2222-2222-2222-222222222222' },
+      },
+    })
+    const b = badgesOf('bits/100')
+    expect(b[0].imageUrl).toBe(
+      'https://static-cdn.jtvnw.net/badges/v1/22222222-2222-2222-2222-222222222222/1',
+    )
+  })
+})
+
+/*
+ * PHASE 3 — per-channel custom badge art. resolveBadgeImageUrl applies a
+ * channel's broadcastBadges override on top of the parse-time global
+ * resolution. It is a PURE function called per-badge at render against a
+ * reactive override, so when the per-channel fetch lands, every buffered
+ * message (parsed before it completed) re-resolves to the custom art.
+ */
+describe('per-channel badge override (resolveBadgeImageUrl)', () => {
+  // A message parsed against the global map carries the global default art.
+  const subBadge = { id: 'subscriber', version: '12', imageUrl: 'https://static-cdn.jtvnw.net/badges/v1/GLOBAL-SUB-UUID/1' }
+  const founderBadge = { id: 'founder', version: '0', imageUrl: 'https://static-cdn.jtvnw.net/badges/v1/GLOBAL-FOUNDER-UUID/1' }
+  // A channel's custom art (from User.broadcastBadges).
+  const channelOverride = {
+    subscriber: { '12': 'cccccccc-cccc-cccc-cccc-cccccccccccc' },
+    founder: { '0': 'ffffffff-ffff-ffff-ffff-ffffffffffff' },
+  }
+
+  it('override beats the global default image', () => {
+    expect(resolveBadgeImageUrl(subBadge, channelOverride)).toBe(
+      'https://static-cdn.jtvnw.net/badges/v1/cccccccc-cccc-cccc-cccc-cccccccccccc/1',
+    )
+  })
+
+  it('null override (before fetch / after channel change) falls back to global', () => {
+    expect(resolveBadgeImageUrl(subBadge, null)).toBe(subBadge.imageUrl)
+  })
+
+  it('override for a different setID does not affect this badge', () => {
+    expect(resolveBadgeImageUrl(subBadge, { founder: { '0': 'ffffffff-ffff-ffff-ffff-ffffffffffff' } })).toBe(
+      subBadge.imageUrl,
+    )
+  })
+
+  it('override for a different version does not affect this badge', () => {
+    expect(resolveBadgeImageUrl(subBadge, { subscriber: { '6': 'dddddddd-dddd-dddd-dddd-dddddddddddd' } })).toBe(
+      subBadge.imageUrl,
+    )
+  })
+
+  it('founder custom art is covered (not just subscriber)', () => {
+    expect(resolveBadgeImageUrl(founderBadge, channelOverride)).toBe(
+      'https://static-cdn.jtvnw.net/badges/v1/ffffffff-ffff-ffff-ffff-ffffffffffff/1',
+    )
+  })
+
+  it('the SAME buffered badge resolves differently before vs after the override lands', () => {
+    // Simulates a message parsed before the channel badge fetch completed:
+    // before the override arrives it shows the global default; after, custom.
+    expect(resolveBadgeImageUrl(subBadge, null)).toBe(subBadge.imageUrl)
+    expect(resolveBadgeImageUrl(subBadge, channelOverride)).toBe(
+      'https://static-cdn.jtvnw.net/badges/v1/cccccccc-cccc-cccc-cccc-cccccccccccc/1',
+    )
+  })
+
+  it('a badge with no global URL still drops when no override applies', () => {
+    expect(resolveBadgeImageUrl({ id: 'subscriber', version: '12', imageUrl: null }, null)).toBeNull()
   })
 })

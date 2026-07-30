@@ -912,3 +912,100 @@ export async function fetchClipMedia(slug: string, signal?: AbortSignal): Promis
     qualities,
   }
 }
+
+/*
+ * ============================================================================
+ * Chat badges — global refresh + per-channel custom art.
+ *
+ * Same anonymous + GQL-only transport as everything above (same pinned
+ * Client-ID, no new host). Two INDEPENDENT queries, both deliberately kept OFF
+ * the batched `USER_STATUS_QUERY` used by favorites polling:
+ *
+ *   - GLOBAL (Query.badges): every global chat-badge set. ~74 KB, well under
+ *     the gql_fetch 256 KB cap (measured via the real path; see
+ *     scripts/generate-badges.mjs). Powers the weekly in-app refresh
+ *     (src/lib/badges.svelte.ts) on top of the shipped baseline. Must NOT ride
+ *     the favorites batch — it's a single big response, not per-channel.
+ *
+ *   - PER-CHANNEL (User.broadcastBadges): one channel's custom subscriber /
+ *     founder art. A SEPARATE single-channel request so the 1000-channel
+ *     favorites batch never carries broadcastBadges (which would blow the cap).
+ *     fetchLiveStatus still uses the shared batch path unchanged.
+ * ============================================================================
+ */
+
+/** One global badge version row from `Query.badges`. */
+export interface GlobalBadgeRow {
+  setID: string
+  version: string
+  title: string
+  imageURL: string
+}
+
+const GLOBAL_BADGES_QUERY = `
+  query {
+    badges {
+      setID
+      version
+      title
+      imageURL(size: NORMAL)
+    }
+  }
+`
+
+/**
+ * Fetch every global chat-badge set Twitch serves today. Used by the weekly
+ * in-app badge refresh to update UUIDs / add new sets on top of the shipped
+ * baseline. Throws on transport failure; the caller fails silently and falls
+ * back to the baseline.
+ */
+export async function fetchGlobalBadgeSets(signal?: AbortSignal): Promise<GlobalBadgeRow[]> {
+  const data = await gqlRequest<{
+    badges?: ({ setID?: string; version?: string; title?: string; imageURL?: string } | null)[] | null
+  }>(GLOBAL_BADGES_QUERY, {}, signal)
+  const rows: GlobalBadgeRow[] = []
+  for (const b of data?.badges ?? []) {
+    if (!b || !b.setID || b.version == null || !b.imageURL) continue
+    rows.push({ setID: b.setID, version: String(b.version), title: b.title ?? '', imageURL: b.imageURL })
+  }
+  return rows
+}
+
+const CHANNEL_BADGES_QUERY = `
+  query($login: String!) {
+    user(login: $login) {
+      broadcastBadges {
+        setID
+        version
+        imageURL(size: NORMAL)
+      }
+    }
+  }
+`
+
+/**
+ * Fetch a channel's custom chat badges (subscriber / founder / etc. art) via
+ * `User.broadcastBadges`. Returns setID -> { version -> image uuid }, used as a
+ * per-channel RENDER-TIME override on top of the global map. SEPARATE from the
+ * batched favorites query (USER_STATUS_QUERY is untouched). `title` is omitted:
+ * the override only swaps the image; the label still comes from the global map.
+ * Throws on transport failure; the caller leaves the override empty so the
+ * global default shows.
+ */
+export async function fetchChannelBadges(
+  login: string,
+  signal?: AbortSignal,
+): Promise<Record<string, Record<string, string>>> {
+  const data = await gqlRequest<{
+    user?: { broadcastBadges?: ({ setID?: string; version?: string; imageURL?: string } | null)[] | null } | null
+  }>(CHANNEL_BADGES_QUERY, { login }, signal)
+  const out: Record<string, Record<string, string>> = {}
+  for (const b of data?.user?.broadcastBadges ?? []) {
+    if (!b || !b.setID || b.version == null || !b.imageURL) continue
+    const m = b.imageURL.match(/\/badges\/v1\/([0-9a-fA-F-]{36})\//)
+    if (!m) continue
+    const byVer = out[b.setID] ?? (out[b.setID] = {})
+    byVer[String(b.version)] = m[1]
+  }
+  return out
+}

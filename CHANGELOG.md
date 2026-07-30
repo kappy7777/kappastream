@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The README features table now lists the chat mute list, sleep timer,
   VOD resume, and player keyboard shortcuts shipped in 0.2.7.
 
+- **Richer chat badges.** Global chat-badge art is now generated from
+  Twitch's badge data and refreshed weekly (cached locally), so newly
+  introduced badges — including transient event and game-promo badges —
+  render instead of being silently dropped. Per-channel custom subscriber
+  and founder badge art is now shown for the channel you're watching
+  (applied to every visible message once it loads, and cleared when you
+  switch channels). A shipped baseline keeps every known badge rendering
+  on a cold start or when the refresh fails.
+
 ## [0.2.7] - 2026-07-28
 
 ### Added
