@@ -76,6 +76,9 @@ jobs:
       - name: Type-check (svelte-check + tsc)
         run: npm run check
 
+      - name: Lint (ESLint)
+        run: npm run lint
+
       - name: Frontend tests (Vitest)
         run: npm test
 

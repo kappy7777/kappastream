@@ -560,7 +560,7 @@ export class FavoritesStore {
         updateDelayed: false,
       })
       if (!wasLive && cs.live && Date.now() - this.startedAt >= NOTIFY_STARTUP_GRACE_MS) {
-        this.fireLiveNotification(cs.login, status)
+        void this.fireLiveNotification(cs.login, status)
       }
       changed = true
     }

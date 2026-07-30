@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fetchChannelVideos, fetchChannelClips, type ChannelVideo, type ChannelClip, type ClipsPeriod } from './gql'
+  import { fetchChannelVideos, fetchChannelClips, type ChannelVideo, type ChannelClip } from './gql'
   import { revealMore, hasMoreToShow } from './browse-reveal'
 
   /*

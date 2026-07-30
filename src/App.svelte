@@ -5,7 +5,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { loadChannelEmotes, loadGlobalEmotes, buildEmoteMap, renderMessage, parseTwitchEmoteTag, type Emote, type RenderedMessagePart } from './lib/emotes'
   import './lib/emote.css'
-  import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, DELETED_MESSAGE_CLASS, isMessageStricken, type ParsedMessage, type BadgeInfo, type IrcEvent, type RoomState } from './lib/irc'
+  import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, DELETED_MESSAGE_CLASS, isMessageStricken, type BadgeInfo, type IrcEvent, type RoomState } from './lib/irc'
   import Sidebar from './lib/Sidebar.svelte'
   import PlayerControls from './lib/PlayerControls.svelte'
   import Settings from './lib/Settings.svelte'
@@ -18,7 +18,7 @@
   import { settings } from './lib/settings.svelte.ts'
   import { buildHlsConfig } from './lib/hls-config'
   import { pipController } from './lib/pip-controller.svelte.ts'
-  import { sleepTimer, formatSleepRemaining, type PlaybackKind as SleepPlaybackKind } from './lib/sleep-timer.svelte.ts'
+  import { sleepTimer, formatSleepRemaining } from './lib/sleep-timer.svelte.ts'
   import { vodPositions } from './lib/vod-positions.svelte.ts'
   import { resolveShortcut } from './lib/shortcuts'
   import { fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
@@ -778,7 +778,7 @@
         manifestTimeout = setTimeout(() => {
           manifestTimeout = null
           if (!resolvedFlag) {
-            try { instance.destroy() } catch (_e) { /* ignore */ }
+          try { instance.destroy() } catch (_e) { /* ignore */ }
             finish({ ok: false, error: 'timeout waiting for manifest' })
           }
         }, 20_000)
@@ -1223,7 +1223,7 @@
         })
         instance.on(Hls.Events.ERROR, (_e, data) => {
           if (!data.fatal) return
-          try { instance.destroy() } catch (_e) { /* ignore */ }
+          try { instance.destroy() } catch (_destroyErr) { /* ignore */ }
           finish({ ok: false, error: 'media error: ' + data.type })
         })
         instance.loadSource(url)
@@ -1702,9 +1702,6 @@
   async function openChatPopout(): Promise<void> {
     if (!channelJoined) return
     const url = `https://twitch.tv/${channelJoined}`
-    const invoke = (window as unknown as {
-      __TAURI_INTERNALS__?: { invoke(cmd: string, args?: unknown): Promise<unknown> }
-    }).__TAURI_INTERNALS__!.invoke
     try {
       const result = await invoke('open_url_robust', { url })
       if (import.meta.env.DEV) console.log('chat-link: opener result', result)
@@ -1774,7 +1771,7 @@
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   }
 
-  function fireMentionNotification(raw: string, username: string, color: string): void {
+  function fireMentionNotification(raw: string, username: string, _color: string): void {
     const target = settings.mentionUsername
     if (!target) return
     if (username.toLowerCase() === target) return
@@ -1865,8 +1862,8 @@
 <svelte:window onkeydown={onGlobalKeydown} />
 
 <div class="app" class:app--sidebar-icons={sidebarMode === 'icons'} class:app--sidebar-hidden={sidebarMode === 'hidden'}>
-  <!-- svelte-ignore a11y_no_static_element_interactions
-       Double-click on empty title-bar space toggles maximize (mouse-only
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- Double-click on empty title-bar space toggles maximize (mouse-only
        convenience; the dedicated maximize button is the accessible path). -->
   <header class="bar" data-tauri-drag-region ondblclick={onTitleDblClick}>
     <div class="bar-left" data-tauri-drag-region>

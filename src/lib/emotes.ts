@@ -283,7 +283,7 @@ export interface EmoteRange {
   id: string
 }
 
-export function parseTwitchEmoteTag(tag: string | undefined, message: string): EmoteRange[] {
+export function parseTwitchEmoteTag(tag: string | undefined, _message: string): EmoteRange[] {
   if (!tag) return []
   const ranges: EmoteRange[] = []
   for (const part of tag.split('/')) {

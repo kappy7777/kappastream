@@ -24,6 +24,7 @@ no-account, no-tracking native Twitch viewer). Before opening one:
 
    ```bash
    npm run check                       # svelte-check (src/**) + tsc (vite.config.ts)
+   npm run lint                        # ESLint (flat config), .ts + .svelte
    npm test                            # Vitest (src/**/*.test.ts)
    sh scripts/check-versions.sh        # version-drift guard (see Releasing)
    cargo fmt --all -- --check          # run inside src-tauri/
@@ -31,7 +32,7 @@ no-account, no-tracking native Twitch viewer). Before opening one:
    cargo test
    ```
 
-   No ESLint/Prettier — don't add one without asking first.
+   No Prettier — don't add one without asking first.
 
    CI additionally runs `cargo clippy --all-targets -- -D warnings` and
    `cargo test`, so `npm run build` must succeed (the Rust build embeds
@@ -75,7 +76,7 @@ Checklist for cutting a release:
    ```bash
    sh scripts/check-versions.sh
    ```
-5. Run the full local gate set (`npm run check`, `npm test`, `cargo fmt
+5. Run the full local gate set (`npm run check`, `npm run lint`, `npm test`, `cargo fmt
    --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo
    test`). CI runs these too, but catch failures before tagging.
 6. Commit on `main` (e.g. `Release v<version>`), then tag and push the tag:

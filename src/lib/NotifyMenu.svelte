@@ -13,10 +13,6 @@
     if (open) notifications.markAllRead()
   }
 
-  function close(): void {
-    open = false
-  }
-
   function clearAll(): void {
     notifications.clear()
   }

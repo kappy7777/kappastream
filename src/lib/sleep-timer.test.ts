@@ -25,7 +25,6 @@ afterEach(() => {
 })
 
 const ctxA = { channel: 'alpha', playbackKind: 'live' as const, streamGen: 1 }
-const ctxB = { channel: 'beta', playbackKind: 'live' as const, streamGen: 2 }
 
 describe('sleep timer fires on expiry', () => {
   it('calls onFire once after the armed duration and disarms', () => {

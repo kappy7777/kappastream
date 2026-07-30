@@ -151,7 +151,7 @@ class PipController {
       shadow: true,
       ...(saved ? { x: saved.x, y: saved.y } : {}),
     })
-    wv.once('tauri://error', () => { void this.onPipClosed() })
+    void wv.once('tauri://error', () => { void this.onPipClosed() })
 
     // Flip optimistically so the button reflects state immediately. Corrected
     // (to false) by onPipClosed if creation failed.

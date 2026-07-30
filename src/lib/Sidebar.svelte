@@ -180,15 +180,6 @@
     return 'hsl(' + hue + ' 45% 35%)'
   }
 
-  function statusLabel(s: LiveStatus): string {
-    if (s.state === 'live') {
-      return s.viewers.toLocaleString() + ' viewers'
-    }
-    if (s.state === 'offline') return 'Offline'
-    if (s.state === 'error') return 'Error'
-    return ''
-  }
-
   function formatViewers(n: number): string {
     if (n < 1000) return n.toString()
     if (n < 1_000_000) {
@@ -196,10 +187,6 @@
       return (k < 100 ? k.toFixed(1).replace(/\.0$/, '') : Math.round(k).toString()) + 'K'
     }
     return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
-  }
-
-  function isLive(s: LiveStatus): boolean {
-    return s.state === 'live'
   }
 
   function liveInfo(s: LiveStatus): { title: string; viewers: number; game: string; avatarUrl: string } | null {

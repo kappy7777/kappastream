@@ -1,10 +1,9 @@
 <script lang="ts">
   import { slide } from 'svelte/transition'
   import { onMount } from 'svelte'
-  import { settings, THEMES, UI_SCALE_PRESETS, UI_SCALE_MIN, UI_SCALE_MAX, UI_SCALE_STEP, UI_SCALE_DEFAULT, MAX_MUTED_USERS, type ThemeId, type SortMode } from './settings.svelte.ts'
+  import { settings, THEMES, UI_SCALE_PRESETS, UI_SCALE_MIN, UI_SCALE_MAX, UI_SCALE_DEFAULT, MAX_MUTED_USERS, type ThemeId } from './settings.svelte.ts'
   import { favoritesStore, type FavoriteStatus } from './favorites.svelte'
   import { sleepTimer, formatSleepRemaining, SLEEP_PRESETS } from './sleep-timer.svelte'
-  import { tooltip } from './tooltip.ts'
 
   let { onarmsleep }: { onarmsleep?: (minutes: number) => void } = $props()
 
@@ -29,10 +28,6 @@
 
   function toggle(): void {
     open = !open
-  }
-
-  function close(): void {
-    open = false
   }
 
   function toggleTheme(): void {
@@ -450,7 +445,7 @@ async function exportFavorites(): Promise<void> {
               </div>
               <p class="mention-help" id="mention-help">
                 {#if !settings.mentionUsername}
-                  Get a desktop notification when chat messages mention @{''}you.
+                  Get a desktop notification when chat messages mention @you.
                 {:else}
                   You'll be notified when someone writes <span class="mention-pill">@{settings.mentionUsername}</span> in chat.
                 {/if}
