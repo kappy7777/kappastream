@@ -78,6 +78,17 @@
   </content_rating>
 
   <releases>
+    <release version="0.2.8" date="2026-07-30">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.8</url>
+      <description>
+        <p>Richer chat badges. Global chat-badge art is now generated from
+        Twitch's badge data and refreshed weekly, so newly added badges —
+        including event and game-promo badges — render instead of being
+        silently dropped. Channels with custom subscriber and founder badge
+        art now show it on every visible chat message. A shipped baseline
+        keeps badges working on a cold start or when the refresh fails.</p>
+      </description>
+    </release>
     <release version="0.2.7" date="2026-07-28">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.7</url>
       <description>

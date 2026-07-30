@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-07-30
+
 ### Changed
 
 - **Corrected inaccurate product descriptions.** The `.deb`, `.rpm`,
@@ -517,7 +519,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.8
+[0.2.7]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.7
+[0.2.6]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.6
+[0.2.5]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.5
+[0.2.4]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.4
 [0.2.3]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.3
 [0.2.2]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.2
 [0.2.1]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.1
