@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-08-01
+
+### Added
+
+- **VOD chat replay, synced to the playhead.** Past-broadcast chat now plays
+  back in step with the video, reusing the live chat renderer — Twitch and
+  third-party emotes, badges, the mute list, and timestamps all apply. It
+  streams through the same anonymous GQL path as everything else (no new host
+  or login), fetching a bounded window ahead of the playhead and never the
+  whole VOD.
+
+- **UI localization.** kappastream now ships in English, Deutsch, Español,
+  Français, and Português, with a language selector under Settings.
+
+- **VOD and clip titles in the status bar.** Watching a past broadcast or clip
+  now shows its title — plus game, view count, and broadcast age — in the
+  status bar, instead of the channel's current live or offline state.
+
+### Changed
+
+- **A less intrusive "Back to live" banner.** While watching a VOD or clip it
+  now hides with the player controls during playback and reappears on mouse
+  activity, and it only appears at all when the channel is actually live right
+  now (when the channel is offline there's nothing to go back to).
+
+### Fixed
+
+- **The live status bar no longer goes stale.** The active channel's title,
+  game, and viewer count were resolved once on join and never refreshed; they
+  now update on each favorites poll using the same batched data the sidebar
+  already fetches, with no extra network request.
+
 ## [0.2.8] - 2026-07-30
 
 ### Changed

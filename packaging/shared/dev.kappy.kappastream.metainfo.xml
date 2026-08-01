@@ -78,6 +78,18 @@
   </content_rating>
 
   <releases>
+    <release version="0.2.9" date="2026-08-01">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.9</url>
+      <description>
+        <p>VOD chat replay synced to the playhead, so past-broadcast chat plays
+        back in step with the video through the same anonymous data path. The
+        interface is now localized into English, Deutsch, Español, Français, and
+        Português (selectable under Settings). Past-broadcast and clip titles
+        now show in the status bar, the "Back to live" banner hides with the
+        player controls and only appears when the channel is live, and the live
+        status bar no longer goes stale between polls.</p>
+      </description>
+    </release>
     <release version="0.2.8" date="2026-07-30">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.8</url>
       <description>
