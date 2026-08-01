@@ -1698,6 +1698,26 @@
     })()
   })
 
+  // The live status bar tracks the favorites poll: a channel's title/game/
+  // viewers refresh every GQL_REFRESH_INTERVAL via the SAME batched request that
+  // refreshes the sidebar, so subscribing here keeps the status bar fresh WITHOUT
+  // an extra network request (the data was already fetched for the sidebar).
+  // Scoped to live playback so VOD/clip status bars stay untouched; the join-time
+  // fetchLiveStatus above covers the initial freshen (incl. channels that aren't
+  // favorites, which the poll won't cover).
+  onMount(() => {
+    const unsubscribe = favoritesStore.subscribe((snapshot) => {
+      if (playback.kind !== 'live') return
+      const channel = channelJoined
+      if (!channel) return
+      const found = snapshot.find((s) => s.name === channel)
+      if (found && found.status.state !== 'unknown') {
+        activeStatus = found.status
+      }
+    })
+    return unsubscribe
+  })
+
   // Per-channel custom badge override: setID -> { version -> image uuid }.
   // Applied at RENDER time (see the badge <img> block) ON TOP of the global
   // map, so a channel's custom subscriber/founder art overrides the global
