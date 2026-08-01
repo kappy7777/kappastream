@@ -7,6 +7,7 @@
   import { PhysicalSize } from '@tauri-apps/api/dpi'
   import { buildHlsConfig } from './lib/hls-config'
   import { settings } from './lib/settings.svelte.ts'
+  import { t } from './lib/i18n/index.svelte'
 
   // Minimal PiP window: a single <video> fed by hls.js from the URL the main
   // window hands us. This window is the audio authority while open; the main
@@ -75,7 +76,7 @@
       })
       inst.on(Hls.Events.ERROR, (_e, data) => {
         if (!data.fatal) return
-        errorMsg = 'Stream error'
+        errorMsg = t('pip_streamError')
         loading = false
       })
       inst.loadSource(url)
@@ -87,7 +88,7 @@
         loading = false
       })
     } else {
-      errorMsg = 'HLS not supported'
+      errorMsg = t('pip_hlsNotSupported')
       loading = false
     }
   }
@@ -175,7 +176,7 @@
   }
 
   onMount(async () => {
-    if (!isTauri()) { errorMsg = 'Not running in Tauri'; loading = false; return }
+    if (!isTauri()) { errorMsg = t('pip_notInTauri'); loading = false; return }
     const win = getCurrentWindow()
 
     // Re-assert always-on-top once the window is mapped. tao applies the
@@ -269,13 +270,13 @@
   ></video>
 
   {#if loading}
-    <div class="pip-status" data-tauri-drag-region>Loading…</div>
+    <div class="pip-status" data-tauri-drag-region>{t('loading')}</div>
   {/if}
   {#if errorMsg}
     <div class="pip-status pip-error" data-tauri-drag-region>{errorMsg}</div>
   {/if}
   {#if needsGesture && !errorMsg}
-    <button type="button" class="pip-gesture" onclick={gesturePlay}>Tap for sound</button>
+    <button type="button" class="pip-gesture" onclick={gesturePlay}>{t('pip_tapForSound')}</button>
   {/if}
 
   <!-- Borderless resize handles. We keep only the left/right edges and bottom
@@ -293,7 +294,7 @@
       type="button"
       class="pip-btn"
       onclick={togglePlay}
-      aria-label={paused ? 'Play' : 'Pause'}
+      aria-label={paused ? t('pc_play') : t('pc_pause')}
       aria-pressed={!paused}
     >
       {#if paused}
@@ -312,7 +313,7 @@
       type="button"
       class="pip-btn"
       onclick={toggleMuted}
-      aria-label={muted ? 'Unmute' : 'Mute'}
+      aria-label={muted ? t('pc_unmute') : t('pc_mute')}
       aria-pressed={muted}
     >
       {#if muted}
@@ -333,7 +334,7 @@
       max="1"
       step="0.05"
       value={muted ? 0 : volume}
-      aria-label="Volume"
+      aria-label={t('volume')}
       oninput={(e) => applyVolume(parseFloat((e.currentTarget as HTMLInputElement).value))}
     />
 
@@ -343,7 +344,7 @@
       type="button"
       class="pip-btn"
       onclick={requestClose}
-      aria-label="Close picture in picture"
+      aria-label={t('pip_close')}
     >
       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
         <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" fill="currentColor"/>

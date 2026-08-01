@@ -9,6 +9,8 @@
     type LiveStatus,
   } from './favorites.svelte'
   import { tooltip } from './tooltip.ts'
+  import { t } from './i18n/index.svelte'
+  import { formatCompact, timeAgo } from './format'
 
   interface Props {
     currentChannel: string | null
@@ -107,15 +109,15 @@
     if (!raw.trim()) return
     const name = normalizeChannelName(raw)
     if (!isValidChannelName(name)) {
-      addError = 'Invalid channel name'
+      addError = t('sidebar_invalidChannel')
       return
     }
     if (store.has(name)) {
-      addError = 'Already in favorites'
+      addError = t('sidebar_alreadyFavorite')
       return
     }
     if (!store.add(name)) {
-      addError = `Favorites are limited to ${MAX_FAVORITES}`
+      addError = t('sidebar_favoritesLimit', { n: MAX_FAVORITES })
       return
     }
     closeAddMenu()
@@ -130,7 +132,7 @@
 
   function handleContextMenu(name: string, e: MouseEvent): void {
     e.preventDefault()
-    if (confirm('Remove ' + name + ' from favorites?')) {
+    if (confirm(t('sidebar_removeConfirm', { name }))) {
       store.remove(name)
     }
   }
@@ -181,12 +183,7 @@
   }
 
   function formatViewers(n: number): string {
-    if (n < 1000) return n.toString()
-    if (n < 1_000_000) {
-      const k = n / 1000
-      return (k < 100 ? k.toFixed(1).replace(/\.0$/, '') : Math.round(k).toString()) + 'K'
-    }
-    return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
+    return formatCompact(n)
   }
 
   function liveInfo(s: LiveStatus): { title: string; viewers: number; game: string; avatarUrl: string } | null {
@@ -197,30 +194,20 @@
     if ((s.state === 'live' || s.state === 'offline') && s.avatarUrl) return s.avatarUrl
     return null
   }
-
-  function timeAgo(ts: number | null): string {
-    if (ts === null) return ''
-    const diff = Date.now() - ts
-    if (diff < 0) return ''
-    if (diff < 60_000) return 'just now'
-    if (diff < 3_600_000) return Math.floor(diff / 60_000) + 'm ago'
-    if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + 'h ago'
-    return Math.floor(diff / 86_400_000) + 'd ago'
-  }
 </script>
 
 <aside class="sidebar" class:sidebar--icons={iconsOnly}>
   {#if !iconsOnly}
   <div class="sidebar-header">
     <div class="header-row">
-      <h2 class="sidebar-title">Favorites</h2>
+      <h2 class="sidebar-title">{t('favorites')}</h2>
       <button
         type="button"
         class="add-fav-btn"
         onclick={addMenuOpen ? closeAddMenu : openAddMenu}
-        aria-label={addMenuOpen ? 'Close add favorite' : 'Add favorite'}
+        aria-label={addMenuOpen ? t('sidebar_closeAddFavorite') : t('sidebar_addFavorite')}
         aria-expanded={addMenuOpen}
-        use:tooltip={addMenuOpen ? 'Close' : 'Add favorite'}
+        use:tooltip={addMenuOpen ? t('close') : t('sidebar_addFavorite')}
       >
         {#if addMenuOpen}
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
@@ -240,15 +227,15 @@
           bind:value={addInput}
           type="text"
           class="add-fav-input"
-          placeholder="channel name"
+          placeholder={t('sidebar_channelNamePlaceholder')}
           spellcheck="false"
           autocomplete="off"
-          aria-label="Channel name"
+          aria-label={t('sidebar_channelName')}
           aria-invalid={!!addError}
           onkeydown={onAddInputKeydown}
         />
         <button type="submit" class="add-fav-submit" disabled={!addInput.trim()}>
-          Add
+          {t('add')}
         </button>
       </form>
       {#if addError}
@@ -257,7 +244,7 @@
     {/if}
     {#if store.rateLimited}
       <div class="rate-limit-banner" role="status">
-        Having trouble reaching Twitch — live statuses may be stale
+        {t('sidebar_rateLimited')}
       </div>
     {/if}
   </div>
@@ -265,7 +252,7 @@
 
   <div class="sidebar-list">
     {#if statuses.length === 0}
-      <div class="empty">No favorites yet. Click the + at the top of the sidebar to add a channel.</div>
+      <div class="empty">{t('sidebar_empty')}</div>
     {:else}
       {#each statuses as fav (fav.name)}
         {@const info = liveInfo(fav.status)}
@@ -312,7 +299,7 @@
                   class="fav-remove"
                   role="button"
                   tabindex="-1"
-                  aria-label="Remove"
+                  aria-label={t('sidebar_remove')}
                   onclick={(e) => removeFav(fav.name, e)}
                   onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') removeFav(fav.name, e) }}
                 >×</span>
@@ -320,8 +307,8 @@
               {#if fav.updateDelayed}
                 <span
                   class="fav-stale-dot"
-                  aria-label="Updates paused — couldn't reach the API across consecutive attempts"
-                  title="Updates paused — couldn't reach the API across consecutive attempts"
+                  aria-label={t('sidebar_staleDot')}
+                  title={t('sidebar_staleDot')}
                   aria-hidden="false"
                 ></span>
               {/if}
@@ -333,29 +320,29 @@
               {#if info.game}
                 <span class="fav-game" use:tooltip={{ text: info.game, delay: 1500 }}>{info.game}</span>
               {:else if !info.title}
-                <span class="fav-title fav-title--muted">Live</span>
+                <span class="fav-title fav-title--muted">{t('live')}</span>
               {/if}
             {:else if isOff}
-              <span class="fav-title fav-title--muted">Offline</span>
+              <span class="fav-title fav-title--muted">{t('offline')}</span>
             {:else if isErr}
               <span class="fav-title fav-title--muted">
-                Couldn't load{#if fav.lastFetched} · {timeAgo(fav.lastFetched)}{/if}
+                {t('sidebar_couldntLoad')}{#if fav.lastFetched} · {timeAgo(fav.lastFetched)}{/if}
               </span>
               <span
                 class="fav-retry"
                 role="button"
                 tabindex="0"
-                aria-label="Retry"
+                aria-label={t('retry')}
                 onclick={(e) => { e.stopPropagation(); store.retryFetch(fav.name) }}
                 onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); store.retryFetch(fav.name) } }}
-                use:tooltip={{ text: 'Retry now', delay: 1500 }}
+                use:tooltip={{ text: t('retryNow'), delay: 1500 }}
               >
                 <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
                   <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 3v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               </span>
             {:else}
-              <span class="fav-title fav-title--muted">Loading…</span>
+              <span class="fav-title fav-title--muted">{t('loading')}</span>
             {/if}
           </span>
            {#if info}
@@ -388,7 +375,7 @@
         {@const live = tip.status}
         <div class="fav-tooltip-row fav-tooltip-row--live">
           <span class="fav-tooltip-dot" aria-hidden="true"></span>
-          <span>Live · {formatViewers(live.viewers)} viewers</span>
+          <span>{t('sidebar_liveViewers', { n: formatCompact(live.viewers) })}</span>
         </div>
         {#if live.title}
           <div class="fav-tooltip-title" use:tooltip={{ text: live.title, delay: 1500 }}>{live.title}</div>
@@ -397,13 +384,13 @@
           <div class="fav-tooltip-game" use:tooltip={{ text: live.game, delay: 1500 }}>{live.game}</div>
         {/if}
       {:else if tip.status.state === 'offline'}
-        <div class="fav-tooltip-row fav-tooltip-row--muted">Offline</div>
+        <div class="fav-tooltip-row fav-tooltip-row--muted">{t('offline')}</div>
       {:else if tip.status.state === 'error'}
         <div class="fav-tooltip-row fav-tooltip-row--muted">
-          Couldn't load{tip.lastFetched ? ` · ${timeAgo(tip.lastFetched)}` : ''}
+          {t('sidebar_couldntLoad')}{tip.lastFetched ? ` · ${timeAgo(tip.lastFetched)}` : ''}
         </div>
       {:else}
-        <div class="fav-tooltip-row fav-tooltip-row--muted">Loading…</div>
+        <div class="fav-tooltip-row fav-tooltip-row--muted">{t('loading')}</div>
       {/if}
     </div>
   {/if}

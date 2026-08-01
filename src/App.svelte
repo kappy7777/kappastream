@@ -28,6 +28,8 @@
   import { notifications } from './lib/notifications.svelte.ts'
   import { tooltip } from './lib/tooltip.ts'
   import { tooltipState } from './lib/tooltip.svelte.ts'
+  import { t } from './lib/i18n/index.svelte'
+  import { formatCompact, formatChatTime } from './lib/format'
   import kappaUrl from './assets/kappa.png'
 
   // Tauri v2 webview origin differs by engine, and that changes whether a
@@ -75,7 +77,7 @@
       } else {
         disconnectStream()
       }
-      showNotifToast('Sleep timer: playback stopped')
+      showNotifToast(t('toast_sleepStopped'))
     })
   })
 
@@ -253,8 +255,8 @@
   // (granting it would double-toggle: maximize then restore). Double-clicks
   // that land on an interactive control (buttons/inputs) are ignored.
   function onTitleDblClick(e: MouseEvent): void {
-    const t = e.target as HTMLElement | null
-    if (t && t.closest('button, input, a, [contenteditable="true"]')) return
+    const target = e.target as HTMLElement | null
+    if (target && target.closest('button, input, a, [contenteditable="true"]')) return
     winToggleMaximize()
   }
   function closeAbout(): void {
@@ -681,12 +683,12 @@
         // mpv is now the sole player; stop the in-app stream (HLS + video) to
         // free network/system resources. The IRC chat connection is left intact.
         disconnectStream()
-        showNotifToast('Launching in mpv…')
+        showNotifToast(t('toast_launchingMpv'))
       } else {
-        showNotifToast(r.error || 'Could not launch mpv')
+        showNotifToast(r.error || t('toast_mpvFailed'))
       }
     } catch (err) {
-      const msg = typeof err === 'string' ? err : (err as Error)?.message ?? 'Could not launch mpv'
+      const msg = typeof err === 'string' ? err : (err as Error)?.message ?? t('toast_mpvFailed')
       showNotifToast(msg)
     }
   }
@@ -835,12 +837,12 @@
         if (q !== 'best') {
           quality = 'best'
           if (channelJoined) settings.setQualityFor(channelJoined, 'best')
-          showNotifToast('Quality "' + q + '" is not available — using Source')
+          showNotifToast(t('toast_qualityFallback', { q, source: t('pc_sourceQuality') }))
           await loadStream(channel, 'best')
           return
         }
         playerStatus = 'error'
-        playerError = 'Quality "' + q + '" is not available for this stream'
+        playerError = t('player_qualityUnavailableError', { q })
         return
       }
       playerStatus = 'error'
@@ -971,7 +973,7 @@
   function connect(): void {
     const channel = normalizeChannelName(channelInput)
     if (!isValidChannelName(channel)) {
-      showNotifToast('Invalid channel name.')
+      showNotifToast(t('toast_invalidChannel'))
       return
     }
     // Any (re)connect returns to live mode — clears a prior VOD/clip playback.
@@ -1015,7 +1017,7 @@
           break
         case 'CLEARMSG':
           // Record the deletion always; presentation is gated.
-          markMessageDeleted(ev.targetMsgId, 'Message deleted')
+          markMessageDeleted(ev.targetMsgId, t('mod_messageDeleted'))
           break
         case 'CLEARCHAT':
           handleClearchat(ev)
@@ -1111,12 +1113,12 @@
     // stable key), never by display name.
     if (ev.targetUserId === null) {
       for (const m of messages) {
-        if (m.kind === 'message') markEntryDeleted(m, 'Chat cleared')
+        if (m.kind === 'message') markEntryDeleted(m, t('mod_chatCleared'))
       }
       return
     }
     const reason =
-      ev.banDuration !== null ? `Timed out (${ev.banDuration}s)` : 'Banned'
+      ev.banDuration !== null ? t('mod_timedOut', { n: ev.banDuration }) : t('mod_banned')
     for (const m of messages) {
       if (m.kind === 'message' && m.userId === ev.targetUserId) {
         markEntryDeleted(m, reason)
@@ -1391,7 +1393,7 @@
 
   async function playVod(video: ChannelVideo): Promise<void> {
     if (!channelJoined) return
-    playback = { kind: 'vod', id: video.id, title: video.title || 'Past broadcast' }
+    playback = { kind: 'vod', id: video.id, title: video.title || t('vod_pastBroadcast') }
     messages = []
     roomState = {}
     stopChatOnly()
@@ -1402,7 +1404,7 @@
 
   async function playClip(clip: ChannelClip): Promise<void> {
     if (!channelJoined) return
-    playback = { kind: 'clip', slug: clip.slug, title: clip.title || 'Clip' }
+    playback = { kind: 'clip', slug: clip.slug, title: clip.title || t('vod_clip') }
     messages = []
     roomState = {}
     stopChatOnly()
@@ -1466,31 +1468,6 @@
   }
 
   // --------------------------------------------------------------------------
-
-  function formatViewers(n: number): string {
-    if (n < 1000) return n.toString()
-    if (n < 1_000_000) {
-      const k = n / 1000
-      return (k < 100 ? k.toFixed(1).replace(/\.0$/, '') : Math.round(k).toString()) + 'K'
-    }
-    return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
-  }
-
-  function formatChatTime(ts: number): string {
-    const d = new Date(ts)
-    const h = d.getHours().toString().padStart(2, '0')
-    const m = d.getMinutes().toString().padStart(2, '0')
-    return h + ':' + m
-  }
-
-  function formatBits(n: number): string {
-    if (n < 1000) return String(n)
-    if (n < 1_000_000) {
-      const k = n / 1000
-      return (k < 100 ? k.toFixed(1).replace(/\.0$/, '') : Math.round(k).toString()) + 'K'
-    }
-    return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
-  }
 
   // followers-only is in minutes (-1 off, 0 any follower, N minutes); slow is
   // in seconds. Compact labels for the chat-mode indicator (Toggle B).
@@ -1710,14 +1687,17 @@
     void initBadgeRefresh()
   })
 
-  const playerLabel: Record<PlayerStatus, string> = {
-    idle: '',
-    resolving: 'Resolving stream…',
-    loading: 'Loading stream…',
-    playing: '',
-    paused: 'Paused',
-    offline: 'Channel is offline',
-    error: 'Stream error',
+  // Player overlay headline per status. A function (not a const map) so the
+  // text re-renders live when the language changes. idle/playing render nothing.
+  function playerLabel(ps: PlayerStatus): string {
+    switch (ps) {
+      case 'resolving': return t('player_resolving')
+      case 'loading': return t('player_loadingStream')
+      case 'paused': return t('player_paused')
+      case 'offline': return t('player_offline')
+      case 'error': return t('player_streamError')
+      default: return ''
+    }
   }
 
   let notifToast = $state<string | null>(null)
@@ -1811,9 +1791,9 @@
     if (!re.test(raw)) return
     const channel = channelJoined ? '#' + channelJoined : 'chat'
     const preview = raw.replace(/\s+/g, ' ').trim().slice(0, 120)
-    notifications.record('mention', 'Mentioned in ' + channel, username + ': ' + preview, channelJoined)
-    sendNotif('Mentioned in ' + channel, {
-      body: username + ': ' + preview,
+    notifications.record('mention', t('notif_mentioned', { channel }), t('notif_mentionedBody', { user: username, preview }), channelJoined)
+    sendNotif(t('notif_mentioned', { channel }), {
+      body: t('notif_mentionedBody', { user: username, preview }),
       tag: 'mention:' + channelJoined,
       icon: '/favicon.svg',
     })
@@ -1838,13 +1818,13 @@
     }
     const granted = await ensureNotifPermission()
     if (!granted) {
-      showNotifToast('Notifications were not granted.')
+      showNotifToast(t('toast_notificationsDenied'))
       notifVersion++
       return
     }
     favoritesStore.setNotifEnabled(channel, true)
     notifVersion++
-    showNotifToast(`Will notify when ${channel} goes live.`)
+    showNotifToast(t('toast_willNotify', { channel }))
   }
 
   let favVersion = $state(0)
@@ -1858,10 +1838,10 @@
     const channel = channelJoined
     if (favoritesStore.has(channel)) {
       favoritesStore.remove(channel)
-      showNotifToast(`Removed ${channel} from favorites.`)
+      showNotifToast(t('toast_removedFavorite', { channel }))
     } else {
       const ok = favoritesStore.add(channel)
-      showNotifToast(ok ? `Added ${channel} to favorites.` : 'Favorites limit reached.')
+      showNotifToast(ok ? t('toast_addedFavorite', { channel }) : t('toast_favoritesLimit'))
     }
     favVersion++
   }
@@ -1903,7 +1883,7 @@
         type="button"
         class="logo logo-btn"
         onclick={openAbout}
-        aria-label="About"
+        aria-label={t('tb_about')}
       >
         <img src={kappaUrl} alt="" />
       </button>
@@ -1911,8 +1891,8 @@
         type="button"
         class="sidebar-toggle"
         onclick={toggleSidebar}
-        aria-label={sidebarMode === 'full' ? 'Minimize favorites' : sidebarMode === 'icons' ? 'Hide favorites' : 'Show favorites'}
-        use:tooltip={sidebarMode === 'full' ? 'Minimize favorites' : sidebarMode === 'icons' ? 'Hide favorites' : 'Show favorites'}
+        aria-label={sidebarMode === 'full' ? t('tb_minimizeFavorites') : sidebarMode === 'icons' ? t('tb_hideFavorites') : t('tb_showFavorites')}
+        use:tooltip={sidebarMode === 'full' ? t('tb_minimizeFavorites') : sidebarMode === 'icons' ? t('tb_hideFavorites') : t('tb_showFavorites')}
       >
         {sidebarMode === 'full' ? '◀' : sidebarMode === 'icons' ? '⏵' : '▶'}
       </button>
@@ -1920,9 +1900,9 @@
         type="button"
         class="browse-btn"
         onclick={() => (browseOpen = true)}
-        aria-label="Browse channels and categories"
+        aria-label={t('tb_browseChannels')}
       >
-        Browse
+        {t('browse')}
       </button>
     </div>
     <div class="bar-center" data-tauri-drag-region>
@@ -1935,8 +1915,8 @@
           type="button"
           class="sleep-chip"
           onclick={() => sleepTimer.cancel()}
-          use:tooltip={`Sleep timer ${formatSleepRemaining(sleepTimer.remainingMs)} — click to cancel`}
-          aria-label={`Sleep timer ${formatSleepRemaining(sleepTimer.remainingMs)}, click to cancel`}
+          use:tooltip={t('tb_sleepTimer', { time: formatSleepRemaining(sleepTimer.remainingMs) })}
+          aria-label={t('tb_sleepTimerAria', { time: formatSleepRemaining(sleepTimer.remainingMs) })}
         >
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="8" cy="9" r="5"/>
@@ -1949,8 +1929,8 @@
         type="button"
         class="layout-toggle"
         onclick={toggleStacked}
-        aria-label={stacked ? 'Switch to side-by-side layout' : 'Stack chat below video'}
-        use:tooltip={stacked ? 'Switch to side-by-side layout' : 'Stack chat below video'}
+        aria-label={stacked ? t('tb_switchSideBySide') : t('tb_stackChat')}
+        use:tooltip={stacked ? t('tb_switchSideBySide') : t('tb_stackChat')}
       >
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
           {#if stacked}
@@ -1966,10 +1946,10 @@
       <div class="win-controls">
         <button
           type="button"
-          class="win-btn"
-          onclick={winMinimize}
-          aria-label="Minimize"
-        >
+        class="win-btn"
+        onclick={winMinimize}
+        aria-label={t('tb_minimize')}
+      >
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
             <rect x="3" y="7.4" width="10" height="1.6" rx="0.8" fill="currentColor"/>
           </svg>
@@ -1978,7 +1958,7 @@
           type="button"
           class="win-btn"
           onclick={winToggleMaximize}
-          aria-label={isMaximized ? 'Restore' : 'Maximize'}
+          aria-label={isMaximized ? t('tb_restore') : t('tb_maximize')}
         >
           {#if isMaximized}
             <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4">
@@ -1996,7 +1976,7 @@
           type="button"
           class="win-btn win-btn--close"
           onclick={winClose}
-          aria-label="Close"
+          aria-label={t('tb_closeWin')}
         >
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
             <path d="M4 4 L12 12 M12 4 L4 12"/>
@@ -2009,9 +1989,9 @@
   <UpdateBanner />
 
   {#if emoteStatus === 'loading'}
-    <div class="banner">Loading emotes…</div>
+    <div class="banner">{t('chat_loadingEmotes')}</div>
   {:else if emoteStatus === 'error'}
-    <div class="banner banner--error">Failed to load third-party emotes. Twitch native emotes still work.</div>
+    <div class="banner banner--error">{t('chat_emotesFailed')}</div>
   {/if}
 
   <div class="body">
@@ -2024,7 +2004,7 @@
     <div class="player-stage">
     {#if playback.kind !== 'live'}
       <div class="playback-banner">
-        <button type="button" class="playback-back" onclick={backToLive}>◀ Back to live</button>
+        <button type="button" class="playback-back" onclick={backToLive}>{t('backToLive')}</button>
         <span class="playback-title">{playback.title}</span>
       </div>
     {/if}
@@ -2046,35 +2026,35 @@
           <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
             {#if isPlayerBusy}
               <div class="spinner" aria-hidden="true"></div>
-              <p class="overlay-text">{playerLabel[playerStatus]}</p>
+              <p class="overlay-text">{playerLabel(playerStatus)}</p>
             {:else if playerStatus === 'offline'}
-              <p class="overlay-title">{playerLabel.offline}</p>
-              <p class="overlay-sub">Waiting for them to go live…</p>
+              <p class="overlay-title">{playerLabel('offline')}</p>
+              <p class="overlay-sub">{t('player_waitingLive')}</p>
             {:else if playerStatus === 'error'}
-              <p class="overlay-title">{playerLabel.error}</p>
+              <p class="overlay-title">{playerLabel('error')}</p>
               <p class="overlay-sub">{playerError}</p>
             {/if}
           </div>
         {:else if playerStatus === 'idle' && pipController.isOpen}
           <div class="player-overlay">
-            <p class="overlay-title">Playing in Picture-in-Picture</p>
-            <p class="overlay-sub">Close the PiP window to resume here</p>
+            <p class="overlay-title">{t('player_pipActive')}</p>
+            <p class="overlay-sub">{t('player_pipActiveSub')}</p>
           </div>
         {:else if playerStatus === 'idle'}
           <div class="player-overlay">
-            <p class="overlay-title">Stream stopped</p>
-            <button type="button" class="overlay-action" onclick={resumeStream}>Resume stream</button>
+            <p class="overlay-title">{t('player_streamStopped')}</p>
+            <button type="button" class="overlay-action" onclick={resumeStream}>{t('player_resumeStream')}</button>
           </div>
         {/if}
         {#if resumeBar}
           <div class="resume-bar" role="status">
-            <span class="resume-bar-text">Resumed from {formatVodTime(resumeBar.position)}</span>
-            <button type="button" class="resume-bar-btn" onclick={restartVod}>Restart</button>
-            <button type="button" class="resume-bar-close" onclick={dismissResumeBar} aria-label="Dismiss resume notice">×</button>
+            <span class="resume-bar-text">{t('player_resumedFrom', { time: formatVodTime(resumeBar.position) })}</span>
+            <button type="button" class="resume-bar-btn" onclick={restartVod}>{t('player_restart')}</button>
+            <button type="button" class="resume-bar-close" onclick={dismissResumeBar} aria-label={t('player_dismissResume')}>×</button>
           </div>
         {/if}
       {:else}
-        <div class="player-placeholder">Stream will appear here when you connect</div>
+        <div class="player-placeholder">{t('player_placeholder')}</div>
       {/if}
     </section>
 
@@ -2085,16 +2065,16 @@
           {#if activeStatus.avatarUrl}
             <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
           {/if}
-          <span class="stream-info-live" use:tooltip={'Live'}><span class="stream-info-live-dot"></span>LIVE</span>
-          <span class="stream-info-title" use:tooltip={activeStatus.title || 'Live'}>{activeStatus.title || 'Live'}</span>
+          <span class="stream-info-live" use:tooltip={t('live')}><span class="stream-info-live-dot"></span>{t('liveBadge')}</span>
+          <span class="stream-info-title" use:tooltip={activeStatus.title || t('live')}>{activeStatus.title || t('live')}</span>
         </div>
         <div class="stream-info-row stream-info-row--meta">
           {#if activeStatus.game}<span class="stream-info-game">{activeStatus.game}</span>{/if}
           <span class="stream-info-dot">·</span>
-          <span class="stream-info-viewers">{formatViewers(activeStatus.viewers)} viewers</span>
+          <span class="stream-info-viewers">{formatCompact(activeStatus.viewers)} {t('viewers')}</span>
           {#if activeStatus.uptime}
             <span class="stream-info-dot">·</span>
-            <span class="stream-info-uptime">Up {activeStatus.uptime}</span>
+            <span class="stream-info-uptime">{t('si_uptime', { uptime: activeStatus.uptime })}</span>
           {/if}
         </div>
       {:else if activeStatus.state === 'offline' && channelJoined}
@@ -2102,7 +2082,7 @@
           {#if activeStatus.avatarUrl}
             <img class="stream-info-avatar stream-info-avatar--offline" src={activeStatus.avatarUrl} alt="" />
           {/if}
-          <span class="stream-info-offline">Offline</span>
+          <span class="stream-info-offline">{t('offline')}</span>
           <span class="stream-info-channel">{channelJoined}</span>
         </div>
       {:else if channelJoined}
@@ -2118,7 +2098,7 @@
               class:favorite-toggle--on={channelIsFavorite}
               aria-pressed={channelIsFavorite}
               onclick={toggleChannelFavorite}
-              use:tooltip={channelIsFavorite ? `Remove ${channelJoined} from favorites` : `Add ${channelJoined} to favorites`}
+              use:tooltip={channelIsFavorite ? t('si_removeFavorite', { channel: channelJoined }) : t('si_addFavoriteTooltip', { channel: channelJoined })}
             >
               <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                 {#if channelIsFavorite}
@@ -2127,7 +2107,7 @@
                   <path d="M8 13.5l-1.2-.95C3.4 9.55 1 7.4 1 4.7 1 2.55 2.74 1 5 1c1.34 0 2.62.6 3.5 1.62A4.62 4.62 0 0 1 11 1c2.26 0 4 1.55 4 3.7 0 2.7-2.4 4.85-5.8 7.85L8 13.5zM8 12.3l.45-.36C11.4 9.36 13.5 7.5 13.5 4.7 13.5 3.2 12.4 2.2 11 2.2c-1.06 0-2.06.55-2.65 1.45L8 4.3l-.35-.65C7.06 2.75 6.06 2.2 5 2.2 3.6 2.2 2.5 3.2 2.5 4.7c0 2.8 2.1 4.66 5.05 7.24l.45.36z" fill="currentColor"/>
                 {/if}
               </svg>
-              <span class="notif-toggle-label">{channelIsFavorite ? 'Favorite' : 'Add favorite'}</span>
+              <span class="notif-toggle-label">{channelIsFavorite ? t('si_favorite') : t('si_addFavorite')}</span>
             </button>
             <button
               type="button"
@@ -2135,7 +2115,7 @@
               class:notif-toggle--on={channelNotifOn}
               aria-pressed={channelNotifOn}
               onclick={toggleChannelNotif}
-              use:tooltip={notifBlocked ? 'Notifications blocked in browser settings' : channelNotifOn ? 'Disable live notifications for this channel' : 'Notify me when this channel goes live'}
+              use:tooltip={notifBlocked ? t('si_notifBlocked') : channelNotifOn ? t('si_disableNotif') : t('si_enableNotif')}
             >
               <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                 {#if channelNotifOn}
@@ -2144,19 +2124,19 @@
                   <path d="M8 2a4 4 0 0 0-4 4v3.5L2.5 11h11L12 9.5V6a4 4 0 0 0-4-4zm0 12a1.5 1.5 0 0 0 1.5-1.5h-3A1.5 1.5 0 0 0 8 14zM3 3l10 10" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
                 {/if}
               </svg>
-              <span class="notif-toggle-label">{channelNotifOn ? 'Notify on' : 'Notify off'}</span>
+              <span class="notif-toggle-label">{channelNotifOn ? t('si_notifyOn') : t('si_notifyOff')}</span>
             </button>
             {#if !stacked}
               <button
                 type="button"
                 class="notif-toggle"
                 onclick={scrollToContent}
-                use:tooltip={'Videos & Clips'}
+                use:tooltip={t('si_videosClips')}
               >
                 <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                   <path d="M2 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm1 2h10v8H3V4zm3 1v6l4-3-4-3z" fill="currentColor"/>
                 </svg>
-                <span class="notif-toggle-label">Videos</span>
+                <span class="notif-toggle-label">{t('si_videos')}</span>
               </button>
             {/if}
           </div>
@@ -2180,7 +2160,7 @@
       onpointerdown={onChatResizerPointerDown}
       role="slider"
       aria-orientation={stacked ? 'horizontal' : 'vertical'}
-      aria-label="Resize chat"
+      aria-label={t('chat_resizeChat')}
       aria-valuenow={chatSize}
       aria-valuemin={CHAT_SIZE_MIN}
       aria-valuemax={CHAT_SIZE_MAX}
@@ -2188,28 +2168,28 @@
     ></div>
     <main class="chat" class:chat--hidden={!settings.chatVisible} style:--chat-size={`${chatSize}px`}>
       {#if settings.chatRoomstate && channelJoined && roomStateActive(roomState)}
-        <div class="chat-modes" role="status" aria-label="Chat modes">
+        <div class="chat-modes" role="status" aria-label={t('chat_chatModes')}>
           {#if roomState.subsOnly}
-            <span class="mode-pill">Subscribers-only</span>
+            <span class="mode-pill">{t('chat_subsOnly')}</span>
           {/if}
           {#if roomState.followersOnly !== undefined && roomState.followersOnly >= 0}
-            <span class="mode-pill">Followers-only{roomState.followersOnly > 0 ? ` (${formatFollowersMin(roomState.followersOnly)})` : ''}</span>
+            <span class="mode-pill">{roomState.followersOnly > 0 ? t('chat_followersOnlyMin', { min: formatFollowersMin(roomState.followersOnly) }) : t('chat_followersOnly')}</span>
           {/if}
           {#if roomState.slow !== undefined && roomState.slow > 0}
-            <span class="mode-pill">Slow ({formatSlow(roomState.slow)})</span>
+            <span class="mode-pill">{t('chat_slowSecs', { n: formatSlow(roomState.slow) })}</span>
           {/if}
           {#if roomState.emoteOnly}
-            <span class="mode-pill">Emote-only</span>
+            <span class="mode-pill">{t('chat_emoteOnly')}</span>
           {/if}
           {#if roomState.r9k}
-            <span class="mode-pill">R9K</span>
+            <span class="mode-pill">{t('chat_r9k')}</span>
           {/if}
         </div>
       {/if}
       <div class="chat-scroll" bind:this={chatEl} onscroll={onChatScroll}>
         {#if messages.length === 0}
           <p class="placeholder">
-            {status === 'connected' ? 'Waiting for messages…' : 'Join a channel to see chat'}
+            {status === 'connected' ? t('chat_waitingMessages') : t('chat_joinToSee')}
           </p>
         {:else}
           {#each messages as msg (msg.id)}
@@ -2268,12 +2248,12 @@
               onerror={() => markEmoteErrored(part.url)}
             />{/if}{/each}</span>
             {#if settings.chatBits && msg.bits}
-              <span class="bits-badge" use:tooltip={`${msg.bits} bits`}>
+              <span class="bits-badge" use:tooltip={t('mod_bits', { n: msg.bits })}>
                 <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
                   <path d="M8 1l5 5-5 9-5-9z" fill="currentColor"/>
                   <path d="M3 6h10M8 1l3 5-3 9-3-9z" fill="none" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round"/>
                 </svg>
-                {formatBits(msg.bits)}
+                {formatCompact(msg.bits)}
               </span>
             {/if}
           </div>
@@ -2282,11 +2262,11 @@
         {/if}
       </div>
       {#if !stickyBottom && messages.length > 0}
-        <button type="button" class="float-pill jump-end" onclick={jumpToPresent} title="Jump to the latest message">
+        <button type="button" class="float-pill jump-end" onclick={jumpToPresent} title={t('chat_jumpToLatest')}>
           <svg class="float-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 3v9M4 8l4 4 4-4"/>
           </svg>
-          Back to bottom
+          {t('chat_backToBottom')}
           {#if newMessageCount > 0}
             <span class="float-count">{newMessageCount}</span>
           {/if}
@@ -2297,8 +2277,8 @@
           type="button"
           class="float-pill chat-link"
           onclick={openChatPopout}
-          title={`Open #${channelJoined} on Twitch`}
-          aria-label={`Open #${channelJoined} on Twitch`}
+          title={t('chat_openOnTwitch', { channel: channelJoined })}
+          aria-label={t('chat_openOnTwitch', { channel: channelJoined })}
         >
           <svg class="chat-link-icon" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
             <path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7zM19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7z" fill="currentColor"/>
@@ -2344,7 +2324,7 @@
         type="button"
         class="about-close"
         onclick={closeAbout}
-        aria-label="Close"
+        aria-label={t('close')}
       >
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
           <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -2352,22 +2332,17 @@
       </button>
       <div id="about-title" class="about-modal-name">Kappastream</div>
       <div class="about-modal-version">v{__APP_VERSION__}</div>
-      <p class="about-modal-tagline">Twitch, stripped down to what matters: the stream and the chat.</p>
-      <p class="about-modal-body">
-        No login, project telemetry, analytics, or project-operated backend. Chat connects anonymously —
-        nothing tied to who you are. Network calls go only to the services needed to watch:
-        Twitch infrastructure and the open community APIs (7TV, BTTV, FFZ) that power
-        emotes and stream info.
-      </p>
-      <p class="about-modal-body">Stream resolution powered by streamlink.</p>
+      <p class="about-modal-tagline">{t('about_tagline')}</p>
+      <p class="about-modal-body">{t('about_body')}</p>
+      <p class="about-modal-body">{t('about_streamlink')}</p>
       <p class="about-modal-tagline about-modal-tagline--last">Built to watch, not to be watched.</p>
       <div class="about-modal-donate">
-        <span class="about-modal-donate-label">Donate</span>
+        <span class="about-modal-donate-label">{t('donate')}</span>
         <div class="about-modal-donate-addr-group">
           <span
             class="about-modal-btc-symbol"
-            aria-label="Bitcoin"
-            title="Bitcoin">₿</span
+            aria-label={t('about_bitcoin')}
+            title={t('about_bitcoin')}>₿</span
           >
           <code class="about-modal-donate-addr"
             >bc1qj9ge9ug4pp5mr3g0lepuyyjh4j6sazhg2hgcrv</code
@@ -2379,24 +2354,24 @@
 
   {#if shortcutsHelpOpen}
     <div class="about-backdrop" onclick={() => (shortcutsHelpOpen = false)} role="presentation"></div>
-    <div class="about-modal shortcuts-modal" role="dialog" aria-label="Keyboard shortcuts">
+    <div class="about-modal shortcuts-modal" role="dialog" aria-label={t('shortcuts_title')}>
       <button
         type="button"
         class="about-close"
         onclick={() => (shortcutsHelpOpen = false)}
-        aria-label="Close shortcuts help"
+        aria-label={t('shortcuts_close')}
       >×</button>
-      <h2 id="shortcuts-title" class="shortcuts-title">Keyboard shortcuts</h2>
+      <h2 id="shortcuts-title" class="shortcuts-title">{t('shortcuts_title')}</h2>
       <ul class="shortcuts-list" aria-labelledby="shortcuts-title">
-        <li><span class="shortcut-keys"><kbd>Space</kbd> <span class="shortcut-or">/</span> <kbd>K</kbd></span><span class="shortcut-desc">Play / pause</span></li>
-        <li><span class="shortcut-keys"><kbd>M</kbd></span><span class="shortcut-desc">Mute / unmute</span></li>
-        <li><span class="shortcut-keys"><kbd>F</kbd></span><span class="shortcut-desc">Toggle fullscreen</span></li>
-        <li><span class="shortcut-keys"><kbd>T</kbd></span><span class="shortcut-desc">Toggle theater mode</span></li>
-        <li><span class="shortcut-keys"><kbd>←</kbd> <span class="shortcut-or">/</span> <kbd>→</kbd></span><span class="shortcut-desc">Seek 10s (VOD &amp; clips) · volume (live)</span></li>
-        <li><span class="shortcut-keys"><kbd>↑</kbd> <span class="shortcut-or">/</span> <kbd>↓</kbd></span><span class="shortcut-desc">Volume up / down</span></li>
-        <li><span class="shortcut-keys"><kbd>?</kbd></span><span class="shortcut-desc">Show / hide this help</span></li>
+        <li><span class="shortcut-keys"><kbd>Space</kbd> <span class="shortcut-or">/</span> <kbd>K</kbd></span><span class="shortcut-desc">{t('shortcuts_playPause')}</span></li>
+        <li><span class="shortcut-keys"><kbd>M</kbd></span><span class="shortcut-desc">{t('shortcuts_muteUnmute')}</span></li>
+        <li><span class="shortcut-keys"><kbd>F</kbd></span><span class="shortcut-desc">{t('shortcuts_fullscreen')}</span></li>
+        <li><span class="shortcut-keys"><kbd>T</kbd></span><span class="shortcut-desc">{t('shortcuts_theater')}</span></li>
+        <li><span class="shortcut-keys"><kbd>←</kbd> <span class="shortcut-or">/</span> <kbd>→</kbd></span><span class="shortcut-desc">{t('shortcuts_seek')}</span></li>
+        <li><span class="shortcut-keys"><kbd>↑</kbd> <span class="shortcut-or">/</span> <kbd>↓</kbd></span><span class="shortcut-desc">{t('shortcuts_volume')}</span></li>
+        <li><span class="shortcut-keys"><kbd>?</kbd></span><span class="shortcut-desc">{t('shortcuts_showHelp')}</span></li>
       </ul>
-      <p class="shortcuts-note">Shortcuts are disabled while typing in any text field (chat, search, inputs).</p>
+      <p class="shortcuts-note">{t('shortcuts_note')}</p>
     </div>
   {/if}
 

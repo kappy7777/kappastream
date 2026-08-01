@@ -4,6 +4,7 @@
   // shows anything (the store stays `idle`); this component only renders when
   // an update is actually available (or a user-initiated install is in flight).
   import { updateStore } from './update.svelte'
+  import { t } from './i18n/index.svelte'
 
   function fmtBytes(n: number): string {
     if (n <= 0) return '0 B'
@@ -21,24 +22,24 @@
     if (!raw) return null
     const s = raw.toLowerCase()
     if (s.includes('minisign') || s.includes('signature') || s.includes('verif')) {
-      return 'the update signature could not be verified'
+      return t('update_sigError')
     }
     if (s.includes('timeout') || s.includes('timed out')) {
-      return 'the download timed out'
+      return t('update_timeout')
     }
     if (s.includes('network') || s.includes('connect') || s.includes('dns') || s.includes('resolve')) {
-      return 'a network problem blocked the download'
+      return t('update_network')
     }
     if (s.includes('status') || /\b[45]\d\d\b/.test(s)) {
-      return 'the update could not be downloaded'
+      return t('update_downloadFailed')
     }
     if (s.includes('enospc') || s.includes('disk') || s.includes('no space') || s.includes('space')) {
-      return 'not enough disk space to install the update'
+      return t('update_diskSpace')
     }
     if (s.includes('permission') || s.includes('denied') || s.includes('eacces') || s.includes('eperm')) {
-      return 'the update could not be written (check permissions)'
+      return t('update_permissions')
     }
-    return 'the update could not be installed'
+    return t('update_installFailed')
   }
 
   // Relative "released Nd ago" from the manifest's pub_date, shown next to the
@@ -53,15 +54,15 @@
     const diffMs = Date.now() - then
     if (diffMs < 0) return null
     const mins = Math.floor(diffMs / 60000)
-    if (mins < 1) return 'released just now'
-    if (mins < 60) return `released ${mins}m ago`
+    if (mins < 1) return t('update_releasedJustNow')
+    if (mins < 60) return t('update_releasedMins', { n: mins })
     const hours = Math.floor(mins / 60)
-    if (hours < 24) return `released ${hours}h ago`
+    if (hours < 24) return t('update_releasedHours', { n: hours })
     const days = Math.floor(hours / 24)
-    if (days < 30) return `released ${days}d ago`
+    if (days < 30) return t('update_releasedDays', { n: days })
     const months = Math.floor(days / 30)
-    if (months < 12) return `released ${months}mo ago`
-    return `released ${Math.floor(months / 12)}y ago`
+    if (months < 12) return t('update_releasedMonths', { n: months })
+    return t('update_releasedYears', { n: Math.floor(months / 12) })
   }
   </script>
 
@@ -72,8 +73,8 @@
         <span class="update-banner__icon" aria-hidden="true">↻</span>
         <span class="update-banner__text">
           {updateStore.status === 'downloading'
-            ? `Downloading v${updateStore.version}…`
-            : `Installing v${updateStore.version}…`}
+            ? t('update_downloading', { version: updateStore.version ?? '' })
+            : t('update_installing', { version: updateStore.version ?? '' })}
         </span>
         {#if updateStore.fraction !== null}
           <span class="update-banner__progress">
@@ -88,22 +89,22 @@
       <div class="update-banner__main">
         <span class="update-banner__icon update-banner__icon--error" aria-hidden="true">!</span>
         <span class="update-banner__text">
-          Update to v{updateStore.version} failed
+          {t('update_failed', { version: updateStore.version ?? '' })}
           {#if friendlyError(updateStore.errorMsg)}<span class="update-banner__reason"> — {friendlyError(updateStore.errorMsg)}</span>{/if}
         </span>
-        <button type="button" class="update-banner__btn update-banner__btn--primary" onclick={() => updateStore.apply()}>Retry</button>
-        <button type="button" class="update-banner__btn update-banner__btn--ghost" onclick={() => updateStore.dismiss()} aria-label="Dismiss update notice">×</button>
+        <button type="button" class="update-banner__btn update-banner__btn--primary" onclick={() => updateStore.apply()}>{t('retry')}</button>
+        <button type="button" class="update-banner__btn update-banner__btn--ghost" onclick={() => updateStore.dismiss()} aria-label={t('update_dismiss')}>×</button>
       </div>
     {:else}
       <div class="update-banner__main">
         <span class="update-banner__icon" aria-hidden="true">↑</span>
         <span class="update-banner__text">
-          kappastream v{updateStore.version} is available
-          {#if updateStore.currentVersion}<span class="update-banner__reason"> (you have v{updateStore.currentVersion})</span>{/if}
+          {t('update_available', { version: updateStore.version ?? '' })}
+          {#if updateStore.currentVersion}<span class="update-banner__reason">{t('update_youHave', { version: updateStore.currentVersion ?? '' })}</span>{/if}
           {#if fmtReleased(updateStore.pubDate)}<span class="update-banner__reason"> · {fmtReleased(updateStore.pubDate)}</span>{/if}
         </span>
-        <button type="button" class="update-banner__btn update-banner__btn--primary" onclick={() => updateStore.apply()}>Update</button>
-        <button type="button" class="update-banner__btn update-banner__btn--ghost" onclick={() => updateStore.dismiss()} aria-label="Dismiss update notice">×</button>
+        <button type="button" class="update-banner__btn update-banner__btn--primary" onclick={() => updateStore.apply()}>{t('update')}</button>
+        <button type="button" class="update-banner__btn update-banner__btn--ghost" onclick={() => updateStore.dismiss()} aria-label={t('update_dismiss')}>×</button>
       </div>
     {/if}
   </div>

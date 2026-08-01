@@ -4,22 +4,29 @@
   import { tooltip } from './tooltip.ts'
   import type { LiveStatus } from './favorites.svelte.ts'
   import { isTauri } from '@tauri-apps/api/core'
+  import { t } from './i18n/index.svelte'
+  import { formatCompact } from './format'
 
-  interface QualityOption {
-    id: string
-    label: string
+  // Quality menu. The resolution IDs (1080p60 …) are technical streamlink args
+  // and are NOT translated; only the two display words ('Source', 'Audio only')
+  // are, resolved reactively via qualityLabel() so a language switch updates
+  // the open menu live (a module-level const label would freeze on first load).
+  const QUALITY_IDS = [
+    'best',
+    '1080p60',
+    '720p60',
+    '720p',
+    '480p',
+    '360p',
+    '160p',
+    'audio_only',
+  ] as const
+
+  function qualityLabel(id: string): string {
+    if (id === 'best') return t('pc_sourceQuality')
+    if (id === 'audio_only') return t('pc_audioOnly')
+    return id
   }
-
-  const QUALITY_OPTIONS: ReadonlyArray<QualityOption> = [
-    { id: 'best', label: 'Source' },
-    { id: '1080p60', label: '1080p60' },
-    { id: '720p60', label: '720p60' },
-    { id: '720p', label: '720p' },
-    { id: '480p', label: '480p' },
-    { id: '360p', label: '360p' },
-    { id: '160p', label: '160p' },
-    { id: 'audio_only', label: 'Audio only' },
-  ]
 
   interface Props {
     video: HTMLVideoElement | null | undefined
@@ -33,15 +40,6 @@
   }
 
   const { video, visible, quality, onqualitychange, onmpv, onstop, onplayintent, activeStatus }: Props = $props()
-
-  function formatViewers(n: number): string {
-    if (n < 1000) return n.toString()
-    if (n < 1_000_000) {
-      const k = n / 1000
-      return (k < 100 ? k.toFixed(1).replace(/\.0$/, '') : Math.round(k).toString()) + 'K'
-    }
-    return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
-  }
 
   function toggleTheater(): void {
     settings.toggleTheaterMode()
@@ -211,9 +209,9 @@
     if (v > 0 && video.muted) video.muted = false
   }
 
-  function seekTo(t: number): void {
+  function seekTo(pos: number): void {
     if (!video) return
-    video.currentTime = Math.max(0, Math.min(t, isFinite(duration) ? duration : t))
+    video.currentTime = Math.max(0, Math.min(pos, isFinite(duration) ? duration : pos))
   }
 
   function seekFromEvent(e: MouseEvent): void {
@@ -271,9 +269,9 @@
     return m + ':' + sec.toString().padStart(2, '0')
   }
 
-  function progressPct(t: number): number {
+  function progressPct(pos: number): number {
     if (!isFinite(duration) || duration <= 0) return 0
-    return Math.max(0, Math.min(100, (t / duration) * 100))
+    return Math.max(0, Math.min(100, (pos / duration) * 100))
   }
 
   let progressEl: HTMLElement | undefined = $state()
@@ -335,7 +333,7 @@
       <div class="theater-info-title">{activeStatus.title}</div>
       <div class="theater-info-meta">
         {#if activeStatus.game}<span class="theater-info-game">{activeStatus.game}</span><span class="theater-info-dot">·</span>{/if}
-        <span class="theater-info-viewers">{formatViewers(activeStatus.viewers)} viewers</span>
+        <span class="theater-info-viewers">{formatCompact(activeStatus.viewers)} {t('viewers')}</span>
       </div>
     </div>
   </div>
@@ -352,7 +350,7 @@
       <button
         type="button"
         class="menu-backdrop"
-        aria-label="Close menu"
+        aria-label={t('pc_closeMenu')}
         onclick={closeMenu}
       ></button>
     {/if}
@@ -365,7 +363,7 @@
       onkeydown={onProgressKey}
       role="slider"
       tabindex="0"
-      aria-label="Seek"
+      aria-label={t('pc_seek')}
       aria-valuemin="0"
       aria-valuemax={isFinite(duration) ? Math.floor(duration) : 0}
       aria-valuenow={Math.floor(currentTime)}
@@ -383,8 +381,8 @@
         type="button"
         class="ctrl-btn ctrl-btn--play"
         onclick={togglePlay}
-        aria-label={playing ? 'Pause' : 'Play'}
-        use:tooltip={playing ? 'Pause' : 'Play'}
+        aria-label={playing ? t('pc_pause') : t('pc_play')}
+        use:tooltip={playing ? t('pc_pause') : t('pc_play')}
       >
         {#if playing}
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -402,8 +400,8 @@
         type="button"
         class="ctrl-btn"
         onclick={onstop}
-        aria-label="Stop stream"
-        use:tooltip={'Stop stream'}
+        aria-label={t('pc_stopStream')}
+        use:tooltip={t('pc_stopStream')}
       >
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/>
@@ -414,8 +412,8 @@
         type="button"
         class="ctrl-btn"
         onclick={toggleMute}
-        aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'}
-        use:tooltip={muted || volume === 0 ? 'Unmute' : 'Mute'}
+        aria-label={muted || volume === 0 ? t('pc_unmute') : t('pc_mute')}
+        use:tooltip={muted || volume === 0 ? t('pc_unmute') : t('pc_mute')}
       >
         {#if muted || volume === 0}
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -440,7 +438,7 @@
         step="0.05"
         value={muted ? 0 : volume}
         oninput={(e) => setVolume(parseFloat((e.currentTarget as HTMLInputElement).value))}
-        aria-label="Volume"
+        aria-label={t('volume')}
       />
 
       <span class="time" aria-live="off">{formatTime(currentTime)} / {formatTime(duration)}</span>
@@ -452,10 +450,10 @@
           type="button"
           class="ctrl-btn"
           onclick={toggleMenu}
-          aria-label="Settings"
+          aria-label={t('settings')}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
-          use:tooltip={'Settings'}
+          use:tooltip={t('settings')}
         >
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
             <path d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.31-.09.63-.09.94s.02.63.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" fill="currentColor"/>
@@ -464,18 +462,18 @@
         {#if menuOpen}
           <div class="menu" role="menu">
             <div class="menu-section">
-              <div class="menu-label">Quality</div>
-              {#each QUALITY_OPTIONS as opt}
+              <div class="menu-label">{t('quality')}</div>
+              {#each QUALITY_IDS as qid (qid)}
                 <button
                   type="button"
                   class="menu-item"
-                  class:menu-item--active={quality === opt.id}
+                  class:menu-item--active={quality === qid}
                   role="menuitemradio"
-                  aria-checked={quality === opt.id}
-                  onclick={() => selectQuality(opt.id)}
+                  aria-checked={quality === qid}
+                  onclick={() => selectQuality(qid)}
                 >
-                  <span>{opt.label}</span>
-                  {#if quality === opt.id}
+                  <span>{qualityLabel(qid)}</span>
+                  {#if quality === qid}
                     <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
                       <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" fill="currentColor"/>
                     </svg>
@@ -493,9 +491,9 @@
           class="ctrl-btn"
           class:ctrl-btn--active={pipActive}
           onclick={togglePip}
-          aria-label={pipActive ? 'Exit Picture in Picture' : 'Picture in Picture'}
+          aria-label={pipActive ? t('pc_exitPip') : t('pc_pip')}
           aria-pressed={pipActive}
-          use:tooltip={pipActive ? 'Exit Picture in Picture' : 'Picture in Picture'}
+          use:tooltip={pipActive ? t('pc_exitPip') : t('pc_pip')}
         >
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
             <path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z" fill="currentColor"/>
@@ -507,8 +505,8 @@
         type="button"
         class="ctrl-btn"
         onclick={onmpv}
-        aria-label="Play in mpv"
-        use:tooltip={'Play in mpv'}
+        aria-label={t('pc_mpv')}
+        use:tooltip={t('pc_mpv')}
       >
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
           <path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h6v2h6v-2h6c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM10 15l7-4-7-4z" fill="currentColor"/>
@@ -520,9 +518,9 @@
         class="ctrl-btn"
         class:ctrl-btn--active={settings.theaterMode}
         onclick={toggleTheater}
-        aria-label={settings.theaterMode ? 'Exit theater mode' : 'Theater mode'}
+        aria-label={settings.theaterMode ? t('pc_exitTheater') : t('pc_theater')}
         aria-pressed={settings.theaterMode}
-        use:tooltip={settings.theaterMode ? 'Exit theater mode' : 'Theater mode'}
+        use:tooltip={settings.theaterMode ? t('pc_exitTheater') : t('pc_theater')}
       >
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
           <path d="M19 7H5c-1.1 0-2 .9-2 2v6c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zm0 8H5V9h14v6zM3 4h18v2H3V4zm0 14h18v2H3v-2z" fill="currentColor"/>
@@ -533,8 +531,8 @@
         type="button"
         class="ctrl-btn"
         onclick={toggleFullscreen}
-        aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-        use:tooltip={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+        aria-label={isFullscreen ? t('pc_exitFullscreen') : t('pc_enterFullscreen')}
+        use:tooltip={isFullscreen ? t('pc_exitFullscreen') : t('pc_fullscreen')}
       >
         {#if isFullscreen}
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">

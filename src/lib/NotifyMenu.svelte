@@ -1,6 +1,8 @@
 <script lang="ts">
   import { notifications, type NotificationRecord } from './notifications.svelte.ts'
   import { tooltip } from './tooltip.ts'
+  import { t } from './i18n/index.svelte'
+  import { relTimeShort } from './format'
 
   let open = $state(false)
   let panelEl: HTMLElement | undefined = $state()
@@ -22,17 +24,7 @@
   }
 
   function relTime(ts: number): string {
-    const diff = Date.now() - ts
-    const sec = Math.floor(diff / 1000)
-    if (sec < 45) return 'now'
-    const min = Math.floor(sec / 60)
-    if (min < 60) return min + 'm'
-    const hr = Math.floor(min / 60)
-    if (hr < 24) return hr + 'h'
-    const day = Math.floor(hr / 24)
-    if (day < 7) return day + 'd'
-    const d = new Date(ts)
-    return d.toLocaleDateString()
+    return relTimeShort(ts)
   }
 
   function iconFor(kind: NotificationRecord['kind']): string {
@@ -42,10 +34,10 @@
   $effect(() => {
     if (!open) return
     function onDown(e: MouseEvent): void {
-      const t = e.target as Node | null
-      if (!t) return
-      if (panelEl?.contains(t)) return
-      if (buttonEl?.contains(t)) return
+      const target = e.target as Node | null
+      if (!target) return
+      if (panelEl?.contains(target)) return
+      if (buttonEl?.contains(target)) return
       open = false
     }
     function onKey(e: KeyboardEvent): void {
@@ -67,10 +59,10 @@
     class:notify-btn--active={open}
     bind:this={buttonEl}
     onclick={toggle}
-    aria-label={count > 0 ? `Notifications (${count} unread)` : 'Notifications'}
+    aria-label={count > 0 ? t('notify_ariaUnread', { n: count }) : t('notifications')}
     aria-haspopup="dialog"
     aria-expanded={open}
-    use:tooltip={'Notifications'}
+    use:tooltip={t('notifications')}
   >
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
       <path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm7-5-1.4-1.4a2 2 0 0 1-.6-1.4V10a5 5 0 0 0-4-4.9V4a1 1 0 1 0-2 0v1.1A5 5 0 0 0 7 10v4.2a2 2 0 0 1-.6 1.4L5 17h14z" fill="currentColor"/>
@@ -81,11 +73,11 @@
   </button>
 
   {#if open}
-    <div class="panel" bind:this={panelEl} role="dialog" aria-label="Notifications">
+    <div class="panel" bind:this={panelEl} role="dialog" aria-label={t('notifications')}>
       <div class="panel-head">
-        <span class="panel-title">Notifications</span>
+        <span class="panel-title">{t('notifications')}</span>
         {#if notifications.items.length > 0}
-          <button type="button" class="clear-btn" onclick={clearAll}>Clear all</button>
+          <button type="button" class="clear-btn" onclick={clearAll}>{t('notify_clearAll')}</button>
         {/if}
       </div>
 
@@ -94,7 +86,7 @@
           <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
             <path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm7-5-1.4-1.4a2 2 0 0 1-.6-1.4V10a5 5 0 0 0-4-4.9V4a1 1 0 1 0-2 0v1.1A5 5 0 0 0 7 10v4.2a2 2 0 0 1-.6 1.4L5 17h14z" fill="currentColor" opacity="0.5"/>
           </svg>
-          <span>No notifications yet</span>
+          <span>{t('notify_empty')}</span>
         </div>
       {:else}
         <div class="notif-list">
@@ -104,7 +96,7 @@
               <div class="notif-body">
                 <div class="notif-title-row">
                   <span class="notif-title">{item.title}</span>
-                  <button type="button" class="notif-dismiss" aria-label="Dismiss" onclick={() => removeItem(item.id)}>
+                  <button type="button" class="notif-dismiss" aria-label={t('notify_dismiss')} onclick={() => removeItem(item.id)}>
                     <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
                       <path d="M4 4 L12 12 M12 4 L4 12" />
                     </svg>

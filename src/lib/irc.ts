@@ -1,5 +1,6 @@
 import type { EmoteRange } from './emotes'
 import { parseTwitchEmoteTag } from './emotes'
+import { t } from './i18n/index.svelte'
 
 export interface ParsedMessage {
   id: string
@@ -177,7 +178,7 @@ function buildPrivmsg(frame: IrcFrame): (ParsedMessage & { type: 'PRIVMSG' }) | 
   const messageBody = frame.trailing
   if (messageBody === null) return null
 
-  let username = 'user'
+  let username = t('irc_user')
   if (frame.prefixText !== null) {
     const prefixText = frame.prefixText
     const bang = prefixText.indexOf('!')
@@ -185,7 +186,7 @@ function buildPrivmsg(frame: IrcFrame): (ParsedMessage & { type: 'PRIVMSG' }) | 
   }
 
   const tags = frame.tags
-  const displayName = tags['display-name'] || username || 'user'
+  const displayName = tags['display-name'] || username || t('irc_user')
   const color = normalizeColor(tags.color)
   const id = tags.id ?? ''
   const twitchEmotes = parseTwitchEmoteTag(tags.emotes, messageBody)
@@ -230,35 +231,35 @@ function buildUsernotice(frame: IrcFrame): UsernoticeEvent {
 }
 
 function buildRoomstate(frame: IrcFrame): RoomstateEvent {
-  const t = frame.tags
+  const tags = frame.tags
   return {
     type: 'ROOMSTATE',
     channel: frame.channel ?? '',
-    emoteOnly: hasTag(t, 'emote-only') ? t['emote-only'] === '1' : null,
-    followersOnly: hasTag(t, 'followers-only') ? Number(t['followers-only']) : null,
-    subsOnly: hasTag(t, 'subs-only') ? t['subs-only'] === '1' : null,
-    slow: hasTag(t, 'slow') ? Number(t['slow']) : null,
-    r9k: hasTag(t, 'r9k') ? t['r9k'] === '1' : null,
+    emoteOnly: hasTag(tags, 'emote-only') ? tags['emote-only'] === '1' : null,
+    followersOnly: hasTag(tags, 'followers-only') ? Number(tags['followers-only']) : null,
+    subsOnly: hasTag(tags, 'subs-only') ? tags['subs-only'] === '1' : null,
+    slow: hasTag(tags, 'slow') ? Number(tags['slow']) : null,
+    r9k: hasTag(tags, 'r9k') ? tags['r9k'] === '1' : null,
   }
 }
 
 function buildClearmsg(frame: IrcFrame): ClearmsgEvent {
-  const t = frame.tags
+  const tags = frame.tags
   return {
     type: 'CLEARMSG',
     channel: frame.channel ?? '',
-    targetMsgId: t['target-msg-id'] ?? '',
-    login: t.login ?? '',
+    targetMsgId: tags['target-msg-id'] ?? '',
+    login: tags.login ?? '',
   }
 }
 
 function buildClearchat(frame: IrcFrame): ClearchatEvent {
-  const t = frame.tags
+  const tags = frame.tags
   return {
     type: 'CLEARCHAT',
     channel: frame.channel ?? '',
-    targetUserId: hasTag(t, 'target-user-id') ? t['target-user-id'] : null,
-    banDuration: hasTag(t, 'ban-duration') ? Number(t['ban-duration']) : null,
+    targetUserId: hasTag(tags, 'target-user-id') ? tags['target-user-id'] : null,
+    banDuration: hasTag(tags, 'ban-duration') ? Number(tags['ban-duration']) : null,
     login: frame.trailing ?? null,
   }
 }
@@ -298,36 +299,36 @@ export function mergeRoomState(prev: RoomState, ev: RoomstateEvent): RoomState {
 // safety net so an absent system-msg never renders a blank line. Handles the
 // known msg-ids explicitly and any future/unknown id generically.
 export function composeUsernoticeFallback(msgId: string, tags: Record<string, string>): string {
-  const login = tags.login || tags['display-name'] || 'Someone'
+  const login = tags.login || tags['display-name'] || t('irc_someone')
   switch (msgId) {
     case 'raid': {
       const viewers = tags['msg-param-viewerCount'] ?? '?'
-      return `${login} is raiding with a party of ${viewers}`
+      return t('irc_raid', { login, viewers })
     }
     case 'sub':
     case 'resub':
-      return `${login} subscribed`
+      return t('irc_subscribed', { login })
     case 'subgift':
     case 'anonsubgift': {
       const recipient =
-        tags['msg-param-recipient-display-name'] || tags['msg-param-recipient-user-name'] || 'someone'
-      return `${login} gifted a sub to ${recipient}`
+        tags['msg-param-recipient-display-name'] || tags['msg-param-recipient-user-name'] || t('irc_someoneLower')
+      return t('irc_giftedSub', { login, recipient })
     }
     case 'submysterygift':
-      return `${login} is gifting community subs`
+      return t('irc_giftingCommunity', { login })
     case 'giftpaidupgrade':
-      return `${login} is continuing the gift they received`
+      return t('irc_continuingGift', { login })
     case 'announcement':
-      return `${login} sent an announcement`
+      return t('irc_announcement', { login })
     case 'bitsbadgetier':
-      return `${login} earned a new bits badge tier`
+      return t('irc_bitsBadge', { login })
     case 'viewermilestone':
-      return `${login} reached a viewer milestone`
+      return t('irc_milestone', { login })
     case 'unraid':
-      return 'The raid was cancelled'
+      return t('irc_unraid')
     default:
       // Unknown msg-id — do not drop it. Twitch ships new ids over time.
-      return msgId ? `Channel event: ${msgId}` : 'Channel event'
+      return msgId ? t('irc_channelEvent', { msgId }) : t('irc_channelEventGeneric')
   }
 }
 

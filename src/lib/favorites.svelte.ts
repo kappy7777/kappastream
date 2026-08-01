@@ -2,6 +2,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { settings } from './settings.svelte.ts'
 import { notifications } from './notifications.svelte.ts'
 import { fetchChannelStatuses, GQL_REFRESH_INTERVAL_MS, type ChannelStatus } from './gql'
+import { t } from './i18n/index.svelte'
 
 export interface FavoriteEntry {
   name: string
@@ -617,8 +618,8 @@ export class FavoritesStore {
   private async fireLiveNotification(channel: string, status: LiveStatus): Promise<void> {
     if (status.state !== 'live') return
     if (!this.hasNotifEnabled(channel)) return
-    const title = channel + ' is live'
-    const body = status.title || status.game || 'Click to watch'
+    const title = t('notif_live', { channel })
+    const body = status.title || status.game || t('notif_clickToWatch')
     notifications.record('live', title, body, channel)
     if (typeof window !== 'undefined' && isTauri()) {
       try {

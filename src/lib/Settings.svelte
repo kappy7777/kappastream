@@ -4,6 +4,7 @@
   import { settings, THEMES, UI_SCALE_PRESETS, UI_SCALE_MIN, UI_SCALE_MAX, UI_SCALE_DEFAULT, MAX_MUTED_USERS, type ThemeId } from './settings.svelte.ts'
   import { favoritesStore, type FavoriteStatus } from './favorites.svelte'
   import { sleepTimer, formatSleepRemaining, SLEEP_PRESETS } from './sleep-timer.svelte'
+  import { t, getLocale, setLocale, LOCALES } from './i18n/index.svelte'
 
   let { onarmsleep }: { onarmsleep?: (minutes: number) => void } = $props()
 
@@ -11,20 +12,26 @@
   let themeOpen = $state(false)
   let chatOpen = $state(false)
   let scaleOpen = $state(false)
+  let langOpen = $state(false)
   let sleepOpen = $state(false)
   let panelEl: HTMLElement | undefined = $state()
   let buttonEl: HTMLButtonElement | undefined = $state()
   let fileInputEl: HTMLInputElement | undefined = $state()
   let importStatus = $state('')
+  let importError = $state(false)
   let favoritesCount = $state(0)
 
   let currentThemeLabel = $derived(
-    THEMES.find((t) => t.id === settings.theme)?.label ?? 'Theme',
+    THEMES.find((tmeta) => tmeta.id === settings.theme)?.label ?? t('theme'),
+  )
+
+  let currentLangLabel = $derived(
+    LOCALES.find((loc) => loc.id === getLocale())?.label ?? t('settings_language'),
   )
 
   // Compact state shown on the Chat disclosure row. Surfaces the headline
   // (chat visible or hidden) so the panel is scannable without expanding it.
-  let chatSummary = $derived(settings.chatVisible ? 'On' : 'Off')
+  let chatSummary = $derived(settings.chatVisible ? t('on') : t('off'))
 
   function toggle(): void {
     open = !open
@@ -40,6 +47,10 @@
 
   function toggleScale(): void {
     scaleOpen = !scaleOpen
+  }
+
+  function toggleLang(): void {
+    langOpen = !langOpen
   }
 
   function toggleSleep(): void {
@@ -67,7 +78,7 @@
   function armCustomSleep(): void {
     const n = parsedCustomMinutes()
     if (n === null) {
-      sleepCustomError = `Enter ${SLEEP_CUSTOM_MIN}–${SLEEP_CUSTOM_MAX} min`
+      sleepCustomError = t('settings_sleepCustomError', { min: SLEEP_CUSTOM_MIN, max: SLEEP_CUSTOM_MAX })
       return
     }
     sleepCustomError = ''
@@ -82,7 +93,7 @@
   }
 
   let sleepSummary = $derived(
-    sleepTimer.armed ? formatSleepRemaining(sleepTimer.remainingMs) : 'Off',
+    sleepTimer.armed ? formatSleepRemaining(sleepTimer.remainingMs) : t('off'),
   )
 
   function pickTheme(id: ThemeId): void {
@@ -116,7 +127,7 @@
     const added = settings.addMutedUser(raw)
     if (!added) {
       setMuteStatus(
-        settings.mutedUsers.length >= MAX_MUTED_USERS ? 'Mute list is full' : 'Already muted or invalid',
+        settings.mutedUsers.length >= MAX_MUTED_USERS ? t('settings_muteFull') : t('settings_muteInvalid'),
       )
     }
   }
@@ -155,6 +166,7 @@ async function exportFavorites(): Promise<void> {
 
   function triggerImport(): void {
     importStatus = ''
+    importError = false
     fileInputEl?.click()
   }
 
@@ -164,29 +176,33 @@ async function exportFavorites(): Promise<void> {
     input.value = ''
     if (!file) return
     if (file.size > 2_000_000) {
-      importStatus = 'Import failed: file too large (> 2 MB)'
+      importStatus = t('settings_importFailedLarge')
+      importError = true
       return
     }
     let text: string
     try {
       text = await file.text()
     } catch (err) {
-      importStatus = 'Import failed: ' + (err as Error).message
+      importStatus = t('settings_importFailed', { msg: (err as Error).message })
+      importError = true
       return
     }
     const result = favoritesStore.importJson(text)
     if (result.invalid < 0) {
-      importStatus = 'Import failed: not a valid favorites JSON'
+      importStatus = t('settings_importFailedJson')
+      importError = true
       return
     }
+    importError = false
     if (result.added === 0 && result.skipped === 0 && result.invalid === 0) {
-      importStatus = 'Import: nothing to add'
+      importStatus = t('settings_importNothing')
     } else {
       const parts: string[] = []
-      if (result.added > 0) parts.push('added ' + result.added)
-      if (result.skipped > 0) parts.push('skipped ' + result.skipped + ' duplicate or over limit')
-      if (result.invalid > 0) parts.push('ignored ' + result.invalid + ' invalid')
-      importStatus = 'Import: ' + parts.join(', ')
+      if (result.added > 0) parts.push(t('settings_importAdded', { n: result.added }))
+      if (result.skipped > 0) parts.push(t('settings_importSkipped', { n: result.skipped }))
+      if (result.invalid > 0) parts.push(t('settings_importInvalid', { n: result.invalid }))
+      importStatus = t('settings_importSummary', { summary: parts.join(', ') })
     }
     setTimeout(() => { importStatus = '' }, 6000)
   }
@@ -194,10 +210,10 @@ async function exportFavorites(): Promise<void> {
   $effect(() => {
     if (!open) return
     function onDown(e: MouseEvent): void {
-      const t = e.target as Node | null
-      if (!t) return
-      if (panelEl?.contains(t)) return
-      if (buttonEl?.contains(t)) return
+      const target = e.target as Node | null
+      if (!target) return
+      if (panelEl?.contains(target)) return
+      if (buttonEl?.contains(target)) return
       open = false
     }
     function onKey(e: KeyboardEvent): void {
@@ -205,6 +221,7 @@ async function exportFavorites(): Promise<void> {
         if (themeOpen) themeOpen = false
         else if (chatOpen) chatOpen = false
         else if (scaleOpen) scaleOpen = false
+        else if (langOpen) langOpen = false
         else if (sleepOpen) sleepOpen = false
         else open = false
       }
@@ -224,7 +241,7 @@ async function exportFavorites(): Promise<void> {
     class="settings-btn"
     bind:this={buttonEl}
     onclick={toggle}
-    aria-label="Settings"
+    aria-label={t('settings')}
     aria-haspopup="dialog"
     aria-expanded={open}
   >
@@ -234,7 +251,7 @@ async function exportFavorites(): Promise<void> {
   </button>
 
   {#if open}
-    <div class="panel" bind:this={panelEl} role="dialog" aria-label="Settings">
+    <div class="panel" bind:this={panelEl} role="dialog" aria-label={t('settings')}>
       <section class="panel-section">
         <button
           type="button"
@@ -243,7 +260,7 @@ async function exportFavorites(): Promise<void> {
           aria-expanded={themeOpen}
           onclick={toggleTheme}
         >
-          <span class="disclosure-label">Theme</span>
+          <span class="disclosure-label">{t('theme')}</span>
           <span class="disclosure-value">{currentThemeLabel}</span>
           <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
             <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
@@ -252,17 +269,17 @@ async function exportFavorites(): Promise<void> {
         {#if themeOpen}
           <div class="disclosure-body" transition:slide={{ duration: 150 }}>
             <div class="swatches">
-              {#each THEMES as t}
+              {#each THEMES as tm (tm.id)}
                 <button
                   type="button"
                   class="swatch"
-                  class:swatch--active={settings.theme === t.id}
-                  onclick={() => pickTheme(t.id)}
-                  aria-label={t.label}
-                  aria-pressed={settings.theme === t.id}
+                  class:swatch--active={settings.theme === tm.id}
+                  onclick={() => pickTheme(tm.id)}
+                  aria-label={tm.label}
+                  aria-pressed={settings.theme === tm.id}
                 >
-                  <span class="swatch-color" style="background: {t.swatch}"></span>
-                  <span class="swatch-label">{t.label}</span>
+                  <span class="swatch-color" style="background: {tm.swatch}"></span>
+                  <span class="swatch-label">{tm.label}</span>
                 </button>
               {/each}
             </div>
@@ -278,7 +295,7 @@ async function exportFavorites(): Promise<void> {
           aria-expanded={chatOpen}
           onclick={toggleChat}
         >
-          <span class="disclosure-label">Chat</span>
+          <span class="disclosure-label">{t('settings_chat')}</span>
           <span class="disclosure-value">{chatSummary}</span>
           <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
             <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
@@ -287,7 +304,7 @@ async function exportFavorites(): Promise<void> {
         {#if chatOpen}
           <div class="disclosure-body" transition:slide={{ duration: 150 }}>
             <div class="toggle-row">
-              <span class="toggle-label" id="show-chat-label">Show chat</span>
+              <span class="toggle-label" id="show-chat-label">{t('settings_showChat')}</span>
               <span
                 class="toggle"
                 class:toggle--on={settings.chatVisible}
@@ -302,7 +319,7 @@ async function exportFavorites(): Promise<void> {
               </span>
             </div>
             <div class="toggle-row">
-              <span class="toggle-label" id="chat-timestamps-label">Chat timestamps</span>
+              <span class="toggle-label" id="chat-timestamps-label">{t('settings_chatTimestamps')}</span>
               <span
                 class="toggle"
                 class:toggle--on={settings.chatTimestamps}
@@ -316,11 +333,11 @@ async function exportFavorites(): Promise<void> {
                 <span class="toggle-knob"></span>
               </span>
             </div>
-            <div class="chat-subgroup-label">Features</div>
+            <div class="chat-subgroup-label">{t('settings_features')}</div>
             <div class="toggle-row">
               <span class="toggle-label" id="chat-subnotices-label">
-                Sub and raid notices
-                <span class="toggle-hint">subs, resubs, gifts, raids, announcements</span>
+                {t('settings_subNotices')}
+                <span class="toggle-hint">{t('settings_subNoticesHint')}</span>
               </span>
               <span
                 class="toggle"
@@ -337,8 +354,8 @@ async function exportFavorites(): Promise<void> {
             </div>
             <div class="toggle-row">
               <span class="toggle-label" id="chat-roomstate-label">
-                Chat mode indicator
-                <span class="toggle-hint">sub/followers-only, slow, emote-only, r9k</span>
+                {t('settings_chatMode')}
+                <span class="toggle-hint">{t('settings_chatModeHint')}</span>
               </span>
               <span
                 class="toggle"
@@ -355,8 +372,8 @@ async function exportFavorites(): Promise<void> {
             </div>
             <div class="toggle-row">
               <span class="toggle-label" id="chat-moderation-label">
-                Show moderation actions
-                <span class="toggle-hint">deleted messages and timeouts/bans shown struck through</span>
+                {t('settings_moderation')}
+                <span class="toggle-hint">{t('settings_moderationHint')}</span>
               </span>
               <span
                 class="toggle"
@@ -373,8 +390,8 @@ async function exportFavorites(): Promise<void> {
             </div>
             <div class="toggle-row">
               <span class="toggle-label" id="chat-bits-label">
-                Show bits
-                <span class="toggle-hint">cheer amounts on messages</span>
+                {t('settings_bits')}
+                <span class="toggle-hint">{t('settings_bitsHint')}</span>
               </span>
               <span
                 class="toggle"
@@ -389,13 +406,13 @@ async function exportFavorites(): Promise<void> {
                 <span class="toggle-knob"></span>
               </span>
             </div>
-            <div class="chat-subgroup-label">Muted users <span class="mute-count">{settings.mutedUsers.length || ''}</span></div>
+            <div class="chat-subgroup-label">{t('settings_mutedUsers')} <span class="mute-count">{settings.mutedUsers.length || ''}</span></div>
             <div class="mute-input-row">
               <span class="mention-prefix" aria-hidden="true">@</span>
               <input
                 type="text"
                 class="mention-input mute-input"
-                placeholder="hide by login"
+                placeholder={t('settings_mutePlaceholder')}
                 value={muteInput}
                 oninput={(e) => { muteInput = (e.currentTarget as HTMLInputElement).value }}
                 onkeydown={onMuteInputKeydown}
@@ -403,9 +420,9 @@ async function exportFavorites(): Promise<void> {
                 autocapitalize="off"
                 spellcheck="false"
                 maxlength="25"
-                aria-label="Add a user to the mute list"
+                aria-label={t('settings_addMuteAria')}
               />
-              <button type="button" class="mute-add" onclick={addMuted} disabled={!muteInput.trim()}>Add</button>
+              <button type="button" class="mute-add" onclick={addMuted} disabled={!muteInput.trim()}>{t('add')}</button>
             </div>
             {#if muteStatus}
               <p class="mute-status" role="status">{muteStatus}</p>
@@ -419,21 +436,21 @@ async function exportFavorites(): Promise<void> {
                       type="button"
                       class="mute-remove"
                       onclick={() => removeMuted(name)}
-                      aria-label={`Unmute @${name}`}
+                      aria-label={t('settings_unmute', { name })}
                     >×</button>
                   </li>
                 {/each}
               </ul>
             {/if}
             <div class="mention-row">
-              <label class="panel-label" for="mention-username-input">Your Twitch username</label>
+              <label class="panel-label" for="mention-username-input">{t('settings_yourUsername')}</label>
               <div class="mention-input-wrap">
                 <span class="mention-prefix" aria-hidden="true">@</span>
                 <input
                   id="mention-username-input"
                   type="text"
                   class="mention-input"
-                  placeholder="notify on mention"
+                  placeholder={t('settings_mentionPlaceholder')}
                   value={settings.mentionUsername}
                   oninput={(e) => settings.setMentionUsername((e.currentTarget as HTMLInputElement).value)}
                   autocomplete="off"
@@ -445,9 +462,9 @@ async function exportFavorites(): Promise<void> {
               </div>
               <p class="mention-help" id="mention-help">
                 {#if !settings.mentionUsername}
-                  Get a desktop notification when chat messages mention @you.
+                  {t('settings_mentionHelpEmpty')}
                 {:else}
-                  You'll be notified when someone writes <span class="mention-pill">@{settings.mentionUsername}</span> in chat.
+                  {t('settings_mentionHelpSet', { name: settings.mentionUsername })}
                 {/if}
               </p>
             </div>
@@ -463,7 +480,7 @@ async function exportFavorites(): Promise<void> {
           aria-expanded={scaleOpen}
           onclick={toggleScale}
         >
-          <span class="disclosure-label">UI scale</span>
+          <span class="disclosure-label">{t('settings_uiScale')}</span>
           <span class="disclosure-value">{Math.round(settings.uiScale * 100)}%</span>
           <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
             <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
@@ -471,7 +488,7 @@ async function exportFavorites(): Promise<void> {
         </button>
         {#if scaleOpen}
           <div class="disclosure-body" transition:slide={{ duration: 150 }}>
-            <div class="scale-grid" role="radiogroup" aria-label="UI scale">
+            <div class="scale-grid" role="radiogroup" aria-label={t('settings_uiScale')}>
               {#each UI_SCALE_PRESETS as preset (preset)}
                 <button
                   type="button"
@@ -484,14 +501,46 @@ async function exportFavorites(): Promise<void> {
               {/each}
             </div>
             <div class="scale-foot">
-              <span class="scale-foot-label">{UI_SCALE_MIN}× min</span>
+              <span class="scale-foot-label">{t('settings_uiScaleMin', { n: UI_SCALE_MIN })}</span>
               <button
                 type="button"
                 class="scale-reset"
                 onclick={resetUiScale}
                 disabled={settings.uiScale === UI_SCALE_DEFAULT}
-              >Reset to {UI_SCALE_DEFAULT}×</button>
-              <span class="scale-foot-label">{UI_SCALE_MAX}× max</span>
+              >{t('settings_resetTo', { n: UI_SCALE_DEFAULT })}</button>
+              <span class="scale-foot-label">{t('settings_uiScaleMax', { n: UI_SCALE_MAX })}</span>
+            </div>
+          </div>
+        {/if}
+      </section>
+
+      <section class="panel-section">
+        <button
+          type="button"
+          class="disclosure"
+          class:disclosure--open={langOpen}
+          aria-expanded={langOpen}
+          onclick={toggleLang}
+        >
+          <span class="disclosure-label">{t('settings_language')}</span>
+          <span class="disclosure-value">{currentLangLabel}</span>
+          <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        {#if langOpen}
+          <div class="disclosure-body" transition:slide={{ duration: 150 }}>
+            <div class="lang-grid" role="radiogroup" aria-label={t('settings_language')}>
+              {#each LOCALES as loc (loc.id)}
+                <button
+                  type="button"
+                  class="lang-btn"
+                  class:lang-btn--active={getLocale() === loc.id}
+                  role="radio"
+                  aria-checked={getLocale() === loc.id}
+                  onclick={() => setLocale(loc.id)}
+                >{loc.label}</button>
+              {/each}
             </div>
           </div>
         {/if}
@@ -500,8 +549,8 @@ async function exportFavorites(): Promise<void> {
       <section class="panel-section">
         <div class="toggle-row">
           <span class="toggle-label" id="low-latency-label">
-            Low latency
-            <span class="toggle-hint">chase the live edge (closer to chat); may stutter on weak connections</span>
+            {t('settings_lowLatency')}
+            <span class="toggle-hint">{t('settings_lowLatencyHint')}</span>
           </span>
           <span
             class="toggle"
@@ -518,8 +567,8 @@ async function exportFavorites(): Promise<void> {
         </div>
         <div class="toggle-row">
           <span class="toggle-label" id="close-to-tray-label">
-            Close to tray
-            <span class="toggle-hint">keep running + notifications when the window is closed</span>
+            {t('settings_closeToTray')}
+            <span class="toggle-hint">{t('settings_closeToTrayHint')}</span>
           </span>
           <span
             class="toggle"
@@ -536,8 +585,8 @@ async function exportFavorites(): Promise<void> {
         </div>
         <div class="toggle-row">
           <span class="toggle-label" id="check-updates-label">
-            Check for updates
-            <span class="toggle-hint">check for new versions on startup</span>
+            {t('settings_checkUpdates')}
+            <span class="toggle-hint">{t('settings_checkUpdatesHint')}</span>
           </span>
           <span
             class="toggle"
@@ -559,7 +608,7 @@ async function exportFavorites(): Promise<void> {
           aria-expanded={sleepOpen}
           onclick={toggleSleep}
         >
-          <span class="disclosure-label">Sleep timer</span>
+          <span class="disclosure-label">{t('settings_sleepTimer')}</span>
           <span class="disclosure-value">{sleepSummary}</span>
           <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
             <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
@@ -567,14 +616,14 @@ async function exportFavorites(): Promise<void> {
         </button>
         {#if sleepOpen}
           <div class="disclosure-body" transition:slide={{ duration: 150 }}>
-            <div class="seg" role="group" aria-label="Sleep timer duration">
+            <div class="seg" role="group" aria-label={t('settings_sleepDurationAria')}>
               <button
                 type="button"
                 class="seg-btn"
                 class:seg-btn--active={!sleepTimer.armed}
                 aria-pressed={!sleepTimer.armed}
                 onclick={cancelSleep}
-              >Off</button>
+              >{t('off')}</button>
               {#each SLEEP_PRESETS as preset (preset)}
                 <button
                   type="button"
@@ -589,22 +638,22 @@ async function exportFavorites(): Promise<void> {
               <input
                 type="number"
                 class="sleep-custom-input"
-                placeholder="custom"
+                placeholder={t('settings_sleepCustomPlaceholder')}
                 min={SLEEP_CUSTOM_MIN}
                 max={SLEEP_CUSTOM_MAX}
                 step="1"
                 value={sleepCustom}
                 oninput={(e) => { sleepCustom = (e.currentTarget as HTMLInputElement).value; sleepCustomError = '' }}
                 onkeydown={onSleepCustomKeydown}
-                aria-label="Custom sleep timer duration in minutes"
+                aria-label={t('settings_sleepCustomAria')}
               />
-              <span class="sleep-custom-unit">min</span>
+              <span class="sleep-custom-unit">{t('settings_sleepCustomUnit')}</span>
               <button
                 type="button"
                 class="mute-add"
                 onclick={armCustomSleep}
                 disabled={parsedCustomMinutes() === null}
-              >Set</button>
+              >{t('set')}</button>
             </div>
             {#if sleepCustomError}
               <p class="sleep-custom-error" role="status">{sleepCustomError}</p>
@@ -612,20 +661,20 @@ async function exportFavorites(): Promise<void> {
             {#if sleepTimer.armed}
               <div class="sleep-armed-row">
                 <span class="sleep-armed-text">
-                  Stops playback in <span class="sleep-armed-time">{formatSleepRemaining(sleepTimer.remainingMs)}</span>
+                  {t('settings_sleepStopsIn', { time: formatSleepRemaining(sleepTimer.remainingMs) })}
                 </span>
-                <button type="button" class="sleep-cancel" onclick={cancelSleep}>Cancel</button>
+                <button type="button" class="sleep-cancel" onclick={cancelSleep}>{t('cancel')}</button>
               </div>
             {:else}
-              <p class="sleep-help">Stops the current stream after the chosen time. Cancels automatically if you switch channels.</p>
+              <p class="sleep-help">{t('settings_sleepHelp')}</p>
             {/if}
           </div>
         {/if}
       </section>
 
       <section class="panel-section">
-        <div class="panel-label">Favorite sort</div>
-        <div class="seg" role="radiogroup" aria-label="Favorite sort mode">
+        <div class="panel-label">{t('settings_favSort')}</div>
+        <div class="seg" role="radiogroup" aria-label={t('settings_favSortMode')}>
           <button
             type="button"
             class="seg-btn"
@@ -633,7 +682,7 @@ async function exportFavorites(): Promise<void> {
             role="radio"
             aria-checked={settings.sortMode === 'auto'}
             onclick={() => settings.setSortMode('auto')}
-          >Auto (live first, by viewers)</button>
+          >{t('settings_sortAuto')}</button>
           <button
             type="button"
             class="seg-btn"
@@ -641,35 +690,35 @@ async function exportFavorites(): Promise<void> {
             role="radio"
             aria-checked={settings.sortMode === 'manual'}
             onclick={() => settings.setSortMode('manual')}
-          >Manual (live first, by drag order)</button>
+          >{t('settings_sortManual')}</button>
         </div>
       </section>
 
       <section class="panel-section">
-        <div class="panel-label">Favorites backup</div>
-        <div class="seg" role="group" aria-label="Favorites import and export">
+        <div class="panel-label">{t('settings_favBackup')}</div>
+        <div class="seg" role="group" aria-label={t('settings_backupGroup')}>
           <button
             type="button"
             class="seg-btn"
             onclick={triggerImport}
-            aria-label="Import favorites from a JSON file"
+            aria-label={t('settings_importAria')}
           >
             <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
               <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z" fill="currentColor"/>
             </svg>
-            <span style="margin-left: 6px;">Import</span>
+            <span style="margin-left: 6px;">{t('import')}</span>
           </button>
           <button
             type="button"
             class="seg-btn"
             onclick={exportFavorites}
             disabled={favoritesCount === 0}
-            aria-label={`Export ${favoritesCount} favorite${favoritesCount === 1 ? '' : 's'} to a JSON file`}
+            aria-label={t(favoritesCount === 1 ? 'settings_exportAriaOne' : 'settings_exportAriaMany', { n: favoritesCount })}
           >
             <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
               <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" fill="currentColor"/>
             </svg>
-            <span style="margin-left: 6px;">Export{favoritesCount > 0 ? ` (${favoritesCount})` : ''}</span>
+            <span style="margin-left: 6px;">{t('exportLabel')}{favoritesCount > 0 ? ` (${favoritesCount})` : ''}</span>
           </button>
         </div>
         <input
@@ -680,7 +729,7 @@ async function exportFavorites(): Promise<void> {
           style="display: none"
         />
         {#if importStatus}
-          <p class="import-status" class:import-status--error={importStatus.startsWith('Import failed')}>
+          <p class="import-status" class:import-status--error={importError}>
             {importStatus}
           </p>
         {/if}
@@ -688,7 +737,7 @@ async function exportFavorites(): Promise<void> {
 
       <section class="panel-section">
         <p class="shortcut-hint">
-          Player keyboard shortcuts: <kbd>Space</kbd> play, <kbd>M</kbd> mute, <kbd>F</kbd> fullscreen, <kbd>T</kbd> theater, arrows seek/volume. Press <kbd>?</kbd> for the full list.
+          {t('shortcuts_hintPrefix')} <kbd>Space</kbd> {t('shortcuts_hintPlay')}, <kbd>M</kbd> {t('shortcuts_hintMute')}, <kbd>F</kbd> {t('shortcuts_hintFullscreen')}, <kbd>T</kbd> {t('shortcuts_hintTheater')}, {t('shortcuts_hintArrows')} {t('shortcuts_hintPress')} <kbd>?</kbd> {t('shortcuts_hintFullList')}
         </p>
       </section>
 
@@ -828,6 +877,7 @@ async function exportFavorites(): Promise<void> {
     align-items: center;
     gap: 8px;
     width: 100%;
+    min-width: 0;
     padding: 6px 8px;
     margin: 0;
     border: 1px solid transparent;
@@ -999,17 +1049,6 @@ async function exportFavorites(): Promise<void> {
     color: var(--text-dim);
   }
 
-  .mention-pill {
-    display: inline-block;
-    padding: 0 5px;
-    background: var(--bg-hover);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    color: var(--accent);
-    font-weight: 600;
-    font-family: 'Menlo', 'Consolas', monospace;
-  }
-
   .mute-count {
     font-size: 10px;
     color: var(--text-dim);
@@ -1133,12 +1172,6 @@ async function exportFavorites(): Promise<void> {
     color: var(--text-primary);
   }
 
-  .sleep-armed-time {
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    color: var(--accent);
-  }
-
   .sleep-cancel {
     flex: 0 0 auto;
     padding: 4px 10px;
@@ -1236,6 +1269,7 @@ async function exportFavorites(): Promise<void> {
 
   .seg-btn {
     flex: 1 1 0;
+    min-width: 0;
     padding: 6px 8px;
     border: none;
     border-right: 1px solid var(--border);
@@ -1355,5 +1389,36 @@ async function exportFavorites(): Promise<void> {
     color: var(--text-dim);
     cursor: default;
     opacity: 0.6;
+  }
+
+  .lang-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .lang-btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 8px;
+    cursor: pointer;
+    transition: background 150ms, color 150ms, border-color 150ms;
+  }
+
+  .lang-btn:hover:not(.lang-btn--active) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .lang-btn--active {
+    background: var(--accent);
+    color: var(--text-primary);
+    border-color: var(--accent);
   }
 </style>

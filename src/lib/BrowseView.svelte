@@ -8,6 +8,8 @@
     type BrowseCategory,
   } from './gql'
   import { initialVisible, revealMore, hasMoreToShow } from './browse-reveal'
+  import { t } from './i18n/index.svelte'
+  import { formatCompact } from './format'
 
   /*
    * Channel discovery browse overlay — top live channels and top categories,
@@ -68,15 +70,6 @@
 
   function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : err == null ? '' : String(err)
-  }
-
-  function formatViewers(n: number): string {
-    if (n < 1000) return n.toString()
-    if (n < 1_000_000) {
-      const k = n / 1000
-      return (k < 100 ? k.toFixed(1).replace(/\.0$/, '') : Math.round(k).toString()) + 'K'
-    }
-    return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
   }
 
   async function loadStreams(): Promise<void> {
@@ -180,17 +173,17 @@
 </script>
 
 <div class="browse-backdrop" onclick={close} role="presentation"></div>
-<div class="browse-modal" role="dialog" aria-modal="true" aria-label="Browse channels and categories">
+<div class="browse-modal" role="dialog" aria-modal="true" aria-label={t('browse_aria')}>
   <header class="browse-head">
     <div class="browse-head-left">
       {#if view === 'category' && activeCategory}
-        <button type="button" class="browse-back" onclick={closeCategory} aria-label="Back to browse">←</button>
+        <button type="button" class="browse-back" onclick={closeCategory} aria-label={t('browse_back')}>←</button>
         <span class="browse-title">{activeCategory.displayName}</span>
       {:else}
-        <span class="browse-title">Browse</span>
+        <span class="browse-title">{t('browse')}</span>
       {/if}
     </div>
-    <button type="button" class="browse-close" onclick={close} aria-label="Close">
+    <button type="button" class="browse-close" onclick={close} aria-label={t('close')}>
       <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
         <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
       </svg>
@@ -200,17 +193,17 @@
   <div class="browse-body">
     {#if view === 'overview'}
       <section class="browse-section">
-        <h2 class="browse-section-title">Top Live Channels</h2>
+        <h2 class="browse-section-title">{t('browse_topStreams')}</h2>
         {#if streamsLoading && streams.length === 0}
-          <div class="browse-status">Loading channels…</div>
+          <div class="browse-status">{t('browse_loadingStreams')}</div>
         {:else if streamsError && streams.length === 0}
           <div class="browse-status browse-status--error">
-            Failed to load channels.
+            {t('browse_failedStreams')}
             {#if streamsErrorMessage}<span class="browse-status-reason">{streamsErrorMessage}</span>{/if}
-            <button type="button" class="retry-btn" onclick={() => loadStreams()}>Retry</button>
+            <button type="button" class="retry-btn" onclick={() => loadStreams()}>{t('retry')}</button>
           </div>
         {:else if streams.length === 0}
-          <div class="browse-status">No live channels right now.</div>
+          <div class="browse-status">{t('browse_noStreams')}</div>
         {:else}
           <div class="browse-grid browse-grid--streams">
             {#each streams as s (s.id)}
@@ -224,9 +217,9 @@
                     loading="lazy"
                     onerror={onThumbError}
                   />
-                  <span class="stream-card-badge">LIVE</span>
+                  <span class="stream-card-badge">{t('liveBadge')}</span>
                   {#if s.viewersCount > 0}
-                    <span class="stream-card-viewers">{formatViewers(s.viewersCount)}</span>
+                    <span class="stream-card-viewers">{formatCompact(s.viewersCount)}</span>
                   {/if}
                 </div>
                 <div class="stream-card-meta">
@@ -239,7 +232,7 @@
                   />
                   <div class="stream-card-text">
                     <span class="stream-card-name">{s.displayName}</span>
-                    <span class="stream-card-title">{s.title || 'Untitled broadcast'}</span>
+                    <span class="stream-card-title">{s.title || t('browse_untitled')}</span>
                     {#if s.game}<span class="stream-card-game">{s.game}</span>{/if}
                   </div>
                 </div>
@@ -250,17 +243,17 @@
       </section>
 
       <section class="browse-section">
-        <h2 class="browse-section-title">Top Categories</h2>
+        <h2 class="browse-section-title">{t('browse_topCategories')}</h2>
         {#if categoriesLoading && categories.length === 0}
-          <div class="browse-status">Loading categories…</div>
+          <div class="browse-status">{t('browse_loadingCategories')}</div>
         {:else if categoriesError && categories.length === 0}
           <div class="browse-status browse-status--error">
-            Failed to load categories.
+            {t('browse_failedCategories')}
             {#if categoriesErrorMessage}<span class="browse-status-reason">{categoriesErrorMessage}</span>{/if}
-            <button type="button" class="retry-btn" onclick={() => loadCategories()}>Retry</button>
+            <button type="button" class="retry-btn" onclick={() => loadCategories()}>{t('retry')}</button>
           </div>
         {:else if categories.length === 0}
-          <div class="browse-status">No categories right now.</div>
+          <div class="browse-status">{t('browse_noCategories')}</div>
         {:else}
           <div class="browse-grid browse-grid--cats">
             {#each categories.slice(0, categoriesVisible) as c (c.id)}
@@ -279,22 +272,22 @@
             {/each}
           </div>
           {#if hasMoreToShow(categoriesVisible, categories.length)}
-            <button type="button" class="load-more" onclick={showMoreCategories}>Load more</button>
+            <button type="button" class="load-more" onclick={showMoreCategories}>{t('loadMore')}</button>
           {/if}
         {/if}
       </section>
     {:else}
       <section class="browse-section">
         {#if gameLoading && gameStreams.length === 0}
-          <div class="browse-status">Loading streams…</div>
+          <div class="browse-status">{t('browse_loadingGameStreams')}</div>
         {:else if gameError && gameStreams.length === 0}
           <div class="browse-status browse-status--error">
-            Failed to load streams.
+            {t('browse_failedGameStreams')}
             {#if gameErrorMessage}<span class="browse-status-reason">{gameErrorMessage}</span>{/if}
-            <button type="button" class="retry-btn" onclick={() => loadGameStreams()}>Retry</button>
+            <button type="button" class="retry-btn" onclick={() => loadGameStreams()}>{t('retry')}</button>
           </div>
         {:else if gameStreams.length === 0}
-          <div class="browse-status">No live channels in this category right now.</div>
+          <div class="browse-status">{t('browse_noGameStreams')}</div>
         {:else}
           <div class="browse-grid browse-grid--streams">
             {#each gameStreams.slice(0, gameStreamsVisible) as s (s.id)}
@@ -308,9 +301,9 @@
                     loading="lazy"
                     onerror={onThumbError}
                   />
-                  <span class="stream-card-badge">LIVE</span>
+                  <span class="stream-card-badge">{t('liveBadge')}</span>
                   {#if s.viewersCount > 0}
-                    <span class="stream-card-viewers">{formatViewers(s.viewersCount)}</span>
+                    <span class="stream-card-viewers">{formatCompact(s.viewersCount)}</span>
                   {/if}
                 </div>
                 <div class="stream-card-meta">
@@ -323,7 +316,7 @@
                   />
                   <div class="stream-card-text">
                     <span class="stream-card-name">{s.displayName}</span>
-                    <span class="stream-card-title">{s.title || 'Untitled broadcast'}</span>
+                    <span class="stream-card-title">{s.title || t('browse_untitled')}</span>
                     {#if s.game}<span class="stream-card-game">{s.game}</span>{/if}
                   </div>
                 </div>
@@ -331,7 +324,7 @@
             {/each}
           </div>
           {#if hasMoreToShow(gameStreamsVisible, gameStreams.length)}
-            <button type="button" class="load-more" onclick={showMoreGameStreams}>Load more</button>
+            <button type="button" class="load-more" onclick={showMoreGameStreams}>{t('loadMore')}</button>
           {/if}
         {/if}
       </section>

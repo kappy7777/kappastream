@@ -1,6 +1,8 @@
 <script lang="ts">
   import { fetchChannelVideos, fetchChannelClips, type ChannelVideo, type ChannelClip } from './gql'
   import { revealMore, hasMoreToShow } from './browse-reveal'
+  import { t } from './i18n/index.svelte'
+  import { formatCompact, formatAge } from './format'
 
   /*
    * Per-channel content sections (Past Broadcasts / Highlights / Recent Clips
@@ -182,12 +184,7 @@
   })
 
   function formatViewers(n: number): string {
-    if (n < 1000) return n.toString()
-    if (n < 1_000_000) {
-      const k = n / 1000
-      return (k < 100 ? k.toFixed(1).replace(/\.0$/, '') : Math.round(k).toString()) + 'K'
-    }
-    return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
+    return formatCompact(n)
   }
 
   function formatDuration(sec: number): string {
@@ -199,21 +196,6 @@
     return `${m}:${String(s).padStart(2, '0')}`
   }
 
-  function formatAge(iso: string): string {
-    if (!iso) return ''
-    const then = Date.parse(iso)
-    if (!Number.isFinite(then)) return ''
-    const diff = Date.now() - then
-    const hr = 3_600_000
-    const day = 86_400_000
-    if (diff < hr) return Math.max(1, Math.floor(diff / 60_000)) + 'm ago'
-    if (diff < day) return Math.floor(diff / hr) + 'h ago'
-    if (diff < 30 * day) return Math.floor(diff / day) + 'd ago'
-    const mo = Math.floor(diff / (30 * day))
-    if (mo < 12) return mo + 'mo ago'
-    return Math.floor(mo / 12) + 'y ago'
-  }
-
   function onThumbError(e: Event): void {
     const img = e.currentTarget as HTMLImageElement
     img.style.visibility = 'hidden'
@@ -223,17 +205,17 @@
 <div class="channel-content" bind:this={sentinel}>
   <!-- Past Broadcasts -->
   <section class="cc-section">
-    <h2 class="cc-title">Past Broadcasts</h2>
+    <h2 class="cc-title">{t('cc_pastBroadcasts')}</h2>
     {#if aStatus === 'loading'}
-      <div class="cc-status">Loading past broadcasts…</div>
+      <div class="cc-status">{t('cc_loadingPast')}</div>
     {:else if aStatus === 'error'}
       <div class="cc-status cc-status--error">
-        Failed to load past broadcasts.
+        {t('cc_failedPast')}
         {#if aErrorMessage}<span class="cc-status-reason">{aErrorMessage}</span>{/if}
-        <button type="button" class="cc-retry" onclick={retryAll}>Retry</button>
+        <button type="button" class="cc-retry" onclick={retryAll}>{t('retry')}</button>
       </div>
     {:else if aStatus === 'ready' && archives.length === 0}
-      <div class="cc-status">No past broadcasts.</div>
+      <div class="cc-status">{t('cc_noPast')}</div>
     {:else if aStatus === 'ready'}
       <div class="cc-grid">
         {#each archives.slice(0, archivesVisible) as v (v.id)}
@@ -242,31 +224,31 @@
               <img src={v.thumbnailUrl || ''} alt="" width="320" height="180" loading="lazy" onerror={onThumbError} />
               <span class="cc-dur">{formatDuration(v.lengthSeconds)}</span>
             </div>
-            <span class="cc-name">{v.title || 'Untitled broadcast'}</span>
-            <span class="cc-meta">{formatViewers(v.viewCount)} views{#if v.game}<span class="cc-dot">·</span>{v.game}{/if}</span>
+            <span class="cc-name">{v.title || t('cc_untitledVod')}</span>
+            <span class="cc-meta">{formatViewers(v.viewCount)} {t('cc_views')}{#if v.game}<span class="cc-dot">·</span>{v.game}{/if}</span>
             <span class="cc-age">{formatAge(v.createdAt)}</span>
           </button>
         {/each}
       </div>
       {#if hasMoreToShow(archivesVisible, archives.length)}
-        <button type="button" class="cc-more" onclick={() => (archivesVisible = revealMore(archivesVisible, archives.length))}>Load more</button>
+        <button type="button" class="cc-more" onclick={() => (archivesVisible = revealMore(archivesVisible, archives.length))}>{t('loadMore')}</button>
       {/if}
     {/if}
   </section>
 
   <!-- Highlights -->
   <section class="cc-section">
-    <h2 class="cc-title">Highlights</h2>
+    <h2 class="cc-title">{t('cc_highlights')}</h2>
     {#if hStatus === 'loading'}
-      <div class="cc-status">Loading highlights…</div>
+      <div class="cc-status">{t('cc_loadingHighlights')}</div>
     {:else if hStatus === 'error'}
       <div class="cc-status cc-status--error">
-        Failed to load highlights.
+        {t('cc_failedHighlights')}
         {#if hErrorMessage}<span class="cc-status-reason">{hErrorMessage}</span>{/if}
-        <button type="button" class="cc-retry" onclick={retryAll}>Retry</button>
+        <button type="button" class="cc-retry" onclick={retryAll}>{t('retry')}</button>
       </div>
     {:else if hStatus === 'ready' && highlights.length === 0}
-      <div class="cc-status">No highlights.</div>
+      <div class="cc-status">{t('cc_noHighlights')}</div>
     {:else if hStatus === 'ready'}
       <div class="cc-grid">
         {#each highlights.slice(0, highlightsVisible) as v (v.id)}
@@ -275,31 +257,31 @@
               <img src={v.thumbnailUrl || ''} alt="" width="320" height="180" loading="lazy" onerror={onThumbError} />
               <span class="cc-dur">{formatDuration(v.lengthSeconds)}</span>
             </div>
-            <span class="cc-name">{v.title || 'Untitled highlight'}</span>
-            <span class="cc-meta">{formatViewers(v.viewCount)} views{#if v.game}<span class="cc-dot">·</span>{v.game}{/if}</span>
+            <span class="cc-name">{v.title || t('cc_untitledHighlight')}</span>
+            <span class="cc-meta">{formatViewers(v.viewCount)} {t('cc_views')}{#if v.game}<span class="cc-dot">·</span>{v.game}{/if}</span>
             <span class="cc-age">{formatAge(v.createdAt)}</span>
           </button>
         {/each}
       </div>
       {#if hasMoreToShow(highlightsVisible, highlights.length)}
-        <button type="button" class="cc-more" onclick={() => (highlightsVisible = revealMore(highlightsVisible, highlights.length))}>Load more</button>
+        <button type="button" class="cc-more" onclick={() => (highlightsVisible = revealMore(highlightsVisible, highlights.length))}>{t('loadMore')}</button>
       {/if}
     {/if}
   </section>
 
   <!-- Recent Clips -->
   <section class="cc-section">
-    <h2 class="cc-title">Recent Clips</h2>
+    <h2 class="cc-title">{t('cc_recentClips')}</h2>
     {#if rcStatus === 'loading'}
-      <div class="cc-status">Loading recent clips…</div>
+      <div class="cc-status">{t('cc_loadingRecentClips')}</div>
     {:else if rcStatus === 'error'}
       <div class="cc-status cc-status--error">
-        Failed to load recent clips.
+        {t('cc_failedRecentClips')}
         {#if rcErrorMessage}<span class="cc-status-reason">{rcErrorMessage}</span>{/if}
-        <button type="button" class="cc-retry" onclick={retryAll}>Retry</button>
+        <button type="button" class="cc-retry" onclick={retryAll}>{t('retry')}</button>
       </div>
     {:else if rcStatus === 'ready' && recentClips.length === 0}
-      <div class="cc-status">No recent clips.</div>
+      <div class="cc-status">{t('cc_noRecentClips')}</div>
     {:else if rcStatus === 'ready'}
       <div class="cc-grid">
         {#each recentClips.slice(0, recentClipsVisible) as c (c.id)}
@@ -308,31 +290,31 @@
               <img src={c.thumbnailUrl || ''} alt="" width="320" height="180" loading="lazy" onerror={onThumbError} />
               <span class="cc-dur">{formatDuration(c.durationSeconds)}</span>
             </div>
-            <span class="cc-name">{c.title || 'Untitled clip'}</span>
-            <span class="cc-meta">{formatViewers(c.viewCount)} views{#if c.game}<span class="cc-dot">·</span>{c.game}{/if}</span>
+            <span class="cc-name">{c.title || t('cc_untitledClip')}</span>
+            <span class="cc-meta">{formatViewers(c.viewCount)} {t('cc_views')}{#if c.game}<span class="cc-dot">·</span>{c.game}{/if}</span>
             <span class="cc-age">{#if c.curator}{c.curator}<span class="cc-dot">·</span>{/if}{formatAge(c.createdAt)}</span>
           </button>
         {/each}
       </div>
       {#if hasMoreToShow(recentClipsVisible, recentClips.length)}
-        <button type="button" class="cc-more" onclick={() => (recentClipsVisible = revealMore(recentClipsVisible, recentClips.length))}>Load more</button>
+        <button type="button" class="cc-more" onclick={() => (recentClipsVisible = revealMore(recentClipsVisible, recentClips.length))}>{t('loadMore')}</button>
       {/if}
     {/if}
   </section>
 
   <!-- Popular Clips -->
   <section class="cc-section">
-    <h2 class="cc-title">Popular Clips</h2>
+    <h2 class="cc-title">{t('cc_popularClips')}</h2>
     {#if pcStatus === 'loading'}
-      <div class="cc-status">Loading popular clips…</div>
+      <div class="cc-status">{t('cc_loadingPopularClips')}</div>
     {:else if pcStatus === 'error'}
       <div class="cc-status cc-status--error">
-        Failed to load popular clips.
+        {t('cc_failedPopularClips')}
         {#if pcErrorMessage}<span class="cc-status-reason">{pcErrorMessage}</span>{/if}
-        <button type="button" class="cc-retry" onclick={retryAll}>Retry</button>
+        <button type="button" class="cc-retry" onclick={retryAll}>{t('retry')}</button>
       </div>
     {:else if pcStatus === 'ready' && popularClips.length === 0}
-      <div class="cc-status">No popular clips.</div>
+      <div class="cc-status">{t('cc_noPopularClips')}</div>
     {:else if pcStatus === 'ready'}
       <div class="cc-grid">
         {#each popularClips.slice(0, popularClipsVisible) as c (c.id)}
@@ -341,14 +323,14 @@
               <img src={c.thumbnailUrl || ''} alt="" width="320" height="180" loading="lazy" onerror={onThumbError} />
               <span class="cc-dur">{formatDuration(c.durationSeconds)}</span>
             </div>
-            <span class="cc-name">{c.title || 'Untitled clip'}</span>
-            <span class="cc-meta">{formatViewers(c.viewCount)} views{#if c.game}<span class="cc-dot">·</span>{c.game}{/if}</span>
+            <span class="cc-name">{c.title || t('cc_untitledClip')}</span>
+            <span class="cc-meta">{formatViewers(c.viewCount)} {t('cc_views')}{#if c.game}<span class="cc-dot">·</span>{c.game}{/if}</span>
             <span class="cc-age">{#if c.curator}{c.curator}<span class="cc-dot">·</span>{/if}{formatAge(c.createdAt)}</span>
           </button>
         {/each}
       </div>
       {#if hasMoreToShow(popularClipsVisible, popularClips.length)}
-        <button type="button" class="cc-more" onclick={() => (popularClipsVisible = revealMore(popularClipsVisible, popularClips.length))}>Load more</button>
+        <button type="button" class="cc-more" onclick={() => (popularClipsVisible = revealMore(popularClipsVisible, popularClips.length))}>{t('loadMore')}</button>
       {/if}
     {/if}
   </section>

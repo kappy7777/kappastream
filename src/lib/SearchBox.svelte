@@ -1,5 +1,7 @@
 <script lang="ts">
   import { searchChannels, type SearchChannelResult } from './gql'
+  import { t } from './i18n/index.svelte'
+  import { formatCompact } from './format'
 
   /*
    * Channel search box — replaces the bare `.channel-input` in the title bar.
@@ -46,15 +48,6 @@
   // show (a query in flight, results, an empty-success notice, or an error).
   // Escape / blur / choosing all collapse back to 'idle'.
   const show = $derived(focused && phase !== 'idle')
-
-  function formatViewers(n: number): string {
-    if (n < 1000) return n.toString()
-    if (n < 1_000_000) {
-      const k = n / 1000
-      return (k < 100 ? k.toFixed(1).replace(/\.0$/, '') : Math.round(k).toString()) + 'K'
-    }
-    return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
-  }
 
   // Debounced search. Re-runs on every keystroke (value change). The returned
   // cleanup cancels the pending timer and aborts any in-flight request before
@@ -203,7 +196,7 @@
   <input
     class="channel-input"
     type="text"
-    placeholder="Search or enter channel…"
+    placeholder={t('search_placeholder')}
     bind:value
     onfocus={onFocus}
     onblur={onBlur}
@@ -223,16 +216,16 @@
   />
 
   {#if show}
-    <div class="search-dropdown" id="search-listbox" role="listbox" aria-label="Channel search results">
+    <div class="search-dropdown" id="search-listbox" role="listbox" aria-label={t('search_resultsAria')}>
       {#if phase === 'loading'}
-        <div class="search-status">Searching…</div>
+        <div class="search-status">{t('search_searching')}</div>
       {:else if phase === 'error'}
         <div class="search-status search-status--error">
-          Search failed — press Enter to connect to the typed name directly.
+          {t('search_failed')}
           {#if errorMessage}<span class="search-status-reason">{errorMessage}</span>{/if}
         </div>
       {:else if phase === 'empty'}
-        <div class="search-status">No channels found — press Enter to connect directly.</div>
+        <div class="search-status">{t('search_empty')}</div>
       {:else}
         {#each results as r, i (r.id || r.login + i)}
           <button
@@ -264,9 +257,9 @@
             </div>
             {#if r.live}
               <div class="search-opt-live">
-                <span class="search-opt-badge">LIVE</span>
+                <span class="search-opt-badge">{t('liveBadge')}</span>
                 {#if r.viewersCount > 0}
-                  <span class="search-opt-viewers">{formatViewers(r.viewersCount)}</span>
+                  <span class="search-opt-viewers">{formatCompact(r.viewersCount)}</span>
                 {/if}
               </div>
             {/if}
