@@ -30,6 +30,7 @@ export const de: Record<TKey, string> = {
   on: 'An',
   off: 'Aus',
   viewers: 'Zuschauer',
+  views: 'Aufrufe',
   backToLive: '◀ Zurück zum Live-Stream',
 
   relTime_justNow: 'gerade eben',
@@ -332,4 +333,6 @@ export const de: Record<TKey, string> = {
 
   vod_pastBroadcast: 'Vergangene Übertragung',
   vod_clip: 'Clip',
+  vod_chatLoading: 'Chat wird geladen…',
+  vod_chatUnavailable: 'Chat-Wiederholung nicht verfügbar',
 }

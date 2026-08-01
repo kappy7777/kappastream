@@ -37,6 +37,7 @@ export const en = {
   on: 'On',
   off: 'Off',
   viewers: 'viewers',
+  views: 'views',
   backToLive: '◀ Back to live',
 
   // ---- relative time (Sidebar timeAgo, ChannelContent formatAge, NotifyMenu)
@@ -360,6 +361,8 @@ export const en = {
   // ---- App.svelte: VOD/clip title fallbacks -------------------------------
   vod_pastBroadcast: 'Past broadcast',
   vod_clip: 'Clip',
+  vod_chatLoading: 'Loading chat…',
+  vod_chatUnavailable: 'Chat replay unavailable',
 } satisfies Record<string, string>
 
 export type TKey = keyof typeof en

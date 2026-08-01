@@ -37,9 +37,13 @@
     onstop: () => void
     onplayintent: (playing: boolean) => void
     activeStatus: LiveStatus
+    // Notifies the parent of the EFFECTIVE controls visibility (visible &&
+    // controlsShown), so siblings that should auto-hide with the controls
+    // (e.g. App's VOD/clip "Back to live" banner) can mirror it.
+    oncontrolsvisible?: (shown: boolean) => void
   }
 
-  const { video, visible, quality, onqualitychange, onmpv, onstop, onplayintent, activeStatus }: Props = $props()
+  const { video, visible, quality, onqualitychange, onmpv, onstop, onplayintent, activeStatus, oncontrolsvisible }: Props = $props()
 
   function toggleTheater(): void {
     settings.toggleTheaterMode()
@@ -183,6 +187,14 @@
       if (Date.now() - lastActivityAt >= IDLE_HIDE_MS) controlsShown = false
     }, 500)
     return () => clearInterval(id)
+  })
+
+  // The effective visibility the parent should mirror for any sibling that
+  // auto-hides with the controls. Recomputed declaratively from the same two
+  // signals the controls render on (`{#if visible && controlsShown}`).
+  const effectiveVisible = $derived(visible && controlsShown)
+  $effect(() => {
+    oncontrolsvisible?.(effectiveVisible)
   })
 
   function togglePlay(): void {

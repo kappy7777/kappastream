@@ -29,6 +29,7 @@ export const fr: Record<TKey, string> = {
   on: 'Activé',
   off: 'Désactivé',
   viewers: 'spectateurs',
+  views: 'vues',
   backToLive: '◀ Retour au direct',
 
   relTime_justNow: 'à l’instant',
@@ -331,4 +332,6 @@ export const fr: Record<TKey, string> = {
 
   vod_pastBroadcast: 'Diffusion passée',
   vod_clip: 'Clip',
+  vod_chatLoading: 'Chargement du chat…',
+  vod_chatUnavailable: 'Relecture du chat indisponible',
 }

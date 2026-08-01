@@ -376,7 +376,7 @@ function decodeTagValue(v: string): string {
     ({ s: ' ', n: '\n', r: '\r', ':': ';', '\\': '\\' } as Record<string, string>)[c] ?? c)
 }
 
-function normalizeColor(c: string | undefined): string {
+export function normalizeColor(c: string | undefined): string {
   if (!c) return '#ffffff'
   return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#ffffff'
 }

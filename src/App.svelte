@@ -5,7 +5,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { loadChannelEmotes, loadGlobalEmotes, buildEmoteMap, renderMessage, parseTwitchEmoteTag, type Emote, type RenderedMessagePart } from './lib/emotes'
   import './lib/emote.css'
-  import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, DELETED_MESSAGE_CLASS, isMessageStricken, resolveBadgeImageUrl, type BadgeInfo, type IrcEvent, type RoomState } from './lib/irc'
+  import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, DELETED_MESSAGE_CLASS, isMessageStricken, resolveBadgeImageUrl, type BadgeInfo, type IrcEvent, type ParsedMessage, type RoomState } from './lib/irc'
   import Sidebar from './lib/Sidebar.svelte'
   import PlayerControls from './lib/PlayerControls.svelte'
   import Settings from './lib/Settings.svelte'
@@ -24,12 +24,13 @@
   import { fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
   import { fetchChannelBadges } from './lib/gql'
+  import { VodChatController, fetchVodComments } from './lib/vodchat.svelte.ts'
   import { initBadgeRefresh } from './lib/badges'
   import { notifications } from './lib/notifications.svelte.ts'
   import { tooltip } from './lib/tooltip.ts'
   import { tooltipState } from './lib/tooltip.svelte.ts'
   import { t } from './lib/i18n/index.svelte'
-  import { formatCompact, formatChatTime } from './lib/format'
+  import { formatCompact, formatChatTime, formatAge } from './lib/format'
   import kappaUrl from './assets/kappa.png'
 
   // Tauri v2 webview origin differs by engine, and that changes whether a
@@ -136,6 +137,11 @@
   let playerStatus = $state<PlayerStatus>('idle')
   let playerError = $state('')
   let videoEl = $state<HTMLVideoElement | undefined>(undefined)
+  // Mirrors PlayerControls' effective visibility (visible && controlsShown) so
+  // the VOD/clip "Back to live" banner can auto-hide with the controls during
+  // playback and reappear on mouse activity. Defaults true so the banner shows
+  // before the first callback lands.
+  let controlsVisible = $state(true)
   let quality = $state<string>('best')
   let pendingQuality: string | null = $state(null)
   let activeStatus: LiveStatus = $state({ state: 'unknown' })
@@ -147,7 +153,10 @@
   // subtree (which otherwise renders only when chat is connected) so the
   // <video> + controls exist in VOD/clip mode too. Restored to 'live' on any
   // channel (re)connect (see connect()).
-  type Playback = { kind: 'live' } | { kind: 'vod'; id: string; title: string } | { kind: 'clip'; slug: string; title: string }
+  type Playback =
+    | { kind: 'live' }
+    | { kind: 'vod'; id: string; title: string; game: string; viewCount: number; createdAt: string }
+    | { kind: 'clip'; slug: string; title: string }
   let playback = $state<Playback>({ kind: 'live' })
   // The scroll container that reveals the channel-content sections below the
   // fold. Reset to the top on every channel change.
@@ -505,9 +514,73 @@
     // Throttled VOD position checkpoint (live + clips are ignored inside).
     saveVodPosition()
   }
+
+  // A user scrub (or a programmatic seek). The `seeking` event fires ONLY for
+  // real seeks, not normal 1x playback, so it is the clean signal to discard
+  // the replay buffer and refetch at the new offset. Rapid scrubbing collapses
+  // to one request via the controller's seek debounce.
+  function onVideoSeeking(): void {
+    if (playback.kind !== 'vod') return
+    const el = videoEl
+    if (!el) return
+    vodChat.seek(el.currentTime)
+  }
   let cancelPendingAttach: (() => void) | null = null
   let emoteAbort: AbortController | null = null
   let thirdPartyMap = new Map<string, Emote>()
+
+  // ---- VOD chat replay ----------------------------------------------------
+  // Past-broadcast chat, synced to the playhead. Each replay comment is
+  // normalized to the same ChatMessage shape the live renderer uses, so there
+  // is ONE render path for live + replay. Live IRC is structurally bypassed in
+  // VOD mode (playVod/playClip call stopChatOnly and never openSocket); a past
+  // broadcast carries no Tier-2 events (USERNOTICE/ROOMSTATE/CLEARMSG/
+  // CLEARCHAT), so those toggles are simply inert during replay.
+  function pmToChatMessage(pm: ParsedMessage): ChatMessage {
+    const parts = renderMessage({ message: pm.message, thirdParty: thirdPartyMap, twitchRanges: pm.twitchEmotes })
+    const emoteOnly =
+      parts.some((p) => p.type === 'emote') &&
+      parts.every((p) => p.type === 'emote' || p.text.trim() === '')
+    return {
+      kind: 'message',
+      id: pm.id,
+      username: pm.displayName,
+      color: pm.color,
+      raw: pm.message,
+      parts,
+      badges: pm.badges,
+      isAction: pm.isAction,
+      emoteOnly,
+      timestamp: pm.timestamp,
+      bits: pm.bits,
+      userId: pm.userId,
+      login: pm.username,
+      deleted: false,
+      deletedReason: null,
+      systemText: null,
+      noticeMsgId: null,
+    }
+  }
+
+  const vodChat = new VodChatController<ChatMessage>({
+    fetchPage: async (videoId, offset, signal) => {
+      const ch = channelJoined ?? ''
+      const page = await fetchVodComments(videoId, ch, offset, signal)
+      return {
+        comments: page.comments.map((c) => ({ offset: c.offset, id: c.id, msg: pmToChatMessage(c.pm) })),
+        maxOffset: page.maxOffset,
+      }
+    },
+    getPlayhead: () => (videoEl ? videoEl.currentTime : 0),
+    getPaused: () => playback.kind !== 'vod' || !videoEl || videoEl.paused,
+    getChatVisible: () => settings.chatVisible,
+  })
+
+  // The single chat render source: replay comments while a VOD is playing, the
+  // live IRC buffer otherwise. `messages` stays empty in VOD mode (playVod
+  // clears it and never appends); vodChat.visible stays empty otherwise.
+  const chatMessages = $derived(playback.kind === 'vod' ? vodChat.visible : messages)
+
   let chatEl = $state<HTMLElement | undefined>(undefined)
 
   let mainEl = $state<HTMLElement | undefined>(undefined)
@@ -633,6 +706,7 @@
   // player because PiP just became the active player).
   function disconnectStream(keepPip = false): void {
     teardownPlayer(keepPip)
+    vodChat.stop()
     playerStatus = 'idle'
     playerError = ''
   }
@@ -1144,6 +1218,7 @@
 
   function disconnect(): void {
     connectionGeneration++
+    vodChat.stop()
     activeConnection = null
     emoteAbort?.abort()
     emoteAbort = null
@@ -1393,17 +1468,32 @@
 
   async function playVod(video: ChannelVideo): Promise<void> {
     if (!channelJoined) return
-    playback = { kind: 'vod', id: video.id, title: video.title || t('vod_pastBroadcast') }
+    vodChat.stop()
+    playback = {
+      kind: 'vod',
+      id: video.id,
+      title: video.title || t('vod_pastBroadcast'),
+      game: video.game,
+      viewCount: video.viewCount,
+      createdAt: video.createdAt,
+    }
     messages = []
     roomState = {}
     stopChatOnly()
     userPaused = false
     if (videoScrollEl) videoScrollEl.scrollTop = 0
     await loadVod(video.id, quality)
+    // Begin replay chat at the saved resume offset (or 0). restoreVodPosition
+    // (inside loadVod) seeks the video to the same spot BEFORE this point, so
+    // its `seeking` event is ignored by an un-started controller and chat/video
+    // align from the first frame. Later user scrub fires `seeking` -> vodChat.seek.
+    const saved = vodPositions.get(video.id)
+    vodChat.start(video.id, saved && saved.position >= 1 ? Math.floor(saved.position) : 0)
   }
 
   async function playClip(clip: ChannelClip): Promise<void> {
     if (!channelJoined) return
+    vodChat.stop()
     playback = { kind: 'clip', slug: clip.slug, title: clip.title || t('vod_clip') }
     messages = []
     roomState = {}
@@ -1450,6 +1540,7 @@
   // Restore the live stream + chat for the current channel.
   function backToLive(): void {
     const ch = channelJoined
+    vodChat.stop()
     playback = { kind: 'live' }
     if (ch) selectChannel(ch)
   }
@@ -1525,9 +1616,9 @@
     stickyBottom = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD
     if (stickyBottom) {
       newMessageCount = 0
-      scrollBaseline = messages.length
+      scrollBaseline = chatMessages.length
     } else if (wasSticky && !stickyBottom) {
-      scrollBaseline = messages.length
+      scrollBaseline = chatMessages.length
       newMessageCount = 0
     }
   }
@@ -1537,12 +1628,12 @@
       chatEl.scrollTop = chatEl.scrollHeight
       stickyBottom = true
       newMessageCount = 0
-      scrollBaseline = messages.length
+      scrollBaseline = chatMessages.length
     }
   }
 
   $effect(() => {
-    const len = messages.length
+    const len = chatMessages.length
     void tick().then(() => {
       if (!chatEl) return
       if (stickyBottom) {
@@ -2002,7 +2093,7 @@
     <div class="video-pane">
     <div class="video-scroll" bind:this={videoScrollEl}>
     <div class="player-stage">
-    {#if playback.kind !== 'live'}
+    {#if playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)}
       <div class="playback-banner">
         <button type="button" class="playback-back" onclick={backToLive}>{t('backToLive')}</button>
         <span class="playback-title">{playback.title}</span>
@@ -2020,8 +2111,9 @@
         onplaying={onVideoPlaying}
         onpause={onVideoPause}
         ontimeupdate={onVideoTimeUpdate}
+        onseeking={onVideoSeeking}
       ></video>
-        <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { userPaused = !p }} {activeStatus} />
+        <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { userPaused = !p }} oncontrolsvisible={(v) => { controlsVisible = v }} {activeStatus} />
         {#if showPlayerOverlay}
           <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
             {#if isPlayerBusy}
@@ -2060,7 +2152,20 @@
 
     {#if !settings.theaterMode}
     <div class="stream-info">
-      {#if activeStatus.state === 'live'}
+      {#if playback.kind === 'vod'}
+        <div class="stream-info-row stream-info-row--main">
+          {#if (activeStatus.state === 'live' || activeStatus.state === 'offline') && activeStatus.avatarUrl}
+            <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
+          {/if}
+          <span class="stream-info-vod">{t('vod_pastBroadcast')}</span>
+          <span class="stream-info-title" use:tooltip={playback.title}>{playback.title}</span>
+        </div>
+        <div class="stream-info-row stream-info-row--meta">
+          {#if playback.game}<span class="stream-info-game">{playback.game}</span><span class="stream-info-dot">·</span>{/if}
+          <span class="stream-info-viewers">{formatCompact(playback.viewCount)} {t('views')}</span>
+          {#if playback.createdAt}<span class="stream-info-dot">·</span><span class="stream-info-age">{formatAge(playback.createdAt)}</span>{/if}
+        </div>
+      {:else if activeStatus.state === 'live'}
         <div class="stream-info-row stream-info-row--main">
           {#if activeStatus.avatarUrl}
             <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
@@ -2187,12 +2292,18 @@
         </div>
       {/if}
       <div class="chat-scroll" bind:this={chatEl} onscroll={onChatScroll}>
-        {#if messages.length === 0}
+        {#if chatMessages.length === 0}
           <p class="placeholder">
-            {status === 'connected' ? t('chat_waitingMessages') : t('chat_joinToSee')}
+            {#if playback.kind === 'vod'}
+              {vodChat.failed ? t('vod_chatUnavailable') : t('vod_chatLoading')}
+            {:else if status === 'connected'}
+              {t('chat_waitingMessages')}
+            {:else}
+              {t('chat_joinToSee')}
+            {/if}
           </p>
         {:else}
-          {#each messages as msg (msg.id)}
+          {#each chatMessages as msg (msg.id)}
           {#if msg.kind === 'notice'}
             {#if settings.chatSubnotices && !settings.isMuted(msg.login)}
               <div class="message message--notice">
@@ -2261,7 +2372,7 @@
           {/each}
         {/if}
       </div>
-      {#if !stickyBottom && messages.length > 0}
+      {#if !stickyBottom && chatMessages.length > 0}
         <button type="button" class="float-pill jump-end" onclick={jumpToPresent} title={t('chat_jumpToLatest')}>
           <svg class="float-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 3v9M4 8l4 4 4-4"/>
@@ -2937,6 +3048,13 @@
     border-radius: 5px;
     color: #fff;
     font-size: 12px;
+    /* Mirrors the PlayerControls fade-in so the banner reappears in step with
+       the controls on mouse activity. */
+    animation: playback-banner-in 150ms ease;
+  }
+  @keyframes playback-banner-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
   .playback-back {
     flex: 0 0 auto;
@@ -3042,6 +3160,19 @@
     height: 6px;
     background: #fff;
     border-radius: 50%;
+  }
+
+  /* "Past broadcast" badge for the VOD status row — same shape as the LIVE
+     badge but neutral (no pulsing dot, accent-tinted). */
+  .stream-info-vod {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    border-radius: 3px;
   }
 
   .stream-info-title {

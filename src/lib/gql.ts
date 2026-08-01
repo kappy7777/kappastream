@@ -915,6 +915,135 @@ export async function fetchClipMedia(slug: string, signal?: AbortSignal): Promis
 
 /*
  * ============================================================================
+ * VOD chat replay — past-broadcast comments, synced to the playhead.
+ *
+ * Same anonymous + GQL-only transport as everything above (same pinned
+ * Client-ID, no new host). Cursor paging (`after`) is integrity-blocked and
+ * `first`/`last` are ignored, so the ONLY useful argument is
+ * `contentOffsetSeconds` — an anchor offset whose page is a contiguous slice of
+ * the comment total-order. See `src/lib/vodchat.svelte.ts` for the measured
+ * advance rule (`nextOffset = lastCommentOffset + 1`) and the sync engine.
+ *
+ * Field/argument names verified against the live endpoint:
+ *   - comments(contentOffsetSeconds: Int!) — the argument is Int (a Float
+ *     variable is rejected), and every returned contentOffsetSeconds is a whole
+ *     number, so the offset advance is exact.
+ *   - the message body is the concatenation of fragments[].text (there is no
+ *     single `body`/`text` field on VideoCommentMessage); an emote fragment
+ *     carries emote.emoteID.
+ *   - pageInfo.hasNextPage is ALWAYS true (even past the VOD end) and so is
+ *     useless — the engine pages until an EMPTY result instead.
+ * ============================================================================
+ */
+
+export interface VodCommentNode {
+  id: string
+  // Broadcast-relative seconds (matches the playhead for unmuted VODs).
+  contentOffsetSeconds: number
+  createdAt: string
+  commenter: { id: string; login: string; displayName: string } | null
+  message: {
+    userColor: string | null
+    userBadges: { setID: string; version: string }[]
+    fragments: { text: string; emote: { emoteID: string } | null }[]
+  } | null
+}
+
+const VOD_COMMENTS_QUERY = `
+  query($videoID: ID!, $offset: Int!) {
+    video(id: $videoID) {
+      id
+      comments(contentOffsetSeconds: $offset) {
+        edges {
+          node {
+            id
+            contentOffsetSeconds
+            createdAt
+            commenter { id login displayName }
+            message {
+              userColor
+              userBadges { setID version }
+              fragments { text emote { emoteID } }
+            }
+          }
+        }
+      }
+    }
+  }
+`
+
+interface RawVodMessage {
+  userColor?: string | null
+  userBadges?: ({ setID?: string; version?: string } | null)[] | null
+  fragments?: ({ text?: string | null; emote?: { emoteID?: string | null } | null } | null)[] | null
+}
+interface RawVodCommentNode {
+  id?: string
+  contentOffsetSeconds?: number
+  createdAt?: string
+  commenter?: { id?: string; login?: string; displayName?: string } | null
+  message?: RawVodMessage | null
+}
+
+/**
+ * Fetch one comment page anchored at a broadcast offset. Returns the raw nodes
+ * (transport only — normalization to ParsedMessage lives in vodchat.svelte.ts).
+ * An empty result is a SUCCESS (offset past the last comment / quiet VOD); the
+ * sync engine treats an empty page as end-of-comments. Throws on transport
+ * failure (network / non-2xx / timeout / top-level GQL errors / abort).
+ *
+ * Measured page size with the full selection set is ~32 KB max (cap 256 KB →
+ * 8× headroom), so a page always fits comfortably.
+ */
+export async function fetchVodCommentPage(
+  videoId: string,
+  offset: number,
+  signal?: AbortSignal,
+): Promise<VodCommentNode[]> {
+  const data = await gqlRequest<{
+    video?: { comments?: { edges?: ({ node?: RawVodCommentNode | null } | null)[] | null } | null } | null
+  }>(VOD_COMMENTS_QUERY, { videoID: videoId, offset }, signal)
+  const edges = data?.video?.comments?.edges ?? []
+  const out: VodCommentNode[] = []
+  for (const edge of edges) {
+    const n = edge?.node ?? null
+    if (!n || !n.id) continue
+    const commenter =
+      n.commenter && n.commenter.login
+        ? {
+            id: n.commenter.id ?? '',
+            login: n.commenter.login,
+            displayName: n.commenter.displayName ?? n.commenter.login,
+          }
+        : null
+    const rawBadges = n.message?.userBadges ?? []
+    const userBadges: { setID: string; version: string }[] = []
+    for (const b of rawBadges) {
+      if (b && b.setID) userBadges.push({ setID: b.setID, version: b.version ?? '' })
+    }
+    const rawFragments = n.message?.fragments ?? []
+    const fragments: { text: string; emote: { emoteID: string } | null }[] = []
+    for (const f of rawFragments) {
+      if (!f) continue
+      const eid = f.emote?.emoteID
+      fragments.push({ text: f.text ?? '', emote: eid ? { emoteID: eid } : null })
+    }
+    const message = n.message
+      ? { userColor: n.message.userColor ?? null, userBadges, fragments }
+      : null
+    out.push({
+      id: n.id,
+      contentOffsetSeconds: typeof n.contentOffsetSeconds === 'number' ? n.contentOffsetSeconds : 0,
+      createdAt: n.createdAt ?? '',
+      commenter,
+      message,
+    })
+  }
+  return out
+}
+
+/*
+ * ============================================================================
  * Chat badges — global refresh + per-channel custom art.
  *
  * Same anonymous + GQL-only transport as everything above (same pinned
