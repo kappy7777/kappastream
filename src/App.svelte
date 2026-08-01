@@ -156,7 +156,7 @@
   type Playback =
     | { kind: 'live' }
     | { kind: 'vod'; id: string; title: string; game: string; viewCount: number; createdAt: string }
-    | { kind: 'clip'; slug: string; title: string }
+    | { kind: 'clip'; slug: string; title: string; game: string; viewCount: number; createdAt: string }
   let playback = $state<Playback>({ kind: 'live' })
   // The scroll container that reveals the channel-content sections below the
   // fold. Reset to the top on every channel change.
@@ -1494,7 +1494,14 @@
   async function playClip(clip: ChannelClip): Promise<void> {
     if (!channelJoined) return
     vodChat.stop()
-    playback = { kind: 'clip', slug: clip.slug, title: clip.title || t('vod_clip') }
+    playback = {
+      kind: 'clip',
+      slug: clip.slug,
+      title: clip.title || t('vod_clip'),
+      game: clip.game,
+      viewCount: clip.viewCount,
+      createdAt: clip.createdAt,
+    }
     messages = []
     roomState = {}
     stopChatOnly()
@@ -2172,12 +2179,12 @@
 
     {#if !settings.theaterMode}
     <div class="stream-info">
-      {#if playback.kind === 'vod'}
+      {#if playback.kind === 'vod' || playback.kind === 'clip'}
         <div class="stream-info-row stream-info-row--main">
           {#if (activeStatus.state === 'live' || activeStatus.state === 'offline') && activeStatus.avatarUrl}
             <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
           {/if}
-          <span class="stream-info-vod">{t('vod_pastBroadcast')}</span>
+          <span class="stream-info-badge">{playback.kind === 'vod' ? t('vod_pastBroadcast') : t('vod_clip')}</span>
           <span class="stream-info-title" use:tooltip={playback.title}>{playback.title}</span>
         </div>
         <div class="stream-info-row stream-info-row--meta">
@@ -3182,9 +3189,9 @@
     border-radius: 50%;
   }
 
-  /* "Past broadcast" badge for the VOD status row — same shape as the LIVE
+  /* On-demand (VOD / clip) badge for the status row — same shape as the LIVE
      badge but neutral (no pulsing dot, accent-tinted). */
-  .stream-info-vod {
+  .stream-info-badge {
     flex: 0 0 auto;
     padding: 1px 6px;
     background: var(--accent);
