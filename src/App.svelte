@@ -796,7 +796,14 @@
     // WebView2 enforces CORS on the real `http://tauri.localhost` origin and
     // Twitch's live CDN doesn't send CORS headers — a direct GET fails with a
     // manifestLoadError). Linux keeps the direct fetch (lower latency; WebKit
-    // allows it). See isWindows.
+    // allows it). macOS (WKWebView, `tauri://localhost`) shares WebKit's CORS
+    // model with WebKitGTK, so it falls into this same non-Windows / direct-
+    // fetch branch by default — UNVERIFIED on real Mac hardware from this
+    // headless build env. If live playback fails on macOS with a
+    // manifestLoadError, the fix is to also route macOS through the proxy:
+    // `(isWindows || os === 'macos')` here and at the PiP mirror below. The
+    // ksvod scheme FORM is unaffected (macOS already uses `ksvod://localhost/`,
+    // same as Linux — see toKsvodProxyUrl). See isWindows.
     const sourceUrl = isWindows ? toKsvodProxyUrl(url) : url
 
     if (Hls.isSupported()) {

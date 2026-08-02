@@ -1,7 +1,7 @@
 [package]
 name = "kappastream"
 version = "0.2.9"
-description = "A lightweight, anonymous Twitch viewer (live stream, chat, favorites) for Linux and Windows"
+description = "A lightweight, anonymous Twitch viewer (live stream, chat, favorites) for Linux, macOS, and Windows"
 authors = ["kappy <kappy777@proton.me>"]
 license = "GPL-3.0-only"
 repository = "https://github.com/kappy7777/kappastream"
