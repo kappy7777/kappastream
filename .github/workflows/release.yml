@@ -480,14 +480,18 @@ jobs:
         run: |
           set -eu
           mkdir -p staging
-          bundle_dir="src-tauri/target/release/bundle/macos"
-          # Distributable installer.
-          cp "$bundle_dir/"*.dmg staging/ 2>/dev/null || true
-          # macOS updater payload + its minisign signature.
-          cp "$bundle_dir/"*.app.tar.gz staging/ 2>/dev/null || true
-          cp "$bundle_dir/"*.app.tar.gz.sig staging/ 2>/dev/null || true
+          # The .dmg is emitted to bundle/dmg/, while the .app / .app.tar.gz /
+          # .sig live under bundle/macos/ — copy each from its real location.
+          cp src-tauri/target/release/bundle/dmg/*.dmg staging/ 2>/dev/null || true
+          cp src-tauri/target/release/bundle/macos/*.app.tar.gz staging/ 2>/dev/null || true
+          cp src-tauri/target/release/bundle/macos/*.app.tar.gz.sig staging/ 2>/dev/null || true
           echo "Staged macOS artifacts:"
-          find staging -maxdepth 1 -type f -printf '%f\n' | sort
+          # Portable across GNU and BSD find: `-printf` is GNU-only and errors
+          # on the macOS runner's BSD find ("unknown primary or operator"),
+          # which (with GHA's default `pipefail` + the `set -e` above) would
+          # fail the step. `basename` is everywhere. The Linux/Windows staging
+          # steps keep `-printf` because their runners ship GNU find.
+          find staging -maxdepth 1 -type f -exec basename {} \; | sort
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v7
