@@ -3,9 +3,10 @@
 #
 # Triggered by pushing a tag matching `v*` (e.g. `v0.1.8`), or manually via
 # `workflow_dispatch`. The pipeline first runs the full CI gate set (check),
-# then builds the bundles across TWO runners and finally publishes from a single
-# job — so a broken commit can never ship as a tag, and a failed bundle build
-# can never produce a partially-published release.
+# then builds the bundles across four parallel platform jobs (native deb/rpm
+# + AUR, AppImage, Windows NSIS, macOS app/dmg) and finally publishes from a
+# single job — so a broken commit can never ship as a tag, and a failed bundle
+# build can never produce a partially-published release.
 #
 # ┌───────────────────────────────────────────────────────────────────────┐
 # │ WHY TWO DIFFERENT UBUNTU VERSIONS (intentional, do not "normalize")   │
@@ -403,11 +404,14 @@ jobs:
   # structure: checkout → node → rust → cache → npm ci → build → stage →
   # upload, retention-days: 7.
   #
-  # Deliberately NOT listed in publish-release's `needs:` yet — a failing
-  # macOS build must not block Linux/Windows releases during bring-up, exactly
-  # how build-windows was handled before it was promoted. Wiring macOS into
-  # latest.json + the release artifacts is a separate, later change once the
-  # build is proven AND the manual Mac Mini test checklist passes.
+  # Wired into the release pipeline: it is in publish-release's `needs:` (a
+  # failing macOS build blocks every release, same as the other platforms),
+  # and its `kappastream.app.tar.gz` + `.sig` ship as the `darwin-aarch64`
+  # updater target in latest.json (the .dmg is the drag-to-Applications
+  # installer only — NOT an updater payload). The build job itself was proven
+  # across multiple smoke-test dispatches (all-green, ad-hoc-signed .dmg +
+  # .app.tar.gz + .sig validated); this promotion ships with the first tagged
+  # release that carries macOS.
   #
   # Signing: NO Apple Developer Program. tauri.conf.json sets
   # bundle.macOS.signingIdentity = "-" so the bundler AD-HOC signs the .app
@@ -508,7 +512,7 @@ jobs:
   # SHA256SUMS are attached; only then is it flipped to public.
   publish-release:
     name: publish release
-    needs: [check, build-native-packages, build-appimage, build-windows]
+    needs: [check, build-native-packages, build-appimage, build-windows, build-macos]
     # Publish on a real tag push, or an explicit manual opt-in. A manual
     # dispatch without `publish` builds everything and keeps the workflow
     # artifacts without creating any release.
@@ -562,6 +566,9 @@ jobs:
           assert_one '*-x86_64.tar.gz' 'AUR tarball'
           assert_one '*-setup.exe' 'Windows setup .exe'
           assert_one '*-setup.exe.sig' 'Windows setup signature'
+          assert_one '*.app.tar.gz' 'macOS app updater tarball'
+          assert_one '*.app.tar.gz.sig' 'macOS app signature'
+          assert_one '*.dmg' 'macOS disk image'
           # The glibc-requirement token produced by build-appimage must exist.
           if [ ! -s appimage-glibc-requirement.txt ]; then
             echo "ERROR: appimage-glibc-requirement.txt missing or empty" >&2
@@ -573,10 +580,11 @@ jobs:
       # just downloaded. The updater validates the WHOLE file, so an incomplete
       # or malformed latest.json would silently break updates for everyone —
       # this step fails the job (and hence the release) if any input is missing.
-      # Platform keys are format-specific (linux-x86_64-{appimage,deb,rpm}) so
-      # each install resolves to its OWN format via bundle_type(); we publish NO
-      # bare `linux-x86_64` fallback to avoid handing one format's artifact to a
-      # different format's install.
+      # Platform keys: Linux is format-specific (linux-x86_64-{appimage,deb,rpm})
+      # so each install resolves to its OWN format via bundle_type(); NO bare
+      # `linux-x86_64` fallback is published (it would hand one format's artifact
+      # to a different format's install). windows-x86_64 and darwin-aarch64 are
+      # single keys (those OSes have no installer-suffix variant).
       #
       # IMPORTANT — signature field format: tauri signer writes each `.sig` file
       # as base64(armored-minisign-signature) (a single base64 line). The
@@ -596,7 +604,10 @@ jobs:
           deb_file="$(find . -maxdepth 1 -type f -name '*_amd64.deb' | head -n1)"
           rpm_file="$(find . -maxdepth 1 -type f -name '*.x86_64.rpm' | head -n1)"
           exe_file="$(find . -maxdepth 1 -type f -name '*-setup.exe' | head -n1)"
-          for f in "$appimage_file" "$deb_file" "$rpm_file" "$exe_file"; do
+          # macOS updater payload is the .app.tar.gz + .sig (the .dmg is NOT an
+          # updater target). `${macapp_file}.sig` resolves to *.app.tar.gz.sig.
+          macapp_file="$(find . -maxdepth 1 -type f -name '*.app.tar.gz' | head -n1)"
+          for f in "$appimage_file" "$deb_file" "$rpm_file" "$exe_file" "$macapp_file"; do
             if [ -z "$f" ] || [ ! -f "$f.sig" ]; then
               echo "ERROR: missing artifact or .sig for ${f:-<none>}" >&2
               exit 1
@@ -609,6 +620,7 @@ jobs:
           debsig="$(tr -d '[:space:]' < "${deb_file}.sig")"
           rpmsig="$(tr -d '[:space:]' < "${rpm_file}.sig")"
           exesig="$(tr -d '[:space:]' < "${exe_file}.sig")"
+          macsig="$(tr -d '[:space:]' < "${macapp_file}.sig")"
           jq -n \
             --arg version "$version" \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -617,6 +629,7 @@ jobs:
             --arg deburl "${base}/${deb_file#./}"       --arg debsig "$debsig" \
             --arg rpmurl "${base}/${rpm_file#./}"       --arg rpmsig "$rpmsig" \
             --arg exeurl "${base}/${exe_file#./}"       --arg exesig "$exesig" \
+            --arg macurl "${base}/${macapp_file#./}"    --arg macsig "$macsig" \
             '{
               version: $version,
               notes: $notes,
@@ -625,12 +638,13 @@ jobs:
                 "linux-x86_64-appimage": { signature: $appsig, url: $appurl },
                 "linux-x86_64-deb":      { signature: $debsig, url: $deburl },
                 "linux-x86_64-rpm":      { signature: $rpmsig, url: $rpmurl },
-                "windows-x86_64":        { signature: $exesig, url: $exeurl }
+                "windows-x86_64":        { signature: $exesig, url: $exeurl },
+                "darwin-aarch64":        { signature: $macsig, url: $macurl }
               }
             }' > latest.json
           echo "=== latest.json ==="
           cat latest.json
-          # Sanity: all four platform keys present with non-empty url+signature,
+          # Sanity: all five platform keys present with non-empty url+signature,
           # AND each signature base64-decodes ONCE to an armored minisign block
           # (catches a double-encoding regression like the rc1/rc2 bug).
           jq -e '
@@ -639,16 +653,25 @@ jobs:
             (.platforms["linux-x86_64-deb"].url      | length > 0) and
             (.platforms["linux-x86_64-rpm"].url      | length > 0) and
             (.platforms["windows-x86_64"].url        | length > 0) and
+            (.platforms["darwin-aarch64"].url        | length > 0) and
             (.platforms["linux-x86_64-appimage"].signature | length > 0) and
             (.platforms["linux-x86_64-deb"].signature      | length > 0) and
             (.platforms["linux-x86_64-rpm"].signature      | length > 0) and
-            (.platforms["windows-x86_64"].signature        | length > 0)
+            (.platforms["windows-x86_64"].signature        | length > 0) and
+            (.platforms["darwin-aarch64"].signature        | length > 0)
           ' latest.json > /dev/null
           # The one-decode → armored check: @base64d decodes once; the result
-          # must start with the minisign "untrusted comment:" header.
-          jq -r '.platforms["linux-x86_64-appimage"].signature' latest.json \
-            | base64 -d | head -n1 | grep -q '^untrusted comment:' \
-            || { echo "ERROR: signature does not decode to armored minisign (double-encoded?)" >&2; exit 1; }
+          # must start with the minisign "untrusted comment:" header. Checked
+          # for one representative per OS that ships a signature — the Linux
+          # AppImage and the new macOS payload (each validates its whole family).
+          check_armored() {
+            local key="$1"
+            jq -r --arg key "$key" '.platforms[$key].signature' latest.json \
+              | base64 -d | head -n1 | grep -q '^untrusted comment:' \
+              || { echo "ERROR: $key signature does not decode to armored minisign (double-encoded?)" >&2; exit 1; }
+          }
+          check_armored 'linux-x86_64-appimage'
+          check_armored 'darwin-aarch64'
           echo "=== latest.json valid (single-base64 signatures confirmed) ==="
 
       - name: Create draft release
@@ -713,6 +736,8 @@ jobs:
             *.x86_64.rpm *.x86_64.rpm.sig \
             *-x86_64.tar.gz \
             *-setup.exe *-setup.exe.sig \
+            *.app.tar.gz *.app.tar.gz.sig \
+            *.dmg \
             latest.json
 
       # Generated LAST, over exactly the artifacts just uploaded, so the
@@ -734,6 +759,8 @@ jobs:
             *.x86_64.rpm *.x86_64.rpm.sig \
             *-x86_64.tar.gz \
             *-setup.exe *-setup.exe.sig \
+            *.app.tar.gz *.app.tar.gz.sig \
+            *.dmg \
             latest.json \
             | sort -k2 > SHA256SUMS
           echo "Generated checksums:"
