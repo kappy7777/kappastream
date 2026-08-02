@@ -9,7 +9,7 @@ flow on the [Security tab](./security/advisories/new), or email
 **kappy777@proton.me**. Include:
 
 - the app version (About modal, or the release page)
-- your distro / compositor (X11 or Wayland)
+- your operating system and version (on Linux: distro / compositor, X11 or Wayland; on macOS: the macOS version)
 - a description of the issue and, if possible, minimal reproduction steps
 
 You should hear back within a few days. If confirmed, a fix and a

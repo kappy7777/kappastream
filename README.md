@@ -2,7 +2,7 @@
 
 <img src="public/kappastream-wordmark.svg" alt="kappastream" width="520">
 
-### A lightweight, anonymous Twitch viewer for Linux and Windows
+### A lightweight, anonymous Twitch viewer for Linux, macOS, and Windows
 
 **No account. No tracking. No recommendations.**  
 Just the stream and the chat.
@@ -15,7 +15,7 @@ Just the stream and the chat.
 [![CI](https://github.com/kappy7777/kappastream/actions/workflows/ci.yml/badge.svg)](https://github.com/kappy7777/kappastream/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/kappy7777/kappastream?label=release)](../../releases/latest)
 [![License](https://img.shields.io/github/license/kappy7777/kappastream)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-Linux%20%26%20Windows-1793d1)
+![Platform](https://img.shields.io/badge/platform-Linux%2C%20macOS%20%26%20Windows-1793d1)
 
 </div>
 
@@ -150,16 +150,35 @@ If `streamlink` is not on your `PATH`, set it before launching kappastream:
 $env:STREAMLINK_BIN = "C:\path\to\streamlink.exe"
 ```
 
+### macOS
+
+kappastream for macOS targets Apple Silicon (arm64) and requires macOS 14 (Sonoma) or later. Download the `.dmg` from the [latest release](../../releases/latest), drag `kappastream.app` to Applications, and launch it.
+
+Because the app is ad-hoc signed and not notarized, Gatekeeper blocks the first launch of a browser-downloaded copy. After the blocked launch, open **System Settings → Privacy & Security** and click **Open Anyway** (or right-click the app and choose **Open** the first time). This flow may change across macOS versions.
+
+Install [streamlink](https://streamlink.github.io/install.html) separately — kappastream needs it to resolve streams:
+
+```bash
+brew install streamlink
+```
+
+An optional [mpv](https://mpv.io/installation/) install enables the external-player feature:
+
+```bash
+brew install mpv
+```
+
 ## streamlink
 
 kappastream uses [streamlink](https://streamlink.github.io/) as a local helper to resolve Twitch streams.
 
-The `.deb` and `.rpm` packages install it as a dependency. AppImage and Windows users must install it separately:
+The `.deb` and `.rpm` packages install it as a dependency. AppImage, Windows, and macOS users must install it separately:
 
 ```bash
 sudo pacman -S streamlink       # Arch Linux
 sudo apt install streamlink     # Debian / Ubuntu
 sudo dnf install streamlink     # Fedora
+brew install streamlink         # macOS
 pip install --user streamlink   # Python fallback
 ```
 
@@ -189,7 +208,7 @@ The application contacts only the services required for playback, chat, metadata
 | **Twitch static CDN** — `static-cdn.jtvnw.net` | Load native emotes and chat badges |
 | **Twitch GQL** — `gql.twitch.tv` | Source for favorites live status, viewer count, title, game, avatar, and Twitch user-ID lookup |
 | **7TV, BTTV and FFZ** | Load third-party emotes |
-| **GitHub Releases** — `github.com/kappy7777/kappastream/releases` | On startup, check whether a newer kappastream release is available and, if so, offer to download, verify (minisign signature), and install it (AppImage / .deb / .rpm / Windows). AUR installs never make this request. |
+| **GitHub Releases** — `github.com/kappy7777/kappastream/releases` | On startup, check whether a newer kappastream release is available and, if so, offer to download, verify (minisign signature), and install it (AppImage / .deb / .rpm / Windows / macOS). AUR installs never make this request. |
 
 These third-party services can see normal request info like your IP address — never your Twitch account, an OAuth token, or your profile.
 
@@ -205,7 +224,7 @@ kappastream does not use Twitch Helix or Kraken and cannot authenticate as you.
 
 Release packages are built by GitHub Actions from the repository source. The [release workflow](.github/workflows/release.yml) and its [public build logs](../../actions) can be inspected directly.
 
-Each release includes a `SHA256SUMS` file covering every published artifact: the AppImage, Debian package, RPM package, Windows installer, and source tarball.
+Each release includes a `SHA256SUMS` file covering every published artifact: the AppImage, Debian package, RPM package, Windows installer, macOS disk image and app bundle, and source tarball.
 
 Download the artifacts into the same directory and verify them with:
 
@@ -253,6 +272,11 @@ sudo apt install \
 - [Microsoft Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
 - [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)
 
+#### macOS
+
+- macOS 14 (Sonoma) or later, on Apple Silicon
+- [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/) (provides the system WebKit/Cocoa frameworks Tauri links)
+
 ### Build
 
 ```bash
@@ -262,7 +286,7 @@ cd kappastream
 npm ci
 npm run check
 npm run build
-npm run tauri -- build --bundles appimage   # Linux (use --bundles nsis on Windows)
+npm run tauri -- build --bundles appimage   # Linux (use --bundles nsis on Windows, --bundles app,dmg on macOS)
 ```
 
 The bundles are written to:
@@ -281,7 +305,7 @@ The first Rust build can take considerably longer than subsequent builds.
 - **hls.js** — HLS playback
 - **Twitch IRC over WebSocket** — anonymous, read-only chat
 - **streamlink** — local stream resolution
-- **System webview** — WebKitGTK on Linux and WebView2 on Windows, avoiding a bundled Chromium runtime
+- **System webview** — WebKitGTK on Linux, WKWebView on macOS, and WebView2 on Windows, avoiding a bundled Chromium runtime
 
 ## Repository structure
 
@@ -306,7 +330,7 @@ Bug reports and focused pull requests are welcome.
 
 Before contributing, read [CONTRIBUTING.md](CONTRIBUTING.md). When reporting a bug, include:
 
-- your operating system and version (Linux distribution or Windows release);
+- your operating system and version (Linux distribution, macOS version, or Windows release);
 - on Linux, your desktop environment or compositor, and whether you are using X11 or Wayland;
 - the kappastream version;
 - your `streamlink --version` output;

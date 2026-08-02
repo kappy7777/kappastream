@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-02
+
+### Added
+
+- **macOS support (Apple Silicon).** kappastream now ships a macOS `.dmg`
+  alongside the Linux AppImage / `.deb` / `.rpm` and the Windows installer.
+  Live and VOD/clip playback, chat, favorites, notifications, and
+  Picture-in-Picture all work on macOS. The build targets Apple Silicon
+  (arm64) only and is ad-hoc signed rather than notarized, so a
+  browser-downloaded copy is gated by Gatekeeper on first launch (see the new
+  macOS install notes). The in-app self-updater is unaffected — it uses its own
+  minisign keypair, independent of Apple code signing. streamlink and mpv
+  remain runtime dependencies (`brew install streamlink`, optional `mpv`).
+
+- **UI scaling fixed on macOS.** At any interface scale other than 1×, the
+  video sat with an empty band above it and the stacked-chat panel extended
+  past the window bottom on macOS (Linux and Windows were unaffected). macOS's
+  WKWebView scales a `zoom`ed element's paint without rescaling its
+  viewport-unit sizes, so those sizes are now divided by a `--ui-zoom` factor
+  applied only on macOS.
+
 ## [0.2.9] - 2026-08-01
 
 ### Added
@@ -551,7 +572,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.2.8...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kappy7777/kappastream/releases/tag/v0.3.0
+[0.2.9]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.9
 [0.2.8]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.8
 [0.2.7]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.7
 [0.2.6]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.6

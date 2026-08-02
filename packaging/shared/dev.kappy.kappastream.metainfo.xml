@@ -78,6 +78,20 @@
   </content_rating>
 
   <releases>
+    <release version="0.3.0" date="2026-08-02">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.3.0</url>
+      <description>
+        <p>macOS support (Apple Silicon). kappastream now ships a macOS .dmg
+        alongside the Linux AppImage, .deb, and .rpm packages and the Windows
+        installer. Live, VOD, and clip playback, chat, favorites,
+        notifications, and Picture-in-Picture all work on macOS. The build
+        targets Apple Silicon (arm64) and is ad-hoc signed rather than
+        notarized, so a browser-downloaded copy is gated by Gatekeeper on first
+        launch. The in-app self-updater uses its own minisign keypair and is
+        unaffected by the lack of Apple code signing; streamlink and mpv remain
+        runtime dependencies.</p>
+      </description>
+    </release>
     <release version="0.2.9" date="2026-08-01">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.2.9</url>
       <description>
