@@ -781,7 +781,7 @@ async function exportFavorites(): Promise<void> {
     top: calc(100% + 6px);
     right: 0;
     width: 260px;
-    max-height: min(calc(100vh - 24px), 600px);
+    max-height: calc(min(calc(100vh - 24px), 600px) / var(--ui-zoom, 1));
     overflow-y: auto;
     overscroll-behavior: contain;
     background: var(--bg-panel);

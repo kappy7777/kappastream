@@ -346,7 +346,7 @@
     left: 50%;
     transform: translate(-50%, -50%);
     z-index: 1001;
-    width: min(1100px, calc(100vw - 32px));
+    width: calc(min(1100px, calc(100vw - 32px)) / var(--ui-zoom, 1));
     max-width: 100%;
     height: min(82vh, 820px);
     display: flex;
