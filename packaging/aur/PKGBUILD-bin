@@ -39,7 +39,7 @@ conflicts=("${_pkgname}" "${_pkgname}-git")
 # packaging/aur/build-release-tarball.sh). No makedepends, no build() — this
 # is a pure -bin repackage.
 source=("${_repo}/releases/download/v${pkgver}/${_pkgname}-${pkgver}-x86_64.tar.gz")
-sha256sums=('258566a89d4a6d08303ab0a169e6eabf2b41f8a9fab522a5fe74c8894e7096e6')   # sha256 of the release tarball; bump alongside pkgver on each release
+sha256sums=('643dd5bcd95e3c32aaa92635b79b9fbe405732488a4153e69200952759b46f2d')   # sha256 of the release tarball; bump alongside pkgver on each release
 
 package() {
 	cd "${srcdir}/${_pkgname}-${pkgver}-x86_64"
