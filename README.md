@@ -136,6 +136,8 @@ sudo dnf swap --allowerasing ffmpeg-free ffmpeg
 
 Download the `*-setup.exe` installer from the [latest release](../../releases/latest) and run it. It installs per-user (no administrator prompt) and provides an NSIS uninstaller.
 
+Because the installer isn't code-signed, Windows SmartScreen may show a "Windows protected your PC" warning on first launch — click **More info**, then **Run anyway**. This is deliberate: a code-signing certificate that silences the warning requires identity verification tied to a real name, which runs against the project's no-registration approach. The exact prompts may change across Windows releases.
+
 The [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) is required (preinstalled on Windows 11 and recent Windows 10); the installer will prompt you to install it if it is missing.
 
 Install [streamlink](https://streamlink.github.io/install.html#windows-binaries) separately — kappastream needs it to resolve streams:
