@@ -607,7 +607,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 30vw;
+    max-width: calc(30vw / var(--ui-zoom, 1));
   }
   .theater-info-dot {
     opacity: 0.7;

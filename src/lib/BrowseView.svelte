@@ -348,7 +348,7 @@
     z-index: 1001;
     width: calc(min(1100px, calc(100vw - 32px)) / var(--ui-zoom, 1));
     max-width: 100%;
-    height: min(82vh, 820px);
+    height: calc(min(82vh, 820px) / var(--ui-zoom, 1));
     display: flex;
     flex-direction: column;
     background: var(--bg-panel);

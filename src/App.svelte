@@ -3731,7 +3731,7 @@
     border-left: none;
     border-top: 1px solid var(--border);
     min-height: 200px;
-    max-height: 70vh;
+    max-height: calc(70vh / var(--ui-zoom, 1));
   }
   .main--stacked .chat--hidden {
     flex: 0 0 0;
