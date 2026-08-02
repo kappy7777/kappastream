@@ -1,5 +1,6 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -68,10 +69,74 @@ pub(crate) fn is_clip_slug_valid(slug: &str) -> bool {
 }
 
 pub(crate) fn streamlink_bin() -> PathBuf {
-    match env::var("STREAMLINK_BIN") {
-        Ok(v) if !v.is_empty() => PathBuf::from(v),
-        _ => PathBuf::from("streamlink"),
+    // Resolved ONCE and cached for the process lifetime (every live/VOD/clip
+    // play calls this). The env is read at most once; if a user installs or
+    // relocates streamlink after the first resolution they must restart, which
+    // the not-installed message already tells them. The pure selection logic
+    // (env override → first existing candidate → bare fallback) lives in
+    // `select_binary_path` and is unit-tested directly.
+    static STREAMLINK_BIN_CACHE: OnceLock<PathBuf> = OnceLock::new();
+    STREAMLINK_BIN_CACHE
+        .get_or_init(|| {
+            let env_value = env::var("STREAMLINK_BIN").ok();
+            // macOS GUI apps launched from Finder/Dock inherit launchd's
+            // minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin), which excludes
+            // Homebrew (/opt/homebrew/bin) and MacPorts (/opt/local/bin), so a
+            // bare "streamlink" lookup fails for every Finder-launched user.
+            // Probe absolute candidates first (mirroring opener.rs). On Linux/
+            // Windows the candidate list is empty and this degrades to the bare
+            // binary via PATH, preserving the original behaviour.
+            let candidates: Vec<PathBuf> = if cfg!(target_os = "macos") {
+                let home = env::var("HOME").ok().map(PathBuf::from);
+                macos_streamlink_candidates(home.as_deref())
+            } else {
+                Vec::new()
+            };
+            select_binary_path(env_value.as_deref(), &candidates, "streamlink")
+        })
+        .clone()
+}
+
+/// Pure binary-path resolver (no global state, no env access) so the
+/// resolution order and rejection cases are unit-testable on any host.
+///
+/// Order: a non-empty env override (verbatim) wins; otherwise the first
+/// existing candidate (checked with `is_file()`); otherwise the bare fallback
+/// (resolved via the child's PATH at spawn time). Like opener.rs, candidates
+/// are absolute paths so a PATH-hijacked binary of the same name can't win,
+/// and the env override remains the explicit escape hatch. Shared by
+/// `streamlink_bin` (resolve.rs) and the mpv resolver (player.rs).
+pub(crate) fn select_binary_path(
+    env_value: Option<&str>,
+    candidates: &[PathBuf],
+    fallback: &str,
+) -> PathBuf {
+    if let Some(v) = env_value.filter(|v| !v.is_empty()) {
+        return PathBuf::from(v);
     }
+    for candidate in candidates {
+        if candidate.is_file() {
+            return candidate.clone();
+        }
+    }
+    PathBuf::from(fallback)
+}
+
+/// macOS streamlink candidate absolute paths, in probe order:
+/// Apple Silicon Homebrew → Intel Homebrew / some pip → MacPorts → pip --user.
+/// `home` is passed in (rather than read from env) so the ORDER is unit-testable
+/// on any host; the caller expands `$HOME`. Non-gated: only the list data is
+/// platform-agnostic; invocation is gated at the call site by `cfg!(macos)`.
+fn macos_streamlink_candidates(home: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = vec![
+        PathBuf::from("/opt/homebrew/bin/streamlink"),
+        PathBuf::from("/usr/local/bin/streamlink"),
+        PathBuf::from("/opt/local/bin/streamlink"),
+    ];
+    if let Some(home) = home {
+        candidates.push(home.join(".local/bin/streamlink"));
+    }
+    candidates
 }
 
 /// A clear, actionable message for the case where the streamlink binary is not
@@ -92,6 +157,10 @@ pub(crate) fn streamlink_missing_message(bin: &std::path::Path) -> String {
     if cfg!(target_os = "windows") {
         format!(
             "streamlink is not installed or not on PATH{detail}. Install it from https://streamlink.github.io/install.html (or run 'pip install streamlink'), then restart kappastream. To point at a specific location, set the STREAMLINK_BIN environment variable to streamlink.exe's full path."
+        )
+    } else if cfg!(target_os = "macos") {
+        format!(
+            "streamlink is not installed or not on PATH{detail}. Install it with Homebrew ('brew install streamlink'), or run 'pip install streamlink', then restart kappastream. To point at a specific location, set the STREAMLINK_BIN environment variable to streamlink's full path."
         )
     } else {
         format!(
@@ -728,16 +797,68 @@ mod tests {
     }
 
     #[test]
-    fn streamlink_bin_respects_env() {
-        // With the override unset, falls back to the bare binary name.
-        temp_env::with_var_unset("STREAMLINK_BIN", || {
-            assert_eq!(streamlink_bin(), PathBuf::from("streamlink"));
-        });
+    fn select_binary_path_prefers_env_override() {
+        // A non-empty env override wins verbatim, even when a candidate exists.
+        let existing = std::env::current_exe().unwrap();
+        assert_eq!(
+            select_binary_path(Some("/override/streamlink"), &[existing], "streamlink"),
+            PathBuf::from("/override/streamlink")
+        );
+        // An empty env string does NOT win — it falls through to candidates.
+        assert_eq!(
+            select_binary_path(
+                Some(""),
+                &[PathBuf::from("/does/not/exist/streamlink")],
+                "streamlink"
+            ),
+            PathBuf::from("streamlink")
+        );
+    }
 
-        // An explicit override is honored verbatim.
-        temp_env::with_var("STREAMLINK_BIN", Some("/custom/path/streamlink"), || {
-            assert_eq!(streamlink_bin(), PathBuf::from("/custom/path/streamlink"));
-        });
+    #[test]
+    fn select_binary_path_returns_first_existing_candidate() {
+        let existing = std::env::current_exe().unwrap();
+        // A non-existent candidate placed BEFORE an existing one: the existing
+        // one must win (order is a probe order, not first-wins-blindly).
+        let candidates = vec![PathBuf::from("/nope/bin/streamlink"), existing.clone()];
+        assert_eq!(
+            select_binary_path(None, &candidates, "streamlink"),
+            existing
+        );
+    }
+
+    #[test]
+    fn select_binary_path_falls_back_to_bare_when_no_candidate_exists() {
+        // None of these exist on the test host → bare fallback (PATH lookup).
+        let candidates = vec![
+            PathBuf::from("/opt/homebrew/bin/streamlink"),
+            PathBuf::from("/usr/local/bin/streamlink"),
+        ];
+        assert_eq!(
+            select_binary_path(None, &candidates, "streamlink"),
+            PathBuf::from("streamlink")
+        );
+    }
+
+    #[test]
+    fn macos_streamlink_candidate_order() {
+        let home = PathBuf::from("/Users/test");
+        let candidates = macos_streamlink_candidates(Some(&home));
+        // Load-bearing order: Apple Silicon Homebrew is checked BEFORE Intel
+        // Homebrew, then MacPorts, then pip --user under $HOME.
+        assert_eq!(
+            candidates,
+            vec![
+                PathBuf::from("/opt/homebrew/bin/streamlink"),
+                PathBuf::from("/usr/local/bin/streamlink"),
+                PathBuf::from("/opt/local/bin/streamlink"),
+                PathBuf::from("/Users/test/.local/bin/streamlink"),
+            ]
+        );
+        // Without HOME, the pip --user entry is omitted (the other three remain).
+        let no_home = macos_streamlink_candidates(None);
+        assert_eq!(no_home.len(), 3);
+        assert!(!no_home.iter().any(|p| p.ends_with(".local/bin/streamlink")));
     }
 
     #[test]

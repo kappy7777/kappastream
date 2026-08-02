@@ -310,7 +310,7 @@
     left: 0;
     right: 0;
     min-width: 0;
-    max-height: min(60vh, 420px);
+    max-height: calc(min(60vh, 420px) / var(--ui-zoom, 1));
     overflow-y: auto;
     background: var(--bg-panel);
     border: 1px solid var(--border);

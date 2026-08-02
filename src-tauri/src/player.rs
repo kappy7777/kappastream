@@ -1,9 +1,11 @@
+use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::OnceLock;
 
 use serde::Serialize;
 
 use crate::resolve::{
-    is_channel_name_valid, is_clip_slug_valid, is_vod_id_valid, streamlink_bin,
+    is_channel_name_valid, is_clip_slug_valid, is_vod_id_valid, select_binary_path, streamlink_bin,
     streamlink_missing_message, ALLOWED_QUALITIES,
 };
 
@@ -14,14 +16,47 @@ pub struct LaunchPlayerResponse {
     pub error: Option<String>,
 }
 
+/// Resolved mpv binary path, cached for the process lifetime. On macOS, a
+/// Finder/Dock-launched app inherits launchd's minimal PATH, so — like
+/// streamlink — mpv is probed at well-known absolute locations before falling
+/// back to a bare PATH lookup. mpv is frequently installed as a `.app` bundle
+/// rather than via Homebrew, so `/Applications/mpv.app/Contents/MacOS/mpv` is
+/// in the candidate list. On Linux/Windows the list is empty → bare "mpv".
+pub(crate) fn mpv_bin() -> PathBuf {
+    static MPV_BIN_CACHE: OnceLock<PathBuf> = OnceLock::new();
+    MPV_BIN_CACHE
+        .get_or_init(|| {
+            let candidates: Vec<PathBuf> = if cfg!(target_os = "macos") {
+                macos_mpv_candidates()
+            } else {
+                Vec::new()
+            };
+            select_binary_path(None, &candidates, "mpv")
+        })
+        .clone()
+}
+
+/// macOS mpv candidate absolute paths, in probe order: Homebrew (Apple Silicon
+/// → Intel) → MacPorts → the mpv.app bundle. Non-gated so the ORDER (incl. the
+/// `.app` path) is unit-testable on any host; invocation is cfg!(macos)-gated
+/// at the call site.
+fn macos_mpv_candidates() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("/opt/homebrew/bin/mpv"),
+        PathBuf::from("/usr/local/bin/mpv"),
+        PathBuf::from("/opt/local/bin/mpv"),
+        PathBuf::from("/Applications/mpv.app/Contents/MacOS/mpv"),
+    ]
+}
+
 /// Whether the external player binary (mpv) can be launched. Probed with the
 /// SAME env whitelist the real handoff uses (`env_spawn::configure`), so AppImage
 /// PATH handling and Windows PATHEXT resolution match exactly what the actual
-/// `--player=mpv` spawn would see. `mpv --version` exits immediately; on
+/// `--player=<mpv>` spawn would see. `mpv --version` exits immediately; on
 /// NotFound we treat mpv as missing, on any other error we assume it exists
 /// (don't block a working install on a weird --version failure).
 fn external_player_available() -> bool {
-    let mut cmd = std::process::Command::new("mpv");
+    let mut cmd = std::process::Command::new(mpv_bin());
     cmd.arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -40,12 +75,15 @@ fn external_player_available() -> bool {
 }
 
 /// A clear, actionable message for when mpv is not installed. The
-/// external-player feature (`--player=mpv`) needs mpv; without this pre-check
+/// external-player feature (`--player=<mpv>`) needs mpv; without this pre-check
 /// streamlink would spawn, fail to launch mpv, and exit asynchronously — so the
 /// app would report success while nothing opens.
 fn external_player_missing_message() -> String {
     if cfg!(target_os = "windows") {
         "mpv is not installed or not on PATH. The 'open in external player' feature needs mpv — install it from https://mpv.io/installation/ and restart kappastream."
+            .to_string()
+    } else if cfg!(target_os = "macos") {
+        "mpv is not installed or not on PATH. The 'open in external player' feature needs mpv — install it with Homebrew ('brew install mpv') or from https://mpv.io/installation/ and restart kappastream."
             .to_string()
     } else {
         "mpv is not installed or not on PATH. The 'open in external player' feature needs mpv — install it via your package manager (e.g. 'sudo apt install mpv') and restart kappastream."
@@ -123,9 +161,15 @@ pub async fn launch_player(
     };
 
     let bin = streamlink_bin();
+    // Resolve mpv once (cached) and pass its path to streamlink's --player so
+    // the handoff does NOT depend on mpv being on the child's PATH — on macOS a
+    // Finder-launched streamlink inherits launchd's minimal PATH and could not
+    // find /opt/homebrew/bin/mpv or /Applications/mpv.app/... on its own. The
+    // external_player_available() probe above resolves the SAME path.
+    let player = mpv_bin();
     let low = low_latency.unwrap_or(false) && low_ok;
 
-    // The handoff shells out to `streamlink --player=mpv ...`, so both
+    // The handoff shells out to `streamlink --player=<player> ...`, so both
     // binaries must be reachable. streamlink is checked by the spawn's NotFound
     // arm below; mpv is checked up front because streamlink launches mpv
     // asynchronously and its failure would otherwise surface nowhere (the app
@@ -138,7 +182,7 @@ pub async fn launch_player(
     }
 
     let mut cmd = tokio::process::Command::new(&bin);
-    cmd.arg("--player=mpv");
+    cmd.arg(format!("--player={}", player.display()));
     if low {
         cmd.arg("--twitch-low-latency");
     }
@@ -169,5 +213,36 @@ pub async fn launch_player(
             ok: false,
             error: Some(e.to_string()),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macos_mpv_candidate_order_includes_app_bundle() {
+        let candidates = macos_mpv_candidates();
+        // Load-bearing order: Homebrew Apple Silicon → Intel → MacPorts → the
+        // mpv.app bundle (mpv is often installed as a .app, not via Homebrew).
+        assert_eq!(
+            candidates,
+            vec![
+                PathBuf::from("/opt/homebrew/bin/mpv"),
+                PathBuf::from("/usr/local/bin/mpv"),
+                PathBuf::from("/opt/local/bin/mpv"),
+                PathBuf::from("/Applications/mpv.app/Contents/MacOS/mpv"),
+            ]
+        );
+    }
+
+    // On a non-macOS host (Linux/Windows) the candidate list is empty, so the
+    // resolver returns the bare binary name (PATH lookup at spawn time) —
+    // preserving the original behaviour. Skipped on macOS, where the candidate
+    // list is non-empty and the result depends on what's installed.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn mpv_bin_falls_back_to_bare_on_non_macos_host() {
+        assert_eq!(mpv_bin(), PathBuf::from("mpv"));
     }
 }

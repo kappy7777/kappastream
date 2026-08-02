@@ -6,6 +6,7 @@
   import { loadChannelEmotes, loadGlobalEmotes, buildEmoteMap, renderMessage, parseTwitchEmoteTag, type Emote, type RenderedMessagePart } from './lib/emotes'
   import './lib/emote.css'
   import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, DELETED_MESSAGE_CLASS, isMessageStricken, resolveBadgeImageUrl, type BadgeInfo, type IrcEvent, type ParsedMessage, type RoomState } from './lib/irc'
+  import { UI_ZOOM_VAR, zoomDivisor } from './lib/ui-zoom'
   import Sidebar from './lib/Sidebar.svelte'
   import PlayerControls from './lib/PlayerControls.svelte'
   import Settings from './lib/Settings.svelte'
@@ -58,12 +59,34 @@
   // mount; every use site (attachStream, PiP, the proxy prefix in
   // toKsvodProxyUrl) is user-triggered and runs after that resolves.
   let isWindows = $state(false)
+  // isMacOS gates ONLY the viewport-unit zoom compensation below (the macOS
+  // WKWebView scaling bug). It is not used to gate anything else. isWindows
+  // remains gated to live-playback routing / the ksvod proxy prefix only.
+  let isMacOS = $state(false)
 
   onMount(() => {
     if (!isTauri()) return
     void invoke<string>('target_os')
-      .then((os) => { isWindows = os === 'windows' })
+      .then((os) => {
+        isWindows = os === 'windows'
+        isMacOS = os === 'macos'
+      })
       .catch((e) => { console.error('[platform] target_os failed; assuming non-Windows (live playback may regress on Windows)', e) })
+  })
+
+  // macOS-only viewport-unit zoom compensation. WKWebView scales the
+  // documentElement.zoom subtree's paint WITHOUT rescaling vh/vw/dvh, so a
+  // `height: 100dvh` element renders at `zoom ×` the real window height and
+  // overflows. The CSS divides viewport-unit sizes by `var(--ui-zoom, 1)`; we
+  // write that variable ONLY on macOS, so Linux/Windows (which rescale viewport
+  // units natively) keep the `1` fallback and render identically to before.
+  // Reacts to both the platform signal and the live UI-scale value.
+  $effect(() => {
+    if (!isMacOS) return
+    document.documentElement.style.setProperty(
+      UI_ZOOM_VAR,
+      String(zoomDivisor(settings.uiScale)),
+    )
   })
 
   // Sleep timer expiry = STOP playback completely (not just pause): tear down
@@ -191,11 +214,15 @@
   let tooltipPos = $state({ left: 0, top: 0 })
   let probeEl: HTMLElement | undefined = $state()
   // k = visual pixels per CSS pixel for a position:fixed element under the
-  // current UI-scale zoom. Chromium and webkit2gtk disagree on how
-  // documentElement zoom re-scales fixed elements, so instead of assuming a
-  // formula we measure it with a hidden probe (see .zoom-probe below). All
-  // tooltip math runs in VISUAL space (target/tip rects are visual) and only
-  // divides by k at the very end to produce the CSS left/top to set.
+  // current UI-scale zoom. Chromium, webkit2gtk AND WKWebView (macOS) each
+  // disagree on how documentElement zoom re-scales fixed elements, so instead
+  // of assuming a formula we measure it with a hidden probe (see .zoom-probe
+  // below). All tooltip math runs in VISUAL space (target/tip rects are
+  // visual) and only divides by k at the very end to produce the CSS left/top
+  // to set. (WKWebView has a SECOND, separate zoom divergence: it does not
+  // rescale viewport units with documentElement zoom, which the --ui-zoom
+  // compensation below + the calc(... / var(--ui-zoom, 1)) sizing in the
+  // stylesheets address. The two divergences are independent.)
   let zoomK = $state(1)
 
   $effect(() => {
@@ -796,7 +823,14 @@
     // WebView2 enforces CORS on the real `http://tauri.localhost` origin and
     // Twitch's live CDN doesn't send CORS headers — a direct GET fails with a
     // manifestLoadError). Linux keeps the direct fetch (lower latency; WebKit
-    // allows it). See isWindows.
+    // allows it). macOS (WKWebView, `tauri://localhost`) shares WebKit's CORS
+    // model with WebKitGTK, so it falls into this same non-Windows / direct-
+    // fetch branch by default — UNVERIFIED on real Mac hardware from this
+    // headless build env. If live playback fails on macOS with a
+    // manifestLoadError, the fix is to also route macOS through the proxy:
+    // `(isWindows || os === 'macos')` here and at the PiP mirror below. The
+    // ksvod scheme FORM is unaffected (macOS already uses `ksvod://localhost/`,
+    // same as Linux — see toKsvodProxyUrl). See isWindows.
     const sourceUrl = isWindows ? toKsvodProxyUrl(url) : url
 
     if (Hls.isSupported()) {
@@ -2576,8 +2610,14 @@
     display: flex;
     flex-direction: column;
     width: 100%;
-    height: 100vh;
-    height: 100dvh;
+    /* On macOS (WKWebView) documentElement.zoom scales this subtree's paint
+       without rescaling viewport units, so a bare 100dvh renders at
+       `zoom ×` the window height and overflows (band above the video, chat
+       past the bottom). Dividing by --ui-zoom cancels the zoom there;
+       --ui-zoom is written ONLY on macOS, so the `1` fallback makes this
+       identical to 100dvh on Linux/Windows. See App.svelte isMacOS effect. */
+    height: calc(100vh / var(--ui-zoom, 1));
+    height: calc(100dvh / var(--ui-zoom, 1));
     background: var(--bg-app);
     overflow: hidden;
   }
@@ -2804,8 +2844,8 @@
     left: 50%;
     transform: translate(-50%, -50%);
     z-index: 1001;
-    width: min(480px, calc(100vw - 32px));
-    max-height: calc(100vh - 64px);
+    width: calc(min(480px, calc(100vw - 32px)) / var(--ui-zoom, 1));
+    max-height: calc((100vh - 64px) / var(--ui-zoom, 1));
     overflow: auto;
     background: var(--bg-panel);
     border: 1px solid var(--border);
@@ -2841,7 +2881,7 @@
   /* Keyboard-shortcuts help overlay (?). Reuses .about-modal chrome. */
   .shortcuts-modal {
     max-width: 420px;
-    width: min(420px, calc(100vw - 32px));
+    width: calc(min(420px, calc(100vw - 32px)) / var(--ui-zoom, 1));
   }
   .shortcuts-title {
     margin: 0;
@@ -3676,7 +3716,7 @@
   .main--stacked .player {
     flex: 0 0 auto;
     width: 100%;
-    max-height: min(70vh, calc(100vw * 9 / 16));
+    max-height: calc(min(70vh, calc(100vw * 9 / 16)) / var(--ui-zoom, 1));
     aspect-ratio: 16 / 9;
   }
   .main--stacked .chat {
@@ -3691,7 +3731,7 @@
     border-left: none;
     border-top: 1px solid var(--border);
     min-height: 200px;
-    max-height: 70vh;
+    max-height: calc(70vh / var(--ui-zoom, 1));
   }
   .main--stacked .chat--hidden {
     flex: 0 0 0;

@@ -397,6 +397,110 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # ── macOS: .app bundle + .dmg (Apple Silicon / arm64 only) ───────────
+  # Built on macos-latest (an arm64 runner), so this is a NATIVE aarch64-
+  # apple-darwin build (no --target cross-compile). Mirrors build-windows in
+  # structure: checkout → node → rust → cache → npm ci → build → stage →
+  # upload, retention-days: 7.
+  #
+  # Deliberately NOT listed in publish-release's `needs:` yet — a failing
+  # macOS build must not block Linux/Windows releases during bring-up, exactly
+  # how build-windows was handled before it was promoted. Wiring macOS into
+  # latest.json + the release artifacts is a separate, later change once the
+  # build is proven AND the manual Mac Mini test checklist passes.
+  #
+  # Signing: NO Apple Developer Program. tauri.conf.json sets
+  # bundle.macOS.signingIdentity = "-" so the bundler AD-HOC signs the .app
+  # (codesign --sign -) — the minimum Apple Silicon's kernel requires to
+  # EXECUTE the arm64 binary at all (an unsigned arm64 binary is refused by
+  # the loader, independent of Gatekeeper). Ad-hoc signing does NOT satisfy
+  # Gatekeeper, so a browser-downloaded .app still prompts on first launch
+  # (right-click → Open). The in-app updater is UNAFFECTED: it uses its own
+  # minisign keypair (TAURI_SIGNING_PRIVATE_KEY), completely independent of
+  # Apple code signing, and works the same as on Linux/Windows.
+  #
+  # No system-dependency install step: the macos-latest runner ships the Xcode
+  # Command Line Tools (Tauri links the system WebKit/Cocoa frameworks), and
+  # streamlink/mpv are RUNTIME deps, not build deps.
+  build-macos:
+    name: build macos (app/dmg) · macos-latest · arm64
+    needs: [check]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      # Separate cache key from the Linux/Windows jobs (aarch64-apple-darwin).
+      - name: Cache Cargo (~/.cargo + src-tauri/target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: macos-aarch64
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Verify release tag matches package version
+        # Enforced only on real tag pushes; a smoke-test dispatch may build a
+        # not-yet-bumped tree. Kept identical to the other build jobs.
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          set -eu
+          pkgver="$(node -p "require('./package.json').version")"
+          tagver="${RELEASE_TAG#v}"
+          if [ "$pkgver" != "$tagver" ]; then
+            echo "ERROR: tag '${RELEASE_TAG}' (v-stripped '${tagver}') != package.json version '${pkgver}'" >&2
+            exit 1
+          fi
+          echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
+
+      # `--bundles app,dmg` builds kappastream.app then kappastream.dmg. With
+      # createUpdaterArtifacts:true tauri-cli ALSO emits kappastream.app.tar.gz
+      # + kappastream.app.tar.gz.sig (the macOS updater payload — distinct
+      # from the .dmg, which is just the drag-to-Applications installer and is
+      # NOT an updater target). The signing env makes tauri-cli emit the .sig.
+      - name: Build .app and .dmg
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri -- build --bundles app,dmg
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p staging
+          # The .dmg is emitted to bundle/dmg/, while the .app / .app.tar.gz /
+          # .sig live under bundle/macos/ — copy each from its real location.
+          cp src-tauri/target/release/bundle/dmg/*.dmg staging/ 2>/dev/null || true
+          cp src-tauri/target/release/bundle/macos/*.app.tar.gz staging/ 2>/dev/null || true
+          cp src-tauri/target/release/bundle/macos/*.app.tar.gz.sig staging/ 2>/dev/null || true
+          echo "Staged macOS artifacts:"
+          # Portable across GNU and BSD find: `-printf` is GNU-only and errors
+          # on the macOS runner's BSD find ("unknown primary or operator"),
+          # which (with GHA's default `pipefail` + the `set -e` above) would
+          # fail the step. `basename` is everywhere. The Linux/Windows staging
+          # steps keep `-printf` because their runners ship GNU find.
+          find staging -maxdepth 1 -type f -exec basename {} \; | sort
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos
+          path: staging/
+          if-no-files-found: error
+          retention-days: 7
+
   # ── Single publication job ────────────────────────────────────────────
   # The ONLY job that creates/edits the GitHub release. Build jobs have read
   # permissions only and never touch the release, so two builds can never race

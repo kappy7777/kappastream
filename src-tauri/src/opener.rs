@@ -246,19 +246,26 @@ pub async fn open_url_robust(url: String) -> Result<OpenResult, String> {
     let opener_url = url.clone();
     let per_candidate = tauri::async_runtime::spawn_blocking(move || {
         // PATH forwarded to env_spawn::configure() when running from an
-        // AppImage (whose runtime strips PATH). configure() is a no-op on
-        // Windows (APPIMAGE is never set there), so this Unix PATH string
-        // is never consulted on Windows — it just satisfies the parameter.
-        #[cfg(not(target_os = "windows"))]
+        // AppImage (whose runtime strips PATH). configure() is a no-op when
+        // APPIMAGE is unset — i.e. always on macOS and Windows — so this value
+        // is only ever consulted on Linux (AppImage). It just satisfies the
+        // parameter elsewhere.
+        #[cfg(target_os = "linux")]
         let child_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-        #[cfg(target_os = "windows")]
+        #[cfg(not(target_os = "linux"))]
         let child_path = "";
 
         // Each candidate is (name, absolute_path, args). The absolute path
         // is checked via is_file() in run_candidate — we deliberately do
         // NOT do a bare PATH lookup, so a PATH-hijacked binary of the same
-        // name can't win (same philosophy on both platforms).
-        #[cfg(not(target_os = "windows"))]
+        // name can't win (same philosophy on every platform).
+        //
+        // Linux: xdg-open → gio → distro browser launchers. macOS: the single
+        // `open` system binary (/usr/bin/open, always present) hands the URL
+        // to the registered https handler. The previous `#[cfg(not(windows))]`
+        // arm mapped macOS onto the Linux list (xdg-open etc. don't exist on
+        // macOS), so browser-opening silently failed there.
+        #[cfg(target_os = "linux")]
         let candidates: Vec<(&'static str, String, Vec<String>)> = vec![
             (
                 "xdg-open",
@@ -296,6 +303,16 @@ pub async fn open_url_robust(url: String) -> Result<OpenResult, String> {
                 vec![opener_url.clone()],
             ),
         ];
+
+        // macOS: `/usr/bin/open <url>` opens in the default browser. It is a
+        // core system binary (always present, not PATH-installed), so a single
+        // absolute candidate is sufficient and has no PATH-hijack surface.
+        #[cfg(target_os = "macos")]
+        let candidates: Vec<(&'static str, String, Vec<String>)> = vec![(
+            "open",
+            "/usr/bin/open".to_string(),
+            vec![opener_url.clone()],
+        )];
 
         // Windows: cmd.exe /C start "" <url> first (most universal —
         // resolves the URL through the registered https handler), then

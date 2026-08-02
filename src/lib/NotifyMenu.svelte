@@ -167,7 +167,7 @@
     top: calc(100% + 6px);
     right: 0;
     width: 320px;
-    max-height: min(calc(100vh - 60px), 480px);
+    max-height: calc(min(calc(100vh - 60px), 480px) / var(--ui-zoom, 1));
     display: flex;
     flex-direction: column;
     background: var(--bg-panel);
