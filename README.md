@@ -52,6 +52,7 @@ Chat is read anonymously through Twitch IRC. Stream playback is resolved locally
 | | |
 |---|---|
 | **Live playback** | HLS playback with quality selection, fullscreen, theater mode, per-channel quality preferences, an optional low-latency mode, player keyboard shortcuts, and a sleep timer. |
+| **Multi-stream view** | Watch up to four live streams at once in a draggable, resizable tile grid. Each tile has its own chat tab, quality, and volume. |
 | **VODs and clips** | Browse a channel's past broadcasts, highlights, recent and popular clips, and play them in the main player — with mpv handoff and Picture-in-Picture support. A Back-to-live control returns to the stream. Past broadcasts resume from where you left off, with a one-click restart. |
 | **Anonymous chat** | Read-only Twitch IRC chat with native Twitch emotes, 7TV, BTTV and FFZ emotes, badges, colored usernames, timestamps, mention highlighting, and a client-side mute list. |
 | **Favorites** | Save channels locally, drag to reorder them, and see live status, viewer count, game, and stream title at a glance. |

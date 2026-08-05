@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-05
+
+### Added
+
+- **Multi-stream split view.** Watch up to four live streams simultaneously in a
+  tile grid, each with its own independent chat tab, quality selector, and
+  volume. Toggle the grid on or off from the top bar; opening a channel while the
+  grid is active adds a tile instead of replacing the current stream. Tiles can
+  be reordered by dragging a grip handle (or arrow buttons for keyboard users),
+  resized by dragging the splitter handles between them (double-click to reset),
+  and closed individually. The focused tile is the audio authority — its volume
+  and mute persist to settings, while other tiles can be independently unmuted to
+  play alongside it. A status bar lists every open stream and is hideable to
+  reclaim space; clicking a stream in the bar focuses its tile.
+
 ## [0.3.0] - 2026-08-02
 
 ### Added
