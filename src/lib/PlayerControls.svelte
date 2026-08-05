@@ -41,9 +41,14 @@
     // controlsShown), so siblings that should auto-hide with the controls
     // (e.g. App's VOD/clip "Back to live" banner) can mirror it.
     oncontrolsvisible?: (shown: boolean) => void
+    // Fullscreen state + toggle are owned by App (native window fullscreen
+    // via the Tauri window API, shared with the F shortcut); the control just
+    // reflects + drives them. See App.svelte toggleVideoFullscreen.
+    isFullscreen: boolean
+    ontogglefullscreen: () => void
   }
 
-  const { video, visible, quality, onqualitychange, onmpv, onstop, onplayintent, activeStatus, oncontrolsvisible }: Props = $props()
+  const { video, visible, quality, onqualitychange, onmpv, onstop, onplayintent, activeStatus, oncontrolsvisible, isFullscreen, ontogglefullscreen }: Props = $props()
 
   function toggleTheater(): void {
     settings.toggleTheaterMode()
@@ -56,7 +61,6 @@
   let currentTime = $state(0)
   let duration = $state(0)
   let buffered = $state(0)
-  let isFullscreen = $state(false)
   let hoverTime: number | null = $state(null)
 
   function getZoom(): number {
@@ -146,8 +150,6 @@
   $effect(() => {
     if (!video) return
     const detach = attach(video)
-    const onFs = () => { isFullscreen = !!document.fullscreenElement }
-    document.addEventListener('fullscreenchange', onFs)
 
     const v: HTMLVideoElement = video
     const onEnter = () => { bumpActivity() }
@@ -172,7 +174,6 @@
 
     return () => {
       detach()
-      document.removeEventListener('fullscreenchange', onFs)
       v.removeEventListener('mouseenter', onEnter)
       v.removeEventListener('mouseleave', onLeave)
       v.removeEventListener('mousemove', onMove)
@@ -238,16 +239,6 @@
     const z = getZoom()
     const pct = Math.max(0, Math.min(1, e.offsetX / (el.offsetWidth * z)))
     hoverTime = pct * (isFinite(duration) ? duration : 0)
-  }
-
-  function toggleFullscreen(): void {
-    if (!video) return
-    if (document.fullscreenElement) {
-      void document.exitFullscreen()
-    } else {
-      const el = video.parentElement ?? video
-      void el.requestFullscreen?.()
-    }
   }
 
   function toggleMenu(): void {
@@ -542,7 +533,7 @@
       <button
         type="button"
         class="ctrl-btn"
-        onclick={toggleFullscreen}
+        onclick={ontogglefullscreen}
         aria-label={isFullscreen ? t('pc_exitFullscreen') : t('pc_enterFullscreen')}
         use:tooltip={isFullscreen ? t('pc_exitFullscreen') : t('pc_fullscreen')}
       >

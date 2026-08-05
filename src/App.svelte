@@ -274,6 +274,12 @@
   }
 
   let isMaximized = $state(false)
+  // Authoritative fullscreen state. Under Tauri this mirrors the real
+  // window state via onResized (so exiting via the OS — Esc / menu bar —
+  // still updates the control); outside Tauri it tracks the HTML5
+  // Fullscreen API via the fullscreenchange event. Owned here (not in
+  // PlayerControls) so the F shortcut and the button share one source.
+  let isFullscreen = $state(false)
   const winResizeUnlisteners: Array<() => void> = []
 
   // Tauri's startResizeDragging takes a ResizeDirection union it doesn't
@@ -326,7 +332,18 @@
   function toggleVideoFullscreen(): void {
     const el = videoEl
     if (!el) return
-    if (document.fullscreenElement) {
+    const win = currentWin()
+    if (win) {
+      // Native window fullscreen. The HTML5 Fullscreen API
+      // (Element.requestFullscreen) is a no-op on macOS WKWebView and
+      // unreliable across the other webview backends inside Tauri, so the
+      // Tauri window API is the single path under the app shell — it drives
+      // real OS-level fullscreen on every platform (Lion-style own-Space on
+      // macOS). isFullscreen is reflected via the onResized handler below.
+      void win.isFullscreen()
+        .then((fs) => win.setFullscreen(!fs))
+        .catch(() => { /* ignore */ })
+    } else if (document.fullscreenElement) {
       void document.exitFullscreen()
     } else {
       const target = el.parentElement ?? el
@@ -1787,14 +1804,26 @@
 
   onMount(() => () => disconnect())
 
-  // Track maximize state so the title-bar control shows restore vs. maximize.
+  // Track maximize + fullscreen state so the title-bar control shows
+  // restore vs. maximize and the player control shows exit vs. enter
+  // fullscreen. Both can change without our buttons (maximize via the OS,
+  // fullscreen via Esc / the macOS menu bar), so we poll the real window
+  // state on every resize. isFullscreen() is queried (not assumed) for the
+  // same reason.
   onMount(() => {
     const win = currentWin()
     if (win) {
       void win.isMaximized().then((m) => { isMaximized = m }).catch(() => { /* ignore */ })
+      void win.isFullscreen().then((f) => { isFullscreen = f }).catch(() => { /* ignore */ })
       void win.onResized(() => {
         void win.isMaximized().then((m) => { isMaximized = m }).catch(() => { /* ignore */ })
+        void win.isFullscreen().then((f) => { isFullscreen = f }).catch(() => { /* ignore */ })
       }).then((un) => { if (un) winResizeUnlisteners.push(un) }).catch(() => { /* ignore */ })
+    } else {
+      // Non-Tauri fallback (browser/archive): track the HTML5 Fullscreen API.
+      const onFs = () => { isFullscreen = !!document.fullscreenElement }
+      document.addEventListener('fullscreenchange', onFs)
+      winResizeUnlisteners.push(() => document.removeEventListener('fullscreenchange', onFs))
     }
     return () => {
       for (const u of winResizeUnlisteners) { try { u() } catch { /* ignore */ } }
@@ -2025,7 +2054,7 @@
 
 <svelte:window onkeydown={onGlobalKeydown} />
 
-<div class="app" class:app--sidebar-icons={sidebarMode === 'icons'} class:app--sidebar-hidden={sidebarMode === 'hidden'}>
+<div class="app" class:app--sidebar-icons={sidebarMode === 'icons'} class:app--sidebar-hidden={sidebarMode === 'hidden'} class:app--fullscreen={isFullscreen}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <!-- Double-click on empty title-bar space toggles maximize (mouse-only
        convenience; the dedicated maximize button is the accessible path). -->
@@ -2174,7 +2203,7 @@
         ontimeupdate={onVideoTimeUpdate}
         onseeking={onVideoSeeking}
       ></video>
-        <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { userPaused = !p }} oncontrolsvisible={(v) => { controlsVisible = v }} {activeStatus} />
+        <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { userPaused = !p }} oncontrolsvisible={(v) => { controlsVisible = v }} {activeStatus} isFullscreen={isFullscreen} ontogglefullscreen={toggleVideoFullscreen} />
         {#if showPlayerOverlay}
           <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
             {#if isPlayerBusy}
@@ -3163,6 +3192,30 @@
     object-fit: contain;
     background: var(--bg-app);
     display: block;
+  }
+
+  /* Native window fullscreen (Tauri setFullscreen) fills the whole OS
+     window, which by default would show the title bar + sidebar + chat
+     scaled up. To get video-only fullscreen we lift just .player out of the
+     layout to cover the viewport: it carries the <video>, the controls and
+     the error/spinner overlay, so those remain interactive while the rest
+     of the app sits behind it. position:fixed inset:0 is safe under
+     documentElement.zoom (all insets are 0, so there's no engine-specific
+     left/top rescaling to disagree on, and no vh/vw to divide). The video's
+     object-fit:contain letterboxes inside the filled area; #000 gives the
+     cinema letterbox bars. aspect-ratio/flex/max-height are reset so the
+     player can adopt any shape instead of the normal 16:9 flex item. */
+  .app--fullscreen .player {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9000;
+    flex: none;
+    aspect-ratio: auto;
+    max-height: none;
+    background: #000;
   }
 
   .stream-info {
