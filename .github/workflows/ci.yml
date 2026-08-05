@@ -67,6 +67,16 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
+      - name: JS dependencies audit (npm audit)
+        # Supply-chain advisory scan over package-lock.json. Mirrors the
+        # cargo-audit step at the end of this job; runs right after `npm ci`
+        # so a vulnerable dependency fails fast before the type-check / lint /
+        # build work. Exits non-zero on any advisory (prod or dev). npm audit
+        # has no "unmaintained" category (unlike cargo audit) so there is no
+        # equivalent ignore list — a new transitive vuln usually clears via the
+        # next dependabot bump.
+        run: npm audit
+
       - name: Version drift check
         # Fails fast if package.json / Cargo.toml / Cargo.lock disagree, or a
         # packaging README / PKGBUILD carries a stale hardcoded version. Runs
