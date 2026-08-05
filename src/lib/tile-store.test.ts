@@ -322,3 +322,55 @@ describe('per-tile volume (scroll changes only the hovered tile)', () => {
     expect(store.byId(a.id)!.manualUnmute).toBe(false)
   })
 })
+
+// ---- Chat visibility invariant: focused tile is always resolvable ------------
+// MultiView.svelte looks up the active chat session via sessions.get(focused.id).
+// If `focused` is ever null while tiles exist (or its id doesn't match a tile in
+// the array), the chat pane shows "No streams open" even though a stream is
+// playing. These tests assert the data-level guarantee that prevents that.
+describe('focused tile is always resolvable while tiles exist (chat visibility)', () => {
+  it('focused is non-null and its id is in tiles after every addOrReplace', () => {
+    for (let i = 0; i < S.MAX_TILES + 2; i++) {
+      store.addOrReplace('channel' + i)
+      expect(store.focused).not.toBeNull()
+      const fid = store.focused!.id
+      expect(store.tiles.some((t) => t.id === fid)).toBe(true)
+    }
+  })
+
+  it('focused is non-null and resolvable after closing any tile (except the last)', () => {
+    const ids: string[] = []
+    for (let i = 0; i < 4; i++) ids.push(store.addOrReplace('ch' + i).tile.id)
+    // Close each one-by-one; after each close (while tiles remain), focused
+    // must point to a real tile so the chat pane can find a session.
+    for (let round = 0; round < 3; round++) {
+      store.close(ids[round])
+      expect(store.focused).not.toBeNull()
+      const fid = store.focused!.id
+      expect(store.tiles.some((t) => t.id === fid)).toBe(true)
+    }
+    // Closing the last tile → focused is null, grid empty.
+    store.close(ids[3])
+    expect(store.focused).toBeNull()
+  })
+
+  it('focused is non-null and resolvable after focus changes', () => {
+    const a = store.addOrReplace('shroud').tile
+    const b = store.addOrReplace('lirik').tile
+    store.focus(a.id)
+    expect(store.focused).not.toBeNull()
+    expect(store.tiles.some((t) => t.id === store.focused!.id)).toBe(true)
+    store.focus(b.id)
+    expect(store.focused).not.toBeNull()
+    expect(store.tiles.some((t) => t.id === store.focused!.id)).toBe(true)
+  })
+
+  it('replacing the focused tile (grid full) keeps focused resolvable', () => {
+    for (let i = 0; i < S.MAX_TILES; i++) store.addOrReplace('ch' + i)
+    // Grid full — addOrReplace replaces the focused tile.
+    store.addOrReplace('newchannel')
+    expect(store.focused).not.toBeNull()
+    expect(store.focused!.channel).toBe('newchannel')
+    expect(store.tiles.some((t) => t.id === store.focused!.id)).toBe(true)
+  })
+})

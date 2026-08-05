@@ -34,7 +34,16 @@
 
   // Reconcile sessions to the current tiles: create on add, dispose on remove,
   // restart on channel replace (same tile id, different channel).
-  $effect(() => {
+  // Reconcile sessions to the current tiles: create on add, dispose on remove,
+  // restart on channel replace (same tile id, different channel).
+  //
+  // IMPORTANT: this runs in $effect.pre (not $effect) so sessions are created
+  // BEFORE the template reads the `activeSession` derived. With a regular
+  // $effect the reconcile runs AFTER the DOM update — the derived sees a null
+  // session for the just-added tile and renders "No streams open" until the user
+  // manually switches chat tabs. $effect.pre runs before the update phase, so
+  // the session is in the Map by the time `sessions.get(focusedId)` is read.
+  $effect.pre(() => {
     const tiles = tileStore.tiles
     const ids = new Set(tiles.map((tile) => tile.id))
     for (const [id, s] of sessions) {
@@ -63,6 +72,9 @@
     for (const [, s] of sessions) s.dispose()
     sessions.clear()
     onFocusedVideo(null)
+    document.removeEventListener('pointermove', onSplitMove)
+    document.removeEventListener('pointerup', endSplitDrag)
+    document.removeEventListener('pointercancel', endSplitDrag)
   })
 
   const focusedId = $derived(tileStore.focused?.id ?? null)
@@ -204,6 +216,69 @@
   // (mouse: hover; keyboard: Tab surfaces the button). The hover zone sits BELOW
   // the grid (its own flex strip) so it never steals clicks from tiles/controls.
   let barHovered = $state(false)
+
+  // ---- resizable tile splits (#3) -------------------------------------------
+  // splitX / splitY are the column / row split ratios (0.15–0.85, default 0.5).
+  // They are NOT persisted (multi-view itself is never persisted) — they reset
+  // on every multi-view session. Dragging a splitter handle updates the ratio;
+  // the grid template is recomputed reactively via inline style on .mv-grid.
+  // For the 3-tile layout the 4-column grid naturally centers tile3 at 50/50;
+  // dragging the column splitter shifts it towards the larger tile (expected).
+  let splitX = $state(0.5)
+  let splitY = $state(0.5)
+  let gridEl = $state<HTMLElement | undefined>(undefined)
+  let splitDrag = $state<{ axis: 'x' | 'y' } | null>(null)
+
+  const gridStyle = $derived.by(() => {
+    if (count <= 1) return ''
+    if (count === 2) return `grid-template-columns: ${splitX}fr ${1 - splitX}fr;`
+    if (count === 3) {
+      const l = splitX * 0.5
+      const r = (1 - splitX) * 0.5
+      return `grid-template-columns: ${l}fr ${l}fr ${r}fr ${r}fr; grid-template-rows: ${splitY}fr ${1 - splitY}fr;`
+    }
+    return `grid-template-columns: ${splitX}fr ${1 - splitX}fr; grid-template-rows: ${splitY}fr ${1 - splitY}fr;`
+  })
+
+  // Explicit grid-area placement per tile for the 3-tile layout (tile3 centered
+  // below the two top tiles). Uses inline style on each Tile's root element
+  // instead of CSS nth-child selectors for deterministic placement. Returns ''
+  // for other layouts so the grid auto-placement handles them.
+  function tileGridArea(i: number): string {
+    if (count === 3) {
+      if (i === 0) return '1 / 1 / 2 / 3'
+      if (i === 1) return '1 / 3 / 2 / 5'
+      if (i === 2) return '2 / 2 / 3 / 4'
+    }
+    return ''
+  }
+
+  function startSplitDrag(axis: 'x' | 'y', e: PointerEvent): void {
+    e.preventDefault()
+    e.stopPropagation()
+    splitDrag = { axis }
+    document.addEventListener('pointermove', onSplitMove)
+    document.addEventListener('pointerup', endSplitDrag)
+    document.addEventListener('pointercancel', endSplitDrag)
+  }
+
+  function onSplitMove(e: PointerEvent): void {
+    if (!splitDrag || !gridEl) return
+    const rect = gridEl.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) return
+    if (splitDrag.axis === 'x') {
+      splitX = Math.max(0.15, Math.min(0.85, (e.clientX - rect.left) / rect.width))
+    } else {
+      splitY = Math.max(0.15, Math.min(0.85, (e.clientY - rect.top) / rect.height))
+    }
+  }
+
+  function endSplitDrag(): void {
+    splitDrag = null
+    document.removeEventListener('pointermove', onSplitMove)
+    document.removeEventListener('pointerup', endSplitDrag)
+    document.removeEventListener('pointercancel', endSplitDrag)
+  }
 </script>
 
 <div class="mv-main" style="--chat-size:{chatSize}px">
@@ -211,8 +286,8 @@
     {#if count === 0}
       <div class="mv-empty">{t('mv_addStreamHint')}</div>
     {:else}
-      <div class="mv-grid" class:mv-grid--1={count === 1} class:mv-grid--2={count === 2} class:mv-grid--3={count === 3} class:mv-grid--4={count === 4}>
-        {#each tileStore.tiles as tile (tile.id)}
+      <div class="mv-grid" class:mv-grid--1={count === 1} class:mv-grid--2={count === 2} class:mv-grid--3={count === 3} class:mv-grid--4={count === 4} bind:this={gridEl} style={gridStyle}>
+        {#each tileStore.tiles as tile, i (tile.id)}
           <Tile
             {tile}
             isFocused={tileStore.isFocused(tile.id)}
@@ -221,8 +296,34 @@
             {isWindows}
             {onFocusedVideo}
             onTileDragStart={startDrag}
+            gridArea={tileGridArea(i)}
           />
         {/each}
+        {#if count >= 2}
+          <!-- Column splitter (between left/right tiles). For 3 tiles it spans
+               only the top-row height (between the two upper tiles). -->
+          <div
+            class="mv-splitter mv-splitter--col"
+            class:mv-splitter--active={splitDrag?.axis === 'x'}
+            style={count === 3 ? `left:${(splitX * 100).toFixed(2)}%;top:0;height:${(splitY * 100).toFixed(2)}%;` : `left:${(splitX * 100).toFixed(2)}%;top:0;bottom:0;`}
+            role="separator"
+            aria-orientation="vertical"
+            onpointerdown={(e) => startSplitDrag('x', e)}
+            ondblclick={() => { splitX = 0.5 }}
+          ></div>
+        {/if}
+        {#if count >= 3}
+          <!-- Row splitter (between the top row and the bottom tile/tiles). -->
+          <div
+            class="mv-splitter mv-splitter--row"
+            class:mv-splitter--active={splitDrag?.axis === 'y'}
+            style={`top:${(splitY * 100).toFixed(2)}%;left:0;right:0;`}
+            role="separator"
+            aria-orientation="horizontal"
+            onpointerdown={(e) => startSplitDrag('y', e)}
+            ondblclick={() => { splitY = 0.5 }}
+          ></div>
+        {/if}
       </div>
     {/if}
 
@@ -250,7 +351,7 @@
         {#each tileStore.tiles as tile (tile.id)}
           {@const s = tile.liveStatus}
           {@const focused = tileStore.isFocused(tile.id)}
-          <div class="mv-status-row" class:mv-status-row--active={focused}>
+          <button type="button" class="mv-status-row" class:mv-status-row--active={focused} onclick={() => tileStore.focus(tile.id)} aria-label={t('mv_focusTile') + ' — ' + tile.channel} aria-current={focused ? 'true' : 'false'}>
             {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
               <img class="mv-status-avatar" class:mv-status-avatar--off={s.state === 'offline'} src={s.avatarUrl} alt="" />
           {/if}
@@ -268,7 +369,7 @@
           {:else}
             <span class="mv-status-loading">{tile.status === 'loading' ? t('player_loadingStream') : t('live')}</span>
           {/if}
-        </div>
+        </button>
         {/each}
       </div>
     {:else}
@@ -389,22 +490,49 @@
     min-height: 0;
     min-width: 0;
     display: grid;
-    gap: 2px;
-    background: var(--border);
+    gap: 0;
+    background: #000;
+    position: relative;
   }
   .mv-grid--1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
   .mv-grid--2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
-  /* 3: TWO equal tiles on top, ONE tile on the bottom spanning the full width.
-     The bottom tile's video is object-fit:contain-centered, so in a wide stage
-     it renders at the SAME size as each top tile (both are height-constrained),
-     with #000 margins that blend into the tile — intentional at every window
-     size, never stretched or orphaned. (Supersedes the old "one large + two
-     stacked".) */
-  .mv-grid--3 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-  .mv-grid--3 > :nth-child(1) { grid-area: 1 / 1; }
-  .mv-grid--3 > :nth-child(2) { grid-area: 1 / 2; }
-  .mv-grid--3 > :nth-child(3) { grid-area: 2 / 1 / 3 / 3; }
+  /* 3: TWO equal tiles on top, ONE tile CENTERED below them (same width as each
+     top tile). Uses a 4-column grid; tile placement is set via inline grid-area
+     on each Tile (see tileGridArea), NOT nth-child — deterministic at every
+     split ratio. At the default 50/50 split tile3 is perfectly centered. */
+  .mv-grid--3 { grid-template-columns: 1fr 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
   .mv-grid--4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+
+  /* Resizable splitter handles. They are absolutely-positioned children of the
+     grid (position:absolute removes them from grid flow so they don't affect
+     tile placement or nth-child selectors — they're rendered after the tiles).
+     A 2px visible line with a larger invisible hit area (via ::before). On
+     hover or active-drag the line turns accent-colored. Double-click resets. */
+  .mv-splitter {
+    position: absolute;
+    z-index: 3;
+    background: var(--border);
+    transition: background 100ms;
+  }
+  .mv-splitter::before {
+    content: '';
+    position: absolute;
+    inset: -5px;
+  }
+  .mv-splitter--col {
+    width: 2px;
+    transform: translateX(-50%);
+    cursor: col-resize;
+  }
+  .mv-splitter--row {
+    height: 2px;
+    transform: translateY(-50%);
+    cursor: row-resize;
+  }
+  .mv-splitter:hover,
+  .mv-splitter--active {
+    background: var(--accent);
+  }
 
   /* Status bar — all streams, focused row prominent. */
   .mv-statusbar {
@@ -488,9 +616,17 @@
     padding: 5px 12px;
     background: var(--bg-app);
     opacity: 0.6;
+    border: none;
     border-left: 3px solid transparent;
     min-width: 0;
+    width: 100%;
+    font: inherit;
+    text-align: left;
+    color: inherit;
+    cursor: pointer;
   }
+  .mv-status-row:hover { background: var(--bg-hover); opacity: 0.85; }
+  .mv-status-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .mv-status-row--active {
     opacity: 1;
     border-left-color: var(--accent);

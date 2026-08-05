@@ -48,8 +48,10 @@
     onFocusedVideo: (el: HTMLVideoElement | null) => void
     /** Drag-handle pointer-down — MultiView owns hit-testing for the drop target. */
     onTileDragStart: (tileId: string, e: PointerEvent) => void
+    /** CSS grid-area shorthand for this tile's placement (empty = auto-place). */
+    gridArea?: string
   }
-  const { tile, isFocused, isWindows, isDragging, isDropTarget, onFocusedVideo, onTileDragStart }: Props = $props()
+  const { tile, isFocused, isWindows, isDragging, isDropTarget, onFocusedVideo, onTileDragStart, gridArea }: Props = $props()
 
   const QUALITY_IDS = ['best', '1080p60', '720p60', '720p', '480p', '360p', '160p', 'audio_only'] as const
   function qualityLabel(id: string): string {
@@ -367,6 +369,7 @@
   class:mv-tile--audible={audible}
   class:mv-tile--dragging={isDragging}
   class:mv-tile--drop-target={isDropTarget}
+  style={gridArea ? `grid-area:${gridArea};` : undefined}
   role="group"
   aria-label={tile.channel}
   onmousemove={bump}
@@ -392,18 +395,23 @@
 
   <!-- Drag handle (pointer-events): grabbing here starts a reorder. Deliberately
        a separate element from the <video> so HTML5/native drag never touches the
-       player or its controls. Keyboard users get the ◀/▶ reorder buttons below. -->
-  <button
-    type="button"
-    class="mv-drag-handle"
-    aria-label={t('mv_dragTile')}
-    use:tooltip={t('mv_dragTile')}
-    onpointerdown={(e) => onTileDragStart(tile.id, e)}
-  >
-    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="currentColor"><circle cx="5" cy="4" r="1.3"/><circle cx="11" cy="4" r="1.3"/><circle cx="5" cy="8" r="1.3"/><circle cx="11" cy="8" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="11" cy="12" r="1.3"/></svg>
-  </button>
+       player or its controls. Keyboard users get the ◀/▶ reorder buttons below.
+       Auto-hides with the rest of the tile overlay (controlsShown). -->
+  {#if controlsShown}
+    <button
+      type="button"
+      class="mv-drag-handle"
+      aria-label={t('mv_dragTile')}
+      use:tooltip={t('mv_dragTile')}
+      onpointerdown={(e) => onTileDragStart(tile.id, e)}
+    >
+      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="currentColor"><circle cx="5" cy="4" r="1.3"/><circle cx="11" cy="4" r="1.3"/><circle cx="5" cy="8" r="1.3"/><circle cx="11" cy="8" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="11" cy="12" r="1.3"/></svg>
+    </button>
+  {/if}
 
-  <div class="mv-tile-channel" class:mv-tile-channel--dim={!isFocused}>{tile.channel}</div>
+  {#if controlsShown}
+    <div class="mv-tile-channel" class:mv-tile-channel--dim={!isFocused}>{tile.channel}</div>
+  {/if}
 
   {#if showOverlay}
     <div class="mv-tile-overlay">
