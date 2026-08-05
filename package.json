@@ -19,7 +19,7 @@
     "tauri": "tauri"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.5",
+    "@eslint/js": "^10.0.1",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tauri-apps/cli": "^2.11.4",
     "@tsconfig/svelte": "^5.0.8",
