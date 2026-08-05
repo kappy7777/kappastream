@@ -90,6 +90,9 @@ const CHAT_SUBNOTICES_KEY = 'app-chat-subnotices-v1'
 const CHAT_ROOMSTATE_KEY = 'app-chat-roomstate-v1'
 const CHAT_MODERATION_KEY = 'app-chat-moderation-v1'
 const CHAT_BITS_KEY = 'app-chat-bits-v1'
+// Multi-view status bar visibility (persisted). Default shown. Hidden by the
+// user to reclaim vertical space; revealed by hovering the bottom edge.
+const MV_STATUSBAR_HIDDEN_KEY = 'app-mv-statusbar-hidden-v1'
 // Client-side chat mute list. Login names the user never wants to see in chat.
 // Matching is done on the STABLE `login` field (parsed & lowercased from the
 // IRC nick prefix), never on display-name (user-settable capitalization — the
@@ -189,6 +192,10 @@ function readChatBits(): boolean {
   return safeRead(CHAT_BITS_KEY) === 'true'
 }
 
+function readMvStatusBarHidden(): boolean {
+  return safeRead(MV_STATUSBAR_HIDDEN_KEY) === 'true'
+}
+
 // Normalize a user-entered mute entry to a lowercase login, or null if it has
 // no usable characters (empty / whitespace / punctuation). Mirrors the lenient
 // cleaning used for the mention username so pasting "@Troll!" yields "troll".
@@ -253,6 +260,7 @@ class SettingsStore {
   chatRoomstate: boolean = $state(readChatRoomstate())
   chatModeration: boolean = $state(readChatModeration())
   chatBits: boolean = $state(readChatBits())
+  mvStatusBarHidden: boolean = $state(readMvStatusBarHidden())
   // Client-side chat mute list (logins). Reactive so adding/removing an entry
   // re-renders messages already in the buffer — same "gate presentation, not
   // parsing" architecture as the Tier 2 toggles.
@@ -388,6 +396,15 @@ class SettingsStore {
 
   toggleChatBits(): void {
     this.setChatBits(!this.chatBits)
+  }
+
+  setMvStatusBarHidden(v: boolean): void {
+    this.mvStatusBarHidden = v
+    safeWrite(MV_STATUSBAR_HIDDEN_KEY, v ? 'true' : 'false')
+  }
+
+  toggleMvStatusBarHidden(): void {
+    this.setMvStatusBarHidden(!this.mvStatusBarHidden)
   }
 
   // ---- Chat mute list -----------------------------------------------------

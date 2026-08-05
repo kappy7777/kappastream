@@ -6,6 +6,7 @@
   import { isTauri } from '@tauri-apps/api/core'
   import { t } from './i18n/index.svelte'
   import { formatCompact } from './format'
+  import { nextVolume } from './volume'
 
   // Quality menu. The resolution IDs (1080p60 …) are technical streamlink args
   // and are NOT translated; only the two display words ('Source', 'Audio only')
@@ -110,10 +111,9 @@
     }
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
-      const step = 0.05
       const dir = e.deltaY < 0 ? 1 : -1
       const current = v.muted ? 0 : v.volume
-      const next = Math.max(0, Math.min(1, current + dir * step))
+      const next = nextVolume(current, dir)
       if (next > 0 && v.muted) v.muted = false
       v.volume = next
     }

@@ -30,6 +30,8 @@
   import { notifications } from './lib/notifications.svelte.ts'
   import { tooltip } from './lib/tooltip.ts'
   import { tooltipState } from './lib/tooltip.svelte.ts'
+  import { tileStore } from './lib/tile-store.svelte.ts'
+  import MultiView from './lib/MultiView.svelte'
   import { t } from './lib/i18n/index.svelte'
   import { formatCompact, formatChatTime, formatAge } from './lib/format'
   import kappaUrl from './assets/kappa.png'
@@ -96,6 +98,13 @@
   // kept so the user can resume / return to live).
   onMount(() => {
     sleepTimer.setOnFire(() => {
+      if (multiView) {
+        // Multi-view: the sleep timer stops ALL tiles (every tile's hls.js +
+        // streamlink resolve + IRC session). Mode stays on with an empty grid.
+        tileStore.exitAll()
+        showNotifToast(t('toast_sleepStopped'))
+        return
+      }
       if (playback.kind === 'live') {
         disconnect()
       } else {
@@ -210,6 +219,15 @@
   }
   let sidebarMode = $state(loadSidebarMode())
   let aboutOpen = $state(false)
+  // Multi-stream split view. ALWAYS OFF on startup and NEVER persisted
+  // (starting in multi-view after a restart would be surprising and would
+  // spawn up to 4 streamlink resolves + 4 hls.js instances on launch). When on,
+  // MultiView.svelte renders the tile grid INSTEAD of the single-stream `.main`;
+  // when off, App.svelte's original markup renders byte-identical.
+  let multiView = $state(false)
+  // The focused tile's <video>, registered by Tile.svelte so the keyboard
+  // shortcuts (space/k/m/arrows/f) target the focused tile in multi-view.
+  let focusedTileVideo = $state<HTMLVideoElement | null>(null)
   let tooltipEl: HTMLElement | undefined = $state()
   let tooltipPos = $state({ left: 0, top: 0 })
   let probeEl: HTMLElement | undefined = $state()
@@ -312,7 +330,7 @@
   // effects. Suppression: never while typing in any editable target, and never
   // behind an open modal/overlay (about / browse / this help). See shortcuts.ts.
   function toggleVideoPlay(): void {
-    const el = videoEl
+    const el = activeVideoEl()
     if (!el) return
     if (el.paused) {
       userPaused = false
@@ -325,11 +343,27 @@
     }
   }
   function toggleVideoMute(): void {
+    if (multiView) {
+      // Focused tile is the audio authority → M toggles the global mute.
+      settings.toggleMuted()
+      return
+    }
     const el = videoEl
     if (!el) return
     el.muted = !el.muted
   }
   function toggleVideoFullscreen(): void {
+    if (multiView) {
+      // Per-tile fullscreen via the HTML5 API on the focused tile's element
+      // (the native-window `.app--fullscreen .player` lift has no `.player` in
+      // multi-view). WebKitGTK supports element fullscreen.
+      const el = focusedTileVideo
+      if (!el) return
+      const target = el.closest('.mv-tile') as HTMLElement | null ?? el.parentElement
+      if (document.fullscreenElement) void document.exitFullscreen()
+      else if (target) void target.requestFullscreen?.()
+      return
+    }
     const el = videoEl
     if (!el) return
     const win = currentWin()
@@ -351,13 +385,18 @@
     }
   }
   function seekVideoBy(delta: number): void {
-    const el = videoEl
+    const el = activeVideoEl()
     if (!el) return
     let next = el.currentTime + delta
     if (Number.isFinite(el.duration) && el.duration > 0) next = Math.min(next, el.duration)
     try { el.currentTime = Math.max(0, next) } catch { /* ignore */ }
   }
   function nudgeVolume(delta: number): void {
+    if (multiView) {
+      // Volume follows the global setting (the focused tile's authority).
+      settings.setVolume(Math.max(0, Math.min(1, settings.volume + delta)))
+      return
+    }
     const el = videoEl
     if (!el) return
     const cur = el.muted ? 0 : el.volume
@@ -397,7 +436,8 @@
         toggleVideoFullscreen()
         return
       case 'toggle-theater':
-        settings.toggleTheaterMode()
+        // Theater is nonsensical over a tile grid — ignored in multi-view.
+        if (!multiView) settings.toggleTheaterMode()
         return
       case 'seek':
         e.preventDefault()
@@ -1297,10 +1337,66 @@
     void connect()
   }
 
-  // Connect from Browse — connects via the same path, then closes the overlay.
-  function browseSelectChannel(name: string): void {
+  // ---- Multi-stream split view -------------------------------------------
+  // The SINGLE channel-open entry point every call site funnels through
+  // (sidebar / search / browse). With multi-view OFF it is exactly the existing
+  // single-stream path (byte-identical baseline). With multi-view ON it adds a
+  // tile (next empty slot, else replaces the focused tile) via the TileStore.
+  function openChannel(name: string): void {
+    if (multiView) {
+      tileStore.addOrReplace(name, 'best', settings.volume)
+      return
+    }
     selectChannel(name)
+  }
+
+  // Connect from Browse — opens via the shared router, then closes the overlay.
+  function browseOpenChannel(name: string): void {
+    openChannel(name)
     browseOpen = false
+  }
+
+  function toggleMultiView(): void {
+    if (!multiView) {
+      // Enter: tear down the single stream (frees its hls.js + chat) and seed
+      // tile[0] with the channel currently watching, if any. Theater is
+      // nonsensical with a tile grid, so it is forced off on entry.
+      const ch = channelJoined
+      multiView = true
+      settings.setTheaterMode(false)
+      if (ch) {
+        disconnect()
+        tileStore.addOrReplace(ch, 'best', settings.volume)
+      }
+    } else {
+      exitMultiView()
+    }
+  }
+
+  // Leave multi-view. Restores the focused tile's channel as the single stream
+  // (when one is still present — e.g. the manual toggle); when the LAST tile
+  // closed (onShouldExit) there is no focused tile, so it falls back to the
+  // idle single-stream view. Tearing down tiles happens via Svelte lifecycle:
+  // setting multiView=false unmounts MultiView, whose Tile onDestroy calls
+  // destroy hls.js and whose reconcile-effect cleanup disposes every
+  // ChatSession.
+  function exitMultiView(): void {
+    const ch = tileStore.focused?.channel ?? null
+    multiView = false
+    tileStore.exitAll()
+    focusedTileVideo = null
+    if (ch) selectChannel(ch)
+  }
+
+  onMount(() => {
+    // Closing the last remaining tile exits multi-view back to single-stream.
+    tileStore.onShouldExit = () => exitMultiView()
+  })
+
+  // The <video> the keyboard shortcuts target: the focused tile's in
+  // multi-view, the single player otherwise.
+  function activeVideoEl(): HTMLVideoElement | null | undefined {
+    return multiView ? focusedTileVideo : videoEl
   }
 
   // ---- VOD / clip playback -------------------------------------------------
@@ -1845,6 +1941,7 @@
       .onCloseRequested((event) => {
         if (settings.closeToTray) {
           event.preventDefault()
+          if (multiView) tileStore.exitAll()
           disconnect()
           void getCurrentWindow().hide().catch(() => { /* ignore */ })
         }
@@ -2087,7 +2184,7 @@
       </button>
     </div>
     <div class="bar-center" data-tauri-drag-region>
-      <SearchBox onselect={selectChannel} />
+      <SearchBox onselect={openChannel} />
     </div>
     <div class="bar-right" data-tauri-drag-region>
       <NotifyMenu />
@@ -2106,6 +2203,7 @@
           <span class="sleep-chip-time">{formatSleepRemaining(sleepTimer.remainingMs)}</span>
         </button>
       {/if}
+      {#if !multiView}
       <button
         type="button"
         class="layout-toggle"
@@ -2121,6 +2219,23 @@
             <rect x="2" y="2" width="12" height="6" rx="1" fill="currentColor"/>
             <rect x="2" y="9" width="12" height="5" rx="1" fill="currentColor" opacity="0.4"/>
           {/if}
+        </svg>
+      </button>
+      {/if}
+      <button
+        type="button"
+        class="layout-toggle"
+        class:layout-toggle--active={multiView}
+        onclick={toggleMultiView}
+        aria-label={multiView ? t('mv_exitMultiView') : t('mv_multiView')}
+        aria-pressed={multiView}
+        use:tooltip={multiView ? t('mv_exitMultiView') : t('mv_multiView')}
+      >
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1" fill="currentColor"/>
+          <rect x="9" y="1.5" width="5.5" height="5.5" rx="1" fill="currentColor"/>
+          <rect x="1.5" y="9" width="5.5" height="5.5" rx="1" fill="currentColor"/>
+          <rect x="9" y="9" width="5.5" height="5.5" rx="1" fill="currentColor"/>
         </svg>
       </button>
       <Settings onarmsleep={armSleep} />
@@ -2177,8 +2292,11 @@
 
   <div class="body">
     {#if !settings.theaterMode && sidebarMode !== 'hidden'}
-      <Sidebar currentChannel={channelJoined} onselect={selectChannel} iconsOnly={sidebarMode === 'icons'} {zoomK} />
+      <Sidebar currentChannel={channelJoined} onselect={openChannel} iconsOnly={sidebarMode === 'icons'} {zoomK} />
     {/if}
+    {#if multiView}
+      <MultiView isWindows={isWindows} chatSize={chatSize} onFocusedVideo={(el) => { focusedTileVideo = el }} />
+    {:else}
     <div class="main" class:main--stacked={stacked} bind:this={mainEl}>
     <div class="video-pane">
     <div class="video-scroll" bind:this={videoScrollEl}>
@@ -2489,6 +2607,7 @@
     </main>
     {/if}
     </div>
+    {/if}
   </div>
   {#if notifToast}
     <div class="notif-toast" role="status" aria-live="polite">{notifToast}</div>
@@ -2577,7 +2696,7 @@
   {/if}
 
   {#if browseOpen}
-    <BrowseView onselect={browseSelectChannel} onclose={() => (browseOpen = false)} />
+    <BrowseView onselect={browseOpenChannel} onclose={() => (browseOpen = false)} />
   {/if}
 
   <!-- Borderless resize handles. The main window is decorations:false, so on
@@ -2814,6 +2933,11 @@
   .layout-toggle:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
+  }
+
+  .layout-toggle--active {
+    color: var(--accent);
+    background: var(--bg-hover-faint);
   }
 
   /* Sleep-timer countdown chip — shown in the top bar only while a timer is

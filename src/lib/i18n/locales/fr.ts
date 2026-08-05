@@ -135,6 +135,22 @@ export const fr: Record<TKey, string> = {
   tb_maximize: 'Agrandir',
   tb_closeWin: 'Fermer',
 
+  // ---- Multi-stream split view (MultiView.svelte / Tile.svelte) -----------
+  mv_multiView: 'Vue multi-flux',
+  mv_exitMultiView: 'Quitter la vue multi-flux',
+  mv_focusedTile: 'Flux actif',
+  mv_focusTile: 'Activer ce flux',
+  mv_listenAlong: 'Écouter en plus du flux actif',
+  mv_closeTile: 'Fermer le flux',
+  mv_noTiles: 'Aucun flux ouvert',
+  mv_addStreamHint: 'Cliquez sur un favori ou recherchez pour ajouter un flux',
+  mv_statusBar: 'Flux ouverts',
+  mv_dragTile: 'Glisser pour réorganiser',
+  mv_moveLeft: 'Déplacer le flux à gauche',
+  mv_moveRight: 'Déplacer le flux à droite',
+  mv_hideStatusBar: 'Masquer la barre d’état',
+  mv_showStatusBar: 'Afficher la barre d’état',
+
   si_uptime: 'Depuis {uptime}',
   si_favorite: 'Favori',
   si_addFavorite: 'Ajouter aux favoris',

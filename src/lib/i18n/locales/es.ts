@@ -135,6 +135,22 @@ export const es: Record<TKey, string> = {
   tb_maximize: 'Maximizar',
   tb_closeWin: 'Cerrar',
 
+  // ---- Multi-stream split view (MultiView.svelte / Tile.svelte) -----------
+  mv_multiView: 'Vista multitransmisión',
+  mv_exitMultiView: 'Salir de la vista multitransmisión',
+  mv_focusedTile: 'Transmisión activa',
+  mv_focusTile: 'Enfocar esta transmisión',
+  mv_listenAlong: 'Escuchar junto a la transmisión enfocada',
+  mv_closeTile: 'Cerrar transmisión',
+  mv_noTiles: 'Sin transmisiones abiertas',
+  mv_addStreamHint: 'Haz clic en un favorito o busca para añadir una transmisión',
+  mv_statusBar: 'Transmisiones abiertas',
+  mv_dragTile: 'Arrastrar para reordenar',
+  mv_moveLeft: 'Mover transmisión a la izquierda',
+  mv_moveRight: 'Mover transmisión a la derecha',
+  mv_hideStatusBar: 'Ocultar barra de estado',
+  mv_showStatusBar: 'Mostrar barra de estado',
+
   si_uptime: 'Desde {uptime}',
   si_favorite: 'Favorito',
   si_addFavorite: 'Añadir favorito',

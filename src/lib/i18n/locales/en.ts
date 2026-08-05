@@ -152,6 +152,22 @@ export const en = {
   tb_maximize: 'Maximize',
   tb_closeWin: 'Close',
 
+  // ---- Multi-stream split view (MultiView.svelte / Tile.svelte) -----------
+  mv_multiView: 'Multi-stream view',
+  mv_exitMultiView: 'Exit multi-stream view',
+  mv_focusedTile: 'Focused tile',
+  mv_focusTile: 'Focus this tile',
+  mv_listenAlong: 'Listen alongside focused tile',
+  mv_closeTile: 'Close tile',
+  mv_noTiles: 'No streams open',
+  mv_addStreamHint: 'Click a favorite or search to add a stream',
+  mv_statusBar: 'Open streams',
+  mv_dragTile: 'Drag to reorder',
+  mv_moveLeft: 'Move tile left',
+  mv_moveRight: 'Move tile right',
+  mv_hideStatusBar: 'Hide status bar',
+  mv_showStatusBar: 'Show status bar',
+
   // ---- App.svelte: stream info bar ----------------------------------------
   si_uptime: 'Up {uptime}',
   si_favorite: 'Favorite',

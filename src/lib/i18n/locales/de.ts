@@ -136,6 +136,22 @@ export const de: Record<TKey, string> = {
   tb_maximize: 'Maximieren',
   tb_closeWin: 'Schließen',
 
+  // ---- Multi-stream split view (MultiView.svelte / Tile.svelte) -----------
+  mv_multiView: 'Multi-Stream-Ansicht',
+  mv_exitMultiView: 'Multi-Stream-Ansicht verlassen',
+  mv_focusedTile: 'Aktiver Stream',
+  mv_focusTile: 'Diesen Stream fokussieren',
+  mv_listenAlong: 'Zusätzlich zum fokussierten Stream hören',
+  mv_closeTile: 'Stream schließen',
+  mv_noTiles: 'Keine Streams geöffnet',
+  mv_addStreamHint: 'Klicke auf einen Favoriten oder suche, um einen Stream hinzuzufügen',
+  mv_statusBar: 'Geöffnete Streams',
+  mv_dragTile: 'Ziehen zum Sortieren',
+  mv_moveLeft: 'Stream nach links',
+  mv_moveRight: 'Stream nach rechts',
+  mv_hideStatusBar: 'Statusleiste ausblenden',
+  mv_showStatusBar: 'Statusleiste einblenden',
+
   si_uptime: 'Seit {uptime}',
   si_favorite: 'Favorit',
   si_addFavorite: 'Favorit hinzufügen',

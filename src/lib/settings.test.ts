@@ -153,6 +153,38 @@ describe('update-check toggle (default on, opt-out)', () => {
   })
 })
 
+describe('multi-view status bar hide/show (persists across reloads)', () => {
+  const KEY = 'app-mv-statusbar-hidden-v1'
+
+  it('defaults to shown (false) on a fresh store', () => {
+    expect(S.settings.mvStatusBarHidden).toBe(false)
+  })
+
+  it('a stored "true" is respected (hidden persists across reloads)', async () => {
+    localStorage.setItem(KEY, 'true')
+    vi.resetModules()
+    const mod = await import('./settings.svelte')
+    expect(mod.settings.mvStatusBarHidden).toBe(true)
+  })
+
+  it('a junk value is treated as shown (default false)', async () => {
+    localStorage.setItem(KEY, 'garbage')
+    vi.resetModules()
+    const mod = await import('./settings.svelte')
+    expect(mod.settings.mvStatusBarHidden).toBe(false)
+  })
+
+  it('setMvStatusBarHidden flips the value and persists', () => {
+    expect(S.settings.mvStatusBarHidden).toBe(false)
+    S.settings.setMvStatusBarHidden(true)
+    expect(S.settings.mvStatusBarHidden).toBe(true)
+    expect(localStorage.getItem(KEY)).toBe('true')
+    S.settings.setMvStatusBarHidden(false)
+    expect(S.settings.mvStatusBarHidden).toBe(false)
+    expect(localStorage.getItem(KEY)).toBe('false')
+  })
+})
+
 /*
  * Client-side chat mute list.
  *
