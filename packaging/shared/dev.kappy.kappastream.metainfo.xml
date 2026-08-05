@@ -78,6 +78,17 @@
   </content_rating>
 
   <releases>
+    <release version="0.3.1" date="2026-08-05">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v0.3.1</url>
+      <description>
+        <p>Multi-stream split view. Watch up to four live streams
+        simultaneously in a tile grid, each with its own independent chat tab,
+        quality, and volume. Tiles can be reordered by dragging, resized by
+        dragging the splitter handles between them, and the third tile in a
+        three-stream layout is centered below the top two. A status bar shows
+        every open stream at a glance and is hideable to reclaim space.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-08-02">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.3.0</url>
       <description>
