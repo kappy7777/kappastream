@@ -1,7 +1,7 @@
 {
   "name": "kappastream",
   "private": true,
-  "version": "0.3.1",
+  "version": "1.0.0",
   "description": "A lightweight, anonymous Twitch viewer (live stream, chat, favorites) for Linux, macOS, and Windows",
   "author": "kappy <kappy777@proton.me>",
   "license": "GPL-3.0-only",

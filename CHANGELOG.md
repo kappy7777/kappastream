@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-10
+
+kappastream 1.0 — the feature set and architecture are stable. This release
+marks the milestone; it is not a breaking change.
+
+### Added
+
+- **First-run welcome and "what's new" screens.** A welcome screen is shown
+  once on first install — a short intro, the feature list, the privacy
+  posture, and a streamlink check that shows the platform-appropriate install
+  command (pacman / apt / dnf on Linux, brew on macOS, pip on Windows) only
+  when streamlink is missing. After each update, a "what's new" screen lists
+  the highlights. Neither appears on a normal launch or a downgrade, and both
+  are dismissed in one click or with Escape. The seen-version is recorded on
+  dismissal, so a crash before dismissing re-shows the screen next launch.
+
 ## [0.3.1] - 2026-08-05
 
 ### Added
@@ -587,7 +603,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.0
 [0.3.1]: https://github.com/kappy7777/kappastream/releases/tag/v0.3.1
 [0.3.0]: https://github.com/kappy7777/kappastream/releases/tag/v0.3.0
 [0.2.9]: https://github.com/kappy7777/kappastream/releases/tag/v0.2.9

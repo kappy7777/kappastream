@@ -30,6 +30,12 @@ export interface VersionNotes {
 }
 
 const RELEASE_NOTES: Record<string, VersionNotes> = {
+  '1.0.0': {
+    highlights: [
+      'First-run welcome screen — intro, feature list, privacy summary, and a streamlink check with the right install command for your platform.',
+      'A "what\'s new" screen now appears once after each update, then never again until the next one.',
+    ],
+  },
   '0.3.1': {
     highlights: [
       'Multi-stream split view — watch up to four live streams side by side, each with its own chat tab, quality, and volume.',

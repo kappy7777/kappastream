@@ -78,6 +78,20 @@
   </content_rating>
 
   <releases>
+    <release version="1.0.0" date="2026-08-10">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.0</url>
+      <description>
+        <p>kappastream 1.0 — the feature set and architecture are stable.
+        This release marks the milestone; it is not a breaking change.</p>
+        <p>First-run welcome and "what's new" screens. A welcome screen is
+        shown once on first install — a short intro, the feature list, the
+        privacy posture, and a streamlink check that shows the
+        platform-appropriate install command only when streamlink is missing.
+        After each update, a "what's new" screen lists the highlights.
+        Neither appears on a normal launch or a downgrade, and both are
+        dismissed in one click or with Escape.</p>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-08-05">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v0.3.1</url>
       <description>
