@@ -22,6 +22,7 @@ const ctx = (over: Partial<ShortcutCtx> = {}): ShortcutCtx => ({
   aboutOpen: false,
   browseOpen: false,
   helpOpen: false,
+  welcomeOpen: false,
   isLive: true,
   ...over,
 })
@@ -113,11 +114,27 @@ describe('shortcuts are a no-op behind open modals/overlays', () => {
     expect(resolveShortcut(makeKey(' ', null), c)).toBeNull()
     expect(resolveShortcut(makeKey('Escape', null), c)).toEqual({ type: 'close-help' })
   })
+
+  it('welcome/what\'s-new overlay open: player shortcuts suppressed, Escape closes it', () => {
+    const c = ctx({ welcomeOpen: true })
+    expect(resolveShortcut(makeKey(' ', null), c)).toBeNull()
+    expect(resolveShortcut(makeKey('f', null), c)).toBeNull()
+    expect(resolveShortcut(makeKey('m', null), c)).toBeNull()
+    expect(resolveShortcut(makeKey('Escape', null), c)).toEqual({ type: 'close-welcome' })
+  })
 })
 
 describe('Escape + modifiers', () => {
   it('Escape closes the about modal when it is open', () => {
     expect(resolveShortcut(makeKey('Escape', null), ctx({ aboutOpen: true }))).toEqual({ type: 'close-about' })
+  })
+
+  it('Escape closes the welcome overlay when it is open (highest priority)', () => {
+    // Welcome is the topmost overlay visually; Escape wins over about/help.
+    expect(resolveShortcut(makeKey('Escape', null), ctx({ welcomeOpen: true }))).toEqual({ type: 'close-welcome' })
+    expect(
+      resolveShortcut(makeKey('Escape', null), ctx({ welcomeOpen: true, aboutOpen: true })),
+    ).toEqual({ type: 'close-welcome' })
   })
 
   it('Escape does nothing when no overlay is open', () => {

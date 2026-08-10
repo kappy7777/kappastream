@@ -76,6 +76,7 @@ pub fn run() {
             resolve::resolve_stream,
             resolve::resolve_vod,
             resolve::resolve_clip,
+            resolve::streamlink_status,
             player::launch_player,
             platform::target_os,
             opener::open_url_robust,

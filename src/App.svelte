@@ -15,6 +15,7 @@
   import BrowseView from './lib/BrowseView.svelte'
   import ChannelContent from './lib/ChannelContent.svelte'
   import UpdateBanner from './lib/UpdateBanner.svelte'
+  import WelcomeOverlay from './lib/WelcomeOverlay.svelte'
   import { updateStore } from './lib/update.svelte.ts'
   import { settings } from './lib/settings.svelte.ts'
   import { buildHlsConfig } from './lib/hls-config'
@@ -22,6 +23,7 @@
   import { sleepTimer, formatSleepRemaining } from './lib/sleep-timer.svelte.ts'
   import { vodPositions } from './lib/vod-positions.svelte.ts'
   import { resolveShortcut } from './lib/shortcuts'
+  import { firstLaunch } from './lib/first-launch.svelte'
   import { fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
   import { fetchChannelBadges } from './lib/gql'
@@ -410,6 +412,7 @@
       aboutOpen,
       browseOpen,
       helpOpen: shortcutsHelpOpen,
+      welcomeOpen: firstLaunch.visible,
       isLive: playback.kind === 'live',
     })
     if (!action) return
@@ -421,6 +424,10 @@
       case 'close-help':
         e.preventDefault()
         shortcutsHelpOpen = false
+        return
+      case 'close-welcome':
+        e.preventDefault()
+        firstLaunch.dismiss()
         return
       case 'toggle-help':
         shortcutsHelpOpen = !shortcutsHelpOpen
@@ -2283,6 +2290,7 @@
   </header>
 
   <UpdateBanner />
+  <WelcomeOverlay />
 
   {#if emoteStatus === 'loading'}
     <div class="banner">{t('chat_loadingEmotes')}</div>

@@ -254,6 +254,71 @@ enum StreamlinkError {
     },
 }
 
+/// Result of probing the host for a usable streamlink install. Used only by the
+/// first-run welcome screen so it can surface the platform-appropriate install
+/// hint ONLY when streamlink is actually missing — users who already have it
+/// are never nagged.
+///
+/// `platform` is the compile-time target OS (`std::env::consts::OS`, the same
+/// authoritative value the `target_os` command returns) so the FRONTEND can
+/// pick the right install command per platform (pacman/apt/dnf on Linux, brew
+/// on macOS, pip on Windows). The hint text itself is translated frontend
+/// chrome — it does not belong here, so this command reports presence +
+/// platform only and stays out of the localization business.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamlinkStatus {
+    pub present: bool,
+    pub platform: String,
+}
+
+/// Whether streamlink is installed and discoverable, plus the compile-time
+/// platform so the welcome screen can show the right install command.
+///
+/// Reuses `streamlink_bin` — the SAME binary discovery every resolve uses (env
+/// override → macOS absolute candidates → bare PATH fallback) — so a "present"
+/// result here guarantees the subsequent `resolve_stream` will spawn it too.
+/// Probed with `streamlink --version` under the SAME env whitelist a real
+/// resolve uses (`env_spawn::configure` + `hide_console`), so AppImage PATH
+/// handling and Windows console-suppression match exactly. On any non-NotFound
+/// spawn error we assume present (don't nag on a weird-but-working install).
+/// NOT gated behind the `updater` Cargo feature — AUR builds compile the
+/// updater out but AUR users still update via pacman and still get the welcome
+/// screen on first install.
+#[tauri::command]
+pub async fn streamlink_status() -> StreamlinkStatus {
+    let bin = streamlink_bin();
+    let platform = std::env::consts::OS.to_string();
+    let mut cmd = tokio::process::Command::new(&bin);
+    cmd.arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    crate::env_spawn::configure(cmd.as_std_mut(), None);
+    // No-op on Unix; suppresses the flash of a console window for the probe on
+    // Windows (same as every other streamlink spawn).
+    crate::env_spawn::hide_console(cmd.as_std_mut());
+    match cmd.spawn() {
+        Ok(mut child) => {
+            // --version exits immediately; reap it so we never orphan a handle.
+            let _ = child.wait().await;
+            StreamlinkStatus {
+                present: true,
+                platform,
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => StreamlinkStatus {
+            present: false,
+            platform,
+        },
+        Err(_) => StreamlinkStatus {
+            present: true,
+            platform,
+        },
+    }
+}
+
 #[tauri::command]
 pub async fn resolve_stream(
     channel: String,

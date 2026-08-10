@@ -15,6 +15,7 @@
 export type ShortcutAction =
   | { type: 'close-about' }
   | { type: 'close-help' }
+  | { type: 'close-welcome' }
   | { type: 'play-pause' }
   | { type: 'toggle-mute' }
   | { type: 'toggle-fullscreen' }
@@ -27,6 +28,7 @@ export interface ShortcutCtx {
   aboutOpen: boolean
   browseOpen: boolean
   helpOpen: boolean
+  welcomeOpen: boolean
   isLive: boolean
 }
 
@@ -73,6 +75,7 @@ const SEEK_STEP = 10
 // while typing or behind an open modal/overlay.
 export function resolveShortcut(e: KeyboardEvent, ctx: ShortcutCtx): ShortcutAction | null {
   if (e.key === 'Escape') {
+    if (ctx.welcomeOpen) return { type: 'close-welcome' }
     if (ctx.helpOpen) return { type: 'close-help' }
     if (ctx.aboutOpen) return { type: 'close-about' }
     return null
@@ -85,8 +88,9 @@ export function resolveShortcut(e: KeyboardEvent, ctx: ShortcutCtx): ShortcutAct
   // No player shortcuts while typing in any editable field.
   if (isEditableTarget(e.target)) return null
 
-  // No player shortcuts behind an open modal/overlay (about, browse, help).
-  if (ctx.aboutOpen || ctx.browseOpen || ctx.helpOpen) return null
+  // No player shortcuts behind an open modal/overlay (about, browse, help, the
+  // first-launch welcome / what's-new overlay).
+  if (ctx.aboutOpen || ctx.browseOpen || ctx.helpOpen || ctx.welcomeOpen) return null
 
   const key = e.key
 

@@ -379,6 +379,27 @@ export const en = {
   vod_clip: 'Clip',
   vod_chatLoading: 'Loading chat…',
   vod_chatUnavailable: 'Chat replay unavailable',
+
+  // ---- WelcomeOverlay.svelte (first-install welcome / what's-new) ---------
+  welcome_title: 'Welcome to Kappastream',
+  welcome_tagline: 'Twitch, stripped to the essentials: the stream and the chat.',
+  welcome_whatYouCanDo: 'What you can do here',
+  welcome_feat1: 'Watch live streams, past broadcasts, highlights, and clips',
+  welcome_feat2: 'Chat with Twitch, 7TV, BTTV, and FFZ emotes and channel badges',
+  welcome_feat3: 'Save favorites and get notified when they go live',
+  welcome_feat4: 'Browse and search to discover new channels',
+  welcome_feat5: 'Up to four streams at once, picture-in-picture, handoff to mpv',
+  welcome_feat6: '29 themes',
+  welcome_privacy: 'Privacy',
+  welcome_privacyBody: 'No account, no tracking, no analytics, no server run by the project. Chat connects anonymously — nothing is tied to your identity. The services kappastream contacts are listed in the About dialog.',
+  welcome_streamlinkOk: "Streamlink detected — you're good to go.",
+  welcome_streamlinkMissing: 'Streamlink is required to play streams.',
+  welcome_installLabel: 'Installation',
+  welcome_getStarted: 'Get started',
+  whatsnew_title: "What's new",
+  whatsnew_highlights: 'Highlights',
+  whatsnew_generic: 'This update includes improvements and bug fixes.',
+  whatsnew_continue: 'Continue',
 } satisfies Record<string, string>
 
 export type TKey = keyof typeof en
