@@ -19,7 +19,7 @@ Just the stream and the chat.
 
 </div>
 
-## About
+## ℹ️ About
 
 kappastream is a native desktop client for watching Twitch without signing in or handing an application your Twitch credentials.
 
@@ -44,27 +44,27 @@ Chat is read anonymously through Twitch IRC. Stream playback is resolved locally
 </p>
 </details>
 
-## Features
+## ✨ Features
 
 | | |
 |---|---|
-| **Live playback** | HLS playback with quality selection, fullscreen, theater mode, per-channel quality preferences, an optional low-latency mode, player keyboard shortcuts, and a sleep timer. |
-| **Multi-stream view** | Watch up to four live streams at once in a draggable, resizable tile grid. Each tile has its own chat tab, quality, and volume. |
-| **VODs and clips** | Browse a channel's past broadcasts, highlights, recent and popular clips, and play them in the main player — with mpv handoff and Picture-in-Picture support. A Back-to-live control returns to the stream. Past broadcasts resume from where you left off, with a one-click restart. |
-| **Anonymous chat** | Read-only Twitch IRC chat with native Twitch emotes, 7TV, BTTV and FFZ emotes, badges, colored usernames, timestamps, mention highlighting, and a client-side mute list. |
-| **Favorites** | Save channels locally, drag to reorder them, and see live status, viewer count, game, and stream title at a glance. |
-| **Channel discovery** | Search for live channels and browse top streams and categories, all anonymously via Twitch GQL. Selecting a result joins the channel. |
-| **Notifications** | Opt in per channel for go-live notifications and receive desktop alerts for chat mentions. |
-| **Picture-in-Picture** | A borderless floating player that maintains a 16:9 aspect ratio and remembers its position. |
-| **mpv handoff** | Open the current stream in a standalone `mpv` player through streamlink. |
-| **System tray** | Show, hide, or quit from the tray, with optional close-to-tray behavior. |
-| **Customization** | 29 themes and interface scaling from 0.5× to 4×. |
-| **Import and export** | Back up and restore favorites and settings as local JSON files. |
-| **Resilient status checks** | When a status request fails, each channel keeps its last-known status and the request is retried with backoff, so a temporary Twitch outage doesn't clear your favorites or disrupt playback or chat. |
+| 📺 **Live playback** | HLS playback with quality selection, fullscreen, theater mode, per-channel quality preferences, an optional low-latency mode, player keyboard shortcuts, and a sleep timer. |
+| 🗂️ **Multi-stream view** | Watch up to four live streams at once in a draggable, resizable tile grid. Each tile has its own chat tab, quality, and volume. |
+| 🎬 **VODs and clips** | Browse a channel's past broadcasts, highlights, recent and popular clips, and play them in the main player — with mpv handoff and Picture-in-Picture support. A Back-to-live control returns to the stream. Past broadcasts resume from where you left off, with a one-click restart. |
+| 💬 **Anonymous chat** | Read-only Twitch IRC chat with native Twitch emotes, 7TV, BTTV and FFZ emotes, badges, colored usernames, timestamps, mention highlighting, and a client-side mute list. |
+| ⭐ **Favorites** | Save channels locally, drag to reorder them, and see live status, viewer count, game, and stream title at a glance. |
+| 🔍 **Channel discovery** | Search for live channels and browse top streams and categories, all anonymously via Twitch GQL. Selecting a result joins the channel. |
+| 🔔 **Notifications** | Opt in per channel for go-live notifications and receive desktop alerts for chat mentions. |
+| 🖼️ **Picture-in-Picture** | A borderless floating player that maintains a 16:9 aspect ratio and remembers its position. |
+| 📽️ **mpv handoff** | Open the current stream in a standalone `mpv` player through streamlink. |
+| 📌 **System tray** | Show, hide, or quit from the tray, with optional close-to-tray behavior. |
+| 🎨 **Customization** | 29 themes and interface scaling from 0.5× to 4×. |
+| 💾 **Import and export** | Back up and restore favorites and settings as local JSON files. |
+| 🔄 **Resilient status checks** | When a status request fails, each channel keeps its last-known status and the request is retried with backoff, so a temporary Twitch outage doesn't clear your favorites or disrupt playback or chat. |
 
-## Installation
+## 📥 Installation
 
-### Arch Linux
+### 🐧 Arch Linux
 
 Install the prebuilt package from the AUR:
 
@@ -80,7 +80,7 @@ yay -S kappastream-git
 
 Other AUR helpers can be used in place of `yay`.
 
-### AppImage
+### 📦 AppImage
 
 1. Install `streamlink` using your distribution's package manager.
 2. Download the AppImage and `SHA256SUMS` from the [latest release](../../releases/latest).
@@ -98,7 +98,7 @@ chmod +x kappastream*.AppImage
 >
 > Arch Linux, Debian/Ubuntu, and Fedora users are therefore strongly encouraged to install the corresponding native package below. Use the AppImage mainly when no suitable native package is available or when you specifically need a portable build.
 
-### Debian and Ubuntu
+### 🐧 Debian and Ubuntu
 
 Download the `.deb` package from the [latest release](../../releases/latest), then install it with:
 
@@ -108,7 +108,7 @@ sudo apt install ./kappastream_*_amd64.deb
 
 The package declares `streamlink` as a dependency.
 
-### Fedora
+### 🐧 Fedora
 
 Twitch streams use H.264 video. Fedora's default `ffmpeg-free` packages do not include the required H.264 decoder, so the **RPM Fusion Free** repository must be enabled first.
 
@@ -134,7 +134,7 @@ If kappastream was installed before the codec dependency was added, repair the e
 sudo dnf swap --allowerasing ffmpeg-free ffmpeg
 ```
 
-### Windows
+### 🖥️ Windows
 
 Download the `*-setup.exe` installer from the [latest release](../../releases/latest) and run it. It installs per-user (no administrator prompt) and provides an NSIS uninstaller.
 
@@ -154,7 +154,7 @@ If `streamlink` is not on your `PATH`, set it before launching kappastream:
 $env:STREAMLINK_BIN = "C:\path\to\streamlink.exe"
 ```
 
-### macOS
+### 🍎 macOS
 
 kappastream for macOS targets Apple Silicon (arm64) and requires macOS 14 (Sonoma) or later. Download the `.dmg` from the [latest release](../../releases/latest), drag `kappastream.app` to Applications, and launch it.
 
@@ -172,7 +172,7 @@ An optional [mpv](https://mpv.io/installation/) install enables the external-pla
 brew install mpv
 ```
 
-## streamlink
+## 🔌 streamlink
 
 kappastream uses [streamlink](https://streamlink.github.io/) as a local helper to resolve Twitch streams.
 
@@ -194,7 +194,7 @@ STREAMLINK_BIN=/opt/bin/streamlink ./kappastream.AppImage
 
 kappastream reports a clear error when the binary cannot be found.
 
-## Privacy
+## 🔒 Privacy
 
 kappastream has no server, account system, analytics, telemetry, advertising SDK, cloud sync, or crash-reporting service.
 
@@ -224,7 +224,7 @@ The update check is a single anonymous HTTPS GET to the project's own GitHub Rel
 
 kappastream does not use Twitch Helix or Kraken and cannot authenticate as you.
 
-## Verifying releases
+## ✅ Verifying releases
 
 Release packages are built by GitHub Actions from the repository source. The [release workflow](.github/workflows/release.yml) and its [public build logs](../../actions) can be inspected directly.
 
@@ -239,12 +239,12 @@ sha256sum -c SHA256SUMS
 A successful result confirms that the downloaded file matches the checksum published with the release. Checksums detect corruption or replacement after publication; they are not a substitute for reviewing the source and build workflow.
 
 
-## Known limitations
+## ⚠️ Known limitations
 
 - **streamlink is required.** Playback cannot be resolved without the local helper binary.
 - **Read-only by design.** Sending chat messages, following, subscribing, redeeming channel points, and other authenticated Twitch features are intentionally outside the project's scope.
 
-## Build from source
+## 🔨 Build from source
 
 ### Requirements
 
@@ -301,7 +301,7 @@ src-tauri/target/release/bundle/<appimage|nsis>/
 
 The first Rust build can take considerably longer than subsequent builds.
 
-## Technology
+## 🛠️ Technology
 
 - **Tauri 2 and Rust** — native shell, window management, subprocess handling, notifications, tray integration, and native packaging
 - **Svelte 5 and TypeScript** — user interface and local application state
@@ -311,7 +311,7 @@ The first Rust build can take considerably longer than subsequent builds.
 - **streamlink** — local stream resolution
 - **System webview** — WebKitGTK on Linux, WKWebView on macOS, and WebView2 on Windows, avoiding a bundled Chromium runtime
 
-## Repository structure
+## 📁 Repository structure
 
 ```text
 .
@@ -328,7 +328,7 @@ The first Rust build can take considerably longer than subsequent builds.
 └── SECURITY.md
 ```
 
-## Contributing
+## 🤝 Contributing
 
 Bug reports and focused pull requests are welcome.
 
@@ -342,13 +342,13 @@ Before contributing, read [CONTRIBUTING.md](CONTRIBUTING.md). When reporting a b
 
 Please report security-sensitive issues privately according to [SECURITY.md](SECURITY.md), rather than opening a public issue.
 
-## License
+## 📜 License
 
 kappastream is licensed under the [GNU General Public License v3.0 only](LICENSE).
 
 Anyone distributing a modified version must provide the corresponding source under the same license. Private modifications do not need to be published.
 
-## Disclaimer
+## 📣 Disclaimer
 
 kappastream is not affiliated with, endorsed by, or connected to Twitch Interactive, Inc.
 

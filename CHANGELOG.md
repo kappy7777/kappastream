@@ -20,8 +20,7 @@ marks the milestone; it is not a breaking change.
   command (pacman / apt / dnf on Linux, brew on macOS, pip on Windows) only
   when streamlink is missing. After each update, a "what's new" screen lists
   the highlights. Neither appears on a normal launch or a downgrade, and both
-  are dismissed in one click or with Escape. The seen-version is recorded on
-  dismissal, so a crash before dismissing re-shows the screen next launch.
+  are dismissed in one click or with Escape.
 
 ## [0.3.1] - 2026-08-05
 
