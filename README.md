@@ -19,9 +19,6 @@ Just the stream and the chat.
 
 </div>
 
-> [!IMPORTANT]
-> **kappastream is early-alpha software.** It is already usable, but bugs and rough edges should be expected. Only the latest release is supported.
-
 ## About
 
 kappastream is a native desktop client for watching Twitch without signing in or handing an application your Twitch credentials.
