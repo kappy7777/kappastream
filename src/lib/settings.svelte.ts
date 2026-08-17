@@ -1,5 +1,6 @@
-export type ThemeId =
+export type BuiltInThemeId =
   | 'ayu-mirage'
+  | 'blacklight'
   | 'catppuccin'
   | 'catppuccin-latte'
   | 'azure'
@@ -11,6 +12,7 @@ export type ThemeId =
   | 'forest'
   | 'gruvbox'
   | 'gruvbox-light'
+  | 'hazard'
   | 'cream'
   | 'kanagawa'
   | 'light-purple'
@@ -19,6 +21,8 @@ export type ThemeId =
   | 'monokai'
   | 'nord'
   | 'one-dark'
+  | 'redline'
+  | 'riptide'
   | 'rose-pine'
   | 'mint'
   | 'slate'
@@ -27,18 +31,36 @@ export type ThemeId =
   | 'synthwave'
   | 'orange'
   | 'tokyo-night'
+  | 'toxin'
   | 'amethyst'
+
+/**
+ * Runtime custom themes live in localStorage under `custom-…` ids (see
+ * custom-themes.svelte.ts) — namespaced so they can never collide with a
+ * built-in id, and applied by setting the 20 theme properties on the document
+ * root instead of a compile-time CSS block.
+ */
+export type ThemeId = BuiltInThemeId | CustomThemeId
+
+import {
+  hasCustomTheme,
+  getCustomTheme,
+  applyThemeProperties,
+  clearThemeProperties,
+  type CustomThemeId,
+} from './custom-themes.svelte'
 
 export type SortMode = 'auto' | 'manual'
 
 export interface ThemeMeta {
-  id: ThemeId
+  id: BuiltInThemeId
   label: string
   swatch: string
 }
 
 export const THEMES: ReadonlyArray<ThemeMeta> = [
   { id: 'ayu-mirage', label: 'Ayu Mirage', swatch: '#FFCC66' },
+  { id: 'blacklight', label: 'Blacklight', swatch: '#B388FF' },
   { id: 'catppuccin', label: 'Catppuccin', swatch: '#CBA6F7' },
   { id: 'catppuccin-latte', label: 'Catppuccin Latte', swatch: '#8839EF' },
   { id: 'azure', label: 'Cornflower', swatch: '#2E70C7' },
@@ -50,6 +72,7 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
   { id: 'forest', label: 'Forest', swatch: '#3FB27F' },
   { id: 'gruvbox', label: 'Gruvbox', swatch: '#FABD2F' },
   { id: 'gruvbox-light', label: 'Gruvbox Light', swatch: '#D65D0E' },
+  { id: 'hazard', label: 'Hazard', swatch: '#FF9A3C' },
   { id: 'cream', label: 'Honey', swatch: '#E5A50A' },
   { id: 'kanagawa', label: 'Kanagawa', swatch: '#7E9CD8' },
   { id: 'light-purple', label: 'Light Purple', swatch: '#C49BFF' },
@@ -58,6 +81,8 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
   { id: 'monokai', label: 'Monokai', swatch: '#FD971F' },
   { id: 'nord', label: 'Nord', swatch: '#88C0D0' },
   { id: 'one-dark', label: 'One Dark', swatch: '#61AFEF' },
+  { id: 'redline', label: 'Redline', swatch: '#FF6B7A' },
+  { id: 'riptide', label: 'Riptide', swatch: '#38B6FF' },
   { id: 'rose-pine', label: 'Rosé Pine', swatch: '#C4A7E7' },
   { id: 'mint', label: 'Sage', swatch: '#3F8B43' },
   { id: 'slate', label: 'Slate', swatch: '#7A6B4B' },
@@ -66,6 +91,7 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
   { id: 'synthwave', label: 'Synthwave', swatch: '#FF7ED4' },
   { id: 'orange', label: 'Tangerine', swatch: '#E07414' },
   { id: 'tokyo-night', label: 'Tokyo Night', swatch: '#7AA2F7' },
+  { id: 'toxin', label: 'Toxin', swatch: '#46E08A' },
   { id: 'amethyst', label: 'Amethyst', swatch: '#6D5DD3' },
 ]
 
@@ -128,7 +154,15 @@ function safeWrite(key: string, value: string): void {
 
 function readTheme(): ThemeId {
   const v = safeRead(THEME_KEY)
-  if (v && THEMES.some((t) => t.id === v)) return v as ThemeId
+  if (v) {
+    // Custom ids are validated against the runtime registry (they are stored
+    // data, not compile-time CSS); an unknown id of either kind falls back.
+    if (v.startsWith('custom-')) {
+      if (hasCustomTheme(v)) return v as CustomThemeId
+      return 'amethyst'
+    }
+    if (THEMES.some((t) => t.id === v)) return v as BuiltInThemeId
+  }
   return 'amethyst'
 }
 
@@ -268,15 +302,33 @@ class SettingsStore {
   theaterMode: boolean = $state(false)
 
   constructor() {
-    this.applyThemeAttr(this.theme)
+    this.applyTheme(this.theme)
     this.applyUiScale(this.uiScale)
     try { localStorage.removeItem('app-theater-v1') } catch { /* ignore */ }
   }
 
-  private applyThemeAttr(id: ThemeId): void {
-    if (typeof document !== 'undefined') {
-      document.documentElement.dataset.theme = id
+  /**
+   * Apply a theme id: sets data-theme (built-ins match their compile-time CSS
+   * block; a custom id matches none, so the `:root` defaults hold underneath)
+   * and — for a custom theme ONLY — writes the 20 validated properties onto
+   * the document root as inline style. Switching to any built-in removes
+   * every inline property again, so built-in themes stay byte-identical.
+   */
+  private applyTheme(id: ThemeId): void {
+    if (typeof document === 'undefined') return
+    document.documentElement.dataset.theme = id
+    if (id.startsWith('custom-')) {
+      const theme = getCustomTheme(id)
+      if (theme) applyThemeProperties(theme.values)
+      else clearThemeProperties()
+    } else {
+      clearThemeProperties()
     }
+  }
+
+  /** Re-apply the current theme (used after a live-preview editor closes). */
+  reapplyTheme(): void {
+    this.applyTheme(this.theme)
   }
 
   private applyUiScale(v: number): void {
@@ -288,7 +340,7 @@ class SettingsStore {
   setTheme(id: ThemeId): void {
     this.theme = id
     safeWrite(THEME_KEY, id)
-    this.applyThemeAttr(id)
+    this.applyTheme(id)
   }
 
   setChatVisible(v: boolean): void {

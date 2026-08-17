@@ -635,8 +635,8 @@
   .mv-status-avatar { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
   .mv-status-avatar--off { filter: grayscale(1); opacity: 0.6; }
   .mv-status-channel { font-weight: 700; flex: 0 0 auto; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mv-status-live { display: inline-flex; align-items: center; gap: 4px; color: #e5484d; font-size: 11px; font-weight: 700; flex: 0 0 auto; }
-  .mv-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #e5484d; }
+  .mv-status-live { display: inline-flex; align-items: center; gap: 4px; color: var(--live); font-size: 11px; font-weight: 700; flex: 0 0 auto; }
+  .mv-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--live); }
   .mv-status-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; color: var(--text-primary); }
   .mv-status-meta { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; color: var(--text-secondary); font-size: 12px; }
   .mv-status-game { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -680,7 +680,7 @@
   }
   .mv-chat-tab:hover { background: var(--bg-hover-faint); color: var(--text-primary); }
   .mv-chat-tab--active { color: var(--accent); border-bottom-color: var(--accent); }
-  .mv-chat-tab--live::before { content: '● '; color: #e5484d; }
+  .mv-chat-tab--live::before { content: '● '; color: var(--live); }
 
   .mv-chat-scroll { flex: 1 1 auto; overflow-y: auto; padding: 6px 8px; min-height: 0; position: relative; }
   .mv-placeholder { color: var(--text-secondary); padding: 12px; font-size: 12px; }

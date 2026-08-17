@@ -5,6 +5,11 @@
   import { favoritesStore, type FavoriteStatus } from './favorites.svelte'
   import { sleepTimer, formatSleepRemaining, SLEEP_PRESETS } from './sleep-timer.svelte'
   import { t, getLocale, setLocale, LOCALES } from './i18n/index.svelte'
+  import {
+    listCustomThemes, getCustomTheme, importAndStoreThemeJson,
+    MAX_CUSTOM_THEMES, MAX_THEME_FILE_BYTES, type CustomTheme,
+  } from './custom-themes.svelte'
+  import CustomThemeEditor from './CustomThemeEditor.svelte'
 
   let { onarmsleep }: { onarmsleep?: (minutes: number) => void } = $props()
 
@@ -21,9 +26,12 @@
   let importError = $state(false)
   let favoritesCount = $state(0)
 
-  let currentThemeLabel = $derived(
-    THEMES.find((tmeta) => tmeta.id === settings.theme)?.label ?? t('theme'),
-  )
+  let currentThemeLabel = $derived.by(() => {
+    if (settings.theme.startsWith('custom-')) {
+      return getCustomTheme(settings.theme)?.label ?? t('theme')
+    }
+    return THEMES.find((tmeta) => tmeta.id === settings.theme)?.label ?? t('theme')
+  })
 
   let currentLangLabel = $derived(
     LOCALES.find((loc) => loc.id === getLocale())?.label ?? t('settings_language'),
@@ -98,6 +106,59 @@
 
   function pickTheme(id: ThemeId): void {
     settings.setTheme(id)
+  }
+
+  // ---- Custom themes ---------------------------------------------------------
+  // undefined = editor closed; null = creating a NEW theme; a CustomTheme =
+  // editing that one. Tri-state so "new" (no theme yet) is distinguishable.
+  let themeEditorFor = $state<CustomTheme | null | undefined>(undefined)
+  let themeFileEl: HTMLInputElement | undefined = $state()
+  let themeImportStatus = $state('')
+  let themeImportError = $state(false)
+  let themeImportTimer: ReturnType<typeof setTimeout> | null = null
+
+  function setThemeImportStatus(msg: string, error: boolean): void {
+    themeImportStatus = msg
+    themeImportError = error
+    if (themeImportTimer) clearTimeout(themeImportTimer)
+    themeImportTimer = setTimeout(() => { themeImportStatus = '' }, 6000)
+  }
+
+  function triggerThemeImport(): void {
+    setThemeImportStatus('', false)
+    themeFileEl?.click()
+  }
+
+  async function onThemeFileSelected(e: Event): Promise<void> {
+    const input = e.currentTarget as HTMLInputElement
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file) return
+    if (file.size > MAX_THEME_FILE_BYTES) {
+      setThemeImportStatus(t('settings_ctImportLarge'), true)
+      return
+    }
+    let text: string
+    try {
+      text = await file.text()
+    } catch {
+      setThemeImportStatus(t('settings_ctImportBad'), true)
+      return
+    }
+    const result = importAndStoreThemeJson(text)
+    if (!result.ok) {
+      // Whole-file rejection: nothing was stored or applied.
+      setThemeImportStatus(
+        result.reason === 'full'
+          ? t('settings_ctImportFull', { n: MAX_CUSTOM_THEMES })
+          : result.reason === 'too-large'
+            ? t('settings_ctImportLarge')
+            : t('settings_ctImportBad'),
+        true,
+      )
+      return
+    }
+    setThemeImportStatus(t('settings_ctImportOk', { name: result.theme.label }), false)
   }
 
   function onUiScalePick(v: number): void {
@@ -218,6 +279,8 @@ async function exportFavorites(): Promise<void> {
     }
     function onKey(e: KeyboardEvent): void {
       if (e.key === 'Escape') {
+        // The custom-theme editor owns Escape while it is open.
+        if (themeEditorFor !== undefined) return
         if (themeOpen) themeOpen = false
         else if (chatOpen) chatOpen = false
         else if (scaleOpen) scaleOpen = false
@@ -283,6 +346,53 @@ async function exportFavorites(): Promise<void> {
                 </button>
               {/each}
             </div>
+
+            <div class="chat-subgroup-label">{t('settings_customThemes')}</div>
+            {#each listCustomThemes() as ct (ct.id)}
+              <div class="ct-list-row" class:ct-list-row--active={settings.theme === ct.id}>
+                <button
+                  type="button"
+                  class="ct-list-apply"
+                  onclick={() => pickTheme(ct.id)}
+                  aria-pressed={settings.theme === ct.id}
+                  title={ct.label}
+                >
+                  <span class="swatch-color" style="background: {ct.values['--accent']}"></span>
+                  <span class="ct-list-label">{ct.label}</span>
+                </button>
+                <button
+                  type="button"
+                  class="ct-list-edit"
+                  onclick={() => { themeEditorFor = ct }}
+                  aria-label={t('settings_ctEdit') + ' — ' + ct.label}
+                >
+                  <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" fill="currentColor"/></svg>
+                </button>
+              </div>
+            {/each}
+            {#if listCustomThemes().length === 0}
+              <p class="ct-empty-hint">{t('settings_ctEmpty')}</p>
+            {/if}
+            <div class="seg" role="group" aria-label={t('settings_customThemes')}>
+              <button type="button" class="seg-btn" onclick={() => { themeEditorFor = null }} aria-label={t('settings_ctNew')}>
+                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" fill="currentColor"/></svg>
+                <span style="margin-left: 6px;">{t('settings_ctNew')}</span>
+              </button>
+              <button type="button" class="seg-btn" onclick={triggerThemeImport} aria-label={t('settings_ctImport')}>
+                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z" fill="currentColor"/></svg>
+                <span style="margin-left: 6px;">{t('settings_ctImport')}</span>
+              </button>
+            </div>
+            <input
+              type="file"
+              accept="application/json,.json"
+              bind:this={themeFileEl}
+              onchange={onThemeFileSelected}
+              style="display: none"
+            />
+            {#if themeImportStatus}
+              <p class="import-status" class:import-status--error={themeImportError}>{themeImportStatus}</p>
+            {/if}
           </div>
         {/if}
       </section>
@@ -742,6 +852,10 @@ async function exportFavorites(): Promise<void> {
       </section>
 
     </div>
+  {/if}
+
+  {#if themeEditorFor !== undefined}
+    <CustomThemeEditor theme={themeEditorFor} onclose={() => { themeEditorFor = undefined }} />
   {/if}
 </div>
 
@@ -1420,5 +1534,58 @@ async function exportFavorites(): Promise<void> {
     background: var(--accent);
     color: var(--text-primary);
     border-color: var(--accent);
+  }
+
+  /* ---- custom themes list ---- */
+  .ct-list-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    border-radius: 5px;
+  }
+  .ct-list-row--active {
+    background: var(--bg-hover);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .ct-list-apply {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-family: inherit;
+    padding: 5px 7px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .ct-list-apply:hover { background: var(--bg-hover-faint); }
+  .ct-list-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ct-list-edit {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .ct-list-edit:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .ct-empty-hint {
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-dim);
   }
 </style>

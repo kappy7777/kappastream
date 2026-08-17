@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 const MAX_EXPORT_BYTES: usize = 1024 * 1024;
 
-fn safe_filename(suggested: &str) -> String {
+fn safe_filename(suggested: &str, fallback: &str) -> String {
     let basename = std::path::Path::new(suggested.trim())
         .file_name()
         .and_then(|name| name.to_str())
@@ -24,29 +24,26 @@ fn safe_filename(suggested: &str) -> String {
         .collect();
     sanitized = sanitized.trim_matches('_').to_string();
     if sanitized.is_empty() {
-        sanitized = "kappastream-favorites".to_string();
+        sanitized = fallback.to_string();
     }
     format!("{sanitized}.json")
 }
 
-/// Native "Save As..." for the favorites JSON export.
-///
-/// The browser-side `<a download>` blob trick doesn't trigger a save
-/// dialog in the Tauri WebView (WebKitGTK on Linux), so we route export
-/// through Rust + `rfd` to get a real native file picker.
-///
-#[tauri::command]
-pub async fn save_favorites_export(
+/// Shared body of the export commands: run the native "Save As..." dialog
+/// (rfd) and write `content` to the chosen path. `Ok(None)` = user canceled.
+async fn save_via_dialog(
+    title: &str,
+    fallback_name: &str,
     content: String,
     suggested_filename: String,
 ) -> Result<Option<String>, String> {
     if content.len() > MAX_EXPORT_BYTES {
-        return Err("favorites export is too large".to_string());
+        return Err("export is too large".to_string());
     }
-    let name = safe_filename(&suggested_filename);
+    let name = safe_filename(&suggested_filename, fallback_name);
 
     let chosen = rfd::AsyncFileDialog::new()
-        .set_title("Export favorites")
+        .set_title(title)
         .set_file_name(&name)
         .add_filter("JSON", &["json"])
         .save_file()
@@ -67,6 +64,42 @@ pub async fn save_favorites_export(
     Ok(Some(path.display().to_string()))
 }
 
+/// Native "Save As..." for the favorites JSON export.
+///
+/// The browser-side `<a download>` blob trick doesn't trigger a save
+/// dialog in the Tauri WebView (WebKitGTK on Linux), so we route export
+/// through Rust + `rfd` to get a real native file picker.
+///
+#[tauri::command]
+pub async fn save_favorites_export(
+    content: String,
+    suggested_filename: String,
+) -> Result<Option<String>, String> {
+    save_via_dialog(
+        "Export favorites",
+        "kappastream-favorites",
+        content,
+        suggested_filename,
+    )
+    .await
+}
+
+/// Native "Save As..." for a custom-theme JSON export (same rfd pattern as
+/// the favorites export; one theme per file, see custom-themes.svelte.ts).
+#[tauri::command]
+pub async fn save_theme_export(
+    content: String,
+    suggested_filename: String,
+) -> Result<Option<String>, String> {
+    save_via_dialog(
+        "Export theme",
+        "kappastream-theme",
+        content,
+        suggested_filename,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::safe_filename;
@@ -74,10 +107,28 @@ mod tests {
     #[test]
     fn sanitizes_export_filename_and_forces_json_extension() {
         assert_eq!(
-            safe_filename("../../my favorites.txt"),
+            safe_filename("../../my favorites.txt", "kappastream-favorites"),
             "my_favorites_txt.json"
         );
-        assert_eq!(safe_filename(" favorites.JSON "), "favorites.json");
-        assert_eq!(safe_filename("../.json"), "kappastream-favorites.json");
+        assert_eq!(
+            safe_filename(" favorites.JSON ", "kappastream-favorites"),
+            "favorites.json"
+        );
+        assert_eq!(
+            safe_filename("../.json", "kappastream-favorites"),
+            "kappastream-favorites.json"
+        );
+    }
+
+    #[test]
+    fn theme_exports_use_their_own_fallback_name() {
+        assert_eq!(
+            safe_filename("   ", "kappastream-theme"),
+            "kappastream-theme.json"
+        );
+        assert_eq!(
+            safe_filename("../.json", "kappastream-theme"),
+            "kappastream-theme.json"
+        );
     }
 }

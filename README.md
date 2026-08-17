@@ -58,7 +58,7 @@ Chat is read anonymously through Twitch IRC. Stream playback is resolved locally
 | 🖼️ **Picture-in-Picture** | A borderless floating player that maintains a 16:9 aspect ratio and remembers its position. |
 | 📽️ **mpv handoff** | Open the current stream in a standalone `mpv` player through streamlink. |
 | 📌 **System tray** | Show, hide, or quit from the tray, with optional close-to-tray behavior. |
-| 🎨 **Customization** | 29 themes and interface scaling from 0.5× to 4×. |
+| 🎨 **Customization** | 34 themes with a custom theme editor — duplicate a built-in, adjust its colors with a live preview, and import or export themes as JSON — plus interface scaling from 0.5× to 4×. |
 | 💾 **Import and export** | Back up and restore favorites and settings as local JSON files. |
 | 🔄 **Resilient status checks** | When a status request fails, each channel keeps its last-known status and the request is retried with backoff, so a temporary Twitch outage doesn't clear your favorites or disrupt playback or chat. |
 

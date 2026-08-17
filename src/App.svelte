@@ -3989,7 +3989,7 @@
 
   /* ---- Tier 2 chat features (Toggle B/C/D + USERNOTICE) ----
      All use existing theme tokens only — no hardcoded colours, so they adapt
-     to all 29 themes. These rules are inert when the toggles are off (the
+     to all 34 themes. These rules are inert when the toggles are off (the
      elements are not rendered at all). */
 
   /* Chat-mode indicator (Toggle B). Compact bar pinned above the chat scroll. */

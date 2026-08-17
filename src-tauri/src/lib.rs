@@ -82,6 +82,7 @@ pub fn run() {
             opener::open_url_robust,
             gql::gql_fetch,
             export::save_favorites_export,
+            export::save_theme_export,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
