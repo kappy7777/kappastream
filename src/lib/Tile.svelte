@@ -10,13 +10,18 @@
   //     closed (mirrors the single-stream path, which only surfaces 'offline'
   //     from an authoritative resolve result).
   //
-  // Audio authority (mirrors src/lib/pip-controller.svelte.ts): the focused tile
-  // is the audio authority — its volume slider + mute persist to `settings`, and
-  // it is audible by default. Non-focused tiles are muted unless the user
-  // manually unmuted them (`manualUnmute`), so several can play at once. A
-  // forced mute (focus moving away) is applied directly to the <video> and is
+  // Audio authority (mirrors src/lib/pip-controller.svelte.ts): the authority
+  // tile (the one the user clicked; NOT moved by chat-tab clicks) — its volume
+  // slider + mute persist to `settings`, and it is audible by default.
+  // Non-authority tiles are muted unless the user manually unmuted them
+  // (`manualUnmute`), so several can play at once. Every tile's control bar
+  // shows a volume slider (consistent overlays); on a non-authority tile it
+  // drives that tile's OWN volume (never persisted). A forced mute (authority
+  // moving away) is applied directly to the <video> via applyTileAudio and is
   // NEVER written to settings — persistence happens only in the explicit
-  // focused-tile control handlers, never on a volumechange event.
+  // control handlers (the authority tile's slider, an explicit unmute that must
+  // clear a blocking global mute — see planTileMuteToggle), never on a
+  // volumechange event.
   //
   // Resource cleanup: the resolve path uses streamlink's --stream-url mode, so
   // streamlink EXITS on its own after returning the playlist URL (managed via
@@ -32,26 +37,26 @@
   import { buildHlsConfig } from './hls-config'
   import { GQL_REFRESH_INTERVAL_MS } from './gql'
   import { fetchLiveStatus } from './favorites.svelte'
-  import { tileStore, tileAudible, type TileState } from './tile-store.svelte'
+  import { tileStore, tileAudible, planTileMuteToggle, planTileVolumeInput, applyTileAudio, type TileState } from './tile-store.svelte'
   import { tooltip } from './tooltip.ts'
   import { nextVolume } from './volume'
   import { t } from './i18n/index.svelte'
 
   interface Props {
     tile: TileState
-    isFocused: boolean
+    isAuthority: boolean
     isWindows: boolean
     /** True while THIS tile is the one being dragged (visual affordance). */
     isDragging: boolean
     /** True while another tile is being dragged over this one (drop highlight). */
     isDropTarget: boolean
-    onFocusedVideo: (el: HTMLVideoElement | null) => void
+    onAuthorityVideo: (el: HTMLVideoElement | null) => void
     /** Drag-handle pointer-down — MultiView owns hit-testing for the drop target. */
     onTileDragStart: (tileId: string, e: PointerEvent) => void
     /** CSS grid-area shorthand for this tile's placement (empty = auto-place). */
     gridArea?: string
   }
-  const { tile, isFocused, isWindows, isDragging, isDropTarget, onFocusedVideo, onTileDragStart, gridArea }: Props = $props()
+  const { tile, isAuthority, isWindows, isDragging, isDropTarget, onAuthorityVideo, onTileDragStart, gridArea }: Props = $props()
 
   const QUALITY_IDS = ['best', '1080p60', '720p60', '720p', '480p', '360p', '160p', 'audio_only'] as const
   function qualityLabel(id: string): string {
@@ -69,10 +74,10 @@
   let userPaused = false
   let menuOpen = $state(false)
 
-  // Audibility (audio authority — see tileAudible): the focused tile follows
-  // the global mute; a non-focused tile is audible only if the user manually
+  // Audibility (audio authority — see tileAudible): the authority tile follows
+  // the global mute; a non-authority tile is audible only if the user manually
   // unmuted it. Global mute silences all.
-  const audible = $derived(tileAudible(isFocused, tile.manualUnmute, settings.muted))
+  const audible = $derived(tileAudible(isAuthority, tile.manualUnmute, settings.muted))
 
   function ksvod(httpsUrl: string): string {
     const prefix = isWindows ? 'http://ksvod.localhost/' : 'ksvod://localhost/'
@@ -212,17 +217,37 @@
     else { userPaused = true; el.pause() }
   }
 
-  // Per-tile mute. The focused tile drives the GLOBAL mute (persisted); a
-  // non-focused tile toggles its local manualUnmute (never persisted). This is
-  // exactly the PiP audio-authority split: a forced/non-authoritative mute is
-  // never written to settings.
+  // Per-tile mute. The toggle direction comes from planTileMuteToggle, which
+  // derives it from the tile's EFFECTIVE audibility (the same value the icon
+  // shows) — flipping the raw manualUnmute flag under a global mute was the
+  // "unmute on a non-authority tile sometimes does nothing" bug: the global
+  // mute kept overriding the flag. The authority tile drives the GLOBAL mute
+  // (persisted); a non-authority tile flips its local manualUnmute (never
+  // persisted) and, only when the global mute is what silences it, clears that
+  // mute too (an explicit user unmute — the one settings write this path may
+  // make, mirroring PiP's explicit-control persistence).
   function toggleMute(): void {
-    if (isFocused) settings.toggleMuted()
-    else tileStore.setManualUnmute(tile.id, !tile.manualUnmute)
+    const plan = planTileMuteToggle(isAuthority, tile.manualUnmute, settings.muted)
+    if (plan.manualUnmute !== undefined) tileStore.setManualUnmute(tile.id, plan.manualUnmute)
+    if (plan.globalMuted !== undefined) settings.setMuted(plan.globalMuted)
   }
-  function setVolume(v: number): void {
-    // Only the focused tile (authority) has a volume slider and persists it.
-    if (isFocused) settings.setVolume(v)
+  // Volume input from the tile's slider (rendered on EVERY tile, matching the
+  // authority overlay's layout). The authority slider drives the GLOBAL
+  // settings.volume (persisted — the authority is the audio source); a
+  // non-authority slider drives the tile's OWN per-tile volume (never
+  // persisted). On both paths dragging above 0 is an explicit unmute — it
+  // mirrors PlayerControls' `if (v > 0 && video.muted) video.muted = false`,
+  // so the slider can never be dragged up with no audible effect.
+  function onVolumeInput(v: number): void {
+    if (isAuthority) {
+      settings.setVolume(v)
+      if (v > 0 && settings.muted) settings.setMuted(false)
+      return
+    }
+    const plan = planTileVolumeInput(v, settings.muted)
+    tileStore.setTileVolume(tile.id, plan.tileVolume)
+    tileStore.setManualUnmute(tile.id, plan.manualUnmute)
+    if (plan.globalMuted !== undefined) settings.setMuted(plan.globalMuted)
   }
 
   function closeTile(): void {
@@ -266,36 +291,46 @@
   })
 
   // ---- audio authority: apply audible/volume imperatively (no persist) ----
-  // Focused tile uses the global settings.volume (it is the authority); a
-  // non-focused tile uses its OWN per-tile volume (nudged by scroll-wheel). A
-  // forced mute (focus moving away) sets el.muted directly and is never written
-  // to settings.
+  // Centralised in applyTileAudio (tile-store.svelte): the authority tile uses
+  // the global settings.volume; a non-authority tile uses its OWN per-tile
+  // volume (nudged by scroll-wheel). A forced mute (authority moving away) sets
+  // el.muted directly and is never written to settings. Re-running this effect
+  // (any dependency change) is idempotent — the element always ends up matching
+  // tileAudible of the current store state.
   $effect(() => {
     const el = videoEl
     if (!el) return
-    el.muted = !audible
-    el.volume = isFocused ? settings.volume : tile.volume
+    applyTileAudio(el, {
+      isAuthority,
+      manualUnmute: tile.manualUnmute,
+      globalMuted: settings.muted,
+      globalVolume: settings.volume,
+      tileVolume: tile.volume,
+    })
   })
 
   // ---- scroll-to-change-volume (reuses the shared nextVolume math that the
   // single-stream PlayerControls also uses). Scrolling a tile nudges THAT tile's
   // volume only:
-  //   - focused tile → global settings.volume (persisted, it is the authority)
-  //   - non-focused tile → its own per-tile volume; scrolling UP an inaudible
-  //     tile unmutes it (manualUnmute=true, so it plays alongside the focused
-  //     one), scrolling DOWN to 0 mutes it again. Mirrors the single-stream
-  //     "scroll on a muted video unmutes" behaviour.
+  //   - authority tile → global settings.volume (persisted, it is the authority)
+  //   - non-authority tile → its own per-tile volume; scrolling UP an inaudible
+  //     tile unmutes it (manualUnmute=true, so it plays alongside the authority
+  //     one — and if the global mute is what silences it, clears that too, same
+  //     explicit-unmute rule as toggleMute), scrolling DOWN to 0 mutes it again.
+  //     Mirrors the single-stream "scroll on a muted video unmutes" behaviour.
   function onWheel(e: WheelEvent): void {
     e.preventDefault()
     const dir = e.deltaY < 0 ? 1 : -1
-    if (isFocused) {
+    if (isAuthority) {
       settings.setVolume(nextVolume(settings.volume, dir))
       return
     }
     const current = tile.manualUnmute ? tile.volume : 0
     const next = nextVolume(current, dir)
-    tileStore.setTileVolume(tile.id, next)
-    tileStore.setManualUnmute(tile.id, next > 0)
+    const plan = planTileVolumeInput(next, settings.muted)
+    tileStore.setTileVolume(tile.id, plan.tileVolume)
+    tileStore.setManualUnmute(tile.id, plan.manualUnmute)
+    if (plan.globalMuted !== undefined) settings.setMuted(plan.globalMuted)
   }
   // Attach the wheel listener as NON-passive so preventDefault() can stop the
   // page/tile scroll (matches PlayerControls' { passive: false }). Bound to the
@@ -308,10 +343,11 @@
     return () => el.removeEventListener('wheel', onWheel)
   })
 
-  // Report the focused tile's video to App (keyboard-shortcut target).
+  // Report the authority tile's video to App (keyboard-shortcut target — the
+  // shortcuts follow the AUDIO AUTHORITY, not the active chat tab).
   $effect(() => {
-    if (isFocused && videoEl) onFocusedVideo(videoEl)
-    else onFocusedVideo(null)
+    if (isAuthority && videoEl) onAuthorityVideo(videoEl)
+    else onAuthorityVideo(null)
   })
 
   // ---- offline-close polling ----
@@ -342,7 +378,7 @@
   onDestroy(() => {
     teardownHls()
     if (pollTimer) clearInterval(pollTimer)
-    onFocusedVideo(null)
+    onAuthorityVideo(null)
   })
 
   // Touch + mouse interaction for control visibility (auto-hide).
@@ -365,7 +401,7 @@
   bind:this={tileEl}
   data-tile-id={tile.id}
   class="mv-tile"
-  class:mv-tile--focused={isFocused}
+  class:mv-tile--authority={isAuthority}
   class:mv-tile--audible={audible}
   class:mv-tile--dragging={isDragging}
   class:mv-tile--drop-target={isDropTarget}
@@ -389,8 +425,8 @@
   <button
     type="button"
     class="mv-tile-surface"
-    aria-label={isFocused ? t('mv_focusedTile') : t('mv_focusTile')}
-    onclick={() => tileStore.focus(tile.id)}
+    aria-label={isAuthority ? t('mv_focusedTile') : t('mv_focusTile')}
+    onclick={() => tileStore.focusTile(tile.id)}
   ></button>
 
   <!-- Drag handle (pointer-events): grabbing here starts a reorder. Deliberately
@@ -410,7 +446,7 @@
   {/if}
 
   {#if controlsShown}
-    <div class="mv-tile-channel" class:mv-tile-channel--dim={!isFocused}>{tile.channel}</div>
+    <div class="mv-tile-channel" class:mv-tile-channel--dim={!isAuthority}>{tile.channel}</div>
   {/if}
 
   {#if showOverlay}
@@ -436,7 +472,7 @@
         class:mv-ctrl--on={audible}
         onclick={toggleMute}
         aria-label={audible ? t('pc_mute') : t('pc_unmute')}
-        use:tooltip={isFocused ? (audible ? t('pc_mute') : t('pc_unmute')) : t('mv_listenAlong')}
+        use:tooltip={isAuthority ? (audible ? t('pc_mute') : t('pc_unmute')) : t('mv_listenAlong')}
       >
         {#if !audible}
           <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3l2.7-2.7-1.4-1.4L15 10.6l-2.8-2.8-1.4 1.4L13.6 12l-2.8 2.8 1.4 1.4L15 13.4l2.7 2.7 1.4-1.4L16.4 12z" fill="currentColor"/></svg>
@@ -445,15 +481,13 @@
         {/if}
       </button>
 
-      {#if isFocused}
-        <input
-          class="mv-volume"
-          type="range" min="0" max="1" step="0.05"
-          value={settings.muted ? 0 : settings.volume}
-          oninput={(e) => setVolume(parseFloat((e.currentTarget as HTMLInputElement).value))}
-          aria-label={t('volume')}
-        />
-      {/if}
+      <input
+        class="mv-volume"
+        type="range" min="0" max="1" step="0.05"
+        value={isAuthority ? (settings.muted ? 0 : settings.volume) : (audible ? tile.volume : 0)}
+        oninput={(e) => onVolumeInput(parseFloat((e.currentTarget as HTMLInputElement).value))}
+        aria-label={t('volume')}
+      />
 
       <div class="mv-menu-wrap">
         <button type="button" class="mv-ctrl" onclick={() => (menuOpen = !menuOpen)} aria-label={t('quality')} aria-haspopup="menu" aria-expanded={menuOpen} use:tooltip={t('quality')}>
@@ -501,8 +535,8 @@
     min-width: 0;
     min-height: 0;
   }
-  /* Focused tile gets an accent ring so the active slot is obvious. */
-  .mv-tile--focused {
+  /* Authority tile gets an accent ring so the audio source is obvious. */
+  .mv-tile--authority {
     box-shadow: inset 0 0 0 2px var(--accent);
   }
   .mv-video {

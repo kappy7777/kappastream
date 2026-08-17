@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-17
+
+### Added
+
+- **Custom theme editor.** Build your own theme on top of any built-in:
+  duplicate it, adjust every colour with sliders and a swatch palette — no hex
+  codes — with a live preview of each change, and save it alongside the
+  built-ins. Themes stay on your device, and export/import as small JSON
+  files; imported files are strictly validated, so a broken or tampered file
+  is rejected whole rather than half-applied.
+
+- **Five new built-in themes.** Riptide (blue), Toxin (green), Redline (red),
+  Hazard (orange), and Blacklight (violet) — saturated themes with genuinely
+  coloured backgrounds, each tuned so text and live markers stay readable.
+
+- **Per-tile volume sliders in multi-view.** Every tile's control bar shows a
+  volume slider now, not just the audio authority's. Each tile keeps its own
+  volume; dragging a slider up (or scrolling over the tile) unmutes it, and
+  dragging to zero mutes it again.
+
+### Changed
+
+- **Multi-view: chat tabs no longer move the audio.** Clicking a chat tab
+  switches only the chat pane; the audio stays with the tile you are listening
+  to. Clicking a tile still moves both, and the media keyboard shortcuts act
+  on the audible stream.
+
+- **Multi-view: the hidden status bar's show button is always visible.** It
+  no longer waits for a hover on the bottom edge.
+
+### Fixed
+
+- **Multi-view: unmuting a tile could silently do nothing.** After muting the
+  audio-authority tile and moving audio to another tile, the old tile's
+  unmute button had no effect while the global mute was on. Unmuting now
+  reliably makes the tile audible, clearing the global mute when that is what
+  silences it.
+
+- **Multi-view: chat tabs beyond the pane edge were unreachable.** The chat
+  tab strip now scrolls with the mouse wheel when the tabs overflow.
+
 ## [1.0.0] - 2026-08-10
 
 kappastream 1.0 — the feature set and architecture are stable. This release

@@ -367,7 +367,9 @@ export const es: Record<TKey, string> = {
   welcome_installLabel: 'Instalación',
   welcome_getStarted: 'Empezar',
   whatsnew_title: 'Novedades',
-  whatsnew_highlights: 'Destacados',
+  whatsnew_added: 'Novedades',
+  whatsnew_changed: 'Cambios',
+  whatsnew_fixed: 'Correcciones',
   whatsnew_generic: 'Esta actualización incluye mejoras y correcciones de errores.',
   whatsnew_continue: 'Continuar',
 

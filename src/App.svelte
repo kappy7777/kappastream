@@ -227,9 +227,12 @@
   // MultiView.svelte renders the tile grid INSTEAD of the single-stream `.main`;
   // when off, App.svelte's original markup renders byte-identical.
   let multiView = $state(false)
-  // The focused tile's <video>, registered by Tile.svelte so the keyboard
-  // shortcuts (space/k/m/arrows/f) target the focused tile in multi-view.
-  let focusedTileVideo = $state<HTMLVideoElement | null>(null)
+  // The audio-authority tile's <video>, registered by Tile.svelte so the
+  // keyboard shortcuts (space/k/m/arrows/f) target the AUTHORITY tile in
+  // multi-view. The shortcut target deliberately follows the audio authority
+  // (not the active chat tab): the shortcuts are media controls whose feedback
+  // is audible, and only the authority tile persists volume/mute to settings.
+  let authorityTileVideo = $state<HTMLVideoElement | null>(null)
   let tooltipEl: HTMLElement | undefined = $state()
   let tooltipPos = $state({ left: 0, top: 0 })
   let probeEl: HTMLElement | undefined = $state()
@@ -346,7 +349,7 @@
   }
   function toggleVideoMute(): void {
     if (multiView) {
-      // Focused tile is the audio authority → M toggles the global mute.
+      // The authority tile owns the global mute → M toggles it.
       settings.toggleMuted()
       return
     }
@@ -356,10 +359,10 @@
   }
   function toggleVideoFullscreen(): void {
     if (multiView) {
-      // Per-tile fullscreen via the HTML5 API on the focused tile's element
+      // Per-tile fullscreen via the HTML5 API on the authority tile's element
       // (the native-window `.app--fullscreen .player` lift has no `.player` in
       // multi-view). WebKitGTK supports element fullscreen.
-      const el = focusedTileVideo
+      const el = authorityTileVideo
       if (!el) return
       const target = el.closest('.mv-tile') as HTMLElement | null ?? el.parentElement
       if (document.fullscreenElement) void document.exitFullscreen()
@@ -395,7 +398,7 @@
   }
   function nudgeVolume(delta: number): void {
     if (multiView) {
-      // Volume follows the global setting (the focused tile's authority).
+      // Volume follows the global setting (the authority tile's volume).
       settings.setVolume(Math.max(0, Math.min(1, settings.volume + delta)))
       return
     }
@@ -1380,18 +1383,18 @@
     }
   }
 
-  // Leave multi-view. Restores the focused tile's channel as the single stream
-  // (when one is still present — e.g. the manual toggle); when the LAST tile
-  // closed (onShouldExit) there is no focused tile, so it falls back to the
-  // idle single-stream view. Tearing down tiles happens via Svelte lifecycle:
-  // setting multiView=false unmounts MultiView, whose Tile onDestroy calls
-  // destroy hls.js and whose reconcile-effect cleanup disposes every
+  // Leave multi-view. Restores the audio-authority tile's channel as the single
+  // stream (when one is still present — e.g. the manual toggle); when the LAST
+  // tile closed (onShouldExit) there is no authority tile, so it falls back to
+  // the idle single-stream view. Tearing down tiles happens via Svelte
+  // lifecycle: setting multiView=false unmounts MultiView, whose Tile onDestroy
+  // calls destroy hls.js and whose reconcile-effect cleanup disposes every
   // ChatSession.
   function exitMultiView(): void {
-    const ch = tileStore.focused?.channel ?? null
+    const ch = tileStore.authority?.channel ?? null
     multiView = false
     tileStore.exitAll()
-    focusedTileVideo = null
+    authorityTileVideo = null
     if (ch) selectChannel(ch)
   }
 
@@ -1400,10 +1403,10 @@
     tileStore.onShouldExit = () => exitMultiView()
   })
 
-  // The <video> the keyboard shortcuts target: the focused tile's in
+  // The <video> the keyboard shortcuts target: the authority tile's in
   // multi-view, the single player otherwise.
   function activeVideoEl(): HTMLVideoElement | null | undefined {
-    return multiView ? focusedTileVideo : videoEl
+    return multiView ? authorityTileVideo : videoEl
   }
 
   // ---- VOD / clip playback -------------------------------------------------
@@ -2303,7 +2306,7 @@
       <Sidebar currentChannel={channelJoined} onselect={openChannel} iconsOnly={sidebarMode === 'icons'} {zoomK} />
     {/if}
     {#if multiView}
-      <MultiView isWindows={isWindows} chatSize={chatSize} onFocusedVideo={(el) => { focusedTileVideo = el }} />
+      <MultiView isWindows={isWindows} chatSize={chatSize} onAuthorityVideo={(el) => { authorityTileVideo = el }} />
     {:else}
     <div class="main" class:main--stacked={stacked} bind:this={mainEl}>
     <div class="video-pane">

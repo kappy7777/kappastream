@@ -4,12 +4,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * Multi-stream split view — TileStore orchestration logic.
  *
  * The store owns the purely-logical rules the spec calls out (which tile a new
- * channel lands in, focus, audio flags, the offline-close trap, last-tile
- * exit). It has no DOM and no network, so every rule is asserted directly.
+ * channel lands in, the authority/chat pointer split, audio flags, the
+ * offline-close trap, last-tile exit). It has no DOM and no network, so every
+ * rule is asserted directly.
  *
- * Audio authority itself (forced mute not persisted to settings, focus moving
- * audio) is enforced in the Tile component; here we cover the store's half:
- * `manualUnmute` flips independently of focus and is never reset by focusing.
+ * Audio authority itself (forced mute not persisted to settings, authority
+ * moving audio) is enforced in the Tile component via the exported pure
+ * helpers (tileAudible / planTileMuteToggle / applyTileAudio); here we cover
+ * both halves: the store's `manualUnmute` flips independently of authority and
+ * the pure helpers' exact decision/application rules.
  */
 
 type TileStoreMod = typeof import('./tile-store.svelte')
@@ -23,7 +26,7 @@ beforeEach(async () => {
   store = new S.TileStore()
 })
 
-describe('TileStore.addOrReplace — empty-slot-first, then focused replace', () => {
+describe('TileStore.addOrReplace — empty-slot-first, then authority replace', () => {
   it('adds tiles to successive slots while the grid has room', () => {
     const a = store.addOrReplace('shroud').tile
     const b = store.addOrReplace('summit1g').tile
@@ -34,37 +37,43 @@ describe('TileStore.addOrReplace — empty-slot-first, then focused replace', ()
     expect(store.count).toBe(S.MAX_TILES)
   })
 
-  it('the newly added tile is always focused (active chat tab follows focus)', () => {
+  it('the newly added tile becomes BOTH audio authority and active chat', () => {
     store.addOrReplace('shroud')
-    expect(store.focused?.channel).toBe('shroud')
+    expect(store.authority?.channel).toBe('shroud')
+    expect(store.activeChat?.channel).toBe('shroud')
     store.addOrReplace('lirik')
-    expect(store.focused?.channel).toBe('lirik')
+    expect(store.authority?.channel).toBe('lirik')
+    expect(store.activeChat?.channel).toBe('lirik')
   })
 
-  it('once full, a new channel replaces the FOCUSED tile, not the last slot', () => {
-    store.addOrReplace('shroud') // focused
+  it('once full, a new channel replaces the AUTHORITY tile, not the last slot', () => {
+    store.addOrReplace('shroud') // authority
     store.addOrReplace('lirik')
     store.addOrReplace('summit1g')
     store.addOrReplace('sodapoppin') // grid full
-    // Focus shroud (slot 0) explicitly, then open a 5th channel.
-    store.focus(store.tiles[0].id)
+    // Make shroud (slot 0) the authority explicitly, then open a 5th channel.
+    store.focusTile(store.tiles[0].id)
     const idsBefore = store.tiles.map((t) => t.id)
     store.addOrReplace('ninja')
     expect(store.tiles.map((t) => t.channel)).toEqual(['ninja', 'lirik', 'summit1g', 'sodapoppin'])
     // The replaced tile KEPT its slot identity (id reused), others untouched.
     expect(store.tiles[0].id).toBe(idsBefore[0])
     expect(store.tiles[1].id).toBe(idsBefore[1])
-    expect(store.focused?.channel).toBe('ninja')
+    expect(store.authority?.channel).toBe('ninja')
   })
 
-  it('opening a channel already in a tile focuses it instead of duplicating', () => {
+  it('opening a channel already in a tile moves both pointers to it instead of duplicating', () => {
     store.addOrReplace('shroud')
     store.addOrReplace('lirik')
     const before = store.tiles.map((t) => t.channel)
+    // Read shroud's chat first, so only chat points at shroud.
+    store.selectChat(store.tiles[0].id)
+    expect(store.authority?.channel).toBe('lirik')
     const { created } = store.addOrReplace('shroud')
     expect(created).toBe(false)
     expect(store.tiles.map((t) => t.channel)).toEqual(before)
-    expect(store.focused?.channel).toBe('shroud')
+    expect(store.authority?.channel).toBe('shroud')
+    expect(store.activeChat?.channel).toBe('shroud')
   })
 
   it('channel names are normalized to lowercase', () => {
@@ -74,37 +83,99 @@ describe('TileStore.addOrReplace — empty-slot-first, then focused replace', ()
   })
 })
 
-describe('TileStore focus', () => {
-  it('exactly one tile is focused and clicking (focus) moves it', () => {
+describe('TileStore authority/chat pointer split (tile click moves both; chat tab moves chat only)', () => {
+  it('a tile click (focusTile) moves BOTH audio authority and active chat', () => {
     const a = store.addOrReplace('shroud').tile
     const b = store.addOrReplace('lirik').tile
-    store.focus(a.id)
-    expect(store.focused?.id).toBe(a.id)
-    expect(store.isFocused(a.id)).toBe(true)
-    expect(store.isFocused(b.id)).toBe(false)
-    store.focus(b.id)
-    expect(store.focused?.id).toBe(b.id)
+    store.focusTile(a.id)
+    expect(store.isAuthority(a.id)).toBe(true)
+    expect(store.isActiveChat(a.id)).toBe(true)
+    expect(store.isAuthority(b.id)).toBe(false)
+    store.focusTile(b.id)
+    expect(store.isAuthority(b.id)).toBe(true)
+    expect(store.isActiveChat(b.id)).toBe(true)
   })
 
-  it('focus is idempotent and ignores unknown ids', () => {
+  it('a CHAT TAB click (selectChat) moves ONLY the active chat — audio authority stays', () => {
     const a = store.addOrReplace('shroud').tile
-    store.focus('does-not-exist')
-    expect(store.focused?.id).toBe(a.id)
+    const b = store.addOrReplace('lirik').tile
+    store.focusTile(a.id)
+    store.selectChat(b.id)
+    // Chat followed the tab...
+    expect(store.activeChat?.id).toBe(b.id)
+    expect(store.isActiveChat(a.id)).toBe(false)
+    // ...audio did NOT.
+    expect(store.authority?.id).toBe(a.id)
+    expect(store.isAuthority(b.id)).toBe(false)
+  })
+
+  it('the asymmetry holds in both directions: tile click after a chat-tab click re-unifies', () => {
+    const a = store.addOrReplace('shroud').tile
+    const b = store.addOrReplace('lirik').tile
+    store.focusTile(a.id) // both pointers on a
+    store.selectChat(b.id) // chat only → b
+    expect(store.authority?.id).toBe(a.id)
+    store.focusTile(b.id)
+    expect(store.authority?.id).toBe(b.id)
+    expect(store.activeChat?.id).toBe(b.id)
+  })
+
+  it('pointer setters are idempotent and ignore unknown ids', () => {
+    const a = store.addOrReplace('shroud').tile
+    store.focusTile('does-not-exist')
+    store.selectChat('does-not-exist')
+    expect(store.authority?.id).toBe(a.id)
+    expect(store.activeChat?.id).toBe(a.id)
+  })
+
+  it('closing the authority tile repairs authority (and leaves an unrelated chat pointer alone)', () => {
+    const a = store.addOrReplace('shroud').tile
+    store.addOrReplace('lirik')
+    store.selectChat(store.tiles[1].id) // chat on lirik
+    store.focusTile(a.id) // authority on shroud
+    store.close(a.id)
+    expect(store.tiles.map((t) => t.channel)).toEqual(['lirik'])
+    // Authority moved to a surviving tile; the chat pointer still resolves.
+    expect(store.authority).not.toBeNull()
+    expect(store.activeChat?.channel).toBe('lirik')
+  })
+
+  it('closing the chat-active tile repairs the chat pointer to a neighbour', () => {
+    const a = store.addOrReplace('shroud').tile
+    const b = store.addOrReplace('lirik').tile
+    store.addOrReplace('summit1g')
+    store.focusTile(a.id)
+    store.selectChat(b.id)
+    store.close(b.id)
+    expect(store.authority?.id).toBe(a.id) // untouched
+    expect(store.activeChat).not.toBeNull()
+    expect(store.tiles.some((t) => t.id === store.activeChat!.id)).toBe(true)
+  })
+
+  it('closing the LAST tile clears both pointers and fires onShouldExit', () => {
+    const onExit = vi.fn()
+    store.onShouldExit = onExit
+    const a = store.addOrReplace('shroud').tile
+    store.close(a.id)
+    expect(onExit).toHaveBeenCalledTimes(1)
+    expect(store.isEmpty).toBe(true)
+    expect(store.authorityId).toBeNull()
+    expect(store.chatId).toBeNull()
   })
 })
 
 describe('TileStore audio flags (store half of audio authority)', () => {
-  it('manualUnmute is independent of focus and is NOT reset by focusing elsewhere', () => {
-    const a = store.addOrReplace('shroud').tile // focused
+  it('manualUnmute is independent of authority and is NOT reset by authority moving elsewhere', () => {
+    const a = store.addOrReplace('shroud').tile // authority
     const b = store.addOrReplace('lirik').tile
-    // Manually unmute the NON-focused tile b.
+    // Manually unmute the NON-authority tile b.
     store.setManualUnmute(b.id, true)
     expect(store.byId(b.id)!.manualUnmute).toBe(true)
-    // Focus a: b keeps its manual unmute (so it can play alongside).
-    store.focus(a.id)
+    // Authority to a: b keeps its manual unmute (so it can play alongside).
+    store.focusTile(a.id)
     expect(store.byId(b.id)!.manualUnmute).toBe(true)
-    // Focus b: a keeps default (manualUnmute false).
-    store.focus(b.id)
+    // Authority to b: a keeps default (manualUnmute false).
+    store.focusTile(b.id)
     expect(store.byId(a.id)!.manualUnmute).toBe(false)
   })
 
@@ -121,25 +192,15 @@ describe('TileStore audio flags (store half of audio authority)', () => {
 })
 
 describe('TileStore.close + offline-close trap', () => {
-  it('closing a tile refocuses a neighbour', () => {
+  it('closing a tile leaves both pointers resolvable', () => {
     const a = store.addOrReplace('shroud').tile
     store.addOrReplace('lirik')
     store.addOrReplace('summit1g')
-    store.focus(a.id)
+    store.focusTile(a.id)
     store.close(a.id)
     expect(store.tiles.map((t) => t.channel)).toEqual(['lirik', 'summit1g'])
-    // A neighbour is now focused (not null).
-    expect(store.focused).not.toBeNull()
-  })
-
-  it('closing the LAST tile fires onShouldExit (exit multi-view)', () => {
-    const onExit = vi.fn()
-    store.onShouldExit = onExit
-    const a = store.addOrReplace('shroud').tile
-    store.close(a.id)
-    expect(onExit).toHaveBeenCalledTimes(1)
-    expect(store.isEmpty).toBe(true)
-    expect(store.focusedId).toBeNull()
+    expect(store.authority).not.toBeNull()
+    expect(store.activeChat).not.toBeNull()
   })
 
   it('a genuine live→offline transition closes the tile', () => {
@@ -177,23 +238,23 @@ describe('TileStore.close + offline-close trap', () => {
   })
 })
 
-describe('tileAudible — audio authority rule (focus moves audio; manual unmute survives focus)', () => {
-  it('only the focused tile is audible by default (global unmuted)', () => {
+describe('tileAudible — audio authority rule (authority moves audio; manual unmute survives)', () => {
+  it('only the authority tile is audible by default (global unmuted)', () => {
     const { tileAudible } = S
-    expect(tileAudible(true, false, false)).toBe(true) // focused
-    expect(tileAudible(false, false, false)).toBe(false) // not focused, not manually unmuted
+    expect(tileAudible(true, false, false)).toBe(true) // authority
+    expect(tileAudible(false, false, false)).toBe(false) // not authority, not manually unmuted
   })
 
-  it('focusing a different tile moves audio to it (the old tile goes silent)', () => {
+  it('authority moving to a different tile moves audio to it (the old tile goes silent)', () => {
     const { tileAudible } = S
-    expect(tileAudible(false, false, false)).toBe(false) // old tile lost focus
-    expect(tileAudible(true, false, false)).toBe(true) // new focused tile
+    expect(tileAudible(false, false, false)).toBe(false) // old tile lost authority
+    expect(tileAudible(true, false, false)).toBe(true) // new authority tile
   })
 
-  it('manually unmuting a second tile is NOT overridden by focus changes', () => {
+  it('manually unmuting a second tile is NOT overridden by authority changes', () => {
     const { tileAudible } = S
-    expect(tileAudible(false, true, false)).toBe(true) // unmuted non-focused stays audible
-    expect(tileAudible(true, true, false)).toBe(true) // focusing it keeps it audible
+    expect(tileAudible(false, true, false)).toBe(true) // unmuted non-authority stays audible
+    expect(tileAudible(true, true, false)).toBe(true) // it becoming authority keeps it audible
   })
 
   it('global mute silences every tile (master mute), including a manually unmuted one', () => {
@@ -204,27 +265,207 @@ describe('tileAudible — audio authority rule (focus moves audio; manual unmute
 
   it('the store never imports or writes settings — a forced mute cannot be persisted by store logic', async () => {
     // The audio-authority half of "forced mute is not persisted": the store has
-    // no reference to settings, so toggling focus/manualUnmute cannot write a
-    // mute to localStorage. (The component half — only the focused tile persists
-    // — lives in Tile.svelte's explicit handlers, not in the store.)
+    // no reference to settings, so toggling authority/manualUnmute cannot write a
+    // mute to localStorage. (The component half — only explicit control handlers
+    // persist — lives in Tile.svelte, enforced via applyTileAudio below.)
     const src = (await import('./tile-store.svelte?raw')).default as string
     expect(src).not.toMatch(/settings\.setMuted|settings\.setVolume/)
     expect(src).not.toMatch(/from '.*settings/)
   })
 })
 
+// ---- Item 3: unmute on a non-authority tile ---------------------------------
+// The reported bug: clicking unmute on a tile that is NOT the audio authority
+// sometimes left it muted. Root cause (logic, not a race): the toggle direction
+// was derived from the raw `manualUnmute` flag while the icon shows the
+// EFFECTIVE audibility (manualUnmute AND NOT global mute). With the global mute
+// on, the click flipped the flag under the mute — nothing changed audibly.
+describe('planTileMuteToggle — unmute derived from EFFECTIVE audibility, never the raw flag', () => {
+  it('non-authority tile, global unmuted, not manually unmuted: unmute locally', () => {
+    expect(S.planTileMuteToggle(false, false, false)).toEqual({ manualUnmute: true })
+  })
+
+  it('THE REPORTED BUG: non-authority tile under a GLOBAL mute also clears the global mute', () => {
+    // Before the fix this click produced only {manualUnmute:true} — inaudible
+    // under the global mute, i.e. "unmute does nothing". Now it also unmutes
+    // the world so the promise of the button is kept.
+    expect(S.planTileMuteToggle(false, false, true)).toEqual({ manualUnmute: true, globalMuted: false })
+  })
+
+  it('a click on an already-audible non-authority tile mutes just that tile', () => {
+    expect(S.planTileMuteToggle(false, true, false)).toEqual({ manualUnmute: false })
+    // non-authority + manualUnmute: the global mute is untouched by this branch
+    expect(S.planTileMuteToggle(false, true, false).globalMuted).toBeUndefined()
+  })
+
+  it('authority tile toggles the global (persisted) mute', () => {
+    expect(S.planTileMuteToggle(true, false, false)).toEqual({ globalMuted: true })
+    expect(S.planTileMuteToggle(true, false, true)).toEqual({ globalMuted: false })
+    expect(S.planTileMuteToggle(true, true, false)).toEqual({ globalMuted: true })
+  })
+
+  it("the owner's exact repro as one story: mute authority → move authority away → unmute the old tile — it plays", () => {
+    // Word-for-word the reported sequence: (1) the audio-authority tile's mute
+    // button is clicked, (2) audio authority moves to another tile, (3) the OLD
+    // tile's now-unmute button is clicked. Pre-fix, step 3 flipped only
+    // manualUnmute under the still-on global mute → nothing audible changed.
+    // Post-fix, the plan also clears the blocking global mute.
+    const a = store.addOrReplace('shroud').tile
+    store.addOrReplace('lirik') // takes authority on open…
+    store.focusTile(a.id) // …until the user clicks tile A (authority back on A)
+    let globalMuted = false // mirrors settings.muted
+    // (1) Mute button on the AUTHORITY tile → toggles the GLOBAL mute.
+    let plan = S.planTileMuteToggle(store.isAuthority(a.id), a.manualUnmute, globalMuted)
+    expect(plan).toEqual({ globalMuted: true }) // settings.setMuted(true)
+    globalMuted = plan.globalMuted!
+    // Everything is silent now — including the authority tile itself.
+    expect(S.tileAudible(true, false, globalMuted)).toBe(false)
+    // (2) Click the other tile → authority moves (tileStore.focusTile).
+    store.focusTile(store.tiles[1].id)
+    expect(store.isAuthority(a.id)).toBe(false)
+    // (3) Mute button on the OLD tile (non-authority, inaudible, global mute on).
+    plan = S.planTileMuteToggle(false, store.byId(a.id)!.manualUnmute, globalMuted)
+    expect(plan).toEqual({ manualUnmute: true, globalMuted: false })
+    store.setManualUnmute(a.id, plan.manualUnmute!) // tileStore half
+    globalMuted = plan.globalMuted! // settings.setMuted(false) half
+    // (4) The click kept its promise: the old tile's element is audible...
+    const elA = { muted: true, volume: 1 }
+    S.applyTileAudio(elA, {
+      isAuthority: false,
+      manualUnmute: store.byId(a.id)!.manualUnmute,
+      globalMuted,
+      globalVolume: 0.8,
+      tileVolume: store.byId(a.id)!.volume,
+    })
+    expect(elA.muted).toBe(false)
+    // ...and the new authority tile is audible again too (the documented,
+    // accepted side effect of clearing the master mute).
+    expect(S.tileAudible(true, false, globalMuted)).toBe(true)
+  })
+})
+
+// ---- Non-authority volume controls (slider + scroll) -------------------------
+// Every tile's control bar shows a volume slider. On a non-authority tile it
+// drives the tile's OWN volume via planTileVolumeInput, with the same
+// explicit-unmute rule as the mute button: dragging above 0 must actually make
+// the tile audible (clearing a blocking global mute), or the slider would be a
+// control that "does nothing" — the exact bug class the mute plan fixed.
+describe('planTileVolumeInput — per-tile volume slider/scroll plan', () => {
+  it('positive volume on an unmuted world: just set the tile volume + unmute locally', () => {
+    expect(S.planTileVolumeInput(0.4, false)).toEqual({ tileVolume: 0.4, manualUnmute: true })
+  })
+
+  it('positive volume under a GLOBAL mute also clears the global mute (explicit unmute)', () => {
+    expect(S.planTileVolumeInput(0.4, true)).toEqual({ tileVolume: 0.4, manualUnmute: true, globalMuted: false })
+  })
+
+  it('dragging to 0 mutes just this tile and NEVER touches the global mute', () => {
+    expect(S.planTileVolumeInput(0, false)).toEqual({ tileVolume: 0, manualUnmute: false })
+    const underGlobal = S.planTileVolumeInput(0, true)
+    expect(underGlobal).toEqual({ tileVolume: 0, manualUnmute: false })
+    expect(underGlobal.globalMuted).toBeUndefined()
+  })
+
+  it('slider story: dragging a non-authority tile up under a global mute makes it audible', () => {
+    const a = store.addOrReplace('shroud').tile // stays non-authority below
+    store.addOrReplace('lirik') // takes authority
+    expect(store.isAuthority(a.id)).toBe(false)
+    let globalMuted = true // mirrors settings.muted
+    const plan = S.planTileVolumeInput(0.4, globalMuted)
+    store.setTileVolume(a.id, plan.tileVolume)
+    store.setManualUnmute(a.id, plan.manualUnmute)
+    globalMuted = plan.globalMuted!
+    const el = { muted: true, volume: 1 }
+    S.applyTileAudio(el, {
+      isAuthority: false,
+      manualUnmute: store.byId(a.id)!.manualUnmute,
+      globalMuted,
+      globalVolume: 0.9,
+      tileVolume: store.byId(a.id)!.volume,
+    })
+    expect(el.muted).toBe(false)
+    expect(el.volume).toBe(0.4)
+  })
+})
+
+describe('applyTileAudio — element and store state agree; re-runs never clobber an unmute', () => {
+  function stubEl(): { muted: boolean; volume: number } {
+    return { muted: true, volume: 1 }
+  }
+
+  it('unmuting a non-authority tile results in an audible element', () => {
+    // Tile A is authority (audible), tile B is a muted non-authority.
+    const elB = stubEl()
+    S.applyTileAudio(elB, { isAuthority: false, manualUnmute: false, globalMuted: false, globalVolume: 0.8, tileVolume: 1 })
+    expect(elB.muted).toBe(true)
+    // The store half of the unmute action (planTileMuteToggle applied):
+    const plan = S.planTileMuteToggle(false, false, false)
+    expect(plan).toEqual({ manualUnmute: true }) // store: manualUnmute := true
+    S.applyTileAudio(elB, { isAuthority: false, manualUnmute: true, globalMuted: false, globalVolume: 0.8, tileVolume: 1 })
+    expect(elB.muted).toBe(false)
+    expect(elB.volume).toBe(1) // non-authority uses its own per-tile volume
+  })
+
+  it('the unmute survives the audio-authority effect re-running afterwards', () => {
+    const el = stubEl()
+    // The unmute landed...
+    S.applyTileAudio(el, { isAuthority: false, manualUnmute: true, globalMuted: false, globalVolume: 0.6, tileVolume: 0.5 })
+    expect(el.muted).toBe(false)
+    // ...then ANY effect re-run (e.g. settings.volume changed elsewhere) writes
+    // the same audibility — a forced mute can never clobber the manual unmute
+    // because the write is derived from the SAME store flags.
+    S.applyTileAudio(el, { isAuthority: false, manualUnmute: true, globalMuted: false, globalVolume: 0.9, tileVolume: 0.5 })
+    expect(el.muted).toBe(false)
+    expect(el.volume).toBe(0.5)
+    // ...and a re-run while globally muted still respects the master mute
+    // (the toggle, not the effect, is what clears the global mute).
+    S.applyTileAudio(el, { isAuthority: false, manualUnmute: true, globalMuted: true, globalVolume: 0.9, tileVolume: 0.5 })
+    expect(el.muted).toBe(true)
+  })
+
+  it('the unmute survives authority moving to a DIFFERENT (third) tile', () => {
+    // B manually unmuted while A was authority; authority now moves to C.
+    // B is still a non-authority tile with manualUnmute=true → still audible.
+    const elB = stubEl()
+    const bManualUnmute = true // never reset by authority moves (store-tested above)
+    S.applyTileAudio(elB, { isAuthority: false, manualUnmute: bManualUnmute, globalMuted: false, globalVolume: 0.7, tileVolume: 0.4 })
+    expect(elB.muted).toBe(false)
+    expect(S.tileAudible(false, bManualUnmute, false)).toBe(true)
+  })
+
+  it('the authority element mirrors the global mute + global volume', () => {
+    const elA = stubEl()
+    S.applyTileAudio(elA, { isAuthority: true, manualUnmute: false, globalMuted: false, globalVolume: 0.35, tileVolume: 0.9 })
+    expect(elA.muted).toBe(false)
+    expect(elA.volume).toBe(0.35)
+    S.applyTileAudio(elA, { isAuthority: true, manualUnmute: false, globalMuted: true, globalVolume: 0.35, tileVolume: 0.9 })
+    expect(elA.muted).toBe(true)
+  })
+
+  it('applyTileAudio is a pure write to the passed target (no settings/localStorage reach)', () => {
+    // The helper writes ONLY the passed target object; the module-level
+    // guarantee that it cannot persist anything is the import/call-check test
+    // above (no settings import, no settings.set* calls in the source).
+    const el = stubEl()
+    S.applyTileAudio(el, { isAuthority: false, manualUnmute: true, globalMuted: false, globalVolume: 0.5, tileVolume: 0.25 })
+    expect(el).toEqual({ muted: false, volume: 0.25 })
+  })
+})
+
 describe('TileStore lifecycle', () => {
-  it('exitAll clears every tile and focus', () => {
+  it('exitAll clears every tile and both pointers', () => {
     store.addOrReplace('shroud')
     store.addOrReplace('lirik')
     store.exitAll()
     expect(store.isEmpty).toBe(true)
-    expect(store.focusedId).toBeNull()
+    expect(store.authorityId).toBeNull()
+    expect(store.chatId).toBeNull()
   })
 
   it('a fresh store is empty (multi-view starts with no tiles)', () => {
     expect(store.isEmpty).toBe(true)
-    expect(store.focused).toBeNull()
+    expect(store.authority).toBeNull()
+    expect(store.activeChat).toBeNull()
   })
 })
 
@@ -308,8 +549,8 @@ describe('per-tile volume (scroll changes only the hovered tile)', () => {
     expect(store.byId(a.id)!.volume).toBe(0)
   })
 
-  it('scroll semantics for a non-focused tile: nudging up unmutes, down to 0 mutes', () => {
-    // Mirrors Tile.svelte's onWheel for a non-focused tile: the component calls
+  it('scroll semantics for a non-authority tile: nudging up unmutes, down to 0 mutes', () => {
+    // Mirrors Tile.svelte's onWheel for a non-authority tile: the component calls
     // setTileVolume + setManualUnmute together. Here we assert the store pairs.
     const a = store.addOrReplace('shroud').tile
     // scrolling up from muted (volume 0) → volume rises + manualUnmute true
@@ -323,54 +564,62 @@ describe('per-tile volume (scroll changes only the hovered tile)', () => {
   })
 })
 
-// ---- Chat visibility invariant: focused tile is always resolvable ------------
-// MultiView.svelte looks up the active chat session via sessions.get(focused.id).
-// If `focused` is ever null while tiles exist (or its id doesn't match a tile in
-// the array), the chat pane shows "No streams open" even though a stream is
-// playing. These tests assert the data-level guarantee that prevents that.
-describe('focused tile is always resolvable while tiles exist (chat visibility)', () => {
-  it('focused is non-null and its id is in tiles after every addOrReplace', () => {
+// ---- Chat visibility invariant: the active chat tile is always resolvable ----
+// MultiView.svelte looks up the active chat session via
+// sessions.get(activeChatId). If `activeChat` is ever null while tiles exist
+// (or its id doesn't match a tile in the array), the chat pane shows "No
+// streams open" even though a stream is playing. These tests assert the
+// data-level guarantee that prevents that — for BOTH pointers.
+describe('authority and chat pointers are always resolvable while tiles exist', () => {
+  it('both pointers are non-null and valid after every addOrReplace', () => {
     for (let i = 0; i < S.MAX_TILES + 2; i++) {
       store.addOrReplace('channel' + i)
-      expect(store.focused).not.toBeNull()
-      const fid = store.focused!.id
-      expect(store.tiles.some((t) => t.id === fid)).toBe(true)
+      expect(store.authority).not.toBeNull()
+      expect(store.activeChat).not.toBeNull()
+      const aid = store.authority!.id
+      const cid = store.activeChat!.id
+      expect(store.tiles.some((t) => t.id === aid)).toBe(true)
+      expect(store.tiles.some((t) => t.id === cid)).toBe(true)
     }
   })
 
-  it('focused is non-null and resolvable after closing any tile (except the last)', () => {
+  it('both pointers stay resolvable after closing any tile (except the last)', () => {
     const ids: string[] = []
     for (let i = 0; i < 4; i++) ids.push(store.addOrReplace('ch' + i).tile.id)
-    // Close each one-by-one; after each close (while tiles remain), focused
-    // must point to a real tile so the chat pane can find a session.
-    for (let round = 0; round < 3; round++) {
-      store.close(ids[round])
-      expect(store.focused).not.toBeNull()
-      const fid = store.focused!.id
-      expect(store.tiles.some((t) => t.id === fid)).toBe(true)
+    // Diverge the pointers first (chat on the tile about to be closed).
+    store.selectChat(ids[1])
+    store.focusTile(ids[0])
+    for (const id of ids.slice(0, -1)) {
+      store.close(id)
+      expect(store.authority).not.toBeNull()
+      expect(store.activeChat).not.toBeNull()
+      expect(store.tiles.some((t) => t.id === store.authority!.id)).toBe(true)
+      expect(store.tiles.some((t) => t.id === store.activeChat!.id)).toBe(true)
     }
-    // Closing the last tile → focused is null, grid empty.
+    // Closing the last tile → both null, grid empty.
     store.close(ids[3])
-    expect(store.focused).toBeNull()
+    expect(store.authority).toBeNull()
+    expect(store.activeChat).toBeNull()
   })
 
-  it('focused is non-null and resolvable after focus changes', () => {
+  it('both pointers stay resolvable after pointer changes', () => {
     const a = store.addOrReplace('shroud').tile
     const b = store.addOrReplace('lirik').tile
-    store.focus(a.id)
-    expect(store.focused).not.toBeNull()
-    expect(store.tiles.some((t) => t.id === store.focused!.id)).toBe(true)
-    store.focus(b.id)
-    expect(store.focused).not.toBeNull()
-    expect(store.tiles.some((t) => t.id === store.focused!.id)).toBe(true)
+    store.focusTile(a.id)
+    store.selectChat(b.id)
+    expect(store.authority?.id).toBe(a.id)
+    expect(store.activeChat?.id).toBe(b.id)
+    expect(store.tiles.some((t) => t.id === store.authority!.id)).toBe(true)
+    expect(store.tiles.some((t) => t.id === store.activeChat!.id)).toBe(true)
   })
 
-  it('replacing the focused tile (grid full) keeps focused resolvable', () => {
+  it('replacing the authority tile (grid full) keeps both pointers resolvable', () => {
     for (let i = 0; i < S.MAX_TILES; i++) store.addOrReplace('ch' + i)
-    // Grid full — addOrReplace replaces the focused tile.
+    // Grid full — addOrReplace replaces the authority tile.
     store.addOrReplace('newchannel')
-    expect(store.focused).not.toBeNull()
-    expect(store.focused!.channel).toBe('newchannel')
-    expect(store.tiles.some((t) => t.id === store.focused!.id)).toBe(true)
+    expect(store.authority).not.toBeNull()
+    expect(store.authority!.channel).toBe('newchannel')
+    expect(store.tiles.some((t) => t.id === store.authority!.id)).toBe(true)
+    expect(store.activeChat!.channel).toBe('newchannel')
   })
 })

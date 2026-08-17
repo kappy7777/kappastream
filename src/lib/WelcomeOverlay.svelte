@@ -56,6 +56,11 @@
   const installCommands = $derived(STREAMLINK_INSTALL[platform] ?? STREAMLINK_INSTALL.linux)
 
   const notes = $derived(releaseNotesFor(__APP_VERSION__))
+  // Sections (Added / Changed / Fixed) mirror the CHANGELOG's headings; a
+  // version with no curated sections shows the generic line instead.
+  const hasNotes = $derived(
+    (notes.added?.length ?? 0) + (notes.changed?.length ?? 0) + (notes.fixed?.length ?? 0) > 0,
+  )
 
   onMount(() => {
     if (firstLaunch.screen !== 'welcome') return
@@ -135,13 +140,31 @@
     {:else}
       <h2 id="welcome-title" class="welcome-title">{t('whatsnew_title')}</h2>
       <p class="welcome-version">v{__APP_VERSION__}</p>
-      {#if notes.highlights.length > 0}
-        <p class="welcome-section-h">{t('whatsnew_highlights')}</p>
-        <ul class="welcome-list">
-          {#each notes.highlights as h (h)}
-            <li>{h}</li>
-          {/each}
-        </ul>
+      {#if hasNotes}
+        {#if notes.added && notes.added.length > 0}
+          <p class="welcome-section-h">{t('whatsnew_added')}</p>
+          <ul class="welcome-list">
+            {#each notes.added as h (h)}
+              <li>{h}</li>
+            {/each}
+          </ul>
+        {/if}
+        {#if notes.changed && notes.changed.length > 0}
+          <p class="welcome-section-h">{t('whatsnew_changed')}</p>
+          <ul class="welcome-list">
+            {#each notes.changed as h (h)}
+              <li>{h}</li>
+            {/each}
+          </ul>
+        {/if}
+        {#if notes.fixed && notes.fixed.length > 0}
+          <p class="welcome-section-h">{t('whatsnew_fixed')}</p>
+          <ul class="welcome-list">
+            {#each notes.fixed as h (h)}
+              <li>{h}</li>
+            {/each}
+          </ul>
+        {/if}
       {:else}
         <p class="welcome-intro">{t('whatsnew_generic')}</p>
       {/if}

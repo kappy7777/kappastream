@@ -1,13 +1,18 @@
 <script lang="ts">
   // The multi-stream split view: a tile grid (1/2/3/4 layouts), a tabbed chat
   // pane with ONE persistent IRC connection per tile (scrollback survives tab
-  // switches), and a status bar showing every open stream with the focused tile
-  // most prominent. Rendered INSTEAD of App.svelte's single-stream `.main` when
-  // multi-view is on; when off, App.svelte's original markup renders untouched
-  // (byte-identical baseline).
+  // switches), and a status bar showing every open stream with the
+  // audio-authority tile most prominent. Rendered INSTEAD of App.svelte's
+  // single-stream `.main` when multi-view is on; when off, App.svelte's original
+  // markup renders untouched (byte-identical baseline).
   //
-  // Chat sessions are owned here (not in Tile.svelte) so a session outlives
-  // focus changes — only tile CLOSE (or a channel replace) disposes it. The
+  // Focus is split (see tile-store.svelte): the AUDIO AUTHORITY (which tile has
+  // sound; moved by tile clicks) and the ACTIVE CHAT (which chat is displayed;
+  // moved by chat-tab clicks AND tile clicks) are independent pointers. A
+  // chat-tab click deliberately does NOT move audio.
+  //
+  // Chat sessions are owned here (not in Tile.svelte) so a session outlives tab
+  // switches — only tile CLOSE (or a channel replace) disposes it. The
   // client-side mute list + Tier 2 toggles are applied at RENDER time reading
   // `settings`, exactly as App.svelte does, so the session always stores every
   // event and toggles apply retroactively.
@@ -25,9 +30,9 @@
   interface Props {
     isWindows: boolean
     chatSize: number
-    onFocusedVideo: (el: HTMLVideoElement | null) => void
+    onAuthorityVideo: (el: HTMLVideoElement | null) => void
   }
-  const { isWindows, chatSize, onFocusedVideo }: Props = $props()
+  const { isWindows, chatSize, onAuthorityVideo }: Props = $props()
 
   // Per-tile chat sessions. A Svelte reactive Map so `.get()` reads track.
   let sessions = $state(new Map<string, ChatSession>())
@@ -42,7 +47,7 @@
   // $effect the reconcile runs AFTER the DOM update — the derived sees a null
   // session for the just-added tile and renders "No streams open" until the user
   // manually switches chat tabs. $effect.pre runs before the update phase, so
-  // the session is in the Map by the time `sessions.get(focusedId)` is read.
+  // the session is in the Map by the time `sessions.get(activeChatId)` is read.
   $effect.pre(() => {
     const tiles = tileStore.tiles
     const ids = new Set(tiles.map((tile) => tile.id))
@@ -71,14 +76,27 @@
   onDestroy(() => {
     for (const [, s] of sessions) s.dispose()
     sessions.clear()
-    onFocusedVideo(null)
+    onAuthorityVideo(null)
     document.removeEventListener('pointermove', onSplitMove)
     document.removeEventListener('pointerup', endSplitDrag)
     document.removeEventListener('pointercancel', endSplitDrag)
   })
 
-  const focusedId = $derived(tileStore.focused?.id ?? null)
-  const activeSession = $derived(focusedId ? sessions.get(focusedId) ?? null : null)
+  // The active chat tab follows tileStore.activeChat (moved by chat-tab clicks
+  // AND tile clicks — NOT by anything audio-related).
+  const activeChatId = $derived(tileStore.activeChat?.id ?? null)
+  const activeSession = $derived(activeChatId ? sessions.get(activeChatId) ?? null : null)
+
+  // Wheel over the tab strip scrolls it horizontally (scrollbar is hidden;
+  // without this the strip only scrolls via shift+wheel, so the rightmost
+  // tabs are effectively unreachable with a plain mouse wheel).
+  function onTabsWheel(e: WheelEvent): void {
+    const el = e.currentTarget as HTMLElement
+    if (el.scrollWidth <= el.clientWidth) return
+    const before = el.scrollLeft
+    el.scrollLeft += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+    if (el.scrollLeft !== before) e.preventDefault()
+  }
   const messages = $derived(activeSession?.messages ?? [])
   const count = $derived(tileStore.count)
 
@@ -111,9 +129,9 @@
       else { const added = len - scrollBaseline; if (added > 0) newMessageCount += added; scrollBaseline = len }
     })
   })
-  // Reset scroll state when the active tab (focused tile) changes.
+  // Reset scroll state when the active chat tab changes.
   $effect(() => {
-    void focusedId
+    void activeChatId
     stickyBottom = true
     newMessageCount = 0
     scrollBaseline = 0
@@ -197,9 +215,9 @@
   }
 
   function startDrag(tileId: string, e: PointerEvent): void {
-    // Only react to primary button presses; focus the tile too, so a handle
-    // interaction also makes it active for chat/shortcuts.
-    tileStore.focus(tileId)
+    // Only react to primary button presses; make the tile the audio authority
+    // too, so a handle interaction also claims audio + chat for that tile.
+    tileStore.focusTile(tileId)
     if (e.button !== 0) return
     dragStart = { x: e.clientX, y: e.clientY, id: tileId }
     if (!dragListeners) {
@@ -211,11 +229,10 @@
   }
 
   // ---- hideable status bar (#3) ----
-  // Persisted via settings.mvStatusBarHidden. When hidden the bar collapses and
-  // a thin hover zone at the bottom edge reveals a focusable "show" button
-  // (mouse: hover; keyboard: Tab surfaces the button). The hover zone sits BELOW
-  // the grid (its own flex strip) so it never steals clicks from tiles/controls.
-  let barHovered = $state(false)
+  // Persisted via settings.mvStatusBarHidden. When hidden the bar collapses to
+  // a thin strip below the grid whose centered "show" button is ALWAYS visible
+  // (owner request — the old hover-to-reveal button was undiscoverable). The
+  // strip is its own flex row so it never steals clicks from tiles/controls.
 
   // ---- resizable tile splits (#3) -------------------------------------------
   // splitX / splitY are the column / row split ratios (0.15–0.85, default 0.5).
@@ -290,11 +307,11 @@
         {#each tileStore.tiles as tile, i (tile.id)}
           <Tile
             {tile}
-            isFocused={tileStore.isFocused(tile.id)}
+            isAuthority={tileStore.isAuthority(tile.id)}
             isDragging={draggingId === tile.id}
             isDropTarget={dropTargetId === tile.id}
             {isWindows}
-            {onFocusedVideo}
+            {onAuthorityVideo}
             onTileDragStart={startDrag}
             gridArea={tileGridArea(i)}
           />
@@ -327,10 +344,12 @@
       </div>
     {/if}
 
-    <!-- Multi-view status bar: every open stream, focused tile most prominent.
-         Same structure family as the single-stream bar (avatar / live badge /
-         title / game / viewers); reads each tile's polled liveStatus so it
-         refreshes with the favorites poll cadence and updates on focus change.
+    <!-- Multi-view status bar: every open stream, audio-authority tile most
+         prominent. Same structure family as the single-stream bar (avatar /
+         live badge / title / game / viewers); reads each tile's polled
+         liveStatus so it refreshes with the favorites poll cadence and updates
+         on authority change. Clicking a row makes that tile the authority (and
+         moves chat to it) — a tile-level interaction.
          Hideable (#3): a hide button collapses it; when hidden, a thin hover
          strip below the grid reveals a focusable "show" button (mouse hover OR
          Tab). Scope: MULTI-VIEW ONLY — the single-stream `.stream-info` bar
@@ -350,8 +369,8 @@
         </button>
         {#each tileStore.tiles as tile (tile.id)}
           {@const s = tile.liveStatus}
-          {@const focused = tileStore.isFocused(tile.id)}
-          <button type="button" class="mv-status-row" class:mv-status-row--active={focused} onclick={() => tileStore.focus(tile.id)} aria-label={t('mv_focusTile') + ' — ' + tile.channel} aria-current={focused ? 'true' : 'false'}>
+          {@const authority = tileStore.isAuthority(tile.id)}
+          <button type="button" class="mv-status-row" class:mv-status-row--active={authority} onclick={() => tileStore.focusTile(tile.id)} aria-label={t('mv_focusTile') + ' — ' + tile.channel} aria-current={authority ? 'true' : 'false'}>
             {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
               <img class="mv-status-avatar" class:mv-status-avatar--off={s.state === 'offline'} src={s.avatarUrl} alt="" />
           {/if}
@@ -373,22 +392,18 @@
         {/each}
       </div>
     {:else}
-      <!-- Hidden: a thin strip below the grid. The reveal button is a real
-           <button> (Tab-focusable for keyboard users); it is visually hidden
-           until the strip is hovered OR focused, so it never clutters the video.
-           The strip is its own flex row beneath the grid → it cannot steal
-           clicks from tiles or their controls. -->
+      <!-- Hidden: a thin strip below the grid with a centered, ALWAYS-VISIBLE
+           reveal button (a real <button>, so Tab reaches it). The strip is its
+           own flex row beneath the grid → it cannot steal clicks from tiles or
+           their controls. -->
       <div
         class="mv-statusbar-hoverzone"
         role="region"
         aria-label={t('mv_statusBar')}
-        onpointerenter={() => (barHovered = true)}
-        onpointerleave={() => (barHovered = false)}
       >
         <button
           type="button"
           class="mv-statusbar-reveal"
-          class:mv-statusbar-reveal--shown={barHovered}
           onclick={() => settings.setMvStatusBarHidden(false)}
           aria-label={t('mv_showStatusBar')}
           aria-expanded={false}
@@ -402,18 +417,24 @@
 
   {#if settings.chatVisible}
     <main class="mv-chat">
-      <!-- Tabs: one per tile, active = focused. Clicking a tab focuses that
-           tile (chat tab and focus are one concept). -->
-      <div class="mv-chat-tabs" role="tablist">
+      <!-- Tabs: one per tile, active = active chat. Clicking a tab moves ONLY
+           the active chat — the audio authority stays where it is, so you can
+           read one channel's chat while listening to another (asymmetric with
+           tile clicks, which move both). The strip scrolls horizontally when
+           the tabs overflow the (often narrow) chat pane: its scrollbar is
+           hidden, so the wheel is translated to horizontal scrolling — a bare
+           overflow-x:auto strip would only scroll via shift+wheel, which
+           reads as "the right tabs are unreachable". -->
+      <div class="mv-chat-tabs" role="tablist" onwheel={onTabsWheel}>
         {#each tileStore.tiles as tile (tile.id)}
           <button
             type="button"
             class="mv-chat-tab"
-            class:mv-chat-tab--active={tileStore.isFocused(tile.id)}
+            class:mv-chat-tab--active={tileStore.isActiveChat(tile.id)}
             class:mv-chat-tab--live={tile.liveStatus.state === 'live'}
             role="tab"
-            aria-selected={tileStore.isFocused(tile.id)}
-            onclick={() => tileStore.focus(tile.id)}
+            aria-selected={tileStore.isActiveChat(tile.id)}
+            onclick={() => tileStore.selectChat(tile.id)}
             title={tile.channel}
           >{tile.channel}</button>
         {/each}
@@ -566,10 +587,11 @@
     opacity: 0.7;
   }
   .mv-statusbar-hide:hover { opacity: 1; background: var(--bg-hover-faint); color: var(--text-primary); }
-  /* Hidden-state hover zone: a thin strip beneath the grid. Never overlaps
+  /* Hidden-state strip: a thin strip beneath the grid. Never overlaps
      tiles/controls, so it cannot steal their clicks. The reveal button inside
-     is a real focusable <button> (Tab surfaces it for keyboard users); it is
-     invisible until the strip is hovered OR the button is focused. */
+     is a real focusable <button> (Tab surfaces it for keyboard users) and is
+     ALWAYS visible (owner request — the old hover-to-reveal button was
+     undiscoverable). */
   .mv-statusbar-hoverzone {
     flex: 0 0 auto;
     height: 12px;
@@ -594,15 +616,12 @@
     font-size: 11px;
     font-family: inherit;
     cursor: pointer;
-    opacity: 0;
-    transition: opacity 120ms;
     white-space: nowrap;
   }
-  .mv-statusbar-reveal--shown,
   .mv-statusbar-reveal:hover,
   .mv-statusbar-reveal:focus-visible {
-    opacity: 1;
     color: var(--text-primary);
+    background: var(--bg-hover-faint);
   }
   .mv-statusbar-reveal:focus-visible {
     outline: 2px solid var(--accent);

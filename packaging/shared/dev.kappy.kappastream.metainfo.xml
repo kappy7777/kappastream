@@ -78,6 +78,21 @@
   </content_rating>
 
   <releases>
+    <release version="1.0.1" date="2026-08-17">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.1</url>
+      <description>
+        <p>Custom theme editor: build a theme on top of any built-in —
+        duplicate it, adjust every colour with sliders and a swatch palette
+        with a live preview, and export or import themes as JSON files
+        (imported files are strictly validated). Five new built-in themes:
+        Riptide, Toxin, Redline, Hazard, and Blacklight.</p>
+        <p>Multi-view: every tile now has its own volume slider, chat tabs
+        switch only the chat (audio stays with the stream you are listening
+        to), unmuting a tile always works, the chat tab strip scrolls when
+        it overflows, and the hidden status bar's show button is always
+        visible.</p>
+      </description>
+    </release>
     <release version="1.0.0" date="2026-08-10">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.0</url>
       <description>

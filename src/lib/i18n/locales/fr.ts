@@ -367,7 +367,9 @@ export const fr: Record<TKey, string> = {
   welcome_installLabel: 'Installation :',
   welcome_getStarted: 'Commencer',
   whatsnew_title: 'Nouveautés',
-  whatsnew_highlights: 'Points forts',
+  whatsnew_added: 'Ajouts',
+  whatsnew_changed: 'Modifications',
+  whatsnew_fixed: 'Corrections',
   whatsnew_generic: 'Cette mise à jour apporte des améliorations et des correctifs.',
   whatsnew_continue: 'Continuer',
 

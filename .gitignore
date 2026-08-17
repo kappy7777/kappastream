@@ -28,6 +28,7 @@ squashfs-root/
 src-tauri/gen/schemas/
 *.AppImage
 *.AppImage.zsync
+src-tauri/target/
 
 # Local secrets — never commit
 .env

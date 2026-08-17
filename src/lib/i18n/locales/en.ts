@@ -397,7 +397,9 @@ export const en = {
   welcome_installLabel: 'Installation',
   welcome_getStarted: 'Get started',
   whatsnew_title: "What's new",
-  whatsnew_highlights: 'Highlights',
+  whatsnew_added: 'Added',
+  whatsnew_changed: 'Changed',
+  whatsnew_fixed: 'Fixed',
   whatsnew_generic: 'This update includes improvements and bug fixes.',
   whatsnew_continue: 'Continue',
 
