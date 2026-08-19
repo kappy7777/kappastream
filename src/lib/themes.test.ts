@@ -74,7 +74,7 @@ describe('the five saturated themes (v1.1)', () => {
       const block = css.slice(css.indexOf(`[data-theme='${id}']`))
       const body = block.slice(0, block.indexOf('}'))
       for (const prop of ['--bg-app', '--bg-panel', '--bg-chat', '--bg-input', '--bg-hover', '--bg-deep'] as const) {
-        const m = new RegExp(prop.replace(/-/g, '\\-') + String.raw`:\s*(#[0-9a-fA-F]{6})`).exec(body)
+        const m = new RegExp(prop + String.raw`:\s*(#[0-9a-fA-F]{6})`).exec(body)
         expect(m, `${id} ${prop}`).not.toBeNull()
         // A channel spread >= 24/255 reads as clearly coloured at these depths;
         // the pre-existing dark themes sit far below this (near-neutral).
