@@ -1701,6 +1701,23 @@
     }
   }
 
+  // The status bar is pinned to the window bottom as a sibling of .video-scroll
+  // (not a child), so its wheel events no longer bubble to that scroll container
+  // — forward them manually so scrolling on the bar reveals the videos/clips
+  // section, the way it did when the bar lived inside the scroll area. The
+  // player surface itself is scroll-to-volume (PlayerControls), so this bar is
+  // the primary scroll surface next to the gap around the video.
+  function onStreamInfoWheel(e: WheelEvent): void {
+    if (!videoScrollEl) return
+    let dy = e.deltaY
+    // Chromium/WebKit report pixel deltas for real wheels; normalize the
+    // line/page modes (some touchpads/point-sticks) so they scroll real amounts.
+    if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) dy *= 16
+    else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) dy *= videoScrollEl.clientHeight
+    videoScrollEl.scrollBy({ top: dy })
+    e.preventDefault()
+  }
+
   // Restore the live stream + chat for the current channel.
   function backToLive(): void {
     const ch = channelJoined
@@ -2368,9 +2385,15 @@
         <div class="player-placeholder">{t('player_placeholder')}</div>
       {/if}
     </section>
-
+    </div>
+    {#if !settings.theaterMode && !stacked && channelJoined}
+      <div bind:this={contentRef}>
+        <ChannelContent channel={channelJoined} onplayVod={playVod} onplayClip={playClip} />
+      </div>
+    {/if}
+    </div>
     {#if !settings.theaterMode}
-    <div class="stream-info">
+    <div class="stream-info" onwheel={onStreamInfoWheel}>
       {#if playback.kind === 'vod' || playback.kind === 'clip'}
         <div class="stream-info-row stream-info-row--main">
           {#if (activeStatus.state === 'live' || activeStatus.state === 'offline') && activeStatus.avatarUrl}
@@ -2467,13 +2490,6 @@
         {/if}
       </div>
       {/if}
-    </div>
-    {#if !settings.theaterMode && !stacked && channelJoined}
-      <div bind:this={contentRef}>
-        <ChannelContent channel={channelJoined} onplayVod={playVod} onplayClip={playClip} />
-      </div>
-    {/if}
-    </div>
     </div>
 
     {#if settings.chatVisible}
@@ -3232,7 +3248,7 @@
   }
 
   /* Scroll container that reveals the channel-content sections below the
-     player+status bar. The scrollbar is HIDDEN (zero width) so reserving a
+     player-stage fold. The scrollbar is HIDDEN (zero width) so reserving a
      gutter can never reflow the player horizontally — the default view at
      scroll 0 stays pixel-identical whether or not sections exist. Sections are
      reached by wheel/touch scroll. In stacked/theater mode no sections render,
@@ -3249,13 +3265,15 @@
     display: none;
   }
 
-  /* Holds the player + status bar, vertically centered, and fills exactly one
+  /* Holds the player, vertically centered, and fills exactly one
      viewport height (height: 100%, definite — NOT min-height) so two things
      hold: (a) the channel-content sections begin precisely below the fold, and
      (b) the player's max-height:100% resolves against a definite containing
-     block so flex-shrink can keep the player from growing past the status bar.
-     With min-height the percentage was indefinite and the player overflowed,
-     pushing the status bar below the fold. */
+     block so flex-shrink can keep the player inside the scroll viewport.
+     With min-height the percentage was indefinite and the player overflowed
+     its area. The status bar is NOT in here — it is a bottom flex child of
+     .video-pane, so this stage spans exactly the space above it and the
+     player's centering is unaffected by the bar's position. */
   .player-stage {
     position: relative;
     height: 100%;
@@ -3353,6 +3371,11 @@
     background: #000;
   }
 
+  /* Status bar: a bottom flex child of .video-pane, so it pins to the bottom
+     of the app window instead of the player's bottom edge (the video used to
+     carry it mid-window when the 16:9 player left vertical space free). The
+     scroll area above shrinks to fit, so the bar is always fully visible at
+     any UI scale / window size; its own height and scaling are unchanged. */
   .stream-info {
     flex: 0 0 auto;
     padding: 10px 16px;
