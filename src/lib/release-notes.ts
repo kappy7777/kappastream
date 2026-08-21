@@ -38,6 +38,17 @@ export interface VersionNotes {
 }
 
 export const RELEASE_NOTES: Record<string, VersionNotes> = {
+  '1.0.2': {
+    added: [
+      '🤝 Stream Together: favorites in a shared session show a +N chip, co-streamer avatars, and the combined viewership.',
+      '📺 New "Watch together" button opens the whole Stream Together session in the multi-view grid.',
+      '🎬 The VOD scrub bar gains chapter ticks, muted-segment stripes, and storyboard thumbnails on hover.',
+      '👥 The status bar now shows the channel\'s follower count.',
+    ],
+    fixed: [
+      '📐 The status bar no longer leaves an empty band below itself on tall windows.',
+    ],
+  },
   '1.0.1': {
     added: [
       '🎨 Custom theme editor — duplicate any of the 34 built-ins, tune it with sliders and a swatch palette, and share themes as JSON files.',

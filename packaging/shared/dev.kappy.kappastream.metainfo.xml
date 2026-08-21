@@ -78,6 +78,19 @@
   </content_rating>
 
   <releases>
+    <release version="1.0.2" date="2026-08-21">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.2</url>
+      <description>
+        <p>Stream Together awareness: favorites in a shared session show a
+        "+N" chip, stacked co-streamer avatars, and the combined viewership,
+        with rosters from the same anonymous GQL operation the twitch.tv
+        channel page uses. A new "Watch together" button opens the whole
+        session in the multi-view grid.</p>
+        <p>VOD chapters, muted segments, and seek previews on the scrub bar.
+        The channel follower count in the status bar, and no more empty
+        band under the status bar on tall windows.</p>
+      </description>
+    </release>
     <release version="1.0.1" date="2026-08-17">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.1</url>
       <description>

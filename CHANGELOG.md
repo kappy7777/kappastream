@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-08-21
+
+### Added
+
+- **Stream Together awareness.** Favorites in a shared Stream Together
+  session now show a "+N" chip, stacked co-streamer avatars, and the
+  combined viewership. Rosters come from the same anonymous GQL operation the
+  twitch.tv channel page uses: one extra request per refresh, and only when
+  a session is actually live in your list.
+
+- **"Watch together" button.** Watching a Stream Together session? One click
+  opens the whole session in the multi-view grid — the leader's stream
+  first, filling up to the four tiles.
+
+- **VOD chapters, muted segments, and seek previews.** Past broadcasts now
+  show chapter ticks on the scrub bar, striped spans where Twitch muted the
+  audio, and a storyboard thumbnail plus the in-effect chapter label in the
+  hover bubble. All of it is optional data — live and clip playback are
+  unchanged, and a failed fetch renders the plain scrubber.
+
+- **Follower count in the status bar.** The live status bar shows the
+  channel's follower count next to the uptime, carried by the existing
+  status poll — no new request.
+
+### Fixed
+
+- **No more empty band under the status bar.** The bar is pinned to the
+  window bottom and always fully visible, whatever the window shape or UI
+  scale; the growing gap it used to leave below itself on tall windows is
+  gone.
+
 ## [1.0.1] - 2026-08-17
 
 ### Added
@@ -643,7 +674,9 @@ marks the milestone; it is not a breaking change.
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.2
+[1.0.1]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.1
 [1.0.0]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.0
 [0.3.1]: https://github.com/kappy7777/kappastream/releases/tag/v0.3.1
 [0.3.0]: https://github.com/kappy7777/kappastream/releases/tag/v0.3.0

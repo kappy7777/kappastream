@@ -1428,29 +1428,28 @@
   }
 
   // The OTHER channels of the active session (host excluded), capped at the
-  // 3 remaining grid slots (4-tile grid). Two independent sources, merged +
-  // deduped: the per-channel collaboration roster fetch (real members for
-  // every session kind — this is the authoritative one) and the favorites
-  // store's roster/grouping (covers the gap before the fetch lands, and
-  // channels whose roster request failed). Session LEADER first, then by
-  // viewership where known (roster entries carry no per-member viewers).
+  // 3 remaining grid slots (4-tile grid). Both sources are the SAME
+  // collaboration roster query: the join-time per-channel fetch (lands
+  // immediately) and the favorites store's roster patch (refreshed every
+  // poll, fills the gap if the join-time fetch failed). Session LEADER
+  // first, then the roster's own order.
   const sessionOthers = $derived.by(() => {
     const host = channelJoined
     if (!host) return []
-    const byLogin = new Map<string, { viewers: number; role: string }>()
+    const byLogin = new Map<string, { role: string }>()
     for (const m of collabRoster ?? []) {
-      byLogin.set(m.login, { viewers: 0, role: m.role })
+      byLogin.set(m.login, { role: m.role })
     }
     const s = activeStatus
     if (s.state === 'live' && s.collabMembers) {
       for (const m of s.collabMembers) {
-        if (!byLogin.has(m.login)) byLogin.set(m.login, { viewers: m.viewers, role: m.role ?? '' })
+        if (!byLogin.has(m.login)) byLogin.set(m.login, { role: m.role ?? '' })
       }
     }
     byLogin.delete(host)
     return Array.from(byLogin.entries())
       .map(([login, info]) => ({ login, ...info }))
-      .sort((a, b) => (b.role === 'LEADER' ? 1 : 0) - (a.role === 'LEADER' ? 1 : 0) || b.viewers - a.viewers)
+      .sort((a, b) => (b.role === 'LEADER' ? 1 : 0) - (a.role === 'LEADER' ? 1 : 0))
       .slice(0, 3)
   })
 
@@ -1929,7 +1928,7 @@
   })
 
   let activeStatusToken = 0
-  // Status-bar badge data for the active channel: the store/grouping badge,
+  // Status-bar badge data for the active channel: the store badge,
   // upgraded by the per-channel roster fetch the moment it lands (real "other
   // channels" count + a real co-streamer avatar, with no favorites dependency).
   const activeCollab = $derived.by(() => {
@@ -1950,7 +1949,7 @@
   // per joined channel: the per-channel flags below keep the 150s poll's
   // activeStatus refreshes from re-triggering the fetch. A channel without a
   // session never fetches; a failed fetch just leaves the store's
-  // roster/grouping values in place.
+  // roster values in place.
   let collabRoster = $state<Collaborator[] | null>(null)
   let collabRosterChannel: string | null = '' // plain (non-reactive): which channel the state belongs to
   let collabRosterAttempted = false
@@ -1979,7 +1978,7 @@
         if (myToken !== collabRosterToken || channelJoined !== channel) return
         collabRoster = rosters.get(userId) ?? null
       } catch {
-        /* no roster — store grouping values remain */
+        /* no roster — store roster values remain */
       }
     })()
   })
