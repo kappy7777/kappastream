@@ -40,6 +40,7 @@ const USER_STATUS_QUERY = `
       login
       displayName
       profileImageURL(width: 70)
+      followers { totalCount }
       stream {
         id
         title
@@ -81,6 +82,8 @@ export interface ChannelStatus {
   // profileImageURL — surfaced alongside status so favorites gets the avatar
   // "for free" in the same request.
   avatarUrl: string
+  // Channel follower count (null when the response omits it).
+  followers: number | null
 }
 
 interface RawUser {
@@ -88,6 +91,7 @@ interface RawUser {
   login: string
   displayName: string
   profileImageURL?: string | null
+  followers?: { totalCount?: number | null } | null
   stream?: RawStream | null
 }
 
@@ -191,9 +195,11 @@ function toChannelStatus(user: RawUser | null): ChannelStatus {
       startedAt: '',
       thumbnailUrl: '',
       avatarUrl: '',
+      followers: null,
     }
   }
   const stream = user.stream ?? null
+  const followersTotal = user.followers?.totalCount
   return {
     login: user.login,
     displayName: user.displayName ?? user.login,
@@ -204,6 +210,7 @@ function toChannelStatus(user: RawUser | null): ChannelStatus {
     startedAt: stream?.createdAt ?? '',
     thumbnailUrl: stream?.previewImageURL ?? '',
     avatarUrl: user.profileImageURL ?? '',
+    followers: typeof followersTotal === 'number' && Number.isFinite(followersTotal) ? followersTotal : null,
   }
 }
 

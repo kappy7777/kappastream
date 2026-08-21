@@ -1701,23 +1701,6 @@
     }
   }
 
-  // The status bar is pinned to the window bottom as a sibling of .video-scroll
-  // (not a child), so its wheel events no longer bubble to that scroll container
-  // — forward them manually so scrolling on the bar reveals the videos/clips
-  // section, the way it did when the bar lived inside the scroll area. The
-  // player surface itself is scroll-to-volume (PlayerControls), so this bar is
-  // the primary scroll surface next to the gap around the video.
-  function onStreamInfoWheel(e: WheelEvent): void {
-    if (!videoScrollEl) return
-    let dy = e.deltaY
-    // Chromium/WebKit report pixel deltas for real wheels; normalize the
-    // line/page modes (some touchpads/point-sticks) so they scroll real amounts.
-    if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) dy *= 16
-    else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) dy *= videoScrollEl.clientHeight
-    videoScrollEl.scrollBy({ top: dy })
-    e.preventDefault()
-  }
-
   // Restore the live stream + chat for the current channel.
   function backToLive(): void {
     const ch = channelJoined
@@ -2335,6 +2318,7 @@
         <span class="playback-title">{playback.title}</span>
       </div>
     {/if}
+    <div class="player-fold">
     <section class="player" class:player--active={playerActive}>
       {#if playerActive}
 <video
@@ -2386,14 +2370,8 @@
       {/if}
     </section>
     </div>
-    {#if !settings.theaterMode && !stacked && channelJoined}
-      <div bind:this={contentRef}>
-        <ChannelContent channel={channelJoined} onplayVod={playVod} onplayClip={playClip} />
-      </div>
-    {/if}
-    </div>
     {#if !settings.theaterMode}
-    <div class="stream-info" onwheel={onStreamInfoWheel}>
+    <div class="stream-info">
       {#if playback.kind === 'vod' || playback.kind === 'clip'}
         <div class="stream-info-row stream-info-row--main">
           {#if (activeStatus.state === 'live' || activeStatus.state === 'offline') && activeStatus.avatarUrl}
@@ -2422,6 +2400,10 @@
           {#if activeStatus.uptime}
             <span class="stream-info-dot">·</span>
             <span class="stream-info-uptime">{t('si_uptime', { uptime: activeStatus.uptime })}</span>
+          {/if}
+          {#if activeStatus.followers != null}
+            <span class="stream-info-dot">·</span>
+            <span class="stream-info-followers">{formatCompact(activeStatus.followers)} {t('si_followers')}</span>
           {/if}
         </div>
       {:else if activeStatus.state === 'offline' && channelJoined}
@@ -2490,6 +2472,13 @@
         {/if}
       </div>
       {/if}
+    </div>
+    {#if !settings.theaterMode && !stacked && channelJoined}
+      <div bind:this={contentRef}>
+        <ChannelContent channel={channelJoined} onplayVod={playVod} onplayClip={playClip} />
+      </div>
+    {/if}
+    </div>
     </div>
 
     {#if settings.chatVisible}
@@ -3265,18 +3254,29 @@
     display: none;
   }
 
-  /* Holds the player, vertically centered, and fills exactly one
-     viewport height (height: 100%, definite — NOT min-height) so two things
-     hold: (a) the channel-content sections begin precisely below the fold, and
-     (b) the player's max-height:100% resolves against a definite containing
-     block so flex-shrink can keep the player inside the scroll viewport.
-     With min-height the percentage was indefinite and the player overflowed
-     its area. The status bar is NOT in here — it is a bottom flex child of
-     .video-pane, so this stage spans exactly the space above it and the
-     player's centering is unaffected by the bar's position. */
+  /* Holds one "fold" of the scroll area: the video (vertically centered in
+     the space left above the status bar) plus the status bar itself, and
+     fills exactly one viewport height (height: 100%, definite — NOT
+     min-height) so two things hold: (a) the channel-content sections begin
+     precisely below the fold, and (b) the player's max-height:100% resolves
+     against a definite containing block so flex-shrink can keep the player
+     inside the scroll viewport. The status bar is the stage's bottom child,
+     so it pins to the window bottom at scroll 0 (no empty band below it when
+     the 16:9 player leaves vertical space free) AND scrolls up together
+     with the video when the fold is scrolled away. */
   .player-stage {
     position: relative;
     height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* The video area: everything above the status bar. Centers the player the
+     way the whole stage used to, so the player's placement is unchanged for
+     any window shape; the status bar below it takes the remaining height. */
+  .player-fold {
+    flex: 1 1 auto;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -3371,11 +3371,12 @@
     background: #000;
   }
 
-  /* Status bar: a bottom flex child of .video-pane, so it pins to the bottom
-     of the app window instead of the player's bottom edge (the video used to
-     carry it mid-window when the 16:9 player left vertical space free). The
-     scroll area above shrinks to fit, so the bar is always fully visible at
-     any UI scale / window size; its own height and scaling are unchanged. */
+  /* Status bar: the bottom flex child of .player-stage (NOT of .video-pane),
+     so at scroll 0 it pins to the bottom of the app window — no empty band
+     below it when the 16:9 player leaves vertical space free — while
+     scrolling the fold carries it up together with the video. Wheel events
+     bubble to .video-scroll naturally (the bar lives inside it again), so no
+     manual forwarding is needed. */
   .stream-info {
     flex: 0 0 auto;
     padding: 10px 16px;
@@ -3474,6 +3475,11 @@
 
   .stream-info-uptime {
     color: var(--text-secondary);
+  }
+
+  .stream-info-followers {
+    color: var(--text-secondary);
+    white-space: nowrap;
   }
 
   .stream-info-dot {

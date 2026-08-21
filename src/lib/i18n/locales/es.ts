@@ -152,6 +152,7 @@ export const es: Record<TKey, string> = {
   mv_showStatusBar: 'Mostrar barra de estado',
 
   si_uptime: 'Desde {uptime}',
+  si_followers: 'seguidores',
   si_favorite: 'Favorito',
   si_addFavorite: 'Añadir favorito',
   si_notifyOn: 'Avisar',

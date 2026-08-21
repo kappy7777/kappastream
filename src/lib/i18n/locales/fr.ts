@@ -152,6 +152,7 @@ export const fr: Record<TKey, string> = {
   mv_showStatusBar: 'Afficher la barre d’état',
 
   si_uptime: 'Depuis {uptime}',
+  si_followers: 'abonnés',
   si_favorite: 'Favori',
   si_addFavorite: 'Ajouter aux favoris',
   si_notifyOn: 'Notif. activées',

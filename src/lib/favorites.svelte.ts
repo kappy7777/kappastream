@@ -12,7 +12,16 @@ export interface FavoriteEntry {
 
 export type LiveStatus =
   | { state: 'unknown' }
-  | { state: 'live'; title: string; viewers: number; uptime: string; game: string; avatarUrl: string }
+  | {
+      state: 'live'
+      title: string
+      viewers: number
+      uptime: string
+      game: string
+      avatarUrl: string
+      // Channel follower count, refreshed with the 150s favorites batch.
+      followers?: number | null
+    }
   | { state: 'offline'; avatarUrl: string }
   | { state: 'error'; message: string }
 
@@ -160,6 +169,7 @@ export async function fetchLiveStatus(channel: string): Promise<LiveStatus> {
         uptime: formatUptime(cs.startedAt),
         game: cs.game,
         avatarUrl: cs.avatarUrl,
+        followers: cs.followers,
       }
     }
     return { state: 'offline', avatarUrl: cs.avatarUrl }
@@ -537,7 +547,7 @@ export class FavoritesStore {
       if (!cs.login || !isValidChannelName(cs.login)) continue
       if (!this.has(cs.login)) continue // removed mid-flight
       if (versions && (this.entryVersions.get(cs.login) ?? 0) !== (versions.get(cs.login) ?? 0)) {
-        continue // a newer fetch owns this channel now
+        continue // a newer fetch owns this channel
       }
       const prev = this.statuses.get(cs.login)
       const wasLive = prev?.status.state === 'live'
@@ -550,6 +560,7 @@ export class FavoritesStore {
             uptime: formatUptime(cs.startedAt),
             game: cs.game,
             avatarUrl: cs.avatarUrl,
+            followers: cs.followers,
           }
         : { state: 'offline', avatarUrl: cs.avatarUrl }
 

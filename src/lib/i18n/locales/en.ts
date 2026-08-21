@@ -170,6 +170,7 @@ export const en = {
 
   // ---- App.svelte: stream info bar ----------------------------------------
   si_uptime: 'Up {uptime}',
+  si_followers: 'followers',
   si_favorite: 'Favorite',
   si_addFavorite: 'Add favorite',
   si_notifyOn: 'Notify on',

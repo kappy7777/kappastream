@@ -571,3 +571,29 @@ describe('gql channel content — clip slug validator', () => {
     expect(G.isValidClipSlug('a'.repeat(101))).toBe(false) // too long
   })
 })
+
+describe('gql favorites batch — followers', () => {
+  it('parses the follower count from the batched user object', async () => {
+    gql.handler = async () =>
+      ok({
+        users: [
+          {
+            id: '1',
+            login: 'kaicenat',
+            displayName: 'KaiCenat',
+            followers: { totalCount: 21652319 },
+            stream: {
+              id: 's1', title: 'x', type: 'live', viewersCount: 1,
+              createdAt: '2024-01-01T00:00:00Z',
+            },
+          },
+          { id: '2', login: 'off', displayName: 'off', followers: null, stream: null },
+        ],
+      })
+
+    const statuses = await G.fetchChannelStatuses(['kaicenat', 'off'])
+    expect(statuses[0].followers).toBe(21652319)
+    expect(statuses[1].followers).toBeNull()
+  })
+})
+

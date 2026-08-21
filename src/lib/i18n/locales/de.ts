@@ -153,6 +153,7 @@ export const de: Record<TKey, string> = {
   mv_showStatusBar: 'Statusleiste einblenden',
 
   si_uptime: 'Seit {uptime}',
+  si_followers: 'Follower',
   si_favorite: 'Favorit',
   si_addFavorite: 'Favorit hinzufügen',
   si_notifyOn: 'Benachr. an',
