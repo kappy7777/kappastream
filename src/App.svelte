@@ -26,7 +26,8 @@
   import { firstLaunch } from './lib/first-launch.svelte'
   import { fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
-  import { fetchChannelBadges } from './lib/gql'
+  import { fetchChannelBadges, fetchVideoExtras, type VodChapter, type VodMuteSpan } from './lib/gql'
+  import { parseStoryboard, type Storyboard } from './lib/vod-extras'
   import { VodChatController, fetchVodComments } from './lib/vodchat.svelte.ts'
   import { initBadgeRefresh } from './lib/badges'
   import { notifications } from './lib/notifications.svelte.ts'
@@ -204,6 +205,48 @@
   let resumeBarTimer: ReturnType<typeof setTimeout> | null = null
   let lastVodSaveAt = 0
   const VOD_SAVE_INTERVAL_MS = 5_000
+
+  // VOD scrubber extras: chapter markers, muted-segment spans, and the
+  // seek-hover storyboard (see vod-extras.ts). Fetched per VOD play; cleared
+  // on any playback-mode change. Every piece is OPTIONAL — a fetch failure
+  // leaves them empty and the scrubber renders its baseline state.
+  let vodChapters = $state<VodChapter[]>([])
+  let vodMutedSpans = $state<VodMuteSpan[]>([])
+  let vodStoryboard = $state<Storyboard | null>(null)
+  let vodExtrasToken = 0
+  function clearVodExtras(): void {
+    vodExtrasToken++
+    vodChapters = []
+    vodMutedSpans = []
+    vodStoryboard = null
+  }
+  async function loadVodExtras(videoId: string): Promise<void> {
+    const myToken = ++vodExtrasToken
+    let extras
+    try {
+      extras = await fetchVideoExtras(videoId)
+    } catch {
+      return // optional data — no chapters/mutes/previews is fine
+    }
+    if (myToken !== vodExtrasToken) return
+    vodChapters = extras.chapters
+    vodMutedSpans = extras.mutedSpans
+    vodStoryboard = null
+    // The storyboard JSON lives on the VOD CDN (no CORS), so it goes through
+    // the ksvod proxy like every other VOD CDN read; the strip IMAGES are
+    // plain CSS background-images straight from the CDN (CORS-exempt).
+    const url = extras.seekPreviewsUrl
+    if (!url) return
+    try {
+      const res = await fetch(toKsvodProxyUrl(url))
+      if (!res.ok) return
+      const sb = parseStoryboard(await res.json(), url)
+      if (myToken !== vodExtrasToken) return
+      vodStoryboard = sb
+    } catch {
+      /* storyboard is the most optional of the extras */
+    }
+  }
 
   const SIDEBAR_VIS_KEY = 'twitch-sidebar-visible-v3'
   function loadSidebarMode(): 'full' | 'icons' | 'hidden' {
@@ -1153,6 +1196,7 @@
     }
     // Any (re)connect returns to live mode — clears a prior VOD/clip playback.
     playback = { kind: 'live' }
+    clearVodExtras()
     disconnect()
 
     reconnectAttempts = 0
@@ -1640,6 +1684,7 @@
     userPaused = false
     if (videoScrollEl) videoScrollEl.scrollTop = 0
     await loadVod(video.id, quality)
+    void loadVodExtras(video.id)
     // Begin replay chat at the saved resume offset (or 0). restoreVodPosition
     // (inside loadVod) seeks the video to the same spot BEFORE this point, so
     // its `seeking` event is ignored by an un-started controller and chat/video
@@ -1651,6 +1696,7 @@
   async function playClip(clip: ChannelClip): Promise<void> {
     if (!channelJoined) return
     vodChat.stop()
+    clearVodExtras()
     playback = {
       kind: 'clip',
       slug: clip.slug,
@@ -1705,6 +1751,7 @@
   function backToLive(): void {
     const ch = channelJoined
     vodChat.stop()
+    clearVodExtras()
     playback = { kind: 'live' }
     if (ch) selectChannel(ch)
   }
@@ -1838,6 +1885,7 @@
   })
 
   let activeStatusToken = 0
+
   $effect(() => {
     const channel = channelJoined
     if (!channel) {
@@ -2333,7 +2381,7 @@
         ontimeupdate={onVideoTimeUpdate}
         onseeking={onVideoSeeking}
       ></video>
-        <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { userPaused = !p }} oncontrolsvisible={(v) => { controlsVisible = v }} {activeStatus} isFullscreen={isFullscreen} ontogglefullscreen={toggleVideoFullscreen} />
+        <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { userPaused = !p }} oncontrolsvisible={(v) => { controlsVisible = v }} {activeStatus} isFullscreen={isFullscreen} ontogglefullscreen={toggleVideoFullscreen} chapters={vodChapters} mutedSpans={vodMutedSpans} storyboard={vodStoryboard} />
         {#if showPlayerOverlay}
           <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
             {#if isPlayerBusy}

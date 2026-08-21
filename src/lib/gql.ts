@@ -1145,3 +1145,147 @@ export async function fetchChannelBadges(
   }
   return out
 }
+
+/*
+ * ============================================================================
+ * VOD playback extras — chapters, muted segments, seek-hover storyboard URL.
+ *
+ * One lightweight per-VOD query. Field/argument names verified against the
+ * live endpoint (2026-08-20); note two places the live schema has DRIFTED
+ * from the community schema dump used elsewhere in this file:
+ *   - `moments` requires `momentRequestType: VIDEO_CHAPTER_MARKERS` to return
+ *     the viewer-facing chapter list (without it the field "server error"s;
+ *     HIGHLIGHTER_SUGGESTIONS is the creator-side variant).
+ *   - `muteInfo.mutedSegmentConnection` exposes `nodes` (no pagination), NOT
+ *     `edges`.
+ * A chapter's label prefers the moment description, then the game-change
+ * game name, then a positional fallback. All extras are OPTIONAL data: the
+ * caller fails silently and the scrubber simply renders without them.
+ * ============================================================================
+ */
+
+export interface VodChapter {
+  // Whole seconds from VOD start where the chapter begins.
+  startSec: number
+  label: string
+}
+
+export interface VodMuteSpan {
+  startSec: number
+  endSec: number
+}
+
+export interface VideoExtras {
+  chapters: VodChapter[]
+  mutedSpans: VodMuteSpan[]
+  // Storyboard document URL (see vod-extras.ts); null when Twitch served none.
+  seekPreviewsUrl: string | null
+}
+
+interface RawMomentDetails {
+  game?: { displayName?: string | null } | null
+}
+
+interface RawMomentNode {
+  positionMilliseconds?: number | null
+  description?: string | null
+  details?: RawMomentDetails | null
+}
+
+interface RawMutedSegment {
+  duration?: number | null
+  offset?: number | null
+}
+
+interface RawVideoExtras {
+  seekPreviewsURL?: string | null
+  muteInfo?: {
+    mutedSegmentConnection?: { nodes?: (RawMutedSegment | null)[] | null } | null
+  } | null
+  moments?: { edges?: ({ node?: RawMomentNode | null } | null)[] | null } | null
+}
+
+const VIDEO_EXTRAS_QUERY = `
+  query($id: ID!) {
+    video(id: $id) {
+      id
+      seekPreviewsURL
+      muteInfo {
+        mutedSegmentConnection {
+          nodes { duration offset }
+        }
+      }
+      moments(first: 100, momentRequestType: VIDEO_CHAPTER_MARKERS) {
+        edges {
+          node {
+            type
+            positionMilliseconds
+            durationMilliseconds
+            description
+            details {
+              ... on GameChangeMomentDetails { game { displayName } }
+            }
+          }
+        }
+      }
+    }
+  }
+`
+
+// VOD ids are numeric strings (e.g. "2849957264"). Validated before the id is
+// sent in a GQL variable so a malformed/external value can never be issued.
+const VOD_ID_RE = /^\d{1,20}$/
+
+export function isValidVodId(id: string): boolean {
+  return VOD_ID_RE.test(id)
+}
+
+function toVodExtras(raw: RawVideoExtras | null | undefined): VideoExtras {
+  const chapters: VodChapter[] = []
+  let i = 0
+  for (const edge of raw?.moments?.edges ?? []) {
+    const n = edge?.node
+    i++
+    if (!n) continue
+    const startMs = typeof n.positionMilliseconds === 'number' ? n.positionMilliseconds : NaN
+    if (!Number.isFinite(startMs) || startMs < 0) continue
+    const label =
+      (typeof n.description === 'string' && n.description.trim()) ||
+      n.details?.game?.displayName?.trim() ||
+      ''
+    chapters.push({ startSec: Math.floor(startMs / 1000), label: label || `Chapter ${i}` })
+  }
+  chapters.sort((a, b) => a.startSec - b.startSec)
+  const mutedSpans: VodMuteSpan[] = []
+  for (const seg of raw?.muteInfo?.mutedSegmentConnection?.nodes ?? []) {
+    const offset = typeof seg?.offset === 'number' ? seg.offset : NaN
+    const duration = typeof seg?.duration === 'number' ? seg.duration : NaN
+    if (!Number.isFinite(offset) || !Number.isFinite(duration) || duration <= 0 || offset < 0) continue
+    mutedSpans.push({ startSec: Math.floor(offset), endSec: Math.floor(offset + duration) })
+  }
+  mutedSpans.sort((a, b) => a.startSec - b.startSec)
+  return {
+    chapters,
+    mutedSpans,
+    seekPreviewsUrl: typeof raw?.seekPreviewsURL === 'string' && raw.seekPreviewsURL ? raw.seekPreviewsURL : null,
+  }
+}
+
+/**
+ * Fetch a VOD's chapter markers, muted segments, and seek-hover storyboard
+ * URL in one request. Throws on transport failure; the caller treats every
+ * extra as optional (no chapters/mutes/previews is a valid render state).
+ */
+export async function fetchVideoExtras(
+  videoId: string,
+  signal?: AbortSignal,
+): Promise<VideoExtras> {
+  if (!isValidVodId(videoId)) throw new Error('invalid vod id')
+  const data = await gqlRequest<{ video?: RawVideoExtras | null }>(
+    VIDEO_EXTRAS_QUERY,
+    { id: videoId },
+    signal,
+  )
+  return toVodExtras(data?.video ?? null)
+}
+

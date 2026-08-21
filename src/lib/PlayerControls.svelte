@@ -3,6 +3,8 @@
   import { pipController } from './pip-controller.svelte.ts'
   import { tooltip } from './tooltip.ts'
   import type { LiveStatus } from './favorites.svelte.ts'
+  import type { VodChapter, VodMuteSpan } from './gql'
+  import { chapterAt, storyboardThumbAt, type Storyboard } from './vod-extras'
   import { isTauri } from '@tauri-apps/api/core'
   import { t } from './i18n/index.svelte'
   import { formatCompact } from './format'
@@ -47,9 +49,31 @@
     // reflects + drives them. See App.svelte toggleVideoFullscreen.
     isFullscreen: boolean
     ontogglefullscreen: () => void
+    // VOD-only scrubber extras (App clears them for live/clip playback):
+    // chapter start markers, muted-segment spans, and the seek-hover
+    // storyboard. All optional — the scrubber renders identically to the
+    // pre-feature baseline when they are empty/null.
+    chapters?: VodChapter[]
+    mutedSpans?: VodMuteSpan[]
+    storyboard?: Storyboard | null
   }
 
-  const { video, visible, quality, onqualitychange, onmpv, onstop, onplayintent, activeStatus, oncontrolsvisible, isFullscreen, ontogglefullscreen }: Props = $props()
+  const {
+    video,
+    visible,
+    quality,
+    onqualitychange,
+    onmpv,
+    onstop,
+    onplayintent,
+    activeStatus,
+    oncontrolsvisible,
+    isFullscreen,
+    ontogglefullscreen,
+    chapters = [],
+    mutedSpans = [],
+    storyboard = null,
+  }: Props = $props()
 
   function toggleTheater(): void {
     settings.toggleTheaterMode()
@@ -277,6 +301,21 @@
     return Math.max(0, Math.min(100, (pos / duration) * 100))
   }
 
+  // VOD scrubber extras: the hovered storyboard thumbnail, the chapter label
+  // in effect at the hovered time, and the percent geometry for muted spans.
+  const hoverThumb = $derived(
+    hoverTime !== null && storyboard ? storyboardThumbAt(storyboard, hoverTime) : null,
+  )
+  const hoverChapterLabel = $derived(
+    hoverTime !== null ? (chapterAt(chapters, hoverTime)?.label ?? '') : '',
+  )
+
+  function mutedSpanStyle(span: VodMuteSpan): string {
+    const left = progressPct(span.startSec)
+    const width = Math.max(0, progressPct(Math.min(span.endSec, duration)) - left)
+    return `left: ${left}%; width: ${width}%`
+  }
+
   let progressEl: HTMLElement | undefined = $state()
 
   let playerWidth = $state(640)
@@ -373,9 +412,30 @@
     >
       <div class="progress-buffered" style="width: {progressPct(buffered)}%"></div>
       <div class="progress-played" style="width: {progressPct(currentTime)}%"></div>
+      {#if mutedSpans.length > 0}
+        {#each mutedSpans as span (span.startSec)}
+          <div class="progress-muted" style={mutedSpanStyle(span)} aria-hidden="true"></div>
+        {/each}
+      {/if}
+      {#if chapters.length > 0}
+        {#each chapters as chapter (chapter.startSec)}
+          {#if chapter.startSec > 0}
+            <div class="progress-chapter" style="left: {progressPct(chapter.startSec)}%" aria-hidden="true"></div>
+          {/if}
+        {/each}
+      {/if}
       {#if hoverTime !== null}
         <div class="progress-hover" style="left: {progressPct(hoverTime)}%">
-          <div class="progress-hover-bubble">{formatTime(hoverTime)}</div>
+          {#if hoverThumb}
+            <div
+              class="progress-hover-thumb"
+              style="width: {storyboard?.width}px; height: {storyboard?.height}px; background-image: url('{hoverThumb.url}'); background-size: {(storyboard?.cols ?? 1) * (storyboard?.width ?? 0)}px {(storyboard?.rows ?? 1) * (storyboard?.height ?? 0)}px; background-position: {hoverThumb.x}px {hoverThumb.y}px;"
+              aria-hidden="true"
+            ></div>
+          {/if}
+          <div class="progress-hover-bubble">
+            {formatTime(hoverTime)}{#if hoverChapterLabel}<span class="progress-hover-chapter"> · {hoverChapterLabel}</span>{/if}
+          </div>
         </div>
       {/if}
     </div>
@@ -667,21 +727,57 @@
     background: var(--accent);
   }
 
+  .progress-muted {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    height: calc(3px * var(--ctrl-scale));
+    border-radius: calc(2px * var(--ctrl-scale));
+    background: repeating-linear-gradient(
+      45deg,
+      rgba(229, 57, 53, 0.95) 0,
+      rgba(229, 57, 53, 0.95) calc(3px * var(--ctrl-scale)),
+      rgba(120, 20, 20, 0.95) calc(3px * var(--ctrl-scale)),
+      rgba(120, 20, 20, 0.95) calc(6px * var(--ctrl-scale))
+    );
+    pointer-events: none;
+  }
+
+  .progress-chapter {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: calc(2px * var(--ctrl-scale));
+    height: calc(9px * var(--ctrl-scale));
+    border-radius: calc(1px * var(--ctrl-scale));
+    background: rgba(255, 255, 255, 0.55);
+    pointer-events: none;
+  }
+
   .progress:hover::before,
   .progress:hover .progress-buffered,
-  .progress:hover .progress-played {
+  .progress:hover .progress-played,
+  .progress:hover .progress-muted {
     height: calc(5px * var(--ctrl-scale));
   }
 
   .progress-hover {
     position: absolute;
-    top: 0;
-    transform: translateX(-50%);
+    top: calc(-4px * var(--ctrl-scale));
+    transform: translate(-50%, -100%);
     pointer-events: none;
-    height: 100%;
     display: flex;
-    align-items: flex-start;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+    gap: calc(4px * var(--ctrl-scale));
+  }
+
+  .progress-hover-thumb {
+    flex: 0 0 auto;
+    border-radius: calc(3px * var(--ctrl-scale));
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    background-color: #000;
+    background-repeat: no-repeat;
   }
 
   .progress-hover-bubble {
@@ -691,7 +787,15 @@
     border-radius: calc(3px * var(--ctrl-scale));
     font-size: calc(11px * var(--ctrl-scale));
     white-space: nowrap;
-    transform: translateY(calc(-18px * var(--ctrl-scale)));
+  }
+
+  .progress-hover-chapter {
+    display: inline-block;
+    max-width: calc(180px * var(--ctrl-scale));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+    color: var(--text-secondary);
   }
 
   .controls-row {

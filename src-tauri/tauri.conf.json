@@ -35,7 +35,9 @@
           "https://static-cdn.jtvnw.net",
           "https://cdn.7tv.app",
           "https://cdn.betterttv.net",
-          "https://cdn.frankerfacez.com"
+          "https://cdn.frankerfacez.com",
+          "https://cloudfront.net",
+          "https://*.cloudfront.net"
         ],
         "connect-src": [
           "'self'",
@@ -86,7 +88,9 @@
           "https://static-cdn.jtvnw.net",
           "https://cdn.7tv.app",
           "https://cdn.betterttv.net",
-          "https://cdn.frankerfacez.com"
+          "https://cdn.frankerfacez.com",
+          "https://cloudfront.net",
+          "https://*.cloudfront.net"
         ],
         "connect-src": [
           "'self'",

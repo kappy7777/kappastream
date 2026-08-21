@@ -572,6 +572,97 @@ describe('gql channel content — clip slug validator', () => {
   })
 })
 
+describe('gql VOD extras (chapters / mutes / storyboard URL)', () => {
+  it('parses chapters, muted segments, and the storyboard URL', async () => {
+    gql.handler = async () =>
+      ok({
+        video: {
+          id: '2849957264',
+          seekPreviewsURL: 'https://d2vi6trrdongqn.cloudfront.net/x/storyboards/2849957264-info.json',
+          muteInfo: {
+            mutedSegmentConnection: {
+              nodes: [
+                { duration: 180, offset: 36180 },
+                { duration: 360, offset: 0 },
+              ],
+            },
+          },
+          moments: {
+            edges: [
+              { node: { type: 'GAME_CHANGE', positionMilliseconds: 0, durationMilliseconds: 83000, description: 'Chapter 1', details: null } },
+              { node: { type: 'GAME_CHANGE', positionMilliseconds: 83000, durationMilliseconds: 10890000, description: '', details: { game: { displayName: 'Just Chatting' } } } },
+              { node: { type: 'GAME_CHANGE', positionMilliseconds: 10973000, durationMilliseconds: 74000, description: '', details: { game: { displayName: 'Grand Theft Auto V' } } } },
+            ],
+          },
+        },
+      })
+
+    const extras = await G.fetchVideoExtras('2849957264')
+    expect(extras.chapters).toEqual([
+      { startSec: 0, label: 'Chapter 1' },
+      { startSec: 83, label: 'Just Chatting' },
+      { startSec: 10973, label: 'Grand Theft Auto V' },
+    ])
+    expect(extras.mutedSpans).toEqual([
+      { startSec: 0, endSec: 360 },
+      { startSec: 36180, endSec: 36360 },
+    ])
+    expect(extras.seekPreviewsUrl).toBe('https://d2vi6trrdongqn.cloudfront.net/x/storyboards/2849957264-info.json')
+  })
+
+  it('falls back to a positional label when a moment has neither description nor game', async () => {
+    gql.handler = async () =>
+      ok({
+        video: {
+          id: '1',
+          moments: { edges: [{ node: { positionMilliseconds: 5000, description: null, details: null } }] },
+        },
+      })
+    const extras = await G.fetchVideoExtras('1')
+    expect(extras.chapters).toEqual([{ startSec: 5, label: 'Chapter 1' }])
+  })
+
+  it('treats missing extras (null video / empty edges / null nodes) as success', async () => {
+    gql.handler = async () => ok({ video: null })
+    expect(await G.fetchVideoExtras('42')).toEqual({ chapters: [], mutedSpans: [], seekPreviewsUrl: null })
+
+    gql.handler = async () =>
+      ok({
+        video: {
+          id: '42',
+          seekPreviewsURL: null,
+          muteInfo: null,
+          moments: { edges: [null, { node: null }, { node: { positionMilliseconds: -5 } }] },
+        },
+      })
+    const extras = await G.fetchVideoExtras('42')
+    expect(extras.chapters).toEqual([])
+    expect(extras.mutedSpans).toEqual([])
+    expect(extras.seekPreviewsUrl).toBeNull()
+  })
+
+  it('drops malformed muted segments and clamps nothing into the timeline', async () => {
+    gql.handler = async () =>
+      ok({
+        video: {
+          id: '1',
+          muteInfo: { mutedSegmentConnection: { nodes: [{ offset: 10 }, { duration: 30 }, { offset: -1, duration: 5 }] } },
+        },
+      })
+    expect((await G.fetchVideoExtras('1')).mutedSpans).toEqual([])
+  })
+
+  it('validates the vod id before any request and throws on transport failure', async () => {
+    gql.handler = async () => ok({ video: null })
+    await expect(G.fetchVideoExtras('abc')).rejects.toThrow('invalid vod id')
+    await expect(G.fetchVideoExtras('../escape')).rejects.toThrow('invalid vod id')
+    expect(gql.calls).toHaveLength(0)
+
+    gql.handler = async () => gqlErrors()
+    await expect(G.fetchVideoExtras('123')).rejects.toThrow()
+  })
+})
+
 describe('gql favorites batch — followers', () => {
   it('parses the follower count from the batched user object', async () => {
     gql.handler = async () =>
