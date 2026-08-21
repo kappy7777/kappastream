@@ -153,6 +153,9 @@ export const es: Record<TKey, string> = {
 
   si_uptime: 'Desde {uptime}',
   si_followers: 'seguidores',
+  streamingTogether: 'Transmitiendo juntos',
+  si_collabViewers: 'viendo juntos',
+  si_watchTogether: 'Ver juntos',
   si_favorite: 'Favorito',
   si_addFavorite: 'Añadir favorito',
   si_notifyOn: 'Avisar',

@@ -663,7 +663,132 @@ describe('gql VOD extras (chapters / mutes / storyboard URL)', () => {
   })
 })
 
-describe('gql favorites batch — followers', () => {
+describe('gql favorites batch — Stream Together / costream fields', () => {
+  it('parses collaborationViewersCount + costreamDetails (classic costream)', async () => {
+    gql.handler = async () =>
+      ok({
+        users: [
+          {
+            id: '1',
+            login: 'les',
+            displayName: 'LES',
+            profileImageURL: 'https://img/les.png',
+            stream: {
+              id: 's1',
+              title: 'FINAL',
+              type: 'live',
+              viewersCount: 3041,
+              createdAt: '2024-01-01T00:00:00Z',
+              previewImageURL: 'https://img/t.png',
+              collaborationViewersCount: 14986,
+              costreamDetails: {
+                costreamersCount: 5,
+                topCostreamers: [
+                  { profileImageURL: 'https://img/jaime.png' },
+                  { profileImageURL: 'https://img/mfreak.png' },
+                ],
+              },
+              game: { id: 'g1', name: 'league-of-legends', displayName: 'League of Legends' },
+            },
+          },
+        ],
+      })
+
+    const statuses = await G.fetchChannelStatuses(['les'])
+    expect(statuses[0].collabViewers).toBe(14986)
+    expect(statuses[0].collabOthers).toBe(5)
+    expect(statuses[0].collabAvatar).toBe('https://img/jaime.png')
+  })
+
+  it('guest-star sessions: collabViewers set, roster fields empty (null details)', async () => {
+    gql.handler = async () =>
+      ok({
+        users: [
+          {
+            id: '1',
+            login: 'trymacs',
+            displayName: 'Trymacs',
+            profileImageURL: 'https://img/tm.png',
+            stream: {
+              id: 's2',
+              title: 'Costream',
+              type: 'live',
+              viewersCount: 11109,
+              createdAt: '2024-01-01T00:00:00Z',
+              previewImageURL: null,
+              collaborationViewersCount: 41103,
+              game: null,
+            },
+          },
+        ],
+      })
+
+    const statuses = await G.fetchChannelStatuses(['trymacs'])
+    expect(statuses[0].collabViewers).toBe(41103)
+    expect(statuses[0].collabOthers).toBe(0)
+    expect(statuses[0].collabAvatar).toBe('')
+  })
+
+  it('plain streams / offline / null users carry no collab state', async () => {
+    gql.handler = async () =>
+      ok({
+        users: [
+          {
+            id: '1',
+            login: 'solo',
+            displayName: 'solo',
+            stream: {
+              id: 's3',
+              title: 'x',
+              type: 'live',
+              viewersCount: 1,
+              createdAt: '2024-01-01T00:00:00Z',
+              collaborationViewersCount: null,
+              costreamDetails: null,
+            },
+          },
+          { id: '2', login: 'off', displayName: 'off', stream: null },
+          null,
+        ],
+      })
+
+    const statuses = await G.fetchChannelStatuses(['solo', 'off', 'ghost'])
+    for (const s of statuses) {
+      expect(s.collabViewers).toBeNull()
+      expect(s.collabOthers).toBe(0)
+      expect(s.collabAvatar).toBe('')
+    }
+  })
+
+  it('malformed costreamDetails degrade to unknown roster', async () => {
+    gql.handler = async () =>
+      ok({
+        users: [
+          {
+            id: '1',
+            login: 'weird',
+            displayName: 'weird',
+            stream: {
+              id: 's4',
+              title: 'x',
+              type: 'live',
+              viewersCount: 1,
+              createdAt: '2024-01-01T00:00:00Z',
+              collaborationViewersCount: 500,
+              costreamDetails: { costreamersCount: -3, topCostreamers: [null, { profileImageURL: '' }] },
+            },
+          },
+        ],
+      })
+
+    const statuses = await G.fetchChannelStatuses(['weird'])
+    expect(statuses[0].collabViewers).toBe(500)
+    expect(statuses[0].collabOthers).toBe(0)
+    expect(statuses[0].collabAvatar).toBe('')
+  })
+})
+
+describe('gql favorites batch — followers + organizer combined count', () => {
   it('parses the follower count from the batched user object', async () => {
     gql.handler = async () =>
       ok({
@@ -675,7 +800,7 @@ describe('gql favorites batch — followers', () => {
             followers: { totalCount: 21652319 },
             stream: {
               id: 's1', title: 'x', type: 'live', viewersCount: 1,
-              createdAt: '2024-01-01T00:00:00Z',
+              createdAt: '2024-01-01T00:00:00Z', collaborationViewersCount: null,
             },
           },
           { id: '2', login: 'off', displayName: 'off', followers: null, stream: null },
@@ -686,5 +811,97 @@ describe('gql favorites batch — followers', () => {
     expect(statuses[0].followers).toBe(21652319)
     expect(statuses[1].followers).toBeNull()
   })
+
+  it('an ORGANIZER carries the combined count via costreamDetails.totalViewersCount', async () => {
+    gql.handler = async () =>
+      ok({
+        users: [
+          {
+            id: '1',
+            login: 'les',
+            displayName: 'LES',
+            followers: { totalCount: 100 },
+            stream: {
+              id: 's1', title: 'FINAL', type: 'live', viewersCount: 3041,
+              createdAt: '2024-01-01T00:00:00Z',
+              collaborationViewersCount: null,
+              costreamDetails: {
+                costreamersCount: 5,
+                totalViewersCount: 14986,
+                topCostreamers: [{ profileImageURL: 'https://img/j.png' }],
+              },
+            },
+          },
+        ],
+      })
+
+    const statuses = await G.fetchChannelStatuses(['les'])
+    expect(statuses[0].collabViewers).toBe(14986)
+    expect(statuses[0].collabOthers).toBe(5)
+    expect(statuses[0].collabAvatar).toBe('https://img/j.png')
+  })
 })
 
+
+describe('gql collaboration roster (channel(id:).collaboration)', () => {
+  it('fetches aliased rosters in one request, ACTIVE members only, self included', async () => {
+    gql.handler = async (body) => {
+      const vars = JSON.parse(body).variables
+      expect(Object.keys(vars).sort()).toEqual(['id0', 'id1'])
+      return ok({
+        c0: {
+          collaboration: {
+            collaborators: [
+              { role: 'LEADER', status: 'ACTIVE', user: { login: 'ronnyberger', displayName: 'ronnyberger', profileImageURL: 'https://img/r.png' } },
+              { role: 'MEMBER', status: 'ACTIVE', user: { login: 'nicistemmler', displayName: 'Nicistemmler', profileImageURL: 'https://img/n.png' } },
+              { role: 'MEMBER', status: 'INVITED', user: { login: 'ghost_guest', displayName: 'ghost', profileImageURL: 'https://img/g.png' } },
+              { role: 'MEMBER', status: 'ACTIVE', user: { login: '', displayName: 'nologin', profileImageURL: null } },
+              null,
+            ],
+          },
+        },
+        c1: { collaboration: null }, // not in a session
+      })
+    }
+    const rosters = await G.fetchCollaborators(['531019578', '641972806'])
+    expect(rosters.size).toBe(1)
+    expect(rosters.get('531019578')).toEqual([
+      { login: 'ronnyberger', displayName: 'ronnyberger', avatarUrl: 'https://img/r.png', role: 'LEADER' },
+      { login: 'nicistemmler', displayName: 'Nicistemmler', avatarUrl: 'https://img/n.png', role: 'MEMBER' },
+    ])
+    expect(rosters.has('641972806')).toBe(false)
+  })
+
+  it('empty and non-numeric ids never issue a request', async () => {
+    gql.handler = async () => {
+      throw new Error('should not be called')
+    }
+    expect((await G.fetchCollaborators([])).size).toBe(0)
+    expect((await G.fetchCollaborators(['abc', '../escape', ''])).size).toBe(0)
+    expect(gql.calls).toHaveLength(0)
+  })
+
+  it('chunks more than 30 ids into multiple requests', async () => {
+    let requests = 0
+    gql.handler = async (body) => {
+      requests++
+      const vars = JSON.parse(body).variables as Record<string, string>
+      const data: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(vars)) {
+        data[k.replace('id', 'c')] = {
+          collaboration: { collaborators: [{ role: 'LEADER', status: 'ACTIVE', user: { login: 'x' + v, displayName: 'x', profileImageURL: null } }] },
+        }
+      }
+      return ok(data)
+    }
+    const ids = Array.from({ length: 65 }, (_, i) => String(1000 + i))
+    const rosters = await G.fetchCollaborators(ids)
+    expect(requests).toBe(3) // 30 + 30 + 5
+    expect(rosters.size).toBe(65)
+  })
+
+  it('throws on transport failure (caller treats as no roster)', async () => {
+    gql.handler = async () => gqlErrors()
+    await expect(G.fetchCollaborators(['531019578'])).rejects.toThrow()
+  })
+})

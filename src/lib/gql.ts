@@ -48,6 +48,14 @@ const USER_STATUS_QUERY = `
         viewersCount
         createdAt
         previewImageURL
+        collaborationViewersCount
+        costreamDetails {
+          costreamersCount
+          totalViewersCount
+          topCostreamers {
+            profileImageURL(width: 70)
+          }
+        }
         game {
           id
           name
@@ -70,6 +78,10 @@ const USER_ID_QUERY = `
 
 export interface ChannelStatus {
   login: string
+  // Numeric Twitch user ID ('' for a nonexistent login). Needed as the key
+  // for the collaboration roster query (channel(id:)), which has no
+  // login-based variant.
+  userId: string
   displayName: string
   live: boolean
   title: string
@@ -82,6 +94,22 @@ export interface ChannelStatus {
   // profileImageURL — surfaced alongside status so favorites gets the avatar
   // "for free" in the same request.
   avatarUrl: string
+  // Stream Together / costream state (live streams only). `collabViewers` is
+  // the COMBINED viewership across the session's channels — non-null means
+  // the channel is in a shared session (works for BOTH the guest-star-style
+  // sessions and classic costreams). Participants carry it as
+  // collaborationViewersCount; an ORGANIZER instead exposes it as
+  // costreamDetails.totalViewersCount, so the mapping falls back to that —
+  // mirroring how twitch.tv picks the number it displays. The full roster
+  // (logins + avatars + roles) is NOT in this response: it lives behind
+  // channel(id:).collaboration (see fetchCollaborators) and is fetched
+  // separately, so collabOthers=0/collabAvatar='' from THIS mapping means
+  // "roster not attached yet", never "not in a session" — check collabViewers.
+  collabViewers: number | null
+  // Other channels in the session (0 = roster unknown or no session).
+  collabOthers: number
+  // One co-streamer's avatar for the stacked mini badge ('' when unknown).
+  collabAvatar: string
   // Channel follower count (null when the response omits it).
   followers: number | null
 }
@@ -102,6 +130,12 @@ interface RawStream {
   viewersCount: number
   createdAt: string
   previewImageURL?: string | null
+  collaborationViewersCount?: number | null
+  costreamDetails?: {
+    costreamersCount?: number | null
+    totalViewersCount?: number | null
+    topCostreamers?: ({ profileImageURL?: string | null } | null)[] | null
+  } | null
   game?: { name: string; displayName: string } | null
 }
 
@@ -187,6 +221,7 @@ function toChannelStatus(user: RawUser | null): ChannelStatus {
   if (!user) {
     return {
       login: '',
+      userId: '',
       displayName: '',
       live: false,
       title: '',
@@ -195,13 +230,38 @@ function toChannelStatus(user: RawUser | null): ChannelStatus {
       startedAt: '',
       thumbnailUrl: '',
       avatarUrl: '',
+      collabViewers: null,
+      collabOthers: 0,
+      collabAvatar: '',
       followers: null,
     }
   }
   const stream = user.stream ?? null
+  const details = stream?.costreamDetails ?? null
+  // Participants expose the combined count directly; an organizer instead
+  // carries it inside costreamDetails.totalViewersCount (its own
+  // collaborationViewersCount is null). Mirror twitch.tv's display choice.
+  const collabViewers =
+    typeof stream?.collaborationViewersCount === 'number' && stream.collaborationViewersCount > 0
+      ? stream.collaborationViewersCount
+      : typeof details?.totalViewersCount === 'number' && details.totalViewersCount > 0
+        ? details.totalViewersCount
+        : null
+  const collabOthers =
+    details && typeof details.costreamersCount === 'number' && details.costreamersCount > 0
+      ? details.costreamersCount
+      : 0
+  let collabAvatar = ''
+  for (const c of details?.topCostreamers ?? []) {
+    if (c && typeof c.profileImageURL === 'string' && c.profileImageURL) {
+      collabAvatar = c.profileImageURL
+      break
+    }
+  }
   const followersTotal = user.followers?.totalCount
   return {
     login: user.login,
+    userId: user.id ?? '',
     displayName: user.displayName ?? user.login,
     live: !!stream,
     title: stream?.title ?? '',
@@ -210,6 +270,9 @@ function toChannelStatus(user: RawUser | null): ChannelStatus {
     startedAt: stream?.createdAt ?? '',
     thumbnailUrl: stream?.previewImageURL ?? '',
     avatarUrl: user.profileImageURL ?? '',
+    collabViewers,
+    collabOthers,
+    collabAvatar,
     followers: typeof followersTotal === 'number' && Number.isFinite(followersTotal) ? followersTotal : null,
   }
 }
@@ -1289,3 +1352,97 @@ export async function fetchVideoExtras(
   return toVodExtras(data?.video ?? null)
 }
 
+
+/*
+ * ============================================================================
+ * Stream Together / costream collaboration roster.
+ *
+ * The full participant list (logins, display names, avatars, roles) is NOT
+ * part of the users(logins:) status batch — it lives behind the
+ * `channel(id:).collaboration` field, the operation the twitch.tv channel
+ * page itself uses (CollaboratorListQuery in the web client). It is fully
+ * anonymous: verified live 2026-08-21 on an active Stream Together session
+ * (ronnyberger + nicistemmler) with the plain anonymous Client-ID.
+ *
+ * The field takes a numeric channel ID (no login variant), so callers pass
+ * ChannelStatus.userId. Multiple channels are fetched in ONE request via
+ * GraphQL aliases (c0:, c1:, ... — also verified live). A channel that is
+ * not in a session returns collaboration: null, which is simply absent from
+ * the result map.
+ */
+
+export interface Collaborator {
+  login: string
+  displayName: string
+  avatarUrl: string
+  role: string
+}
+
+// Cap aliases per request so one huge favorites list can't build a giant
+// document; realistically a poll has at most a handful of session channels.
+const COLLABORATION_CHUNK = 30
+
+interface RawCollaborator {
+  role?: string | null
+  status?: string | null
+  user?: {
+    login?: string | null
+    displayName?: string | null
+    profileImageURL?: string | null
+  } | null
+}
+
+const CHANNEL_ID_RE = /^\d{1,20}$/
+
+function collaborationQuery(count: number): string {
+  const fields: string[] = []
+  for (let i = 0; i < count; i++) {
+    fields.push(
+      `c${i}: channel(id: $id${i}) { collaboration { collaborators { role status user { login displayName profileImageURL(width: 70) } } } }`,
+    )
+  }
+  const vars: string[] = []
+  for (let i = 0; i < count; i++) vars.push(`$id${i}: ID!`)
+  return `query CollaborationRoster(${vars.join(', ')}) { ${fields.join(' ')} }`
+}
+
+/**
+ * Fetch the ACTIVE collaboration roster for each channel ID in one batched
+ * (aliased) request per 30 IDs. Returns a map channelId -> collaborators
+ * (self included); channels without an active session are absent. Throws on
+ * transport failure — callers treat that as "no roster" (never as an outage
+ * of the main status poll).
+ */
+export async function fetchCollaborators(
+  channelIds: string[],
+  signal?: AbortSignal,
+): Promise<Map<string, Collaborator[]>> {
+  const out = new Map<string, Collaborator[]>()
+  const ids = channelIds.filter((id) => CHANNEL_ID_RE.test(id))
+  for (const group of chunk(ids, COLLABORATION_CHUNK)) {
+    const variables: Record<string, string> = {}
+    group.forEach((id, i) => {
+      variables[`id${i}`] = id
+    })
+    const data = await gqlRequest<Record<string, { collaboration?: { collaborators?: (RawCollaborator | null)[] | null } | null } | null>>(
+      collaborationQuery(group.length),
+      variables,
+      signal,
+    )
+    group.forEach((id, i) => {
+      const collaborators = data?.[`c${i}`]?.collaboration?.collaborators ?? []
+      const members: Collaborator[] = []
+      for (const c of collaborators) {
+        if (!c || c.status !== 'ACTIVE' || !c.user?.login) continue
+        members.push({
+          login: c.user.login,
+          displayName: c.user.displayName ?? c.user.login,
+          avatarUrl: c.user.profileImageURL ?? '',
+          role: c.role ?? '',
+        })
+      }
+      if (members.length > 0) out.set(id, members)
+    })
+  }
+  return out
+}

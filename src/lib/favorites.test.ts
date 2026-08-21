@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import type { ChannelStatus } from './gql'
 
 /*
  * Unit tests for src/lib/favorites.svelte.
@@ -59,22 +60,47 @@ interface ChanCfg {
   title?: string
   game?: string
   avatar?: string
+  // Numeric Twitch user id (needed for the collaboration roster follow-up;
+  // non-numeric defaults never trigger it).
+  id?: string
+  collabViewers?: number
+  collabOthers?: number
+  collabAvatar?: string
 }
 
-/** Build a gql_fetch handler returning a canned users(logins:) response. */
+/**
+ * Build a gql_fetch handler returning a canned users(logins:) response.
+ * The follow-up collaboration roster request (one aliased channel(id:)
+ * query for the poll's session channels) is answered with "no session" for
+ * every alias unless a per-test `roster` handler overrides it.
+ */
 function gqlStatusHandler(
   cfg: Record<string, ChanCfg | null>,
-  opts: { fail?: 'transport' } = {},
+  opts: { fail?: 'transport'; roster?: (id: string) => unknown } = {},
 ): (body: string) => Promise<string> {
   return async (body) => {
     if (opts.fail === 'transport') throw new Error('HTTP 500')
-    const logins: string[] = JSON.parse(body).variables.logins
+    const parsed = JSON.parse(body)
+    // Match the roster query by its OPERATION name — a bare
+    // 'collaboration' substring would also hit collaborationViewersCount
+    // in the status query.
+    if (typeof parsed.query === 'string' && parsed.query.includes('CollaborationRoster')) {
+      // CollaborationRoster(ids...) — alias c0, c1, ... keyed by id0, id1...
+      const data: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(parsed.variables as Record<string, string>)) {
+        data[k.replace('id', 'c')] = {
+          collaboration: opts.roster ? opts.roster(v) : null,
+        }
+      }
+      return JSON.stringify({ data })
+    }
+    const logins: string[] = parsed.variables.logins
     const users = logins.map((login) => {
       const c = cfg[login]
       if (!c) return null // nonexistent login -> positional null entry
       if (!c.live) {
         return {
-          id: 'id-' + login,
+          id: c.id ?? 'id-' + login,
           login,
           displayName: login,
           profileImageURL: c.avatar ?? 'https://img/' + login + '.png',
@@ -82,7 +108,7 @@ function gqlStatusHandler(
         }
       }
       return {
-        id: 'id-' + login,
+        id: c.id ?? 'id-' + login,
         login,
         displayName: login,
         profileImageURL: c.avatar ?? 'https://img/' + login + '.png',
@@ -93,6 +119,14 @@ function gqlStatusHandler(
           viewersCount: c.viewers ?? 11,
           createdAt: new Date(Date.now() - 3600_000).toISOString(),
           previewImageURL: 'https://thumb/' + login + '.jpg',
+          collaborationViewersCount: c.collabViewers ?? null,
+          costreamDetails: c.collabOthers
+            ? {
+                costreamersCount: c.collabOthers,
+                totalViewersCount: c.collabViewers ?? null,
+                topCostreamers: c.collabAvatar ? [{ profileImageURL: c.collabAvatar }] : [],
+              }
+            : null,
           game: { id: 'g', name: c.game ?? 'game-' + login, displayName: c.game ?? 'game-' + login, boxArtURL: 'https://box/' + login + '.jpg' },
         },
       }
@@ -395,5 +429,239 @@ describe('stale-response guard', () => {
     await delay(1200)
     const s = store.getStatus('stale')!.status
     expect(s.state).toBe('live') // newer result wins; the stale offline was skipped
+  })
+})
+
+
+describe('collabBadge (LiveStatus → badge data)', () => {
+  it('returns null unless live and in a session', async () => {
+    const { collabBadge } = await import('./favorites.svelte')
+    expect(collabBadge({ state: 'unknown' })).toBeNull()
+    expect(collabBadge({ state: 'offline', avatarUrl: '' })).toBeNull()
+    expect(collabBadge({ state: 'error', message: 'x' })).toBeNull()
+    expect(collabBadge({ state: 'live', title: '', viewers: 1, uptime: '', game: '', avatarUrl: '' })).toBeNull()
+    expect(
+      collabBadge({ state: 'live', title: '', viewers: 1, uptime: '', game: '', avatarUrl: '', collabViewers: null }),
+    ).toBeNull()
+  })
+
+  it('exposes the roster when present, and the guest-star fallback shape when not', async () => {
+    const { collabBadge } = await import('./favorites.svelte')
+    expect(
+      collabBadge({
+        state: 'live', title: '', viewers: 1, uptime: '', game: '', avatarUrl: '',
+        collabViewers: 14986, collabOthers: 5, collabAvatar: 'https://img/jaime.png',
+      }),
+    ).toEqual({ others: 5, avatar: 'https://img/jaime.png' })
+    expect(
+      collabBadge({ state: 'live', title: '', viewers: 1, uptime: '', game: '', avatarUrl: '', collabViewers: 41103 }),
+    ).toEqual({ others: 0, avatar: '' })
+  })
+})
+
+describe('auto-sort uses the combined session viewership', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+  })
+
+  it('a session channel sorts by collabViewers, not its own viewers', async () => {
+    const { settings } = await import('./settings.svelte.ts')
+    settings.sortMode = 'auto'
+    try {
+      seedFavorites(['solo', 'costreamer', 'offline1'])
+      gql.handler = gqlStatusHandler({
+        // costreamer's OWN viewers are the lowest of the live channels, but
+        // its session total is the highest number in the list.
+        costreamer: { live: true, viewers: 500, collabViewers: 40_000, collabOthers: 3, collabAvatar: 'https://img/other.png' },
+        solo: { live: true, viewers: 5_000 },
+        offline1: { live: false },
+      })
+      const store = new F.FavoritesStore()
+      store.start()
+      await vi.advanceTimersByTimeAsync(5_000)
+      const snap = store.snapshot()
+      expect(snap.map((s) => s.name)).toEqual(['costreamer', 'solo', 'offline1'])
+      const live = snap[0].status
+      if (live.state === 'live') {
+        expect(live.collabViewers).toBe(40_000)
+        expect(live.collabOthers).toBe(3)
+        expect(live.collabAvatar).toBe('https://img/other.png')
+      }
+    } finally {
+      settings.sortMode = 'manual'
+    }
+  })
+})
+
+describe('Stream Together batch session grouping (groupCollabSessions)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+  })
+
+  function cs(login: string, over: Partial<ChannelStatus> = {}): ChannelStatus {
+    return {
+      login,
+      userId: 'uid-' + login,
+      displayName: login,
+      live: true,
+      title: 't',
+      game: 'GeoGuessr',
+      viewersCount: 100,
+      startedAt: new Date().toISOString(),
+      thumbnailUrl: '',
+      avatarUrl: 'https://img/' + login + '.png',
+      collabViewers: null,
+      collabOthers: 0,
+      collabAvatar: '',
+      followers: null,
+      ...over,
+    }
+  }
+
+  it('groups live channels with matching combined counts + game; members exclude self', () => {
+    const groups = F.groupCollabSessions([
+      cs('bastighg', { collabViewers: 5368, viewersCount: 4702 }),
+      cs('lennli', { collabViewers: 5368, viewersCount: 600 }),
+      cs('solo', { viewersCount: 10 }),
+    ])
+    expect(groups.get('bastighg')).toEqual([{ login: 'lennli', avatarUrl: 'https://img/lennli.png', viewers: 600 }])
+    expect(groups.get('lennli')).toEqual([{ login: 'bastighg', avatarUrl: 'https://img/bastighg.png', viewers: 4702 }])
+    expect(groups.has('solo')).toBe(false)
+  })
+
+  it('tolerates ~1% drift in the combined count within a session', () => {
+    const groups = F.groupCollabSessions([
+      cs('trymacs', { game: 'ore factory squad', collabViewers: 37837, viewersCount: 11109 }),
+      cs('rumathra', { game: 'Ore Factory Squad', collabViewers: 37696, viewersCount: 1814 }),
+    ])
+    expect(groups.get('trymacs')?.[0].login).toBe('rumathra')
+    expect(groups.get('rumathra')?.[0].login).toBe('trymacs')
+  })
+
+  it('never groups across games, without a game, or non-session channels', () => {
+    const groups = F.groupCollabSessions([
+      cs('a', { game: 'Game One', collabViewers: 5000 }),
+      cs('b', { game: 'Game Two', collabViewers: 5000 }),
+      cs('c', { game: '', collabViewers: 5000 }),
+      cs('d', { game: 'Game One' }), // collabViewers null
+      cs('e', { game: 'Game One', collabViewers: 90000 }),
+    ])
+    expect(groups.size).toBe(0)
+  })
+
+  it('composes the badge fields in applyGqlStatuses (roster fallback -> grouping)', async () => {
+    seedFavorites(['host', 'mate', 'unrelated'])
+    gql.handler = gqlStatusHandler({
+      host: { live: true, viewers: 4702, collabViewers: 5368, game: 'GeoGuessr' },
+      mate: { live: true, viewers: 600, collabViewers: 5368, game: 'GeoGuessr' },
+      unrelated: { live: true, viewers: 99999, game: 'GeoGuessr' },
+    })
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    const host = store.getStatus('host')!.status
+    if (host.state !== 'live') throw new Error('expected live')
+    expect(host.collabMembers?.map((m) => m.login)).toEqual(['mate'])
+    expect(host.collabOthers).toBe(1) // grouping fallback (no costreamDetails)
+    expect(host.collabAvatar).toBe('https://img/mate.png')
+    const mate = store.getStatus('mate')!.status
+    if (mate.state !== 'live') throw new Error('expected live')
+    expect(mate.collabMembers?.map((m) => m.login)).toEqual(['host'])
+    const unrelated = store.getStatus('unrelated')!.status
+    if (unrelated.state !== 'live') throw new Error('expected live')
+    expect(unrelated.collabMembers).toBeUndefined()
+    expect(unrelated.collabOthers).toBe(0)
+  })
+})
+
+describe('Stream Together collaboration roster fetch (per poll)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+  })
+
+  function roster(...specs: [string, string, string, string][]): unknown {
+    // [login, displayName, avatarUrl, role] -> ACTIVE collaborators
+    return {
+      collaborators: specs.map(([login, displayName, avatarUrl, role]) => ({
+        role,
+        status: 'ACTIVE',
+        user: { login, displayName, profileImageURL: avatarUrl },
+      })),
+    }
+  }
+
+  it('fetches one aliased roster request per poll and patches the real members', async () => {
+    seedFavorites(['host', 'solo'])
+    gql.handler = gqlStatusHandler(
+      {
+        host: { live: true, viewers: 674, collabViewers: 1865, id: '531019578', game: 'IRL' },
+        solo: { live: true, viewers: 50, id: '111', game: 'Other' },
+      },
+      {
+        roster: (id) =>
+          id === '531019578'
+            ? roster(
+                ['host', 'ronnyberger', 'https://img/r.png', 'LEADER'],
+                ['nicistemmler', 'Nicistemmler', 'https://img/n.png', 'MEMBER'],
+              )
+            : null,
+      },
+    )
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    // one status batch + one collaboration roster request — nothing else
+    expect(gql.calls).toHaveLength(2)
+    expect(gql.calls[1].body).toContain('collaboration')
+    const host = store.getStatus('host')!.status
+    if (host.state !== 'live') throw new Error('expected live')
+    expect(host.collabMembers).toEqual([
+      { login: 'nicistemmler', avatarUrl: 'https://img/n.png', viewers: 0, role: 'MEMBER' },
+    ])
+    expect(host.collabOthers).toBe(1)
+    expect(host.collabAvatar).toBe('https://img/n.png')
+    expect(host.userId).toBe('531019578')
+    const solo = store.getStatus('solo')!.status
+    if (solo.state !== 'live') throw new Error('expected live')
+    expect(solo.collabMembers).toBeUndefined()
+    expect(solo.collabOthers).toBe(0)
+  })
+
+  it('no session channels -> the batch stays the only GQL call', async () => {
+    seedFavorites(['solo1', 'solo2'])
+    gql.handler = gqlStatusHandler({ solo1: { live: true, id: '1' }, solo2: { live: true, id: '2' } })
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(gql.calls).toHaveLength(1)
+  })
+
+  it('a roster transport failure is silent — grouping values remain, breaker NOT tripped', async () => {
+    seedFavorites(['host', 'mate'])
+    let rosterFailed = false
+    gql.handler = gqlStatusHandler(
+      {
+        host: { live: true, viewers: 4702, collabViewers: 5368, id: '531019578', game: 'GeoGuessr' },
+        mate: { live: true, viewers: 600, collabViewers: 5368, id: '531019579', game: 'GeoGuessr' },
+      },
+      {
+        roster: () => {
+          rosterFailed = true
+          throw new Error('HTTP 500')
+        },
+      },
+    )
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(rosterFailed).toBe(true)
+    expect(store.rateLimited).toBe(false)
+    const host = store.getStatus('host')!.status
+    if (host.state !== 'live') throw new Error('expected live')
+    // the batch grouping fallback survives the failed roster fetch
+    expect(host.collabMembers?.map((m) => m.login)).toEqual(['mate'])
   })
 })

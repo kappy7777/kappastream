@@ -1,7 +1,13 @@
 import { isTauri } from '@tauri-apps/api/core'
 import { settings } from './settings.svelte.ts'
 import { notifications } from './notifications.svelte.ts'
-import { fetchChannelStatuses, GQL_REFRESH_INTERVAL_MS, type ChannelStatus } from './gql'
+import {
+  fetchChannelStatuses,
+  fetchCollaborators,
+  GQL_REFRESH_INTERVAL_MS,
+  type ChannelStatus,
+  type Collaborator,
+} from './gql'
 import { t } from './i18n/index.svelte'
 
 export interface FavoriteEntry {
@@ -19,8 +25,24 @@ export type LiveStatus =
       uptime: string
       game: string
       avatarUrl: string
+      // Stream Together / costream (optional so hand-built literals — e.g.
+      // tests — stay valid). collabViewers non-null = in a shared session
+      // (combined viewership).
+      collabViewers?: number | null
+      collabOthers?: number
+      collabAvatar?: string
+      // Numeric Twitch user ID — the key the collaboration roster query
+      // (channel(id:)) needs.
+      userId?: string
       // Channel follower count, refreshed with the 150s favorites batch.
       followers?: number | null
+      // OTHER channels in the same Stream Together / costream session.
+      // Primary source is the per-poll collaboration roster fetch (real
+      // logins + avatars for EVERY session member, favorited or not — see
+      // fetchSessionRosters); the batch session grouping
+      // (groupCollabSessions) fills in between polls and covers a roster
+      // fetch failure, but only sees session mates that are favorited.
+      collabMembers?: CollabMemberInfo[]
     }
   | { state: 'offline'; avatarUrl: string }
   | { state: 'error'; message: string }
@@ -169,6 +191,10 @@ export async function fetchLiveStatus(channel: string): Promise<LiveStatus> {
         uptime: formatUptime(cs.startedAt),
         game: cs.game,
         avatarUrl: cs.avatarUrl,
+        userId: cs.userId,
+        collabViewers: cs.collabViewers,
+        collabOthers: cs.collabOthers,
+        collabAvatar: cs.collabAvatar,
         followers: cs.followers,
       }
     }
@@ -179,6 +205,78 @@ export async function fetchLiveStatus(channel: string): Promise<LiveStatus> {
 }
 
 export type StatusListener = (snapshot: FavoriteStatus[]) => void
+
+/**
+ * Stream Together / costream badge data for a LiveStatus: present when the
+ * live stream is in a shared session (collabViewers set — works for both
+ * session kinds). `others`/`avatar` come from the collaboration roster fetch
+ * (every session member, favorited or not) or costreamDetails (official
+ * co-streams), with the batch session grouping (groupCollabSessions) as the
+ * last fallback; callers fall back to a generic people glyph when no roster
+ * source produced an avatar.
+ */
+export function collabBadge(s: LiveStatus): { others: number; avatar: string } | null {
+  if (s.state !== 'live') return null
+  if (s.collabViewers == null && !s.collabOthers) return null
+  return { others: s.collabOthers ?? 0, avatar: s.collabAvatar ?? '' }
+}
+
+export interface CollabMemberInfo {
+  login: string
+  avatarUrl: string
+  // Own live viewership when known (batch grouping); the roster source has
+  // no per-member viewers, so its entries carry 0. LEADER/MEMBER from the
+  // roster orders the "watch together" list.
+  viewers: number
+  role?: string
+}
+
+// Relative tolerance for matching session members' collaborationViewersCount:
+// members of one session report the combined count computed at slightly
+// different server instants, so values drift by up to ~1% within a batch
+// (measured on a live 4-channel session). 1.5% catches that while keeping
+// unrelated sessions with coincidentally similar totals apart (grouping
+// additionally requires the same game).
+const COLLAB_MATCH_TOLERANCE = 0.015
+
+/**
+ * Group one favorites batch's live channels into Stream Together / costream
+ * sessions — the FALLBACK roster source, used between collaboration roster
+ * fetches and when they fail. Within a single batch response the members of
+ * one session are recognizable: they are live, report a combined viewership
+ * (collaborationViewersCount) within ~1% of each other, and stream the same
+ * game. Returns, per channel login, the OTHER members of its session (with
+ * avatars — the batch already carries them).
+ *
+ * Best-effort by design: session mates that are not favorited are invisible
+ * to it, and single-member "groups" are dropped (a lone session channel
+ * reports no members).
+ */
+export function groupCollabSessions(statuses: ChannelStatus[]): Map<string, CollabMemberInfo[]> {
+  const clusters: { game: string; value: number; members: CollabMemberInfo[] }[] = []
+  for (const s of statuses) {
+    if (!s.live || !s.login || s.collabViewers == null || s.collabViewers <= 0) continue
+    const game = s.game.trim().toLowerCase()
+    if (!game) continue // same-game is the disambiguator — never group without it
+    const value = s.collabViewers
+    const cluster = clusters.find(
+      (c) => c.game === game && Math.abs(c.value - value) <= Math.max(1, Math.round(c.value * COLLAB_MATCH_TOLERANCE)),
+    )
+    if (cluster) {
+      cluster.members.push({ login: s.login, avatarUrl: s.avatarUrl, viewers: s.viewersCount })
+    } else {
+      clusters.push({ game, value, members: [{ login: s.login, avatarUrl: s.avatarUrl, viewers: s.viewersCount }] })
+    }
+  }
+  const out = new Map<string, CollabMemberInfo[]>()
+  for (const c of clusters) {
+    if (c.members.length < 2) continue
+    for (const m of c.members) {
+      out.set(m.login, c.members.filter((x) => x.login !== m.login))
+    }
+  }
+  return out
+}
 
 export class FavoritesStore {
   private entries: FavoriteEntry[] = []
@@ -248,8 +346,11 @@ export class FavoritesStore {
       const eb = this.entries.find((e) => e.name === b.name)
       if (settings.sortMode === 'auto') {
         if (aLive === 0) {
-          const av = a.status.state === 'live' ? a.status.viewers : 0
-          const bv = b.status.state === 'live' ? b.status.viewers : 0
+          // Sort by the COMBINED session viewership when the channel is in a
+          // Stream Together / costream (mirroring the number the sidebar
+          // displays); own viewers otherwise.
+          const av = a.status.state === 'live' ? (a.status.collabViewers ?? a.status.viewers) : 0
+          const bv = b.status.state === 'live' ? (b.status.collabViewers ?? b.status.viewers) : 0
           if (bv !== av) return bv - av
         }
       } else {
@@ -495,6 +596,7 @@ export class FavoritesStore {
       const statuses = await fetchChannelStatuses(names)
       if (this.disposed) return
       this.applyGqlStatuses(statuses, versions)
+      await this.fetchSessionRosters(statuses, versions)
     } catch {
       if (this.disposed) return
       this.tripCircuitBreaker()
@@ -541,6 +643,10 @@ export class FavoritesStore {
   // whose version has since changed (removed + re-added mid-flight) is skipped.
   private applyGqlStatuses(statuses: ChannelStatus[], versions?: Map<string, number>): void {
     if (this.disposed) return
+    // Session grouping runs once per batch so every member learns its mates
+    // (roster fields below only exist for official co-streams — the grouping
+    // is what recovers "+N"/avatars for creator Stream Together sessions).
+    const collabGroups = groupCollabSessions(statuses)
     let changed = false
     for (const cs of statuses) {
       if (this.disposed) return
@@ -552,6 +658,7 @@ export class FavoritesStore {
       const prev = this.statuses.get(cs.login)
       const wasLive = prev?.status.state === 'live'
 
+      const groupMembers = collabGroups.get(cs.login) ?? []
       const status: LiveStatus = cs.live
         ? {
             state: 'live',
@@ -560,6 +667,13 @@ export class FavoritesStore {
             uptime: formatUptime(cs.startedAt),
             game: cs.game,
             avatarUrl: cs.avatarUrl,
+            userId: cs.userId,
+            collabViewers: cs.collabViewers,
+            // Prefer Twitch's own roster count/avatar when exposed; fall
+            // back to the batch grouping (favorites-only, but real avatars).
+            collabOthers: cs.collabOthers > 0 ? cs.collabOthers : groupMembers.length,
+            collabAvatar: cs.collabAvatar || groupMembers[0]?.avatarUrl || '',
+            collabMembers: groupMembers.length > 0 ? groupMembers : undefined,
             followers: cs.followers,
           }
         : { state: 'offline', avatarUrl: cs.avatarUrl }
@@ -579,6 +693,71 @@ export class FavoritesStore {
     // A clean GQL batch is proof the endpoint recovered, so let a lapsed
     // breaker clear (it can only have been tripped by a prior failure).
     this.clearCircuitBreakerIfExpired()
+    if (changed) {
+      this.notify()
+    }
+  }
+
+  // The users(logins:) batch reports WHICH channels are in a Stream Together
+  // / costream session (collabViewers) but not the full roster. This
+  // follow-up fetches the real participant lists — logins, avatars, roles,
+  // for EVERY member (favorited or not) — via the same anonymous GQL path
+  // twitch.tv's channel page uses (channel(id:).collaboration), ONE aliased
+  // request covering all of the poll's session channels. Fired only when a
+  // poll actually saw session channels, and fully best-effort: a failure
+  // leaves the grouping-derived values from applyGqlStatuses in place and
+  // must NEVER trip the circuit breaker (the main batch succeeded).
+  private async fetchSessionRosters(
+    statuses: ChannelStatus[],
+    versions: Map<string, number>,
+  ): Promise<void> {
+    if (this.disposed) return
+    const sessionIds = statuses
+      .filter((s) => s.live && s.collabViewers != null && s.userId && this.has(s.login))
+      .map((s) => s.userId)
+    if (sessionIds.length === 0) return
+    try {
+      const rosters = await fetchCollaborators(sessionIds)
+      if (this.disposed) return
+      this.applyCollabRosters(rosters, statuses, versions)
+    } catch {
+      /* no roster this cycle — grouping values remain */
+    }
+  }
+
+  // Merge fetched rosters into the already-applied live statuses. The roster
+  // is the authoritative roster source: it overrides the count/avatar the
+  // grouping derived, and its collabMembers include session mates that are
+  // NOT favorited (which the grouping can never see).
+  private applyCollabRosters(
+    rosters: Map<string, Collaborator[]>,
+    statuses: ChannelStatus[],
+    versions: Map<string, number>,
+  ): void {
+    if (this.disposed || rosters.size === 0) return
+    let changed = false
+    for (const cs of statuses) {
+      if (!cs.login || !cs.userId) continue
+      const members = rosters.get(cs.userId)
+      if (!members) continue // not in a session (or no roster served)
+      if (!this.has(cs.login)) continue // removed mid-flight
+      if ((this.entryVersions.get(cs.login) ?? 0) !== (versions.get(cs.login) ?? 0)) {
+        continue // a newer fetch owns this channel
+      }
+      const prev = this.statuses.get(cs.login)
+      if (prev?.status.state !== 'live') continue // went offline since
+      const others: CollabMemberInfo[] = members
+        .filter((m) => m.login !== cs.login)
+        .map((m) => ({ login: m.login, avatarUrl: m.avatarUrl, viewers: 0, role: m.role }))
+      prev.status = {
+        ...prev.status,
+        collabOthers: others.length,
+        collabAvatar: others[0]?.avatarUrl || prev.status.collabAvatar,
+        collabMembers: others.length > 0 ? others : prev.status.collabMembers,
+      }
+      this.statuses.set(cs.login, prev)
+      changed = true
+    }
     if (changed) {
       this.notify()
     }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import {
+    collabBadge,
     favoritesStore,
     isValidChannelName,
     MAX_FAVORITES,
@@ -186,7 +187,7 @@
     return formatCompact(n)
   }
 
-  function liveInfo(s: LiveStatus): { title: string; viewers: number; game: string; avatarUrl: string } | null {
+  function liveInfo(s: LiveStatus): Extract<LiveStatus, { state: 'live' }> | null {
     return s.state === 'live' ? s : null
   }
 
@@ -256,6 +257,7 @@
     {:else}
       {#each statuses as fav (fav.name)}
         {@const info = liveInfo(fav.status)}
+        {@const collab = collabBadge(fav.status)}
         {@const isOff = fav.status.state === 'offline'}
         {@const isErr = fav.status.state === 'error'}
         <button
@@ -283,17 +285,33 @@
           oncontextmenu={(e) => handleContextMenu(fav.name, e)}
           onclick={() => onselect(fav.name)}
         >
-          <span class="avatar" style="background: {info && info.avatarUrl ? 'transparent' : avatarBg(fav.name)}">
-            {#if avatarSrc(fav.status)}
-              <img src={avatarSrc(fav.status)} alt="" loading="lazy" />
-            {:else}
-              <span class="avatar-initial">{avatarInitial(fav.name)}</span>
+          <span class="avatar-wrap">
+            <span class="avatar" style="background: {info && info.avatarUrl ? 'transparent' : avatarBg(fav.name)}">
+              {#if avatarSrc(fav.status)}
+                <img src={avatarSrc(fav.status)} alt="" loading="lazy" />
+              {:else}
+                <span class="avatar-initial">{avatarInitial(fav.name)}</span>
+              {/if}
+            </span>
+            {#if collab}
+              <span class="avatar-collab" use:tooltip={t('streamingTogether')} aria-hidden="true">
+                {#if collab.avatar}
+                  <img src={collab.avatar} alt="" loading="lazy" />
+                {:else}
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" fill="currentColor"/>
+                  </svg>
+                {/if}
+              </span>
             {/if}
           </span>
           {#if !iconsOnly}
           <span class="fav-body">
             <span class="fav-name">
               {fav.name}
+              {#if collab && collab.others > 0}
+                <span class="fav-collab-count" aria-label={t('streamingTogether')}>+{collab.others}</span>
+              {/if}
               {#if hoveredName === fav.name}
                 <span
                   class="fav-remove"
@@ -348,7 +366,12 @@
            {#if info}
              <span class="fav-meta">
                <span class="live-dot" aria-hidden="true"></span>
-               <span class="fav-viewers">{formatViewers(info.viewers)}</span>
+               <!-- twitch.tv shows the COMBINED session viewership on shared-
+                    session cards; the tooltip flags why the number is bigger
+                    than the channel's own viewers. -->
+               <span class="fav-viewers" use:tooltip={info.collabViewers != null ? t('streamingTogether') : undefined}>
+                 {formatViewers(info.collabViewers != null ? info.collabViewers : info.viewers)}
+               </span>
              </span>
            {/if}
          {/if}
@@ -569,9 +592,13 @@
     background: var(--bg-hover);
   }
 
-  .avatar {
+  .avatar-wrap {
     position: relative;
     flex: 0 0 auto;
+  }
+
+  .avatar {
+    position: relative;
     width: 30px;
     height: 30px;
     border-radius: 50%;
@@ -593,6 +620,50 @@
 
   .avatar-initial {
     line-height: 1;
+  }
+
+  /* Stacked mini badge for Stream Together / costream sessions — a small
+     circle of one co-streamer's avatar (or a generic people glyph when the
+     roster isn't exposed) overlapping the channel avatar's bottom-right, in
+     the style of twitch.tv's followed-channels cards. */
+  .avatar-collab {
+    position: absolute;
+    right: -3px;
+    bottom: -2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 2px solid var(--bg-panel);
+    background: var(--bg-panel);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+  }
+
+  .avatar-collab img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .avatar-collab svg {
+    width: 9px;
+    height: 9px;
+    display: block;
+  }
+
+  .fav-collab-count {
+    flex: 0 0 auto;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 6px;
+    background: var(--bg-hover-faint);
+    color: var(--accent);
   }
 
   .fav-body {

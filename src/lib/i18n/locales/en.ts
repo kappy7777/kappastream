@@ -171,6 +171,9 @@ export const en = {
   // ---- App.svelte: stream info bar ----------------------------------------
   si_uptime: 'Up {uptime}',
   si_followers: 'followers',
+  streamingTogether: 'Streaming together',
+  si_collabViewers: 'watching together',
+  si_watchTogether: 'Watch together',
   si_favorite: 'Favorite',
   si_addFavorite: 'Add favorite',
   si_notifyOn: 'Notify on',

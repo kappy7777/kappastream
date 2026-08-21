@@ -24,9 +24,9 @@
   import { vodPositions } from './lib/vod-positions.svelte.ts'
   import { resolveShortcut } from './lib/shortcuts'
   import { firstLaunch } from './lib/first-launch.svelte'
-  import { fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
+  import { collabBadge, fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
-  import { fetchChannelBadges, fetchVideoExtras, type VodChapter, type VodMuteSpan } from './lib/gql'
+  import { fetchChannelBadges, fetchCollaborators, fetchVideoExtras, type Collaborator, type VodChapter, type VodMuteSpan } from './lib/gql'
   import { parseStoryboard, type Storyboard } from './lib/vod-extras'
   import { VodChatController, fetchVodComments } from './lib/vodchat.svelte.ts'
   import { initBadgeRefresh } from './lib/badges'
@@ -1427,6 +1427,50 @@
     }
   }
 
+  // The OTHER channels of the active session (host excluded), capped at the
+  // 3 remaining grid slots (4-tile grid). Two independent sources, merged +
+  // deduped: the per-channel collaboration roster fetch (real members for
+  // every session kind — this is the authoritative one) and the favorites
+  // store's roster/grouping (covers the gap before the fetch lands, and
+  // channels whose roster request failed). Session LEADER first, then by
+  // viewership where known (roster entries carry no per-member viewers).
+  const sessionOthers = $derived.by(() => {
+    const host = channelJoined
+    if (!host) return []
+    const byLogin = new Map<string, { viewers: number; role: string }>()
+    for (const m of collabRoster ?? []) {
+      byLogin.set(m.login, { viewers: 0, role: m.role })
+    }
+    const s = activeStatus
+    if (s.state === 'live' && s.collabMembers) {
+      for (const m of s.collabMembers) {
+        if (!byLogin.has(m.login)) byLogin.set(m.login, { viewers: m.viewers, role: m.role ?? '' })
+      }
+    }
+    byLogin.delete(host)
+    return Array.from(byLogin.entries())
+      .map(([login, info]) => ({ login, ...info }))
+      .sort((a, b) => (b.role === 'LEADER' ? 1 : 0) - (a.role === 'LEADER' ? 1 : 0) || b.viewers - a.viewers)
+      .slice(0, 3)
+  })
+
+  // "Watch together": switch to the multi-view grid with every channel of the
+  // active Stream Together / costream session (up to the 4 grid slots).
+  // Entering via toggleMultiView() seeds tile[0] with the channel currently
+  // watching; the roster's other channels fill the remaining slots.
+  // The member list MUST be captured BEFORE toggleMultiView(): entering calls
+  // disconnect(), which clears channelJoined, and sessionOthers is a $derived
+  // that would re-evaluate to [] on the next read — the co-streamer tiles
+  // would never be added.
+  function openSessionInMultiView(): void {
+    const members = sessionOthers
+    if (members.length === 0) return
+    if (!multiView) toggleMultiView()
+    for (const m of members) {
+      tileStore.addOrReplace(m.login, 'best', settings.volume)
+    }
+  }
+
   // Leave multi-view. Restores the audio-authority tile's channel as the single
   // stream (when one is still present — e.g. the manual toggle); when the LAST
   // tile closed (onShouldExit) there is no authority tile, so it falls back to
@@ -1885,6 +1929,60 @@
   })
 
   let activeStatusToken = 0
+  // Status-bar badge data for the active channel: the store/grouping badge,
+  // upgraded by the per-channel roster fetch the moment it lands (real "other
+  // channels" count + a real co-streamer avatar, with no favorites dependency).
+  const activeCollab = $derived.by(() => {
+    const badge = collabBadge(activeStatus)
+    if (!badge) return null
+    const host = channelJoined
+    const others = (collabRoster ?? []).filter((m) => m.login !== host)
+    if (others.length > 0) {
+      return { others: others.length, avatar: others[0].avatarUrl || badge.avatar }
+    }
+    return badge
+  })
+  // Stream Together / costream roster for the ACTIVE channel (ALL session
+  // participants, with logins + avatars + roles) — powers the "watch
+  // together" button and the avatar badge. Uses the same anonymous
+  // channel(id:).collaboration query twitch.tv's channel page runs, keyed by
+  // the numeric user ID the status batch already carries. Fired at most ONCE
+  // per joined channel: the per-channel flags below keep the 150s poll's
+  // activeStatus refreshes from re-triggering the fetch. A channel without a
+  // session never fetches; a failed fetch just leaves the store's
+  // roster/grouping values in place.
+  let collabRoster = $state<Collaborator[] | null>(null)
+  let collabRosterChannel: string | null = '' // plain (non-reactive): which channel the state belongs to
+  let collabRosterAttempted = false
+  let collabRosterToken = 0
+  $effect(() => {
+    const channel = channelJoined
+    if (channel !== collabRosterChannel) {
+      collabRosterChannel = channel
+      collabRosterAttempted = false
+      collabRosterToken++
+      collabRoster = null
+    }
+    if (!channel || collabRosterAttempted) return
+    // Fires when the join-time fetch or a poll refresh first reports a live
+    // session for this channel.
+    const s = activeStatus
+    if (s.state !== 'live') return
+    if (s.collabViewers == null && !s.collabOthers) return
+    const userId = s.userId ?? ''
+    if (!userId) return
+    collabRosterAttempted = true
+    const myToken = collabRosterToken
+    void (async () => {
+      try {
+        const rosters = await fetchCollaborators([userId])
+        if (myToken !== collabRosterToken || channelJoined !== channel) return
+        collabRoster = rosters.get(userId) ?? null
+      } catch {
+        /* no roster — store grouping values remain */
+      }
+    })()
+  })
 
   $effect(() => {
     const channel = channelJoined
@@ -2423,7 +2521,21 @@
       {#if playback.kind === 'vod' || playback.kind === 'clip'}
         <div class="stream-info-row stream-info-row--main">
           {#if (activeStatus.state === 'live' || activeStatus.state === 'offline') && activeStatus.avatarUrl}
-            <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
+            {@const collab = activeCollab}
+            <span class="stream-info-avatar-wrap">
+              <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
+              {#if collab}
+                <span class="stream-info-avatar-collab" use:tooltip={t('streamingTogether')} aria-hidden="true">
+                  {#if collab.avatar}
+                    <img src={collab.avatar} alt="" loading="lazy" />
+                  {:else}
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" fill="currentColor"/>
+                    </svg>
+                  {/if}
+                </span>
+              {/if}
+            </span>
           {/if}
           <span class="stream-info-badge">{playback.kind === 'vod' ? t('vod_pastBroadcast') : t('vod_clip')}</span>
           <span class="stream-info-title" use:tooltip={playback.title}>{playback.title}</span>
@@ -2436,7 +2548,21 @@
       {:else if activeStatus.state === 'live'}
         <div class="stream-info-row stream-info-row--main">
           {#if activeStatus.avatarUrl}
-            <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
+            {@const collab = activeCollab}
+            <span class="stream-info-avatar-wrap">
+              <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
+              {#if collab}
+                <span class="stream-info-avatar-collab" use:tooltip={t('streamingTogether')} aria-hidden="true">
+                  {#if collab.avatar}
+                    <img src={collab.avatar} alt="" loading="lazy" />
+                  {:else}
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" fill="currentColor"/>
+                    </svg>
+                  {/if}
+                </span>
+              {/if}
+            </span>
           {/if}
           <span class="stream-info-live" use:tooltip={t('live')}><span class="stream-info-live-dot"></span>{t('liveBadge')}</span>
           <span class="stream-info-title" use:tooltip={activeStatus.title || t('live')}>{activeStatus.title || t('live')}</span>
@@ -2445,6 +2571,10 @@
           {#if activeStatus.game}<span class="stream-info-game">{activeStatus.game}</span>{/if}
           <span class="stream-info-dot">·</span>
           <span class="stream-info-viewers">{formatCompact(activeStatus.viewers)} {t('viewers')}</span>
+          {#if activeStatus.collabViewers != null}
+            <span class="stream-info-dot">·</span>
+            <span class="stream-info-collab-viewers" use:tooltip={t('streamingTogether')}>{formatCompact(activeStatus.collabViewers)} {t('si_collabViewers')}</span>
+          {/if}
           {#if activeStatus.uptime}
             <span class="stream-info-dot">·</span>
             <span class="stream-info-uptime">{t('si_uptime', { uptime: activeStatus.uptime })}</span>
@@ -2504,6 +2634,19 @@
               <span class="notif-toggle-label">{channelNotifOn ? t('si_notifyOn') : t('si_notifyOff')}</span>
             </button>
             {#if !stacked}
+              {#if sessionOthers.length > 0}
+                <button
+                  type="button"
+                  class="notif-toggle"
+                  onclick={openSessionInMultiView}
+                  use:tooltip={t('si_watchTogether')}
+                >
+                  <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path d="M1 2a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm8 0a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V2zM1 10a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1v-3zm8 0a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-3z" fill="currentColor"/>
+                  </svg>
+                  <span class="notif-toggle-label">{t('si_watchTogether')}</span>
+                </button>
+              {/if}
               <button
                 type="button"
                 class="notif-toggle"
@@ -3448,12 +3591,51 @@
     gap: 10px;
   }
 
+  .stream-info-avatar-wrap {
+    position: relative;
+    flex: 0 0 auto;
+  }
+
   .stream-info-avatar {
     flex: 0 0 auto;
     width: 32px;
     height: 32px;
     border-radius: 50%;
     object-fit: cover;
+    display: block;
+  }
+
+  /* Stacked mini badge for Stream Together / costream sessions — a small
+     circle of one co-streamer's avatar (or a generic people glyph when the
+     roster isn't exposed) overlapping the channel avatar's bottom-right,
+     twitch.tv-style. */
+  .stream-info-avatar-collab {
+    position: absolute;
+    right: -3px;
+    bottom: -2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 2px solid var(--bg-app);
+    background: var(--bg-app);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+  }
+
+  .stream-info-avatar-collab img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .stream-info-avatar-collab svg {
+    width: 10px;
+    height: 10px;
+    display: block;
   }
 
   .stream-info-avatar--offline {
@@ -3523,6 +3705,11 @@
 
   .stream-info-uptime {
     color: var(--text-secondary);
+  }
+
+  .stream-info-collab-viewers {
+    color: var(--text-secondary);
+    white-space: nowrap;
   }
 
   .stream-info-followers {
