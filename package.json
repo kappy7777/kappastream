@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@tauri-apps/cli": "^2.11.4",
     "@tsconfig/svelte": "^5.0.8",
     "@types/node": "^26.2.0",
