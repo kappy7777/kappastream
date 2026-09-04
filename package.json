@@ -41,7 +41,7 @@
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-process": "^2.3.0",
     "@tauri-apps/plugin-updater": "^2.10.1",
-    "hls.js": "^1.7.0"
+    "hls.js": "^1.7.1"
   },
   "overrides": {
     "nanoid": "^3.3.17"
