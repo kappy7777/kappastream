@@ -4,6 +4,8 @@ import {
   parseIrcEvent,
   mergeRoomState,
   composeUsernoticeFallback,
+  usernoticeCategory,
+  isNoticeVisible,
   isMessageStricken,
   setGlobalBadges,
   resolveBadgeImageUrl,
@@ -173,6 +175,49 @@ describe('parseIrcEvent USERNOTICE', () => {
     )
     expect(composeUsernoticeFallback('announcement', { login: 'x' })).toBe('x sent an announcement')
     expect(composeUsernoticeFallback('brand-new-id', {})).toBe('Channel event: brand-new-id')
+  })
+})
+
+describe('notice categories (granular USERNOTICE toggles)', () => {
+  it('subs and resubs share ONE category', () => {
+    expect(usernoticeCategory('sub')).toBe('sub')
+    expect(usernoticeCategory('resub')).toBe('sub')
+  })
+
+  it('the gift chain (gifted / anon / community / upgrade) is the gift category', () => {
+    expect(usernoticeCategory('subgift')).toBe('gift')
+    expect(usernoticeCategory('anonsubgift')).toBe('gift')
+    expect(usernoticeCategory('submysterygift')).toBe('gift')
+    expect(usernoticeCategory('giftpaidupgrade')).toBe('gift')
+  })
+
+  it('raid + unraid are raids; announcement is its own category', () => {
+    expect(usernoticeCategory('raid')).toBe('raid')
+    expect(usernoticeCategory('unraid')).toBe('raid')
+    expect(usernoticeCategory('announcement')).toBe('announcement')
+  })
+
+  it('exotic and unknown ids land in other', () => {
+    expect(usernoticeCategory('bitsbadgetier')).toBe('other')
+    expect(usernoticeCategory('viewermilestone')).toBe('other')
+    expect(usernoticeCategory('brand-new-id')).toBe('other')
+    expect(usernoticeCategory('')).toBe('other')
+  })
+
+  it('each named category follows exactly its own toggle', () => {
+    const none = { sub: false, gift: false, raid: false, announcement: false }
+    expect(isNoticeVisible('sub', { ...none, sub: true })).toBe(true)
+    expect(isNoticeVisible('sub', { ...none, gift: true })).toBe(false)
+    expect(isNoticeVisible('gift', { ...none, gift: true })).toBe(true)
+    expect(isNoticeVisible('raid', { ...none, raid: true })).toBe(true)
+    expect(isNoticeVisible('announcement', { ...none, announcement: true })).toBe(true)
+  })
+
+  it('other (unknown ids) shows when ANY toggle is on — never dropped while the group is enabled', () => {
+    const none = { sub: false, gift: false, raid: false, announcement: false }
+    expect(isNoticeVisible('other', none)).toBe(false)
+    expect(isNoticeVisible('other', { ...none, raid: true })).toBe(true)
+    expect(isNoticeVisible('other', { ...none, announcement: true })).toBe(true)
   })
 })
 

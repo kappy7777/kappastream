@@ -28,15 +28,22 @@ beforeEach(async () => {
 })
 
 const KEYS = {
-  subnotices: 'app-chat-subnotices-v1',
+  noticesSub: 'app-chat-notices-sub-v1',
+  noticesGift: 'app-chat-notices-gift-v1',
+  noticesRaid: 'app-chat-notices-raid-v1',
+  noticesAnnouncement: 'app-chat-notices-announcement-v1',
+  legacySubnotices: 'app-chat-subnotices-v1',
   roomstate: 'app-chat-roomstate-v1',
   moderation: 'app-chat-moderation-v1',
   bits: 'app-chat-bits-v1',
 } as const
 
 describe('chat-feature toggle defaults', () => {
-  it('all four toggles default to false on a fresh store', () => {
-    expect(S.settings.chatSubnotices).toBe(false)
+  it('all chat-feature toggles default to false on a fresh store', () => {
+    expect(S.settings.chatNoticesSub).toBe(false)
+    expect(S.settings.chatNoticesGift).toBe(false)
+    expect(S.settings.chatNoticesRaid).toBe(false)
+    expect(S.settings.chatNoticesAnnouncement).toBe(false)
     expect(S.settings.chatRoomstate).toBe(false)
     expect(S.settings.chatModeration).toBe(false)
     expect(S.settings.chatBits).toBe(false)
@@ -49,16 +56,53 @@ describe('chat-feature toggle defaults', () => {
     const mod = await import('./settings.svelte')
     expect(mod.settings.chatModeration).toBe(true)
     expect(mod.settings.chatBits).toBe(true)
-    // The other two remain off.
-    expect(mod.settings.chatSubnotices).toBe(false)
+    // The others remain off.
+    expect(mod.settings.chatNoticesSub).toBe(false)
+    expect(mod.settings.chatNoticesGift).toBe(false)
+    expect(mod.settings.chatNoticesRaid).toBe(false)
+    expect(mod.settings.chatNoticesAnnouncement).toBe(false)
     expect(mod.settings.chatRoomstate).toBe(false)
   })
 
   it('a junk value is treated as false (default off)', async () => {
-    localStorage.setItem(KEYS.subnotices, 'garbage')
+    localStorage.setItem(KEYS.noticesSub, 'garbage')
     vi.resetModules()
     const mod = await import('./settings.svelte')
-    expect(mod.settings.chatSubnotices).toBe(false)
+    expect(mod.settings.chatNoticesSub).toBe(false)
+  })
+})
+
+describe('notice-group split: legacy single-toggle migration', () => {
+  it('a legacy "true" turns ALL four groups on (the user had notices enabled)', async () => {
+    localStorage.setItem(KEYS.legacySubnotices, 'true')
+    vi.resetModules()
+    const mod = await import('./settings.svelte')
+    expect(mod.settings.chatNoticesSub).toBe(true)
+    expect(mod.settings.chatNoticesGift).toBe(true)
+    expect(mod.settings.chatNoticesRaid).toBe(true)
+    expect(mod.settings.chatNoticesAnnouncement).toBe(true)
+  })
+
+  it('a legacy "false"/junk keeps all groups off', async () => {
+    localStorage.setItem(KEYS.legacySubnotices, 'garbage')
+    vi.resetModules()
+    const mod = await import('./settings.svelte')
+    expect(mod.settings.chatNoticesSub).toBe(false)
+    expect(mod.settings.chatNoticesGift).toBe(false)
+    expect(mod.settings.chatNoticesRaid).toBe(false)
+    expect(mod.settings.chatNoticesAnnouncement).toBe(false)
+  })
+
+  it('an explicit group key OVERRIDES the legacy fallback for that group only', async () => {
+    localStorage.setItem(KEYS.legacySubnotices, 'true')
+    localStorage.setItem(KEYS.noticesSub, 'false')
+    vi.resetModules()
+    const mod = await import('./settings.svelte')
+    expect(mod.settings.chatNoticesSub).toBe(false)
+    // The untouched groups still follow the legacy opt-in.
+    expect(mod.settings.chatNoticesGift).toBe(true)
+    expect(mod.settings.chatNoticesRaid).toBe(true)
+    expect(mod.settings.chatNoticesAnnouncement).toBe(true)
   })
 })
 
@@ -68,23 +112,23 @@ describe('chat-feature toggle persistence + independence', () => {
     expect(S.settings.chatModeration).toBe(true)
     expect(localStorage.getItem(KEYS.moderation)).toBe('true')
     // Independence: the other toggles stay false / unwritten.
-    expect(S.settings.chatSubnotices).toBe(false)
+    expect(S.settings.chatNoticesSub).toBe(false)
     expect(S.settings.chatRoomstate).toBe(false)
     expect(S.settings.chatBits).toBe(false)
-    expect(localStorage.getItem(KEYS.subnotices)).toBeNull()
+    expect(localStorage.getItem(KEYS.noticesSub)).toBeNull()
     expect(localStorage.getItem(KEYS.roomstate)).toBeNull()
     expect(localStorage.getItem(KEYS.bits)).toBeNull()
   })
 
   it('each toggle persists and flips only itself', () => {
-    S.settings.setChatSubnotices(true)
+    S.settings.setChatNoticesSub(true)
     S.settings.setChatRoomstate(true)
     S.settings.setChatBits(true)
-    expect(S.settings.chatSubnotices).toBe(true)
+    expect(S.settings.chatNoticesSub).toBe(true)
     expect(S.settings.chatRoomstate).toBe(true)
     expect(S.settings.chatBits).toBe(true)
     expect(S.settings.chatModeration).toBe(false) // untouched
-    expect(localStorage.getItem(KEYS.subnotices)).toBe('true')
+    expect(localStorage.getItem(KEYS.noticesSub)).toBe('true')
     expect(localStorage.getItem(KEYS.roomstate)).toBe('true')
     expect(localStorage.getItem(KEYS.bits)).toBe('true')
     expect(localStorage.getItem(KEYS.moderation)).toBeNull()

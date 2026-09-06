@@ -13,7 +13,7 @@
 //
 // The message buffer + roomState + badge override are Svelte `$state` so the
 // Tile/MultiView render reacts live. The client-side mute list and the Tier 2
-// chat toggles (subnotices / roomstate indicator / moderation / bits) are
+// chat toggles (notice groups / roomstate indicator / moderation / bits) are
 // applied at RENDER time by the component reading `settings`, exactly as
 // App.svelte does — the session always stores every event so flipping a toggle
 // retroactively re-evaluates already-buffered messages.

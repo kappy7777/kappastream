@@ -111,12 +111,19 @@ const CLOSE_TO_TRAY_KEY = 'app-close-to-tray-v1'
 // regardless of this setting — the toggle is simply inert there.
 const CHECK_UPDATES_KEY = 'app-check-updates-v1'
 // Tier 2 chat-feature toggles (sections 1–6). All default OFF — the baseline
-// chat is byte-identical with every one of these false.
-const CHAT_SUBNOTICES_KEY = 'app-chat-subnotices-v1'
+// chat is byte-identical with every one of these false. The old single
+// sub/raid toggle was SPLIT into four individually togglable notice groups;
+// each new key falls back to the legacy key while unset (a legacy 'true'
+// keeps the user's notices on until they flip a group themselves).
+const CHAT_NOTICES_SUB_KEY = 'app-chat-notices-sub-v1'
+const CHAT_NOTICES_GIFT_KEY = 'app-chat-notices-gift-v1'
+const CHAT_NOTICES_RAID_KEY = 'app-chat-notices-raid-v1'
+const CHAT_NOTICES_ANNOUNCEMENT_KEY = 'app-chat-notices-announcement-v1'
+const LEGACY_CHAT_SUBNOTICES_KEY = 'app-chat-subnotices-v1'
 const CHAT_ROOMSTATE_KEY = 'app-chat-roomstate-v1'
 const CHAT_MODERATION_KEY = 'app-chat-moderation-v1'
 const CHAT_BITS_KEY = 'app-chat-bits-v1'
-// Pinned chat messages. Unlike the four Tier 2 toggles above (parse always,
+// Pinned chat messages. Unlike the Tier 2 toggles above (parse always,
 // gate only rendering), this one gates the FETCH itself: with it off, no
 // pinned-message GQL query is issued at all.
 const CHAT_PINNED_KEY = 'app-chat-pinned-v1'
@@ -216,9 +223,24 @@ function readCheckUpdates(): boolean {
   return safeRead(CHECK_UPDATES_KEY) !== 'false'
 }
 
-// All four Tier 2 chat-feature toggles default OFF.
-function readChatSubnotices(): boolean {
-  return safeRead(CHAT_SUBNOTICES_KEY) === 'true'
+// All Tier 2 chat-feature toggles default OFF. The four notice groups fall
+// back to the legacy single-toggle key while their own key is unset.
+function readChatNoticeGroup(key: string): boolean {
+  const own = safeRead(key)
+  if (own !== null) return own === 'true'
+  return safeRead(LEGACY_CHAT_SUBNOTICES_KEY) === 'true'
+}
+function readChatNoticesSub(): boolean {
+  return readChatNoticeGroup(CHAT_NOTICES_SUB_KEY)
+}
+function readChatNoticesGift(): boolean {
+  return readChatNoticeGroup(CHAT_NOTICES_GIFT_KEY)
+}
+function readChatNoticesRaid(): boolean {
+  return readChatNoticeGroup(CHAT_NOTICES_RAID_KEY)
+}
+function readChatNoticesAnnouncement(): boolean {
+  return readChatNoticeGroup(CHAT_NOTICES_ANNOUNCEMENT_KEY)
 }
 function readChatRoomstate(): boolean {
   return safeRead(CHAT_ROOMSTATE_KEY) === 'true'
@@ -297,7 +319,10 @@ class SettingsStore {
   lowLatency: boolean = $state(readLowLatency())
   closeToTray: boolean = $state(readCloseToTray())
   checkUpdates: boolean = $state(readCheckUpdates())
-  chatSubnotices: boolean = $state(readChatSubnotices())
+  chatNoticesSub: boolean = $state(readChatNoticesSub())
+  chatNoticesGift: boolean = $state(readChatNoticesGift())
+  chatNoticesRaid: boolean = $state(readChatNoticesRaid())
+  chatNoticesAnnouncement: boolean = $state(readChatNoticesAnnouncement())
   chatRoomstate: boolean = $state(readChatRoomstate())
   chatModeration: boolean = $state(readChatModeration())
   chatBits: boolean = $state(readChatBits())
@@ -422,13 +447,40 @@ class SettingsStore {
     this.setCheckUpdates(!this.checkUpdates)
   }
 
-  setChatSubnotices(v: boolean): void {
-    this.chatSubnotices = v
-    safeWrite(CHAT_SUBNOTICES_KEY, v ? 'true' : 'false')
+  setChatNoticesSub(v: boolean): void {
+    this.chatNoticesSub = v
+    safeWrite(CHAT_NOTICES_SUB_KEY, v ? 'true' : 'false')
   }
 
-  toggleChatSubnotices(): void {
-    this.setChatSubnotices(!this.chatSubnotices)
+  toggleChatNoticesSub(): void {
+    this.setChatNoticesSub(!this.chatNoticesSub)
+  }
+
+  setChatNoticesGift(v: boolean): void {
+    this.chatNoticesGift = v
+    safeWrite(CHAT_NOTICES_GIFT_KEY, v ? 'true' : 'false')
+  }
+
+  toggleChatNoticesGift(): void {
+    this.setChatNoticesGift(!this.chatNoticesGift)
+  }
+
+  setChatNoticesRaid(v: boolean): void {
+    this.chatNoticesRaid = v
+    safeWrite(CHAT_NOTICES_RAID_KEY, v ? 'true' : 'false')
+  }
+
+  toggleChatNoticesRaid(): void {
+    this.setChatNoticesRaid(!this.chatNoticesRaid)
+  }
+
+  setChatNoticesAnnouncement(v: boolean): void {
+    this.chatNoticesAnnouncement = v
+    safeWrite(CHAT_NOTICES_ANNOUNCEMENT_KEY, v ? 'true' : 'false')
+  }
+
+  toggleChatNoticesAnnouncement(): void {
+    this.setChatNoticesAnnouncement(!this.chatNoticesAnnouncement)
   }
 
   setChatRoomstate(v: boolean): void {

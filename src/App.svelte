@@ -5,7 +5,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { loadChannelEmotes, loadGlobalEmotes, buildEmoteMap, renderMessage, parseTwitchEmoteTag, type Emote, type RenderedMessagePart } from './lib/emotes'
   import './lib/emote.css'
-  import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, DELETED_MESSAGE_CLASS, isMessageStricken, resolveBadgeImageUrl, type BadgeInfo, type IrcEvent, type ParsedMessage, type RoomState } from './lib/irc'
+  import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, usernoticeCategory, isNoticeVisible, DELETED_MESSAGE_CLASS, isMessageStricken, resolveBadgeImageUrl, type BadgeInfo, type IrcEvent, type ParsedMessage, type RoomState } from './lib/irc'
   import { UI_ZOOM_VAR, zoomDivisor } from './lib/ui-zoom'
   import Sidebar from './lib/Sidebar.svelte'
   import PlayerControls from './lib/PlayerControls.svelte'
@@ -125,10 +125,11 @@
   type PlayerStatus = 'idle' | 'resolving' | 'loading' | 'playing' | 'paused' | 'offline' | 'error'
 
   interface ChatMessage {
-    // 'message' = normal PRIVMSG; 'notice' = a USERNOTICE line (subs, raids,
-    // announcements). Notices render only when the chat-subnotices toggle is
-    // on; with all toggles off a notice entry produces no DOM, so the baseline
-    // chat is byte-identical.
+    // 'message' = normal PRIVMSG; 'notice' = a USERNOTICE line (subs, gifts,
+    // raids, announcements). A notice renders only when its CATEGORY's toggle
+    // is on (unknown/exotic ids render when any of the four is on); with all
+    // four off a notice entry produces no DOM, so the baseline chat is
+    // byte-identical.
     kind: 'message' | 'notice'
     id: string
     username: string
@@ -1849,6 +1850,18 @@
 
   // --------------------------------------------------------------------------
 
+  // Whether a stored USERNOTICE line renders under the four granular notice
+  // toggles (subs+resubs / gifts / raids / announcements; unknown msg-ids show
+  // when any of the four is on).
+  function noticeShown(msg: ChatMessage): boolean {
+    return isNoticeVisible(usernoticeCategory(msg.noticeMsgId ?? ''), {
+      sub: settings.chatNoticesSub,
+      gift: settings.chatNoticesGift,
+      raid: settings.chatNoticesRaid,
+      announcement: settings.chatNoticesAnnouncement,
+    })
+  }
+
   function roomStateActive(rs: RoomState): boolean {
     return (
       rs.emoteOnly === true ||
@@ -2804,7 +2817,7 @@
         {:else}
           {#each chatMessages as msg (msg.id)}
           {#if msg.kind === 'notice'}
-            {#if settings.chatSubnotices && !settings.isMuted(msg.login)}
+            {#if noticeShown(msg) && !settings.isMuted(msg.login)}
               <div class="message message--notice">
                 {#if settings.chatTimestamps}
                   <span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span>

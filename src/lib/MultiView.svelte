@@ -26,7 +26,7 @@
   import PinnedMessage from './PinnedMessage.svelte'
   import { pinnedChat } from './pinned-chat.svelte'
   import LinkifiedText from './LinkifiedText.svelte'
-  import { resolveBadgeImageUrl, isMessageStricken, DELETED_MESSAGE_CLASS, type BadgeInfo } from './irc'
+  import { resolveBadgeImageUrl, isMessageStricken, usernoticeCategory, isNoticeVisible, DELETED_MESSAGE_CLASS, type BadgeInfo } from './irc'
   import { formatCompact, formatChatTime } from './format'
   import { tooltip } from './tooltip.ts'
   import { t } from './i18n/index.svelte'
@@ -482,7 +482,7 @@
           {:else}
             {#each messages as msg (msg.id)}
               {#if msg.kind === 'notice'}
-                {#if settings.chatSubnotices && !settings.isMuted(msg.login)}
+                {#if isNoticeVisible(usernoticeCategory(msg.noticeMsgId ?? ''), { sub: settings.chatNoticesSub, gift: settings.chatNoticesGift, raid: settings.chatNoticesRaid, announcement: settings.chatNoticesAnnouncement }) && !settings.isMuted(msg.login)}
                   <div class="message message--notice">
                     {#if settings.chatTimestamps}<span class="message-time">{formatChatTime(msg.timestamp)}</span>{/if}
                     <span class="notice-system">{msg.systemText}</span>

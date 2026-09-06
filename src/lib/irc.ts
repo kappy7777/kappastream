@@ -332,6 +332,60 @@ export function composeUsernoticeFallback(msgId: string, tags: Record<string, st
   }
 }
 
+// The individually toggleable USERNOTICE groups (Settings → Chat → Features).
+// Subs and resubs deliberately share ONE category; the gift-chain ids (gifted
+// subs, community gifts, gift upgrades) share the gift category; unraid rides
+// raids. 'other' collects the exotic ids (bitsbadgetier, viewermilestone,
+// future Twitch ids) — classification stays with the message; only the
+// PRESENTATION is gated (see isNoticeVisible).
+export type UsernoticeCategory = 'sub' | 'gift' | 'raid' | 'announcement' | 'other'
+
+export function usernoticeCategory(msgId: string): UsernoticeCategory {
+  switch (msgId) {
+    case 'sub':
+    case 'resub':
+      return 'sub'
+    case 'subgift':
+    case 'anonsubgift':
+    case 'submysterygift':
+    case 'giftpaidupgrade':
+      return 'gift'
+    case 'raid':
+    case 'unraid':
+      return 'raid'
+    case 'announcement':
+      return 'announcement'
+    default:
+      return 'other'
+  }
+}
+
+export interface NoticeToggles {
+  sub: boolean
+  gift: boolean
+  raid: boolean
+  announcement: boolean
+}
+
+// Gate for rendering a stored notice. The four named groups follow their own
+// toggle; 'other' (unknown/exotic ids) renders when ANY toggle is on — the
+// granular version of "never drop an unknown msg-id while the feature group
+// is enabled".
+export function isNoticeVisible(category: UsernoticeCategory, toggles: NoticeToggles): boolean {
+  switch (category) {
+    case 'sub':
+      return toggles.sub
+    case 'gift':
+      return toggles.gift
+    case 'raid':
+      return toggles.raid
+    case 'announcement':
+      return toggles.announcement
+    case 'other':
+      return toggles.sub || toggles.gift || toggles.raid || toggles.announcement
+  }
+}
+
 // Single source of truth for how a deleted/timed-out message is PRESENTED.
 // Today it is strikethrough with the original text left visible. Tradeoff:
 // this still shows content a moderator removed — an explicit product choice.

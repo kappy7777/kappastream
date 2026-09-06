@@ -445,19 +445,73 @@ async function exportFavorites(): Promise<void> {
             </div>
             <div class="chat-subgroup-label">{t('settings_features')}</div>
             <div class="toggle-row">
-              <span class="toggle-label" id="chat-subnotices-label">
-                {t('settings_subNotices')}
-                <span class="toggle-hint">{t('settings_subNoticesHint')}</span>
+              <span class="toggle-label" id="chat-notices-sub-label">
+                {t('settings_noticesSub')}
+                <span class="toggle-hint">{t('settings_noticesSubHint')}</span>
               </span>
               <span
                 class="toggle"
-                class:toggle--on={settings.chatSubnotices}
+                class:toggle--on={settings.chatNoticesSub}
                 role="switch"
                 tabindex="0"
-                aria-checked={settings.chatSubnotices}
-                aria-labelledby="chat-subnotices-label"
-                onclick={() => settings.toggleChatSubnotices()}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatSubnotices() } }}
+                aria-checked={settings.chatNoticesSub}
+                aria-labelledby="chat-notices-sub-label"
+                onclick={() => settings.toggleChatNoticesSub()}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatNoticesSub() } }}
+              >
+                <span class="toggle-knob"></span>
+              </span>
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label" id="chat-notices-gift-label">
+                {t('settings_noticesGift')}
+                <span class="toggle-hint">{t('settings_noticesGiftHint')}</span>
+              </span>
+              <span
+                class="toggle"
+                class:toggle--on={settings.chatNoticesGift}
+                role="switch"
+                tabindex="0"
+                aria-checked={settings.chatNoticesGift}
+                aria-labelledby="chat-notices-gift-label"
+                onclick={() => settings.toggleChatNoticesGift()}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatNoticesGift() } }}
+              >
+                <span class="toggle-knob"></span>
+              </span>
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label" id="chat-notices-raid-label">
+                {t('settings_noticesRaid')}
+                <span class="toggle-hint">{t('settings_noticesRaidHint')}</span>
+              </span>
+              <span
+                class="toggle"
+                class:toggle--on={settings.chatNoticesRaid}
+                role="switch"
+                tabindex="0"
+                aria-checked={settings.chatNoticesRaid}
+                aria-labelledby="chat-notices-raid-label"
+                onclick={() => settings.toggleChatNoticesRaid()}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatNoticesRaid() } }}
+              >
+                <span class="toggle-knob"></span>
+              </span>
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label" id="chat-notices-announcement-label">
+                {t('settings_noticesAnnouncement')}
+                <span class="toggle-hint">{t('settings_noticesAnnouncementHint')}</span>
+              </span>
+              <span
+                class="toggle"
+                class:toggle--on={settings.chatNoticesAnnouncement}
+                role="switch"
+                tabindex="0"
+                aria-checked={settings.chatNoticesAnnouncement}
+                aria-labelledby="chat-notices-announcement-label"
+                onclick={() => settings.toggleChatNoticesAnnouncement()}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatNoticesAnnouncement() } }}
               >
                 <span class="toggle-knob"></span>
               </span>
