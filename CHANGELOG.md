@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-09-06
+
+### Added
+
+- **Merged chats in multi-view.** A merge button at the left of the chat
+  tab strip combines any subset of the open chats into one interleaved
+  stream — merged channels share a single tab with their avatars stacked,
+  and every message carries its origin channel's mini avatar.
+
+- **Remembered window geometry.** kappastream now opens 1280×800 and
+  centered on first launch (960×600 minimum), and remembers size,
+  position, and maximized state across restarts.
+
+- **In-app changelog.** The what's-new screen after an update now lists
+  every recorded release in a scrollable log, and the About dialog gained
+  a Changelog button that reopens it at any time.
+
+### Changed
+
+- **Avatar chat tabs in multi-view.** The chat tab strip shows the
+  channels' circular profile pictures — channel initial as fallback, a
+  live dot, offline grayscaled — sharing the strip's width evenly.
+
+- **Marquee chat-mode labels.** When the chat-mode pill's labels would
+  overflow its one line, they glide back and forth inside the pill instead
+  of wrapping (respects prefers-reduced-motion).
+
+- **One chat renderer everywhere.** Multi-view chat now renders through
+  the same component as the single-stream chat: timestamp and badge
+  tooltips, the bits badge, and the newer jump-to-live pill included.
+
+### Fixed
+
+- **Pinned messages survive a lookup hiccup.** A transient failure
+  resolving a channel's id no longer silences that channel's pinned
+  messages until restart — the lookup retries every five minutes.
+
 ## [1.0.3] - 2026-09-06
 
 ### Added

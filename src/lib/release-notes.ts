@@ -40,6 +40,21 @@ export interface VersionNotes {
 }
 
 export const RELEASE_NOTES: Record<string, VersionNotes> = {
+  '1.0.4': {
+    added: [
+      '🔀 Merge any subset of your multi-view chats into one interleaved stream.',
+      '🪟 The window opens 1280×800 and centered on first launch and now remembers size, position, and maximized state.',
+      "📜 A scrollable in-app changelog — in the what's-new screen and via a Changelog button in About.",
+    ],
+    changed: [
+      "👤 Multi-view chat tabs are the channels' profile pictures, evenly spaced with live dots.",
+      '🎠 Overflowing chat-mode labels glide back and forth inside the pill instead of wrapping.',
+      "🧩 Multi-view chat renders with the single-view chat's polish: tooltips, bits badge, jump pill.",
+    ],
+    fixed: [
+      '📌 A transient channel-id lookup failure no longer disables pinned messages until restart.',
+    ],
+  },
   '1.0.3': {
     added: [
       '📌 Pinned chat messages — an opt-in banner floats over the chat, expandable and dismissable per pin.',

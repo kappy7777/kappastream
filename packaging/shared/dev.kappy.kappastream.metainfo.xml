@@ -78,6 +78,23 @@
   </content_rating>
 
   <releases>
+    <release version="1.0.4" date="2026-09-06">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.4</url>
+      <description>
+        <p>Merged chats in multi-view: a merge button at the left of the
+        chat tab strip combines any subset of the open chats into one
+        interleaved stream, with merged channels sharing a single tab and
+        every message carrying its origin channel's mini avatar.</p>
+        <p>The window now opens 1280×800 and centered on first launch and
+        remembers size, position, and maximized state across restarts. The
+        what's-new screen lists every recorded release in a scrollable
+        changelog, also reachable from the About dialog. Multi-view chat
+        tabs show the channels' profile pictures, overflowing chat-mode
+        labels glide inside the pill, multi-view chat renders with the
+        single-view chat's polish, and a transient channel-id lookup
+        failure no longer disables pinned messages until restart.</p>
+      </description>
+    </release>
     <release version="1.0.3" date="2026-09-06">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.3</url>
       <description>
