@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-09-06
+
+### Added
+
+- **Pinned chat messages.** The channel's pinned message shows as a compact
+  banner floating over the chat — click to expand, dismiss per pin. Opt-in
+  via Settings → Chat (default off); with the toggle off no pinned-message
+  request is made at all.
+
+- **Clickable Twitch links in chat.** twitch.tv links in chat messages,
+  notices, and the pinned banner are now clickable. Clip links play right
+  inside kappastream; every other Twitch link opens in your browser.
+
+- **Granular chat-event filters.** The single "sub & raid notices" toggle is
+  now four independent ones — subs & resubs, gifted subs, raids, and
+  announcements. Existing settings migrate automatically.
+
+### Changed
+
+- **Chat-mode indicator, redesigned.** Active chat modes (slow mode,
+  followers-only, …) float as a single-line pill at the bottom of the chat,
+  led by an info symbol — no stacked lines and no parenthesized thresholds.
+  The pinned-message banner got the same floating treatment, and the
+  open-on-Twitch button sits beside the modes pill on one row.
+
+- **Refreshed title bar.** The favorites toggle got a proper panel icon,
+  and the spacing between logo, toggle, and Discover is balanced now.
+
+### Fixed
+
+- **Small windows minimize the sidebar properly.** Narrow windows no longer
+  squeeze the favorites sidebar into a broken half-hidden layout — it
+  switches to the same profile-picture icons mode the panel button uses,
+  hover previews included.
+
+- **Sidebar channel names are never cut off.** The viewer count no longer
+  overlaps the channel name's line: names ellipsize cleanly and the
+  Stream Together "+N" chip stays visible.
+
 ## [1.0.2] - 2026-08-21
 
 ### Added

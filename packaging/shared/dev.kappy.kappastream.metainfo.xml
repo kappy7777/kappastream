@@ -78,6 +78,21 @@
   </content_rating>
 
   <releases>
+    <release version="1.0.3" date="2026-09-06">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.3</url>
+      <description>
+        <p>Chat round-out. Pinned chat messages (opt-in) float as a compact,
+        expandable banner over the chat; Twitch links in chat are clickable,
+        with clip links playing in-app; and the single sub/raid notice toggle
+        splits into four filters — subs &amp; resubs, gifted subs, raids, and
+        announcements.</p>
+        <p>The chat-mode indicator floats as a one-line pill with an info
+        symbol, the favorites toggle got a proper panel icon with balanced
+        title-bar spacing, narrow windows minimize the sidebar into the real
+        icons mode with hover previews, and sidebar channel names are never
+        cut off by the viewer count.</p>
+      </description>
+    </release>
     <release version="1.0.2" date="2026-08-21">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.2</url>
       <description>

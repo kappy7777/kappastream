@@ -38,6 +38,21 @@ export interface VersionNotes {
 }
 
 export const RELEASE_NOTES: Record<string, VersionNotes> = {
+  '1.0.3': {
+    added: [
+      '📌 Pinned chat messages — an opt-in banner floats over the chat, expandable and dismissable per pin.',
+      '🔗 Twitch links in chat are clickable now; clip links play in-app.',
+      '🗂️ The sub/raid notice toggle splits into four filters: subs & resubs, sub gifts, raids, and announcements.',
+    ],
+    changed: [
+      '💬 Active chat modes float as a one-line pill at the bottom of the chat.',
+      '🎛️ The favorites toggle got a proper panel icon, with balanced title-bar spacing.',
+    ],
+    fixed: [
+      '📱 On narrow windows the sidebar minimizes to the proper icons mode with hover previews.',
+      '📖 Sidebar channel names and the Stream Together "+N" chip are never cut off by the viewer count.',
+    ],
+  },
   '1.0.2': {
     added: [
       '🤝 Stream Together: favorites in a shared session show a +N chip, co-streamer avatars, and the combined viewership.',
