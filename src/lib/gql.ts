@@ -948,6 +948,41 @@ export async function fetchChannelClips(
 }
 
 /**
+ * Fetch one clip's metadata by slug (anonymous) — the same fields the channel
+ * clips list carries, for chat/pin clip links that only yield a slug. Returns
+ * null for an unknown/unindexed clip or an invalid slug; throws only on a
+ * transport failure (the caller keeps the generic placeholder then).
+ */
+export async function fetchClipInfo(slug: string, signal?: AbortSignal): Promise<ChannelClip | null> {
+  if (!isValidClipSlug(slug)) return null
+  const query = `
+  query($slug: ID!) {
+    clip(slug: $slug) {
+      id
+      slug
+      title
+      durationSeconds
+      viewCount
+      createdAt
+      thumbnailURL(width: ${CLIP_THUMB_W}, height: ${CLIP_THUMB_H})
+      game {
+        id
+        name
+        displayName
+      }
+      curator {
+        id
+        login
+        displayName
+      }
+    }
+  }
+`
+  const data = await gqlRequest<{ clip?: RawChannelClip | null }>(query, { slug }, signal)
+  return toChannelClip(data?.clip ?? null)
+}
+
+/**
  * Resolve a clip's direct MP4 media URLs (anonymous). streamlink 8.4.0 cannot
  * resolve clips (PersistedQueryNotFound), so clips play natively from these
  * sourceURLs. Qualities are returned highest-first (1080→360). Throws on an

@@ -308,7 +308,7 @@
           {#if !iconsOnly}
           <span class="fav-body">
             <span class="fav-name">
-              {fav.name}
+              <span class="fav-name-text">{fav.name}</span>
               {#if collab && collab.others > 0}
                 <span class="fav-collab-count" aria-label={t('streamingTogether')}>+{collab.others}</span>
               {/if}
@@ -332,13 +332,35 @@
               {/if}
             </span>
             {#if info}
+              {#snippet favMeta()}
+                <span class="fav-meta">
+                  <span class="live-dot" aria-hidden="true"></span>
+                  <!-- twitch.tv shows the COMBINED session viewership on shared-
+                       session cards; the tooltip flags why the number is bigger
+                       than the channel's own viewers. -->
+                  <span class="fav-viewers" use:tooltip={info.collabViewers != null ? t('streamingTogether') : undefined}>
+                    {formatViewers(info.collabViewers != null ? info.collabViewers : info.viewers)}
+                  </span>
+                </span>
+              {/snippet}
               {#if info.title}
-                <span class="fav-title" use:tooltip={{ text: info.title, delay: 1500 }}>{info.title}</span>
-              {/if}
-              {#if info.game}
-                <span class="fav-game" use:tooltip={{ text: info.game, delay: 1500 }}>{info.game}</span>
-              {:else if !info.title}
-                <span class="fav-title fav-title--muted">{t('live')}</span>
+                <span class="fav-line">
+                  <span class="fav-title" use:tooltip={{ text: info.title, delay: 1500 }}>{info.title}</span>
+                  {@render favMeta()}
+                </span>
+                {#if info.game}
+                  <span class="fav-game" use:tooltip={{ text: info.game, delay: 1500 }}>{info.game}</span>
+                {/if}
+              {:else if info.game}
+                <span class="fav-line">
+                  <span class="fav-game" use:tooltip={{ text: info.game, delay: 1500 }}>{info.game}</span>
+                  {@render favMeta()}
+                </span>
+              {:else}
+                <span class="fav-line">
+                  <span class="fav-title fav-title--muted">{t('live')}</span>
+                  {@render favMeta()}
+                </span>
               {/if}
             {:else if isOff}
               <span class="fav-title fav-title--muted">{t('offline')}</span>
@@ -363,17 +385,6 @@
               <span class="fav-title fav-title--muted">{t('loading')}</span>
             {/if}
           </span>
-           {#if info}
-             <span class="fav-meta">
-               <span class="live-dot" aria-hidden="true"></span>
-               <!-- twitch.tv shows the COMBINED session viewership on shared-
-                    session cards; the tooltip flags why the number is bigger
-                    than the channel's own viewers. -->
-               <span class="fav-viewers" use:tooltip={info.collabViewers != null ? t('streamingTogether') : undefined}>
-                 {formatViewers(info.collabViewers != null ? info.collabViewers : info.viewers)}
-               </span>
-             </span>
-           {/if}
          {/if}
          </button>
        {/each}
@@ -685,6 +696,34 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* The name text itself must be the shrinkable flex item — an anonymous
+     text node defaults to min-width:auto and never shrinks, so it hard-clips
+     AND pushes the +N chip / remove button out of view. */
+  .fav-name-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* First metadata line (title, else game, else LIVE) — a flex row that
+     carries the viewers badge at its right end. The badge lives inside ONE
+     line instead of being a full-row-height sibling of .fav-body, so it can
+     never claim width away from the channel name above it; the name runs the
+     full row width and the title ellipsizes against the badge instead. */
+  .fav-line {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .fav-line .fav-title,
+  .fav-line .fav-game {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .fav-remove {

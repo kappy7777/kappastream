@@ -553,6 +553,61 @@ describe('gql channel content — clip media', () => {
   })
 })
 
+describe('gql clip info (metadata for chat/pin clip links)', () => {
+  it('parses title/game/views/age/curator into a ChannelClip', async () => {
+    gql.handler = async () =>
+      ok({
+        clip: {
+          id: '5e0a1d',
+          slug: 'CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4',
+          title: 'broo',
+          durationSeconds: 30,
+          viewCount: 1234,
+          createdAt: '2026-09-01T00:00:00Z',
+          thumbnailURL: 'https://clips-media-assets2.twitch.tv/x-preview-480x272.jpg',
+          game: { displayName: 'Path of Exile 2' },
+          curator: { login: 'clipper', displayName: 'Clipper' },
+        },
+      })
+
+    const clip = await G.fetchClipInfo('CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4')
+    expect(clip).not.toBeNull()
+    expect(clip?.title).toBe('broo')
+    expect(clip?.game).toBe('Path of Exile 2')
+    expect(clip?.viewCount).toBe(1234)
+    expect(clip?.createdAt).toBe('2026-09-01T00:00:00Z')
+    expect(clip?.durationSeconds).toBe(30)
+    expect(clip?.curator).toBe('Clipper')
+    // The metadata query rides the same anonymous transport as clip media…
+    expect(gql.calls).toHaveLength(1)
+    // …but is metadata-only (no videoQualities media payload).
+    const body = gql.calls[0]
+    expect(body).toContain('clip(slug: $slug)')
+    expect(body).toContain('title')
+    expect(body).not.toContain('videoQualities')
+    expect(lastVars()).toEqual({ slug: 'CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4' })
+  })
+
+  it('returns null for an unknown/unindexed clip (null clip)', async () => {
+    gql.handler = async () => ok({ clip: null })
+    expect(await G.fetchClipInfo('NoSuchSlug-x')).toBeNull()
+  })
+
+  it('returns null for an invalid slug without issuing any request', async () => {
+    gql.handler = async () => ok({ clip: { id: '1', slug: 'x' } })
+    expect(await G.fetchClipInfo('bad slug!')).toBeNull()
+    expect(await G.fetchClipInfo('')).toBeNull()
+    expect(gql.calls).toHaveLength(0)
+  })
+
+  it('throws on transport failure (caller keeps the placeholder)', async () => {
+    gql.handler = async () => {
+      throw new Error('HTTP 502')
+    }
+    await expect(G.fetchClipInfo('GoodSlug-1')).rejects.toThrow('HTTP 502')
+  })
+})
+
 describe('gql channel content — clip slug validator', () => {
   it('accepts real Twitch clip slugs', () => {
     expect(G.isValidClipSlug('CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4')).toBe(true)

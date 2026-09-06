@@ -29,6 +29,10 @@
     background: transparent;
     color: var(--accent);
     font: inherit;
+    /* Buttons default to centered text (UA stylesheet); when a long URL
+       stretches the button to max-width the content would sit centered in
+       the chat line — force the left alignment every other message uses. */
+    text-align: left;
     text-decoration: underline;
     cursor: pointer;
     /* Links can be long; never break the chat line layout. */

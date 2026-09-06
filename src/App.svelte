@@ -26,7 +26,7 @@
   import { firstLaunch } from './lib/first-launch.svelte'
   import { collabBadge, fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
-  import { fetchChannelBadges, fetchCollaborators, fetchVideoExtras, type Collaborator, type VodChapter, type VodMuteSpan } from './lib/gql'
+  import { fetchChannelBadges, fetchClipInfo, fetchCollaborators, fetchVideoExtras, type Collaborator, type VodChapter, type VodMuteSpan } from './lib/gql'
   import { parseStoryboard, type Storyboard } from './lib/vod-extras'
   import { VodChatController, fetchVodComments } from './lib/vodchat.svelte.ts'
   import { initBadgeRefresh } from './lib/badges'
@@ -2190,6 +2190,21 @@
           id: '', slug, title: '', game: '', viewCount: 0, createdAt: '',
           durationSeconds: 0, thumbnailUrl: '', curator: '',
         })
+        // The link only carried the slug — fetch the real title/game/views
+        // and patch them into the status bar while this clip still plays.
+        // Silent on failure (unknown/unindexed clip or transport error):
+        // the generic placeholder stays.
+        void fetchClipInfo(slug)
+          .then((info) => {
+            if (!info) return
+            if (playback.kind === 'clip' && playback.slug === slug) {
+              playback.title = info.title || playback.title
+              playback.game = info.game
+              playback.viewCount = info.viewCount
+              playback.createdAt = info.createdAt
+            }
+          })
+          .catch(() => {})
         return
       }
     }
@@ -2599,9 +2614,11 @@
           <span class="stream-info-title" use:tooltip={playback.title}>{playback.title}</span>
         </div>
         <div class="stream-info-row stream-info-row--meta">
-          {#if playback.game}<span class="stream-info-game">{playback.game}</span><span class="stream-info-dot">·</span>{/if}
-          <span class="stream-info-viewers">{formatCompact(playback.viewCount)} {t('views')}</span>
-          {#if playback.createdAt}<span class="stream-info-dot">·</span><span class="stream-info-age">{formatAge(playback.createdAt)}</span>{/if}
+          {#if playback.game}<span class="stream-info-game">{playback.game}</span>{/if}
+          {#if playback.game && (playback.viewCount > 0 || playback.createdAt)}<span class="stream-info-dot">·</span>{/if}
+          {#if playback.viewCount > 0}<span class="stream-info-viewers">{formatCompact(playback.viewCount)} {t('views')}</span>{/if}
+          {#if playback.createdAt && playback.viewCount > 0}<span class="stream-info-dot">·</span>{/if}
+          {#if playback.createdAt}<span class="stream-info-age">{formatAge(playback.createdAt)}</span>{/if}
         </div>
       {:else if activeStatus.state === 'live'}
         <div class="stream-info-row stream-info-row--main">
