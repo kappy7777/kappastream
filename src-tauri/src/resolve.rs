@@ -56,7 +56,7 @@ pub(crate) fn is_vod_id_valid(id: &str) -> bool {
 }
 
 /// A Twitch clip slug is alphanumeric + dashes/underscores, e.g.
-/// "ClumsyDarkPassionfruitBCouch-IAtE_BZ87kE7PQSG". Validated before the slug
+/// "QuietBraveLlamaMeadowRun-pT4vXR2bWHn7fKqz". Validated before the slug
 /// reaches a streamlink argument so unvalidated input can never be injected.
 pub(crate) fn is_clip_slug_valid(slug: &str) -> bool {
     let s = slug.trim();
@@ -779,7 +779,7 @@ mod tests {
     fn channel_name_valid_basic() {
         assert!(is_channel_name_valid("x"));
         assert!(is_channel_name_valid("twitch"));
-        assert!(is_channel_name_valid("shroud"));
+        assert!(is_channel_name_valid("chan1"));
         assert!(is_channel_name_valid("name_with_underscore"));
         assert!(is_channel_name_valid("123abc"));
         assert!(is_channel_name_valid("a1b2c3"));
@@ -982,10 +982,10 @@ mod tests {
     #[test]
     fn clip_slug_valid_basic() {
         assert!(is_clip_slug_valid(
-            "ClumsyDarkPassionfruitBCouch-IAtE_BZ87kE7PQSG"
+            "QuietBraveLlamaMeadowRun-pT4vXR2bWHn7fKqz"
         ));
         assert!(is_clip_slug_valid(
-            "CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4"
+            "HappySunnyOtterRabbitTacos-aB3xKQ9vZRtM5cWf"
         ));
         assert!(is_clip_slug_valid("abc"));
         assert!(is_clip_slug_valid("a-b_c"));

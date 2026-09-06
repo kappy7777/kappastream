@@ -54,7 +54,7 @@ export async function getTwitchUserId(username: string, signal?: AbortSignal): P
     const ids = await resolveUserIds([username], signal)
     if (signal?.aborted) return null
     // Twitch returns `login` in canonical lowercase, so the map is keyed
-    // lowercase. Match that here — a mixed-case channel name (e.g. "Lirik")
+    // lowercase. Match that here — a mixed-case channel name (e.g. "Somechan")
     // would otherwise miss and silently drop that channel's third-party emotes.
     return ids.get(username.toLowerCase()) ?? null
   } catch {

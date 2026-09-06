@@ -10,7 +10,7 @@ import { VodChatController } from './vodchat.svelte'
  * normalize layer + the real GQL fetcher (fetchVodComments) are tested by
  * mocking the `gql_fetch` Tauri command, mirroring favorites.test.ts.
  *
- * Central behaviors under test (the task's TESTS list):
+ * Central behaviors under test:
  *  - advance rule is gap-free (maxOff+1) and dedupes overlapping windows;
  *  - seek discards the buffer and refetches; rapid seeks collapse to one fetch;
  *  - no fetch while paused or chat hidden;
@@ -24,7 +24,7 @@ import { VodChatController } from './vodchat.svelte'
 // second). pageAt(O) mimics the real endpoint: a window of COUNT comments
 // starting LOOKBACK seconds before O (so consecutive pages OVERLAP), with
 // maxOffset = the last comment's offset and the page bracketing O. This is the
-// shape Phase 0 measured, so it exercises dedupe + the advance rule for real.
+// shape the live endpoint serves, so it exercises dedupe + the advance rule for real.
 
 interface StreamMsg { id: string }
 
@@ -307,24 +307,24 @@ describe('normalizeVodComment', () => {
     const node = {
       id: 'comment-1',
       contentOffsetSeconds: 42,
-      createdAt: '2026-07-31T20:26:48.942Z',
+      createdAt: '2020-01-01T12:00:48.123Z',
       commenter: { id: 'uid', login: 'user', displayName: 'User' },
       message: {
         userColor: '#FF0000',
         userBadges: [{ setID: 'subscriber', version: '12' }],
         fragments: [
-          { text: 'F E L I X ', emote: null },
+          { text: 'h e l l o ', emote: null },
           { text: 'TriHard', emote: { emoteID: '120232' } },
           { text: ' 7', emote: null },
         ],
       },
     }
-    const res = normalizeVodComment(node as never, 'xqc')
+    const res = normalizeVodComment(node as never, 'chan11')
     expect(res).not.toBeNull()
     expect(res!.offset).toBe(42)
     const pm = res!.pm
     expect(pm.id).toBe('comment-1')
-    expect(pm.message).toBe('F E L I X TriHard 7')
+    expect(pm.message).toBe('h e l l o TriHard 7')
     expect(pm.username).toBe('user')
     expect(pm.displayName).toBe('User')
     expect(pm.userId).toBe('uid')
@@ -338,7 +338,7 @@ describe('normalizeVodComment', () => {
     expect(pm.badges[0].id).toBe('subscriber')
     expect(pm.badges[0].version).toBe('12')
     // Timestamp parsed from createdAt (wall-clock) for the timestamp toggle.
-    expect(pm.timestamp).toBe(Date.parse('2026-07-31T20:26:48.942Z'))
+    expect(pm.timestamp).toBe(Date.parse('2020-01-01T12:00:48.123Z'))
   })
 
   it('drops empty setID badge rows and normalizes an absent color', async () => {

@@ -4,14 +4,14 @@ import { describe, it, expect } from 'vitest'
  * Unit tests for src/lib/vod-extras — the seek-hover storyboard math and the
  * chapter-at-time lookup. Pure functions; no transport involved. The strip
  * fixtures mirror the REAL document shape served by the VOD CDN (verified
- * against the live endpoint 2026-08-20): a top-level ARRAY of quality
+ * against the live endpoint): a top-level ARRAY of quality
  * variants, each a rows×cols grid of interval-spaced thumbnails with
  * RELATIVE image filenames.
  */
 
 import { parseStoryboard, storyboardThumbAt, chapterAt } from './vod-extras'
 
-const BASE = 'https://d2vi6trrdongqn.cloudfront.net/abc/vod/storyboards/2849957264-info.json'
+const BASE = 'https://d2vi6trrdongqn.cloudfront.net/abc/vod/storyboards/5000000001-info.json'
 
 const LOW = {
   count: 200,
@@ -19,7 +19,7 @@ const LOW = {
   height: 90,
   rows: 40,
   cols: 5,
-  images: ['2849957264-low-0.jpg'],
+  images: ['5000000001-low-0.jpg'],
   interval: 118,
   quality: 'low',
 }
@@ -30,7 +30,7 @@ const HIGH = {
   height: 124,
   rows: 10,
   cols: 5,
-  images: ['2849957264-high-0.jpg', '2849957264-high-1.jpg', '2849957264-high-2.jpg', '2849957264-high-3.jpg'],
+  images: ['5000000001-high-0.jpg', '5000000001-high-1.jpg', '5000000001-high-2.jpg', '5000000001-high-3.jpg'],
   interval: 118,
   quality: 'high',
 }
@@ -45,14 +45,14 @@ describe('parseStoryboard', () => {
     expect(sb!.rows).toBe(10)
     expect(sb!.intervalSec).toBe(118)
     expect(sb!.count).toBe(200)
-    expect(sb!.imageUrls[0]).toBe('https://d2vi6trrdongqn.cloudfront.net/abc/vod/storyboards/2849957264-high-0.jpg')
+    expect(sb!.imageUrls[0]).toBe('https://d2vi6trrdongqn.cloudfront.net/abc/vod/storyboards/5000000001-high-0.jpg')
     expect(sb!.imageUrls).toHaveLength(4)
   })
 
   it('falls back to the only variant present', () => {
     const sb = parseStoryboard([LOW], BASE)
     expect(sb!.width).toBe(160)
-    expect(sb!.imageUrls).toEqual(['https://d2vi6trrdongqn.cloudfront.net/abc/vod/storyboards/2849957264-low-0.jpg'])
+    expect(sb!.imageUrls).toEqual(['https://d2vi6trrdongqn.cloudfront.net/abc/vod/storyboards/5000000001-low-0.jpg'])
   })
 
   it('rejects malformed documents (null, empty, non-array, junk variants)', () => {

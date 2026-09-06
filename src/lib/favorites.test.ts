@@ -450,9 +450,9 @@ describe('collabBadge (LiveStatus → badge data)', () => {
     expect(
       collabBadge({
         state: 'live', title: '', viewers: 1, uptime: '', game: '', avatarUrl: '',
-        collabViewers: 14986, collabOthers: 5, collabAvatar: 'https://img/jaime.png',
+        collabViewers: 14986, collabOthers: 5, collabAvatar: 'https://img/c1.png',
       }),
-    ).toEqual({ others: 5, avatar: 'https://img/jaime.png' })
+    ).toEqual({ others: 5, avatar: 'https://img/c1.png' })
     expect(
       collabBadge({ state: 'live', title: '', viewers: 1, uptime: '', game: '', avatarUrl: '', collabViewers: 41103 }),
     ).toEqual({ others: 0, avatar: '' })
@@ -545,15 +545,15 @@ describe('Stream Together collaboration roster fetch (per poll)', () => {
     seedFavorites(['host', 'solo'])
     gql.handler = gqlStatusHandler(
       {
-        host: { live: true, viewers: 674, collabViewers: 1865, id: '531019578', game: 'IRL' },
+        host: { live: true, viewers: 674, collabViewers: 1865, id: '200000001', game: 'IRL' },
         solo: { live: true, viewers: 50, id: '111', game: 'Other' },
       },
       {
         roster: (id) =>
-          id === '531019578'
+          id === '200000001'
             ? roster(
-                ['host', 'ronnyberger', 'https://img/r.png', 'LEADER'],
-                ['nicistemmler', 'Nicistemmler', 'https://img/n.png', 'MEMBER'],
+                ['host', 'cohost1', 'https://img/r.png', 'LEADER'],
+                ['cohost2', 'Cohost2', 'https://img/n.png', 'MEMBER'],
               )
             : null,
       },
@@ -566,10 +566,10 @@ describe('Stream Together collaboration roster fetch (per poll)', () => {
     expect(gql.calls[1].body).toContain('collaboration')
     const host = store.getStatus('host')!.status
     if (host.state !== 'live') throw new Error('expected live')
-    expect(host.collabMembers).toEqual([{ login: 'nicistemmler', avatarUrl: 'https://img/n.png', role: 'MEMBER' }])
+    expect(host.collabMembers).toEqual([{ login: 'cohost2', avatarUrl: 'https://img/n.png', role: 'MEMBER' }])
     expect(host.collabOthers).toBe(1)
     expect(host.collabAvatar).toBe('https://img/n.png')
-    expect(host.userId).toBe('531019578')
+    expect(host.userId).toBe('200000001')
     const solo = store.getStatus('solo')!.status
     if (solo.state !== 'live') throw new Error('expected live')
     expect(solo.collabMembers).toBeUndefined()
@@ -589,11 +589,11 @@ describe('Stream Together collaboration roster fetch (per poll)', () => {
     seedFavorites(['host'])
     let failRoster = false
     gql.handler = gqlStatusHandler(
-      { host: { live: true, viewers: 674, collabViewers: 1865, id: '531019578', game: 'IRL' } },
+      { host: { live: true, viewers: 674, collabViewers: 1865, id: '200000001', game: 'IRL' } },
       {
         roster: (id) => {
           if (failRoster) throw new Error('HTTP 500')
-          return id === '531019578'
+          return id === '200000001'
             ? roster(['host', 'Host', 'https://img/h.png', 'LEADER'], ['guest', 'Guest', 'https://img/g.png', 'MEMBER'])
             : null
         },

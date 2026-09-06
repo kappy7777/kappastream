@@ -27,10 +27,12 @@
 // Single-view App.svelte targets the joined channel and passes the numeric
 // userId the favorites status batch already carries. MultiView targets ONLY
 // the active chat tab's channel (the banner lives in the chat pane, so pins
-// for background tiles would never be seen; fetching them would quadruple
-// the requests). MultiView has no status batch, so the controller falls back
-// to ONE memoized login→id resolution per channel (getTwitchUserId — the
-// same anonymous GQL helper the emote loader uses), never per poll.
+// for background tiles would never be seen; fetching them would quadruple the
+// requests). MultiView has no status batch, so the controller falls back
+// to a memoized login→id resolution per channel (getTwitchUserId — the
+// same anonymous GQL helper the emote loader uses): successes for the app's
+// lifetime, failures retried at most once per USER_ID_RETRY_MS window —
+// never per poll.
 
 import {
   fetchPinnedChatMessages,
@@ -151,7 +153,17 @@ export interface PinnedChatDeps {
   now: () => number
   /** Min spacing between requests for the SAME channel (the poll cadence). */
   intervalMs: number
+  /** How long a FAILED login→id resolution is remembered before one retry. */
+  userIdRetryMs: number
 }
+
+// How long a FAILED login→id resolution stays memoized before the next
+// refresh may retry it. Successes are stable for the app's lifetime (a
+// channel's numeric id never changes), but a failure is usually a transient
+// network blip — caching it forever would silently drop the pin banner on
+// that channel until an app restart. 5 min bounds the retry cost at roughly
+// one resolution request per TTL window, never per poll.
+const USER_ID_RETRY_MS = 5 * 60_000
 
 const DEFAULT_DEPS: PinnedChatDeps = {
   fetch: (id) => fetchPinnedChatMessages(id),
@@ -159,6 +171,7 @@ const DEFAULT_DEPS: PinnedChatDeps = {
   resolveUserId: (login) => getTwitchUserId(login),
   now: () => Date.now(),
   intervalMs: GQL_REFRESH_INTERVAL_MS,
+  userIdRetryMs: USER_ID_RETRY_MS,
 }
 
 // How often the local clock re-checks endsAt while a bounded pin is shown.
@@ -179,6 +192,7 @@ export class PinnedChatStore {
   private inFlight = false
   private wasEnabled = false
   private userIdMemo = new Map<string, string>()
+  private userIdFailedAt = new Map<string, number>()
   private resolvingIds = new Set<string>()
   private expiryTimer: ReturnType<typeof setInterval> | null = null
   private readonly deps: PinnedChatDeps
@@ -288,18 +302,30 @@ export class PinnedChatStore {
   }
 
   // Numeric id for channels whose caller has no status batch (multi-view).
-  // Memoized per login (including failures as '') so it costs at most ONE
-  // request per channel per app run, never one per poll.
+  // Successes are memoized for the app's lifetime; failures are memoized as
+  // '' for userIdRetryMs only, so a transient blip costs one retry per TTL
+  // window instead of silencing the channel's pins until restart — and never
+  // one request per poll.
   private async ensureUserId(channel: string): Promise<string | null> {
     if (this.targetUserId) return this.targetUserId
     const memo = this.userIdMemo.get(channel)
-    if (memo !== undefined) return memo || null
+    if (memo !== undefined) {
+      if (memo) return memo
+      const failedAt = this.userIdFailedAt.get(channel) ?? 0
+      if (this.deps.now() - failedAt < this.deps.userIdRetryMs) return null
+      this.userIdMemo.delete(channel)
+      this.userIdFailedAt.delete(channel)
+    }
     if (this.resolvingIds.has(channel)) return null
     this.resolvingIds.add(channel)
     try {
       const id = await this.deps.resolveUserId(channel)
-      // Memoize failures as '' too — one attempt per channel per app run.
-      this.userIdMemo.set(channel, id ?? '')
+      if (id) {
+        this.userIdMemo.set(channel, id)
+      } else {
+        this.userIdMemo.set(channel, '')
+        this.userIdFailedAt.set(channel, this.deps.now())
+      }
       return id
     } finally {
       this.resolvingIds.delete(channel)

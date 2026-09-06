@@ -5,7 +5,7 @@
 // never when it is shown — so a crash or force-quit before dismissal re-shows
 // the screen on the next launch instead of silently skipping it.
 //
-// Decision table (Phase 0 of the welcome/what's-new task):
+// Decision table:
 //   no stored version / corrupt → FIRST INSTALL → welcome
 //   stored  < current           → UPDATED       → what's new
 //   stored === current          → normal        → nothing

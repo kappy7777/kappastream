@@ -1,26 +1,26 @@
 /*
  * VOD chat replay — past-broadcast comments synced to the playhead.
  *
- * EFFICIENCY is the primary design goal. The Phase 0 measurement run (see the
- * spike notes in gql.ts `fetchVodCommentPage`) established the endpoint's
- * paging model, and every number below is derived from it:
+ * EFFICIENCY is the primary design goal. The endpoint's paging model (measured
+ * against the live endpoint — see the notes at `fetchVodCommentPage` in
+ * gql.ts) drives every constant below:
  *
  *   - A page is a contiguous slice of the comment total-order bounded by a
- *     COUNT ceiling (~59–60 comments). DENSE chat (xqc) → those 60 span ~9 s;
- *     SPARSE chat → they span a minute or more.
+ *     COUNT ceiling (~59–60 comments). On a dense chat those 60 span ~9 s; on
+ *     a sparse one they span a minute or more.
  *   - The page anchors slightly before and well after the requested offset, and
  *     consecutive pages OVERLAP heavily (so every request re-fetches some prior
  *     comments → dedup by comment id is mandatory).
  *   - `contentOffsetSeconds` is an Int argument and all returned offsets are
  *     whole numbers, so `+1` is exact.
  *   - The gap-free advance rule is `nextOffset = lastCommentOffset + 1`
- *     (verified MISSING=0 against a dense 1 s ground-truth walk on firehose /
- *     mid / small VODs). Cursor paging is integrity-blocked and `first`/`last`
- *     are ignored, so this offset walk is the ONLY viable path.
+ *     (verified MISSING=0 on a dense ground-truth walk). Cursor paging is
+ *     integrity-blocked and `first`/`last` are ignored, so this offset walk is
+ *     the ONLY viable path.
  *
- * Real-time cost (advance = maxOff+1, measured): ~6.7 req/min on a firehose,
- * ~1.3 req/min mid, ~2.2 req/min small — and Phase 4 guards cut that further
- * (no fetch while paused / chat hidden / VOD closed).
+ * Real-time cost stays bounded (≈7 requests/min worst case on a dense chat,
+ * 1–2 on typical ones) and the fetch guards cut that further (no fetch while
+ * paused / chat hidden / VOD closed).
  *
  * The engine is transport-agnostic and generic over the rendered message type
  * <M>: it only knows offsets + ids. App.svelte supplies a `fetchPage` that goes
@@ -33,7 +33,7 @@ import type { EmoteRange } from './emotes'
 import { fetchVodCommentPage, type VodCommentNode } from './gql'
 
 // ---------------------------------------------------------------------------
-// Phase 1 — normalize a raw GQL comment node into the shared ParsedMessage
+// Normalize a raw GQL comment node into the shared ParsedMessage
 // shape (irc.ts) so the live-chat renderer handles replay unchanged.
 // ---------------------------------------------------------------------------
 
@@ -131,7 +131,7 @@ export async function fetchVodComments(
 }
 
 // ---------------------------------------------------------------------------
-// Phase 2 — sync engine. Bounded-ahead buffer; advances by maxOff+1; seeks
+// Sync engine. Bounded-ahead buffer; advances by maxOff+1; seeks
 // discard + refetch (debounced); degrades to no chat on failure.
 // ---------------------------------------------------------------------------
 
@@ -161,7 +161,7 @@ export interface VodChatDeps<M> {
   getChatVisible: () => boolean
 }
 
-// How far ahead of the playhead to buffer. Worst case (a firehose at ~9 s new
+// How far ahead of the playhead to buffer. Worst case (the densest chat at ~9 s new
 // coverage per request) this is ~7 pages; a seek discards at most that much
 // prefetched data. One request lands in well under a second, so 60 s comfortably
 // covers a slow/timeout request with no playback starvation.
@@ -182,7 +182,7 @@ const BACKOFF_MS = 30_000
  * (not yet at the playhead) and a capped visible list (at/behind the playhead,
  * what the renderer shows). A 250 ms tick drains buffered comments whose offset
  * has passed the playhead and tops the buffer up only when the ahead-margin
- * drops below `MARGIN_AHEAD_S` AND the Phase 4 guards pass (not paused, chat
+ * drops below `MARGIN_AHEAD_S` AND the fetch guards pass (not paused, chat
  * visible, VOD active).
  *
  * Concurrency: EXACTLY one in-flight request at a time (`inFlight`). A
@@ -324,7 +324,7 @@ export class VodChatController<M> {
     this.visible = next.length > VISIBLE_CAP ? next.slice(next.length - VISIBLE_CAP) : next
   }
 
-  // Phase 4 guards + margin top-up. Idempotent; called from the tick and after
+  // Fetch guards + margin top-up. Idempotent; called from the tick and after
   // every fetch / guard change.
   private maybeFetch(): void {
     if (this.videoId == null || this.eof || this.inFlight || this.failed) return
@@ -367,7 +367,7 @@ export class VodChatController<M> {
       // `drain`'s front-scan is always correct.
       if (this.buffer.length > 1) this.buffer.sort((a, b) => a.offset - b.offset)
       if (page.maxOffset > this.maxFetched) this.maxFetched = page.maxOffset
-      // The gap-free advance rule (Phase 0). The Math.max guards forward
+      // The gap-free advance rule. The Math.max guards forward
       // progress in the impossible case a page didn't bracket its offset.
       this.nextOffset = Math.max(page.maxOffset + 1, offset + 1)
       this.drain()

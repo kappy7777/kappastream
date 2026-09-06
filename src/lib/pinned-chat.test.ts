@@ -13,6 +13,8 @@ import { readFileSync, readdirSync } from 'node:fs'
  *     channel only;
  *   - dismissal is keyed to the PIN id and persists; a NEW pin id still
  *     appears;
+ *   - a failed login→id resolution is retried at most once per retry TTL
+ *     window, never per poll, and a success is memoized for the run;
  *   - an endsAt that lapses between polls hides the pin locally;
  *   - unknown `type` values are kept and render generically (never dropped);
  *   - empty is a success and a transport failure degrades to no pin without
@@ -33,15 +35,15 @@ function fixturePin(over: Partial<PinnedChatMessageData> = {}): PinnedChatMessag
     pinId: 'pin-1',
     messageId: 'msg-1', // deliberately distinct from the pin id
     type: 'MOD',
-    startsAt: '2026-09-05T21:33:21Z',
-    updatedAt: '2026-09-05T21:33:23Z',
+    startsAt: '2020-01-01T12:00:21Z',
+    updatedAt: '2020-01-01T12:00:23Z',
     endsAt: '',
-    pinnedBy: { login: 'syanitv', displayName: 'SyaniTV' },
+    pinnedBy: { login: 'pinmod1', displayName: 'Pinmod1' },
     message: {
-      sentAt: '2026-09-05T21:33:18Z',
+      sentAt: '2020-01-01T12:00:18Z',
       text: 'check this https://bit.ly/x',
       fragments: [{ text: 'check this https://bit.ly/x', emoteId: null }],
-      sender: { login: 'streamlabs', displayName: 'Streamlabs', chatColor: '#32C3A2', badges: [] },
+      sender: { login: 'chatbot1', displayName: 'Chatbot1', chatColor: '#9146FF', badges: [] },
     },
     ...over,
   }
@@ -69,6 +71,7 @@ function makeHarness(initial: PinnedChatMessageData[][] = []): Harness {
     resolveUserId: resolveUserId as unknown as (login: string) => Promise<string | null>,
     now: () => now,
     intervalMs: 150_000,
+    userIdRetryMs: 300_000,
   })
   return {
     store,
@@ -94,7 +97,7 @@ describe('pinned chat: fetch gating', () => {
   it('issues NO query while the toggle is off (not fetched-and-hidden)', async () => {
     const h = makeHarness()
     h.setEnabled(false)
-    h.store.setTarget('trymacs', '64342766')
+    h.store.setTarget('chan9', '100000001')
     h.store.tick()
     h.store.tick()
     await flush()
@@ -104,7 +107,7 @@ describe('pinned chat: fetch gating', () => {
 
   it('hides an already-shown pin the moment the toggle turns off', async () => {
     const h = makeHarness([[fixturePin()]])
-    h.store.setTarget('trymacs', '64342766')
+    h.store.setTarget('chan9', '100000001')
     await flush()
     expect(h.store.visiblePin).not.toBeNull()
     h.setEnabled(false)
@@ -116,10 +119,10 @@ describe('pinned chat: fetch gating', () => {
 
   it('issues exactly one request per poll cycle for the active channel only', async () => {
     const h = makeHarness([[fixturePin()]])
-    h.store.setTarget('trymacs', '64342766')
+    h.store.setTarget('chan9', '100000001')
     await flush()
     expect(h.fetch).toHaveBeenCalledTimes(1)
-    expect(h.fetch).toHaveBeenCalledWith('64342766')
+    expect(h.fetch).toHaveBeenCalledWith('100000001')
 
     // Extra notify() bursts within the same cycle window stay at one request.
     h.store.tick()
@@ -137,10 +140,10 @@ describe('pinned chat: fetch gating', () => {
 
   it('a channel switch bypasses the throttle (returning to a channel re-fetches)', async () => {
     const h = makeHarness([[fixturePin()]])
-    h.store.setTarget('trymacs', '1')
+    h.store.setTarget('chan9', '1')
     await flush()
     h.store.setTarget(null, null)
-    h.store.setTarget('trymacs', '1')
+    h.store.setTarget('chan9', '1')
     await flush()
     expect(h.fetch).toHaveBeenCalledTimes(2)
   })
@@ -148,7 +151,7 @@ describe('pinned chat: fetch gating', () => {
   it('falls back to one memoized login→id resolution for callers without a userId', async () => {
     const h = makeHarness([[fixturePin()]])
     h.resolveUserId.mockClear()
-    h.store.setTarget('schradin', null) // multi-view path: no status batch
+    h.store.setTarget('chan10', null) // multi-view path: no status batch
     await flush()
     expect(h.resolveUserId).toHaveBeenCalledTimes(1)
     expect(h.fetch).toHaveBeenCalledWith('999')
@@ -157,10 +160,39 @@ describe('pinned chat: fetch gating', () => {
     h.advance(150_001)
     h.store.tick()
     h.store.setTarget(null, null)
-    h.store.setTarget('schradin', null)
+    h.store.setTarget('chan10', null)
     await flush()
     expect(h.resolveUserId).toHaveBeenCalledTimes(1)
     expect(h.fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('a failed login→id resolution is retried only after the retry TTL, then sticks', async () => {
+    const h = makeHarness([[fixturePin()]])
+    h.resolveUserId.mockResolvedValueOnce(null) // first attempt: transient blip
+    h.store.setTarget('chan10', null)
+    await flush()
+    expect(h.resolveUserId).toHaveBeenCalledTimes(1)
+    expect(h.fetch).not.toHaveBeenCalled() // no id resolved → no pin fetch
+
+    // Within the TTL the failure stays memoized — ticks do not re-resolve.
+    h.advance(150_001)
+    h.store.tick()
+    await flush()
+    expect(h.resolveUserId).toHaveBeenCalledTimes(1)
+
+    // Past the TTL the next tick retries once; the success fetches the pin
+    // and is then memoized for the rest of the run.
+    h.advance(300_001)
+    h.store.tick()
+    await flush()
+    expect(h.resolveUserId).toHaveBeenCalledTimes(2)
+    expect(h.fetch).toHaveBeenCalledWith('999')
+    expect(h.store.visiblePin).not.toBeNull()
+
+    h.advance(300_001)
+    h.store.tick()
+    await flush()
+    expect(h.resolveUserId).toHaveBeenCalledTimes(2) // success never re-resolves
   })
 })
 
@@ -283,7 +315,7 @@ describe('pinned chat: display model', () => {
       pinId: 'pin-1',
       messageId: 'msg-1',
       message: {
-        sentAt: '2026-09-05T21:33:18Z',
+        sentAt: '2020-01-01T12:00:18Z',
         text: 'check this Kappa https://bit.ly/x',
         fragments: [
           { text: 'check this ', emoteId: null },
@@ -291,8 +323,8 @@ describe('pinned chat: display model', () => {
           { text: ' https://bit.ly/x', emoteId: null },
         ],
         sender: {
-          login: 'streamlabs',
-          displayName: 'Streamlabs',
+          login: 'chatbot1',
+          displayName: 'Chatbot1',
           chatColor: 'not-a-color',
           badges: [{ setID: 'moderator', version: '1' }],
         },
@@ -306,7 +338,7 @@ describe('pinned chat: display model', () => {
     // displayBadges go through the IRC badge path (setID/version keys).
     expect(pin.badges.map((b) => b.id + '/' + b.version)).toEqual(['moderator/1'])
     expect(pin.endsAtMs).toBeNull()
-    expect(pin.sentAtMs).toBe(Date.parse('2026-09-05T21:33:18Z'))
+    expect(pin.sentAtMs).toBe(Date.parse('2020-01-01T12:00:18Z'))
   })
 
   it('isPinExpired only fires for a lapsed endsAt', () => {

@@ -14,6 +14,10 @@
   let { text, onlink }: { text: string; onlink: (url: string) => void } = $props()
 </script>
 
+<!-- Index keys are deliberate here: the chunks are re-derived from `text` on
+     every render and carry no state of their own, so there is nothing to
+     preserve across a re-order (unlike the multi-view tiles, which MUST key
+     by stable tile id to keep their hls.js instances alive). Do not "fix". -->
 {#each splitTwitchLinks(text) as chunk, i (i)}
   {#if chunk.url}
     <button type="button" class="chat-link" onclick={() => onlink(chunk.url!)}>{chunk.text}</button>

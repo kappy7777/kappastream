@@ -57,8 +57,8 @@ describe('t()', () => {
   it('substitutes {name} placeholders', async () => {
     const { t, setLocale } = await fresh()
     setLocale('en')
-    expect(t('toast_removedFavorite', { channel: 'shroud' })).toBe('Removed shroud from favorites.')
-    expect(t('notif_live', { channel: 'shroud' })).toBe('shroud is live')
+    expect(t('toast_removedFavorite', { channel: 'chan1' })).toBe('Removed chan1 from favorites.')
+    expect(t('notif_live', { channel: 'chan1' })).toBe('chan1 is live')
     expect(t('sidebar_favoritesLimit', { n: 1000 })).toBe('Favorites are limited to 1000')
   })
 

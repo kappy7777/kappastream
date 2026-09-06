@@ -19,11 +19,11 @@ import { splitTwitchLinks, parseTwitchClipUrl } from './chat-links'
 describe('chat links: allowlist', () => {
   it('linkifies only https twitch.tv URLs — javascript:/data:/other hosts stay text', () => {
     const chunks = splitTwitchLinks(
-      'see https://www.twitch.tv/trymacs and https://twitch.tv/videos/1 not javascript:alert(1) or data:text/html,x or https://bit.ly/x or http://twitch.tv/x',
+      'see https://www.twitch.tv/chan9 and https://twitch.tv/videos/1 not javascript:alert(1) or data:text/html,x or https://bit.ly/x or http://twitch.tv/x',
     )
     const links = chunks.filter((c) => c.url)
     expect(links).toHaveLength(2)
-    expect(links[0].url).toBe('https://www.twitch.tv/trymacs')
+    expect(links[0].url).toBe('https://www.twitch.tv/chan9')
     expect(links[1].url).toBe('https://twitch.tv/videos/1')
     // Every emitted URL parses as an https://(*.)twitch.tv link — a
     // whitelist, so no scheme or host denylist can miss a case.
@@ -47,11 +47,11 @@ describe('chat links: allowlist', () => {
   })
 
   it('clip URLs (both shapes) are clickable twitch links', () => {
-    expect(splitTwitchLinks('watch https://clips.twitch.tv/CrispyJollyGull-x1')[1].url).toBe(
-      'https://clips.twitch.tv/CrispyJollyGull-x1',
+    expect(splitTwitchLinks('watch https://clips.twitch.tv/HappySunnyOtter-x1')[1].url).toBe(
+      'https://clips.twitch.tv/HappySunnyOtter-x1',
     )
-    expect(splitTwitchLinks('watch https://www.twitch.tv/trymacs/clip/CrispyJollyGull-x1')[1].url).toBe(
-      'https://www.twitch.tv/trymacs/clip/CrispyJollyGull-x1',
+    expect(splitTwitchLinks('watch https://www.twitch.tv/chan9/clip/HappySunnyOtter-x1')[1].url).toBe(
+      'https://www.twitch.tv/chan9/clip/HappySunnyOtter-x1',
     )
   })
 
@@ -72,22 +72,22 @@ describe('chat links: allowlist', () => {
 
 describe('chat links: clip URL parsing', () => {
   it('recognizes clips.twitch.tv/<slug>', () => {
-    expect(parseTwitchClipUrl('https://clips.twitch.tv/CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4')).toBe(
-      'CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4',
+    expect(parseTwitchClipUrl('https://clips.twitch.tv/HappySunnyOtterRabbitTacos-aB3xKQ9vZRtM5cWf')).toBe(
+      'HappySunnyOtterRabbitTacos-aB3xKQ9vZRtM5cWf',
     )
   })
 
   it('recognizes twitch.tv/<channel>/clip/<slug> (incl. www/m subdomains)', () => {
-    expect(parseTwitchClipUrl('https://www.twitch.tv/trymacs/clip/SwissManlyKangaroo-fCO_OHO9QUIuPGlg')).toBe(
-      'SwissManlyKangaroo-fCO_OHO9QUIuPGlg',
+    expect(parseTwitchClipUrl('https://www.twitch.tv/chan9/clip/MellowBraveWombats-qR7_NDU8WQkc3mLz')).toBe(
+      'MellowBraveWombats-qR7_NDU8WQkc3mLz',
     )
-    expect(parseTwitchClipUrl('https://m.twitch.tv/trymacs/clip/GoodAlertBurritoTheTarFu')).toBe(
-      'GoodAlertBurritoTheTarFu',
+    expect(parseTwitchClipUrl('https://m.twitch.tv/chan9/clip/CozyBrightLlamaTheMuffin')).toBe(
+      'CozyBrightLlamaTheMuffin',
     )
   })
 
   it('non-clip twitch pages return null', () => {
-    expect(parseTwitchClipUrl('https://www.twitch.tv/trymacs')).toBeNull()
+    expect(parseTwitchClipUrl('https://www.twitch.tv/chan9')).toBeNull()
     expect(parseTwitchClipUrl('https://www.twitch.tv/videos/12345')).toBeNull()
     expect(parseTwitchClipUrl('https://clips.twitch.tv/')).toBeNull()
     // A bare "clip" path without a channel segment is not the canonical shape.
@@ -97,7 +97,7 @@ describe('chat links: clip URL parsing', () => {
   it('rejects malformed slugs and non-twitch hosts', () => {
     expect(parseTwitchClipUrl('https://clips.twitch.tv/bad slug!')).toBeNull()
     expect(parseTwitchClipUrl('https://clips.twitch.tv/' + 'a'.repeat(101))).toBeNull()
-    expect(parseTwitchClipUrl('https://evil.example/trymacs/clip/SomeSlug-1')).toBeNull()
+    expect(parseTwitchClipUrl('https://evil.example/chan9/clip/SomeSlug-1')).toBeNull()
     expect(parseTwitchClipUrl('https://twitch.tv.example/chan/clip/SomeSlug-1')).toBeNull()
     expect(parseTwitchClipUrl('not a url')).toBeNull()
   })

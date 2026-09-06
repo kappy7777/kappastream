@@ -19,8 +19,8 @@
  * IMAGES are rendered as CSS background-images (CORS-exempt) straight from
  * the CDN (img-src allows the same hosts media-src already did).
  *
- * Shapes verified against the live endpoint 2026-08-20. Pure logic only —
- * unit-tested in vod-extras.test.ts.
+ * Shapes verified against the live endpoint. Pure logic only — unit-tested
+ * in vod-extras.test.ts.
  */
 
 export interface Storyboard {

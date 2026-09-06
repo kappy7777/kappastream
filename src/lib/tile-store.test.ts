@@ -28,65 +28,65 @@ beforeEach(async () => {
 
 describe('TileStore.addOrReplace — empty-slot-first, then authority replace', () => {
   it('adds tiles to successive slots while the grid has room', () => {
-    const a = store.addOrReplace('shroud').tile
-    const b = store.addOrReplace('summit1g').tile
-    const c = store.addOrReplace('lirik').tile
-    const d = store.addOrReplace('sodapoppin').tile
-    expect(store.tiles.map((t) => t.channel)).toEqual(['shroud', 'summit1g', 'lirik', 'sodapoppin'])
+    const a = store.addOrReplace('chan1').tile
+    const b = store.addOrReplace('chan3').tile
+    const c = store.addOrReplace('chan2').tile
+    const d = store.addOrReplace('chan4').tile
+    expect(store.tiles.map((t) => t.channel)).toEqual(['chan1', 'chan3', 'chan2', 'chan4'])
     expect([a, b, c, d].every((t) => t.id.length > 0)).toBe(true)
     expect(store.count).toBe(S.MAX_TILES)
   })
 
   it('the newly added tile becomes BOTH audio authority and active chat', () => {
-    store.addOrReplace('shroud')
-    expect(store.authority?.channel).toBe('shroud')
-    expect(store.activeChat?.channel).toBe('shroud')
-    store.addOrReplace('lirik')
-    expect(store.authority?.channel).toBe('lirik')
-    expect(store.activeChat?.channel).toBe('lirik')
+    store.addOrReplace('chan1')
+    expect(store.authority?.channel).toBe('chan1')
+    expect(store.activeChat?.channel).toBe('chan1')
+    store.addOrReplace('chan2')
+    expect(store.authority?.channel).toBe('chan2')
+    expect(store.activeChat?.channel).toBe('chan2')
   })
 
   it('once full, a new channel replaces the AUTHORITY tile, not the last slot', () => {
-    store.addOrReplace('shroud') // authority
-    store.addOrReplace('lirik')
-    store.addOrReplace('summit1g')
-    store.addOrReplace('sodapoppin') // grid full
-    // Make shroud (slot 0) the authority explicitly, then open a 5th channel.
+    store.addOrReplace('chan1') // authority
+    store.addOrReplace('chan2')
+    store.addOrReplace('chan3')
+    store.addOrReplace('chan4') // grid full
+    // Make chan1 (slot 0) the authority explicitly, then open a 5th channel.
     store.focusTile(store.tiles[0].id)
     const idsBefore = store.tiles.map((t) => t.id)
-    store.addOrReplace('ninja')
-    expect(store.tiles.map((t) => t.channel)).toEqual(['ninja', 'lirik', 'summit1g', 'sodapoppin'])
+    store.addOrReplace('chan5')
+    expect(store.tiles.map((t) => t.channel)).toEqual(['chan5', 'chan2', 'chan3', 'chan4'])
     // The replaced tile KEPT its slot identity (id reused), others untouched.
     expect(store.tiles[0].id).toBe(idsBefore[0])
     expect(store.tiles[1].id).toBe(idsBefore[1])
-    expect(store.authority?.channel).toBe('ninja')
+    expect(store.authority?.channel).toBe('chan5')
   })
 
   it('opening a channel already in a tile moves both pointers to it instead of duplicating', () => {
-    store.addOrReplace('shroud')
-    store.addOrReplace('lirik')
+    store.addOrReplace('chan1')
+    store.addOrReplace('chan2')
     const before = store.tiles.map((t) => t.channel)
-    // Read shroud's chat first, so only chat points at shroud.
+    // Read chan1's chat first, so only chat points at chan1.
     store.selectChat(store.tiles[0].id)
-    expect(store.authority?.channel).toBe('lirik')
-    const { created } = store.addOrReplace('shroud')
+    expect(store.authority?.channel).toBe('chan2')
+    const { created } = store.addOrReplace('chan1')
     expect(created).toBe(false)
     expect(store.tiles.map((t) => t.channel)).toEqual(before)
-    expect(store.authority?.channel).toBe('shroud')
-    expect(store.activeChat?.channel).toBe('shroud')
+    expect(store.authority?.channel).toBe('chan1')
+    expect(store.activeChat?.channel).toBe('chan1')
   })
 
   it('channel names are normalized to lowercase', () => {
-    const { tile } = store.addOrReplace('ShRoUd')
-    expect(tile.channel).toBe('shroud')
-    expect(store.byChannel('shroud')).toBeDefined()
+    const { tile } = store.addOrReplace('ChAn1')
+    expect(tile.channel).toBe('chan1')
+    expect(store.byChannel('chan1')).toBeDefined()
   })
 })
 
 describe('TileStore authority/chat pointer split (tile click moves both; chat tab moves chat only)', () => {
   it('a tile click (focusTile) moves BOTH audio authority and active chat', () => {
-    const a = store.addOrReplace('shroud').tile
-    const b = store.addOrReplace('lirik').tile
+    const a = store.addOrReplace('chan1').tile
+    const b = store.addOrReplace('chan2').tile
     store.focusTile(a.id)
     expect(store.isAuthority(a.id)).toBe(true)
     expect(store.isActiveChat(a.id)).toBe(true)
@@ -97,8 +97,8 @@ describe('TileStore authority/chat pointer split (tile click moves both; chat ta
   })
 
   it('a CHAT TAB click (selectChat) moves ONLY the active chat — audio authority stays', () => {
-    const a = store.addOrReplace('shroud').tile
-    const b = store.addOrReplace('lirik').tile
+    const a = store.addOrReplace('chan1').tile
+    const b = store.addOrReplace('chan2').tile
     store.focusTile(a.id)
     store.selectChat(b.id)
     // Chat followed the tab...
@@ -110,8 +110,8 @@ describe('TileStore authority/chat pointer split (tile click moves both; chat ta
   })
 
   it('the asymmetry holds in both directions: tile click after a chat-tab click re-unifies', () => {
-    const a = store.addOrReplace('shroud').tile
-    const b = store.addOrReplace('lirik').tile
+    const a = store.addOrReplace('chan1').tile
+    const b = store.addOrReplace('chan2').tile
     store.focusTile(a.id) // both pointers on a
     store.selectChat(b.id) // chat only → b
     expect(store.authority?.id).toBe(a.id)
@@ -121,7 +121,7 @@ describe('TileStore authority/chat pointer split (tile click moves both; chat ta
   })
 
   it('pointer setters are idempotent and ignore unknown ids', () => {
-    const a = store.addOrReplace('shroud').tile
+    const a = store.addOrReplace('chan1').tile
     store.focusTile('does-not-exist')
     store.selectChat('does-not-exist')
     expect(store.authority?.id).toBe(a.id)
@@ -129,21 +129,21 @@ describe('TileStore authority/chat pointer split (tile click moves both; chat ta
   })
 
   it('closing the authority tile repairs authority (and leaves an unrelated chat pointer alone)', () => {
-    const a = store.addOrReplace('shroud').tile
-    store.addOrReplace('lirik')
-    store.selectChat(store.tiles[1].id) // chat on lirik
-    store.focusTile(a.id) // authority on shroud
+    const a = store.addOrReplace('chan1').tile
+    store.addOrReplace('chan2')
+    store.selectChat(store.tiles[1].id) // chat on chan2
+    store.focusTile(a.id) // authority on chan1
     store.close(a.id)
-    expect(store.tiles.map((t) => t.channel)).toEqual(['lirik'])
+    expect(store.tiles.map((t) => t.channel)).toEqual(['chan2'])
     // Authority moved to a surviving tile; the chat pointer still resolves.
     expect(store.authority).not.toBeNull()
-    expect(store.activeChat?.channel).toBe('lirik')
+    expect(store.activeChat?.channel).toBe('chan2')
   })
 
   it('closing the chat-active tile repairs the chat pointer to a neighbour', () => {
-    const a = store.addOrReplace('shroud').tile
-    const b = store.addOrReplace('lirik').tile
-    store.addOrReplace('summit1g')
+    const a = store.addOrReplace('chan1').tile
+    const b = store.addOrReplace('chan2').tile
+    store.addOrReplace('chan3')
     store.focusTile(a.id)
     store.selectChat(b.id)
     store.close(b.id)
@@ -155,7 +155,7 @@ describe('TileStore authority/chat pointer split (tile click moves both; chat ta
   it('closing the LAST tile clears both pointers and fires onShouldExit', () => {
     const onExit = vi.fn()
     store.onShouldExit = onExit
-    const a = store.addOrReplace('shroud').tile
+    const a = store.addOrReplace('chan1').tile
     store.close(a.id)
     expect(onExit).toHaveBeenCalledTimes(1)
     expect(store.isEmpty).toBe(true)
@@ -166,8 +166,8 @@ describe('TileStore authority/chat pointer split (tile click moves both; chat ta
 
 describe('TileStore audio flags (store half of audio authority)', () => {
   it('manualUnmute is independent of authority and is NOT reset by authority moving elsewhere', () => {
-    const a = store.addOrReplace('shroud').tile // authority
-    const b = store.addOrReplace('lirik').tile
+    const a = store.addOrReplace('chan1').tile // authority
+    const b = store.addOrReplace('chan2').tile
     // Manually unmute the NON-authority tile b.
     store.setManualUnmute(b.id, true)
     expect(store.byId(b.id)!.manualUnmute).toBe(true)
@@ -180,8 +180,8 @@ describe('TileStore audio flags (store half of audio authority)', () => {
   })
 
   it('per-tile quality is independent', () => {
-    const a = store.addOrReplace('shroud', '720p60').tile
-    const b = store.addOrReplace('lirik', '480p').tile
+    const a = store.addOrReplace('chan1', '720p60').tile
+    const b = store.addOrReplace('chan2', '480p').tile
     store.setQuality(a.id, '1080p60')
     expect(store.byId(a.id)!.quality).toBe('1080p60')
     expect(store.byId(b.id)!.quality).toBe('480p')
@@ -193,12 +193,12 @@ describe('TileStore audio flags (store half of audio authority)', () => {
 
 describe('TileStore.close + offline-close trap', () => {
   it('closing a tile leaves both pointers resolvable', () => {
-    const a = store.addOrReplace('shroud').tile
-    store.addOrReplace('lirik')
-    store.addOrReplace('summit1g')
+    const a = store.addOrReplace('chan1').tile
+    store.addOrReplace('chan2')
+    store.addOrReplace('chan3')
     store.focusTile(a.id)
     store.close(a.id)
-    expect(store.tiles.map((t) => t.channel)).toEqual(['lirik', 'summit1g'])
+    expect(store.tiles.map((t) => t.channel)).toEqual(['chan2', 'chan3'])
     expect(store.authority).not.toBeNull()
     expect(store.activeChat).not.toBeNull()
   })
@@ -206,24 +206,24 @@ describe('TileStore.close + offline-close trap', () => {
   it('a genuine live→offline transition closes the tile', () => {
     const onExit = vi.fn()
     store.onShouldExit = onExit
-    const a = store.addOrReplace('shroud').tile
-    store.addOrReplace('lirik')
-    // Mark live, then offline → closes shroud only.
+    const a = store.addOrReplace('chan1').tile
+    store.addOrReplace('chan2')
+    // Mark live, then offline → closes chan1 only.
     store.setLiveStatus(a.id, { state: 'live', title: 'x', viewers: 1, uptime: '0m', game: '', avatarUrl: '' })
     store.setLiveStatus(a.id, { state: 'offline', avatarUrl: '' })
-    expect(store.tiles.map((t) => t.channel)).toEqual(['lirik'])
-    expect(onExit).not.toHaveBeenCalled() // lirik remains
+    expect(store.tiles.map((t) => t.channel)).toEqual(['chan2'])
+    expect(onExit).not.toHaveBeenCalled() // chan2 remains
   })
 
   it('a transient error does NOT close the tile', () => {
-    const a = store.addOrReplace('shroud').tile
+    const a = store.addOrReplace('chan1').tile
     store.setLiveStatus(a.id, { state: 'live', title: 'x', viewers: 1, uptime: '0m', game: '', avatarUrl: '' })
     // A GQL transport failure surfaces as state 'error' — keep last-known, do NOT close.
     store.setLiveStatus(a.id, { state: 'error', message: 'boom' })
-    expect(store.tiles.map((t) => t.channel)).toEqual(['shroud'])
+    expect(store.tiles.map((t) => t.channel)).toEqual(['chan1'])
     // A playback error likewise just sets status, never closes.
     store.setStatus(a.id, 'error', 'network/manifest error: fragmentLoadError')
-    expect(store.tiles.map((t) => t.channel)).toEqual(['shroud'])
+    expect(store.tiles.map((t) => t.channel)).toEqual(['chan1'])
     expect(store.byId(a.id)!.status).toBe('error')
     expect(store.byId(a.id)!.error).toContain('fragmentLoadError')
   })
@@ -232,9 +232,9 @@ describe('TileStore.close + offline-close trap', () => {
     // Edge: a brand-new tile starts at liveStatus unknown. If the first poll
     // says offline (channel was already offline at add time), we must NOT close
     // — there was no live→offline transition; the Tile overlay shows offline.
-    const a = store.addOrReplace('shroud').tile
+    const a = store.addOrReplace('chan1').tile
     store.setLiveStatus(a.id, { state: 'offline', avatarUrl: '' })
-    expect(store.tiles.map((t) => t.channel)).toEqual(['shroud'])
+    expect(store.tiles.map((t) => t.channel)).toEqual(['chan1'])
   })
 })
 
@@ -310,8 +310,8 @@ describe('planTileMuteToggle — unmute derived from EFFECTIVE audibility, never
     // tile's now-unmute button is clicked. Pre-fix, step 3 flipped only
     // manualUnmute under the still-on global mute → nothing audible changed.
     // Post-fix, the plan also clears the blocking global mute.
-    const a = store.addOrReplace('shroud').tile
-    store.addOrReplace('lirik') // takes authority on open…
+    const a = store.addOrReplace('chan1').tile
+    store.addOrReplace('chan2') // takes authority on open…
     store.focusTile(a.id) // …until the user clicks tile A (authority back on A)
     let globalMuted = false // mirrors settings.muted
     // (1) Mute button on the AUTHORITY tile → toggles the GLOBAL mute.
@@ -367,8 +367,8 @@ describe('planTileVolumeInput — per-tile volume slider/scroll plan', () => {
   })
 
   it('slider story: dragging a non-authority tile up under a global mute makes it audible', () => {
-    const a = store.addOrReplace('shroud').tile // stays non-authority below
-    store.addOrReplace('lirik') // takes authority
+    const a = store.addOrReplace('chan1').tile // stays non-authority below
+    store.addOrReplace('chan2') // takes authority
     expect(store.isAuthority(a.id)).toBe(false)
     let globalMuted = true // mirrors settings.muted
     const plan = S.planTileVolumeInput(0.4, globalMuted)
@@ -454,8 +454,8 @@ describe('applyTileAudio — element and store state agree; re-runs never clobbe
 
 describe('TileStore lifecycle', () => {
   it('exitAll clears every tile and both pointers', () => {
-    store.addOrReplace('shroud')
-    store.addOrReplace('lirik')
+    store.addOrReplace('chan1')
+    store.addOrReplace('chan2')
     store.exitAll()
     expect(store.isEmpty).toBe(true)
     expect(store.authorityId).toBeNull()
@@ -472,44 +472,44 @@ describe('TileStore lifecycle', () => {
 // ---- Follow-up issues: stable keys, reorder identity, per-tile volume -------
 describe('stable tile identity survives add / remove / reorder (no reload cause)', () => {
   it('adding a tile does NOT mutate or recreate any existing tile (ids stable)', () => {
-    const a = store.addOrReplace('shroud').tile
-    const b = store.addOrReplace('lirik').tile
+    const a = store.addOrReplace('chan1').tile
+    const b = store.addOrReplace('chan2').tile
     const aId = a.id, bId = b.id
     const aStatus = a.status
     // Add a 3rd + 4th tile.
-    store.addOrReplace('summit1g')
-    store.addOrReplace('sodapoppin')
+    store.addOrReplace('chan3')
+    store.addOrReplace('chan4')
     // The first two tiles are byte-for-byte the same store entries: same id,
     // same channel, same status. (This is the store-level half of "adding a
     // channel must not reload open tiles" — the {#each} key + per-tile effect
     // scope in Tile.svelte is the other half.)
     expect(store.byId(aId)?.id).toBe(aId)
-    expect(store.byId(aId)?.channel).toBe('shroud')
+    expect(store.byId(aId)?.channel).toBe('chan1')
     expect(store.byId(aId)?.status).toBe(aStatus)
     expect(store.byId(bId)?.id).toBe(bId)
-    expect(store.byId(bId)?.channel).toBe('lirik')
+    expect(store.byId(bId)?.channel).toBe('chan2')
   })
 
   it('reorder via swap preserves every tile id (drag does not recreate tiles)', () => {
-    const a = store.addOrReplace('shroud').tile
-    const b = store.addOrReplace('lirik').tile
-    const c = store.addOrReplace('summit1g').tile
+    const a = store.addOrReplace('chan1').tile
+    const b = store.addOrReplace('chan2').tile
+    const c = store.addOrReplace('chan3').tile
     store.swap(a.id, c.id)
     // Order changed, identity + per-tile channels preserved.
-    expect(store.tiles.map((t) => t.channel)).toEqual(['summit1g', 'lirik', 'shroud'])
+    expect(store.tiles.map((t) => t.channel)).toEqual(['chan3', 'chan2', 'chan1'])
     expect(store.tiles.map((t) => t.id)).toEqual([c.id, b.id, a.id])
   })
 
   it('move() shifts a tile one slot, no-op at the edges', () => {
-    const a = store.addOrReplace('shroud').tile
-    const b = store.addOrReplace('lirik').tile
-    const c = store.addOrReplace('summit1g').tile
+    const a = store.addOrReplace('chan1').tile
+    const b = store.addOrReplace('chan2').tile
+    const c = store.addOrReplace('chan3').tile
     store.move(a.id, -1) // already first → no-op
-    expect(store.tiles.map((t) => t.channel)).toEqual(['shroud', 'lirik', 'summit1g'])
-    store.move(b.id, 1) // lirik → right
-    expect(store.tiles.map((t) => t.channel)).toEqual(['shroud', 'summit1g', 'lirik'])
-    store.move(c.id, 1) // summit1g already not-last-after-move... edge check
-    // c is now at index 1; moving right → index 2 (swap with lirik)
+    expect(store.tiles.map((t) => t.channel)).toEqual(['chan1', 'chan2', 'chan3'])
+    store.move(b.id, 1) // chan2 → right
+    expect(store.tiles.map((t) => t.channel)).toEqual(['chan1', 'chan3', 'chan2'])
+    store.move(c.id, 1) // chan3 already not-last-after-move... edge check
+    // c is now at index 1; moving right → index 2 (swap with chan2)
     expect(store.tiles.map((t) => t.id)).toContain(c.id)
     // moving the last tile right is a no-op
     const last = store.tiles[store.tiles.length - 1]
@@ -518,31 +518,31 @@ describe('stable tile identity survives add / remove / reorder (no reload cause)
   })
 
   it('removing a tile keeps the survivors identities intact', () => {
-    const a = store.addOrReplace('shroud').tile
-    const b = store.addOrReplace('lirik').tile
-    const c = store.addOrReplace('summit1g').tile
+    const a = store.addOrReplace('chan1').tile
+    const b = store.addOrReplace('chan2').tile
+    const c = store.addOrReplace('chan3').tile
     store.close(b.id)
     expect(store.tiles.map((t) => t.id)).toEqual([a.id, c.id])
-    expect(store.tiles.map((t) => t.channel)).toEqual(['shroud', 'summit1g'])
+    expect(store.tiles.map((t) => t.channel)).toEqual(['chan1', 'chan3'])
   })
 })
 
 describe('per-tile volume (scroll changes only the hovered tile)', () => {
   it('a new tile is seeded with the caller-provided volume', () => {
-    const a = store.addOrReplace('shroud', 'best', 0.7).tile
+    const a = store.addOrReplace('chan1', 'best', 0.7).tile
     expect(store.byId(a.id)!.volume).toBe(0.7)
   })
 
   it('setTileVolume only affects the targeted tile', () => {
-    const a = store.addOrReplace('shroud').tile
-    const b = store.addOrReplace('lirik').tile
+    const a = store.addOrReplace('chan1').tile
+    const b = store.addOrReplace('chan2').tile
     store.setTileVolume(a.id, 0.3)
     expect(store.byId(a.id)!.volume).toBe(0.3)
     expect(store.byId(b.id)!.volume).toBe(1) // untouched (default seed)
   })
 
   it('setTileVolume clamps to [0, 1]', () => {
-    const a = store.addOrReplace('shroud').tile
+    const a = store.addOrReplace('chan1').tile
     store.setTileVolume(a.id, 5)
     expect(store.byId(a.id)!.volume).toBe(1)
     store.setTileVolume(a.id, -2)
@@ -552,7 +552,7 @@ describe('per-tile volume (scroll changes only the hovered tile)', () => {
   it('scroll semantics for a non-authority tile: nudging up unmutes, down to 0 mutes', () => {
     // Mirrors Tile.svelte's onWheel for a non-authority tile: the component calls
     // setTileVolume + setManualUnmute together. Here we assert the store pairs.
-    const a = store.addOrReplace('shroud').tile
+    const a = store.addOrReplace('chan1').tile
     // scrolling up from muted (volume 0) → volume rises + manualUnmute true
     store.setTileVolume(a.id, 0.1)
     store.setManualUnmute(a.id, true)
@@ -603,8 +603,8 @@ describe('authority and chat pointers are always resolvable while tiles exist', 
   })
 
   it('both pointers stay resolvable after pointer changes', () => {
-    const a = store.addOrReplace('shroud').tile
-    const b = store.addOrReplace('lirik').tile
+    const a = store.addOrReplace('chan1').tile
+    const b = store.addOrReplace('chan2').tile
     store.focusTile(a.id)
     store.selectChat(b.id)
     expect(store.authority?.id).toBe(a.id)

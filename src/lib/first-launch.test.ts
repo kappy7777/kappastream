@@ -10,7 +10,7 @@ import {
  * First-launch detection. The store singleton reads localStorage + __APP_VERSION__
  * at import; the LOGIC under test is exercised through the pure `classifyLaunch`
  * decision function and the `read/writeLastSeenVersion` helpers, so each row of
- * the Phase 0 decision table + the write-on-dismissal contract is covered
+ * the classifyLaunch decision table + the write-on-dismissal contract is covered
  * without module-reset gymnastics.
  *
  * Current build version for these tests is whatever __APP_VERSION__ resolves to
@@ -20,7 +20,7 @@ import {
 
 const CURRENT = '0.3.1'
 
-describe('classifyLaunch — Phase 0 decision table', () => {
+describe('classifyLaunch — decision table', () => {
   it('no stored version → FIRST INSTALL → welcome', () => {
     expect(classifyLaunch(CURRENT, null)).toBe('welcome')
   })

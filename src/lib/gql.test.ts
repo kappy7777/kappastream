@@ -125,9 +125,9 @@ describe('gql search (searchChannels)', () => {
             items: [
               {
                 id: '11',
-                login: 'shroud',
-                displayName: 'shroud',
-                profileImageURL: 'https://img/shroud.png',
+                login: 'chan1',
+                displayName: 'chan1',
+                profileImageURL: 'https://img/chan1.png',
                 stream: {
                   id: 'st',
                   title: 'Aimlabs',
@@ -137,8 +137,8 @@ describe('gql search (searchChannels)', () => {
               },
               {
                 id: '22',
-                login: 'pokimane',
-                displayName: 'pokimane',
+                login: 'chan6',
+                displayName: 'chan6',
                 profileImageURL: 'https://img/poki.png',
                 stream: null,
               },
@@ -150,16 +150,16 @@ describe('gql search (searchChannels)', () => {
     const results = await G.searchChannels('shro')
     expect(results).toHaveLength(2)
     expect(results[0]).toMatchObject({
-      login: 'shroud',
-      displayName: 'shroud',
-      avatarUrl: 'https://img/shroud.png',
+      login: 'chan1',
+      displayName: 'chan1',
+      avatarUrl: 'https://img/chan1.png',
       live: true,
       title: 'Aimlabs',
       game: 'VALORANT',
       viewersCount: 9001,
     })
     // An offline match still appears, just with live:false and empty stream fields.
-    expect(results[1]).toMatchObject({ login: 'pokimane', live: false, viewersCount: 0, game: '' })
+    expect(results[1]).toMatchObject({ login: 'chan6', live: false, viewersCount: 0, game: '' })
   })
 
   it('drops malformed/null items but keeps the rest', async () => {
@@ -189,11 +189,11 @@ describe('gql search (searchChannels)', () => {
 
   it('sends the CHANNEL target index against searchFor', async () => {
     gql.handler = async () => ok({ searchFor: { channels: { items: [] } } })
-    await G.searchChannels('lirik')
+    await G.searchChannels('chan2')
     const body = gql.calls.at(-1) ?? ''
     expect(body).toContain('searchFor')
     expect(body).toContain('index: CHANNEL')
-    expect(body).toContain('"query":"lirik"')
+    expect(body).toContain('"query":"chan2"')
   })
 
   it('throws on a top-level GQL errors array (NOT an empty list)', async () => {
@@ -419,7 +419,7 @@ describe('gql channel content — videos', () => {
         },
       })
 
-    const vids = await G.fetchChannelVideos('summit1g', 'ARCHIVE')
+    const vids = await G.fetchChannelVideos('chan3', 'ARCHIVE')
     expect(vids).toHaveLength(1)
     expect(vids[0]).toMatchObject({
       id: '111',
@@ -431,13 +431,13 @@ describe('gql channel content — videos', () => {
       game: 'Just Chatting',
     })
     // The type + first are forwarded; no `after`.
-    expect(lastVars()).toMatchObject({ login: 'summit1g', first: 100, type: 'ARCHIVE' })
+    expect(lastVars()).toMatchObject({ login: 'chan3', first: 100, type: 'ARCHIVE' })
     expect(lastVars()).not.toHaveProperty('after')
   })
 
   it('treats an empty / no-videos channel as a success (returns [])', async () => {
     gql.handler = async () => ok({ user: { videos: { edges: [] } } })
-    await expect(G.fetchChannelVideos('esl_csgo', 'HIGHLIGHT')).resolves.toEqual([])
+    await expect(G.fetchChannelVideos('chan8', 'HIGHLIGHT')).resolves.toEqual([])
   })
 
   it('treats a null user as a success (returns [])', async () => {
@@ -463,7 +463,7 @@ describe('gql channel content — clips', () => {
               {
                 node: {
                   id: '222',
-                  slug: 'CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4',
+                  slug: 'HappySunnyOtterRabbitTacos-aB3xKQ9vZRtM5cWf',
                   title: 'Best moment',
                   durationSeconds: 42,
                   viewCount: 9999,
@@ -478,10 +478,10 @@ describe('gql channel content — clips', () => {
         },
       })
 
-    const clips = await G.fetchChannelClips('kaicenat')
+    const clips = await G.fetchChannelClips('chan7')
     expect(clips).toHaveLength(1)
     expect(clips[0]).toMatchObject({
-      slug: 'CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4',
+      slug: 'HappySunnyOtterRabbitTacos-aB3xKQ9vZRtM5cWf',
       title: 'Best moment',
       durationSeconds: 42,
       viewCount: 9999,
@@ -491,7 +491,7 @@ describe('gql channel content — clips', () => {
     // ALL_TIME + VIEWS_DESC + first:100, no `after`.
     expect(gql.calls.at(-1) ?? '').toContain('ALL_TIME')
     expect(gql.calls.at(-1) ?? '').toContain('VIEWS_DESC')
-    expect(lastVars()).toMatchObject({ login: 'kaicenat', first: 100 })
+    expect(lastVars()).toMatchObject({ login: 'chan7', first: 100 })
   })
 
   it('treats a channel with no clips as a success (returns [])', async () => {
@@ -511,7 +511,7 @@ describe('gql channel content — clip media', () => {
       ok({
         clip: {
           id: '333',
-          title: 'broo',
+          title: 'nice shot',
           durationSeconds: 5,
           videoQualities: [
             { quality: '480', frameRate: 30, sourceURL: 'https://d.cloudfront.net/480.mp4' },
@@ -559,8 +559,8 @@ describe('gql clip info (metadata for chat/pin clip links)', () => {
       ok({
         clip: {
           id: '5e0a1d',
-          slug: 'CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4',
-          title: 'broo',
+          slug: 'HappySunnyOtterRabbitTacos-aB3xKQ9vZRtM5cWf',
+          title: 'nice shot',
           durationSeconds: 30,
           viewCount: 1234,
           createdAt: '2026-09-01T00:00:00Z',
@@ -570,9 +570,9 @@ describe('gql clip info (metadata for chat/pin clip links)', () => {
         },
       })
 
-    const clip = await G.fetchClipInfo('CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4')
+    const clip = await G.fetchClipInfo('HappySunnyOtterRabbitTacos-aB3xKQ9vZRtM5cWf')
     expect(clip).not.toBeNull()
-    expect(clip?.title).toBe('broo')
+    expect(clip?.title).toBe('nice shot')
     expect(clip?.game).toBe('Path of Exile 2')
     expect(clip?.viewCount).toBe(1234)
     expect(clip?.createdAt).toBe('2026-09-01T00:00:00Z')
@@ -585,7 +585,7 @@ describe('gql clip info (metadata for chat/pin clip links)', () => {
     expect(body).toContain('clip(slug: $slug)')
     expect(body).toContain('title')
     expect(body).not.toContain('videoQualities')
-    expect(lastVars()).toEqual({ slug: 'CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4' })
+    expect(lastVars()).toEqual({ slug: 'HappySunnyOtterRabbitTacos-aB3xKQ9vZRtM5cWf' })
   })
 
   it('returns null for an unknown/unindexed clip (null clip)', async () => {
@@ -609,10 +609,10 @@ describe('gql clip info (metadata for chat/pin clip links)', () => {
 })
 
 describe('gql channel content — clip slug validator', () => {
-  it('accepts real Twitch clip slugs', () => {
-    expect(G.isValidClipSlug('CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4')).toBe(true)
-    expect(G.isValidClipSlug('SwissManlyKangarooPRChase-fCO_OHO9QUIuPGlg')).toBe(true)
-    expect(G.isValidClipSlug('GoodAlertBurritoTheTarFu')).toBe(true)
+  it('accepts realistic Twitch clip slugs', () => {
+    expect(G.isValidClipSlug('HappySunnyOtterRabbitTacos-aB3xKQ9vZRtM5cWf')).toBe(true)
+    expect(G.isValidClipSlug('MellowBraveWombatsPRDash-qR7_NDU8WQkc3mLz')).toBe(true)
+    expect(G.isValidClipSlug('CozyBrightLlamaTheMuffin')).toBe(true)
   })
 
   it('rejects malformed / injection slugs', () => {
@@ -632,8 +632,8 @@ describe('gql VOD extras (chapters / mutes / storyboard URL)', () => {
     gql.handler = async () =>
       ok({
         video: {
-          id: '2849957264',
-          seekPreviewsURL: 'https://d2vi6trrdongqn.cloudfront.net/x/storyboards/2849957264-info.json',
+          id: '5000000001',
+          seekPreviewsURL: 'https://d2vi6trrdongqn.cloudfront.net/x/storyboards/5000000001-info.json',
           muteInfo: {
             mutedSegmentConnection: {
               nodes: [
@@ -652,7 +652,7 @@ describe('gql VOD extras (chapters / mutes / storyboard URL)', () => {
         },
       })
 
-    const extras = await G.fetchVideoExtras('2849957264')
+    const extras = await G.fetchVideoExtras('5000000001')
     expect(extras.chapters).toEqual([
       { startSec: 0, label: 'Chapter 1' },
       { startSec: 83, label: 'Just Chatting' },
@@ -662,7 +662,7 @@ describe('gql VOD extras (chapters / mutes / storyboard URL)', () => {
       { startSec: 0, endSec: 360 },
       { startSec: 36180, endSec: 36360 },
     ])
-    expect(extras.seekPreviewsUrl).toBe('https://d2vi6trrdongqn.cloudfront.net/x/storyboards/2849957264-info.json')
+    expect(extras.seekPreviewsUrl).toBe('https://d2vi6trrdongqn.cloudfront.net/x/storyboards/5000000001-info.json')
   })
 
   it('falls back to a positional label when a moment has neither description nor game', async () => {
@@ -725,9 +725,9 @@ describe('gql favorites batch — Stream Together / costream fields', () => {
         users: [
           {
             id: '1',
-            login: 'les',
-            displayName: 'LES',
-            profileImageURL: 'https://img/les.png',
+            login: 'chan12',
+            displayName: 'Chan12',
+            profileImageURL: 'https://img/chan12.png',
             stream: {
               id: 's1',
               title: 'FINAL',
@@ -739,8 +739,8 @@ describe('gql favorites batch — Stream Together / costream fields', () => {
               costreamDetails: {
                 costreamersCount: 5,
                 topCostreamers: [
-                  { profileImageURL: 'https://img/jaime.png' },
-                  { profileImageURL: 'https://img/mfreak.png' },
+                  { profileImageURL: 'https://img/c1.png' },
+                  { profileImageURL: 'https://img/c2.png' },
                 ],
               },
               game: { id: 'g1', name: 'league-of-legends', displayName: 'League of Legends' },
@@ -749,10 +749,10 @@ describe('gql favorites batch — Stream Together / costream fields', () => {
         ],
       })
 
-    const statuses = await G.fetchChannelStatuses(['les'])
+    const statuses = await G.fetchChannelStatuses(['chan12'])
     expect(statuses[0].collabViewers).toBe(14986)
     expect(statuses[0].collabOthers).toBe(5)
-    expect(statuses[0].collabAvatar).toBe('https://img/jaime.png')
+    expect(statuses[0].collabAvatar).toBe('https://img/c1.png')
   })
 
   it('guest-star sessions: collabViewers set, roster fields empty (null details)', async () => {
@@ -761,8 +761,8 @@ describe('gql favorites batch — Stream Together / costream fields', () => {
         users: [
           {
             id: '1',
-            login: 'trymacs',
-            displayName: 'Trymacs',
+            login: 'chan9',
+            displayName: 'Chan9',
             profileImageURL: 'https://img/tm.png',
             stream: {
               id: 's2',
@@ -778,7 +778,7 @@ describe('gql favorites batch — Stream Together / costream fields', () => {
         ],
       })
 
-    const statuses = await G.fetchChannelStatuses(['trymacs'])
+    const statuses = await G.fetchChannelStatuses(['chan9'])
     expect(statuses[0].collabViewers).toBe(41103)
     expect(statuses[0].collabOthers).toBe(0)
     expect(statuses[0].collabAvatar).toBe('')
@@ -850,9 +850,9 @@ describe('gql favorites batch — followers + organizer combined count', () => {
         users: [
           {
             id: '1',
-            login: 'kaicenat',
-            displayName: 'KaiCenat',
-            followers: { totalCount: 21652319 },
+            login: 'chan7',
+            displayName: 'Chan7',
+            followers: { totalCount: 12345678 },
             stream: {
               id: 's1', title: 'x', type: 'live', viewersCount: 1,
               createdAt: '2024-01-01T00:00:00Z', collaborationViewersCount: null,
@@ -862,8 +862,8 @@ describe('gql favorites batch — followers + organizer combined count', () => {
         ],
       })
 
-    const statuses = await G.fetchChannelStatuses(['kaicenat', 'off'])
-    expect(statuses[0].followers).toBe(21652319)
+    const statuses = await G.fetchChannelStatuses(['chan7', 'off'])
+    expect(statuses[0].followers).toBe(12345678)
     expect(statuses[1].followers).toBeNull()
   })
 
@@ -873,8 +873,8 @@ describe('gql favorites batch — followers + organizer combined count', () => {
         users: [
           {
             id: '1',
-            login: 'les',
-            displayName: 'LES',
+            login: 'chan12',
+            displayName: 'Chan12',
             followers: { totalCount: 100 },
             stream: {
               id: 's1', title: 'FINAL', type: 'live', viewersCount: 3041,
@@ -890,7 +890,7 @@ describe('gql favorites batch — followers + organizer combined count', () => {
         ],
       })
 
-    const statuses = await G.fetchChannelStatuses(['les'])
+    const statuses = await G.fetchChannelStatuses(['chan12'])
     expect(statuses[0].collabViewers).toBe(14986)
     expect(statuses[0].collabOthers).toBe(5)
     expect(statuses[0].collabAvatar).toBe('https://img/j.png')
@@ -907,8 +907,8 @@ describe('gql collaboration roster (channel(id:).collaboration)', () => {
         c0: {
           collaboration: {
             collaborators: [
-              { role: 'LEADER', status: 'ACTIVE', user: { login: 'ronnyberger', displayName: 'ronnyberger', profileImageURL: 'https://img/r.png' } },
-              { role: 'MEMBER', status: 'ACTIVE', user: { login: 'nicistemmler', displayName: 'Nicistemmler', profileImageURL: 'https://img/n.png' } },
+              { role: 'LEADER', status: 'ACTIVE', user: { login: 'cohost1', displayName: 'cohost1', profileImageURL: 'https://img/r.png' } },
+              { role: 'MEMBER', status: 'ACTIVE', user: { login: 'cohost2', displayName: 'Cohost2', profileImageURL: 'https://img/n.png' } },
               { role: 'MEMBER', status: 'INVITED', user: { login: 'ghost_guest', displayName: 'ghost', profileImageURL: 'https://img/g.png' } },
               { role: 'MEMBER', status: 'ACTIVE', user: { login: '', displayName: 'nologin', profileImageURL: null } },
               null,
@@ -918,13 +918,13 @@ describe('gql collaboration roster (channel(id:).collaboration)', () => {
         c1: { collaboration: null }, // not in a session
       })
     }
-    const rosters = await G.fetchCollaborators(['531019578', '641972806'])
+    const rosters = await G.fetchCollaborators(['200000001', '200000002'])
     expect(rosters.size).toBe(1)
-    expect(rosters.get('531019578')).toEqual([
-      { login: 'ronnyberger', displayName: 'ronnyberger', avatarUrl: 'https://img/r.png', role: 'LEADER' },
-      { login: 'nicistemmler', displayName: 'Nicistemmler', avatarUrl: 'https://img/n.png', role: 'MEMBER' },
+    expect(rosters.get('200000001')).toEqual([
+      { login: 'cohost1', displayName: 'cohost1', avatarUrl: 'https://img/r.png', role: 'LEADER' },
+      { login: 'cohost2', displayName: 'Cohost2', avatarUrl: 'https://img/n.png', role: 'MEMBER' },
     ])
-    expect(rosters.has('641972806')).toBe(false)
+    expect(rosters.has('200000002')).toBe(false)
   })
 
   it('empty and non-numeric ids never issue a request', async () => {
@@ -957,24 +957,24 @@ describe('gql collaboration roster (channel(id:).collaboration)', () => {
 
   it('throws on transport failure (caller treats as no roster)', async () => {
     gql.handler = async () => gqlErrors()
-    await expect(G.fetchCollaborators(['531019578'])).rejects.toThrow()
+    await expect(G.fetchCollaborators(['200000001'])).rejects.toThrow()
   })
 })
 
 describe('gql pinned chat messages (channel(id:).pinnedChatMessages)', () => {
-  // Fixture mirrors the VERIFIED live response shape (2026-09-06 research
-  // session on channels with actively pinned messages; same field the
-  // twitch.tv logged-out client reads via its GetPinnedChat operation).
+  // Fixture mirrors the VERIFIED live response shape (channels with actively
+  // pinned messages; same field the twitch.tv logged-out client reads via its
+  // GetPinnedChat operation).
   const pinNode = {
-    id: '176a8770-ccee-465f-8468-44265040bb56', // PIN id — distinct from the message id
+    id: '11111111-1111-4111-8111-111111111111', // PIN id — distinct from the message id
     type: 'MOD',
-    startsAt: '2026-09-05T21:33:21Z',
-    updatedAt: '2026-09-05T21:33:23Z',
+    startsAt: '2020-01-01T12:00:21Z',
+    updatedAt: '2020-01-01T12:00:23Z',
     endsAt: null,
-    pinnedBy: { id: '54527144', login: 'syanitv', displayName: 'SyaniTV' },
+    pinnedBy: { id: '30000001', login: 'pinmod1', displayName: 'Pinmod1' },
     pinnedMessage: {
-      id: 'e11f6936-b8d3-4c60-b035-331f8579b5de',
-      sentAt: '2026-09-05T21:33:18.484601997Z',
+      id: '22222222-2222-4222-8222-222222222222',
+      sentAt: '2020-01-01T12:00:18.123456789Z',
       content: {
         text: 'check this Kappa https://bit.ly/x',
         fragments: [
@@ -984,10 +984,10 @@ describe('gql pinned chat messages (channel(id:).pinnedChatMessages)', () => {
         ],
       },
       sender: {
-        id: '105166207',
-        login: 'streamlabs',
-        displayName: 'Streamlabs',
-        chatColor: '#32C3A2',
+        id: '30000002',
+        login: 'chatbot1',
+        displayName: 'Chatbot1',
+        chatColor: '#9146FF',
         displayBadges: [
           { id: 'bW9kZXJhdG9yOzE7', setID: 'moderator', version: '1' },
           { id: 'cGFydG5lcjsxOw==', setID: 'partner', version: '1' },
@@ -998,15 +998,15 @@ describe('gql pinned chat messages (channel(id:).pinnedChatMessages)', () => {
 
   it('parses the verified response shape, keeping pin id ≠ message id', async () => {
     gql.handler = async () => ok({ channel: { pinnedChatMessages: { edges: [{ node: pinNode }] } } })
-    const pins = await G.fetchPinnedChatMessages('656099497')
+    const pins = await G.fetchPinnedChatMessages('200000003')
     expect(pins).toHaveLength(1)
     const pin = pins[0]
-    expect(pin.pinId).toBe('176a8770-ccee-465f-8468-44265040bb56')
-    expect(pin.messageId).toBe('e11f6936-b8d3-4c60-b035-331f8579b5de')
+    expect(pin.pinId).toBe('11111111-1111-4111-8111-111111111111')
+    expect(pin.messageId).toBe('22222222-2222-4222-8222-222222222222')
     expect(pin.pinId).not.toBe(pin.messageId)
     expect(pin.type).toBe('MOD')
     expect(pin.endsAt).toBe('') // null → '' (no expiry)
-    expect(pin.pinnedBy).toEqual({ login: 'syanitv', displayName: 'SyaniTV' })
+    expect(pin.pinnedBy).toEqual({ login: 'pinmod1', displayName: 'Pinmod1' })
     expect(pin.message?.text).toBe('check this Kappa https://bit.ly/x')
     expect(pin.message?.fragments).toEqual([
       { text: 'check this ', emoteId: null },
@@ -1014,15 +1014,15 @@ describe('gql pinned chat messages (channel(id:).pinnedChatMessages)', () => {
       { text: ' https://bit.ly/x', emoteId: null },
     ])
     expect(pin.message?.sender).toEqual({
-      login: 'streamlabs',
-      displayName: 'Streamlabs',
-      chatColor: '#32C3A2',
+      login: 'chatbot1',
+      displayName: 'Chatbot1',
+      chatColor: '#9146FF',
       badges: [
         { setID: 'moderator', version: '1' },
         { setID: 'partner', version: '1' },
       ],
     })
-    expect(lastVars()).toMatchObject({ id: '656099497' })
+    expect(lastVars()).toMatchObject({ id: '200000003' })
   })
 
   it('empty edges / null connection / null channel are all successes (returns [])', async () => {

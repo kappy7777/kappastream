@@ -259,9 +259,8 @@ export class TileStore {
   /**
    * The single channel-open entry point for multi-view. Returns the tile that
    * ended up holding the channel and whether a NEW tile was created (vs. an
-   * existing one reused). Always moves BOTH pointers to the resulting tile (a
-   * channel open is a tile-level event: it becomes the audio authority and its
-   * chat becomes active). `seedVolume` seeds a new tile's per-tile volume (the
+   * existing one reused) — both pointers always follow (see the focus-split
+   * rule in the header). `seedVolume` seeds a new tile's per-tile volume (the
    * caller passes settings.volume); the store stays decoupled from settings.
    */
   addOrReplace(channel: string, quality = 'best', seedVolume = 1): { tile: TileState; created: boolean } {
@@ -279,8 +278,8 @@ export class TileStore {
       // pre-insertion plain object would NOT see later store mutations.
       tile = this.tiles[this.tiles.length - 1]
     } else {
-      // Grid full → replace the AUTHORITY tile (the shortcut-target rule: the
-      // primary, audible stream is the "active" slot).
+      // Grid full → replace the AUTHORITY tile (the shortcut-target rule in
+      // the header).
       const target = this.authority ?? this.tiles[0]
       target.channel = norm
       target.quality = quality
@@ -298,8 +297,8 @@ export class TileStore {
 
   /**
    * TILE click (video area / status-bar row / drag handle): moves BOTH the
-   * audio authority and the active chat to the tile. Clicking a tile should
-   * bring up its chat — the asymmetry with selectChat is deliberate.
+   * audio authority and the active chat to the tile (the focus-split rule in
+   * the header — the asymmetry with selectChat is deliberate).
    */
   focusTile(id: string): void {
     if (this.byId(id)) {
@@ -309,8 +308,8 @@ export class TileStore {
   }
 
   /**
-   * CHAT TAB click: moves ONLY the active chat. The audio authority stays put,
-   * so the user can read one channel's chat while listening to another.
+   * CHAT TAB click: moves ONLY the active chat (the focus-split rule in the
+   * header — the audio authority stays put).
    */
   selectChat(id: string): void {
     if (this.byId(id)) this.chatId = id
@@ -396,7 +395,6 @@ export class TileStore {
     if (!t) return
     const wasLive = t.liveStatus.state === 'live'
     t.liveStatus = status
-    // Only an authoritative offline (after being live) closes the tile.
     if (wasLive && status.state === 'offline') {
       this.close(id)
     }

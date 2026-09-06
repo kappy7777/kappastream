@@ -13,14 +13,14 @@ import { invoke } from '@tauri-apps/api/core'
  * on their last-known status until the next successful poll (see
  * favorites.svelte).
  *
- * Field names + argument signatures confirmed against the live endpoint (see
- * the STEP 1 spike): `profileImageURL(width:)`, `previewImageURL` (+ optional
+ * Field names + argument signatures confirmed against the live endpoint:
+ * `profileImageURL(width:)`, `previewImageURL` (+ optional
  * width/height), `boxArtURL(width:, height:)`, `viewersCount`, `createdAt`.
  */
 
-// Max logins per GQL request. The spike confirmed the endpoint accepts 400+ in
-// one request with no complexity cap, but 100 keeps each response small
-// (~23 KB, ~600–900 ms) and well under the Rust 256 KB response cap. A full
+// Max logins per GQL request. The endpoint accepts 400+ in one request with no
+// complexity cap, but 100 keeps each response small (~23 KB, ~600–900 ms) and
+// well under the Rust 256 KB response cap. A full
 // favorites list (MAX_FAVORITES = 1000) is fetched as ceil(N/100) SEQUENTIAL
 // chunks — up to 10 requests for 1000 favorites (~7–9 s), still far inside the
 // GQL_REFRESH_INTERVAL_MS window. Chunk order is preserved, so results zip by
@@ -835,7 +835,7 @@ const CLIP_MEDIA_QUERY = `
 `
 
 // Clip slugs are alphanumeric words joined by dashes/underscores, e.g.
-// "CrispyJollyGullHassaanChop-nPlLKGxGRcBj37e4". Validated before the slug is
+// "HappySunnyOtterRabbitTacos-aB3xKQ9vZRtM5cWf". Validated before the slug is
 // sent in a GQL variable so a malformed/external value can never be issued.
 const CLIP_SLUG_RE = /^[A-Za-z0-9_-]{1,100}$/
 
@@ -1249,7 +1249,7 @@ export async function fetchChannelBadges(
  * VOD playback extras — chapters, muted segments, seek-hover storyboard URL.
  *
  * One lightweight per-VOD query. Field/argument names verified against the
- * live endpoint (2026-08-20); note two places the live schema has DRIFTED
+ * live endpoint; note two places the live schema has DRIFTED
  * from the community schema dump used elsewhere in this file:
  *   - `moments` requires `momentRequestType: VIDEO_CHAPTER_MARKERS` to return
  *     the viewer-facing chapter list (without it the field "server error"s;
@@ -1330,7 +1330,7 @@ const VIDEO_EXTRAS_QUERY = `
   }
 `
 
-// VOD ids are numeric strings (e.g. "2849957264"). Validated before the id is
+// VOD ids are numeric strings (e.g. "5000000001"). Validated before the id is
 // sent in a GQL variable so a malformed/external value can never be issued.
 const VOD_ID_RE = /^\d{1,20}$/
 
@@ -1392,9 +1392,9 @@ export async function fetchVideoExtras(
  * ============================================================================
  * Pinned chat messages.
  *
- * `channel(id:).pinnedChatMessages` — verified live (2026-09-06) against a
- * channel with an actively pinned message, anonymous with the public web
- * Client-ID; it is the same field twitch.tv's logged-out client reads (its
+ * `channel(id:).pinnedChatMessages` — verified live against a channel with an
+ * actively pinned message, anonymous with the public web Client-ID; it is the
+ * same field twitch.tv's logged-out client reads (its
  * persisted operation is `GetPinnedChat`). Shape notes from that session:
  *   - The parent is Channel, keyed by NUMERIC id only (dead on User/Stream).
  *   - node.id is the PIN id and pinnedMessage.id the MESSAGE id — DISTINCT
@@ -1595,8 +1595,8 @@ export async function fetchPinnedChatMessages(
  * part of the users(logins:) status batch — it lives behind the
  * `channel(id:).collaboration` field, the operation the twitch.tv channel
  * page itself uses (CollaboratorListQuery in the web client). It is fully
- * anonymous: verified live 2026-08-21 on an active Stream Together session
- * (ronnyberger + nicistemmler) with the plain anonymous Client-ID.
+ * anonymous: verified live on an active Stream Together session with the
+ * plain anonymous Client-ID.
  *
  * The field takes a numeric channel ID (no login variant), so callers pass
  * ChannelStatus.userId. Multiple channels are fetched in ONE request via

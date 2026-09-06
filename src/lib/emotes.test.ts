@@ -100,11 +100,11 @@ describe('getTwitchUserId case-insensitivity', () => {
     // drops that channel's third-party emotes.
     tauriInvoke.handler = async (cmd: string) => {
       if (cmd === 'gql_fetch') {
-        return JSON.stringify({ data: { users: [{ id: '12345', login: 'lirik' }] } })
+        return JSON.stringify({ data: { users: [{ id: '12345', login: 'chan2' }] } })
       }
       throw new Error('unexpected invoke: ' + cmd)
     }
-    const id = await E.getTwitchUserId('Lirik')
+    const id = await E.getTwitchUserId('Chan2')
     expect(id).toBe('12345')
   })
 })
