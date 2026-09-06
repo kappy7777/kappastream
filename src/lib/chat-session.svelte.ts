@@ -1,24 +1,28 @@
-// One IRC chat connection per multi-view tile. Multi-view keeps a SEPARATE
-// ChatSession per open tile so switching chat tabs never loses scrollback and
-// each channel's ROOMSTATE / moderation / badges are tracked independently.
+// One IRC chat connection. Used by BOTH chat surfaces:
+//  - Multi-view keeps a SEPARATE ChatSession per open tile so switching chat
+//    tabs never loses scrollback and each channel's ROOMSTATE / moderation /
+//    badges are tracked independently.
+//  - App.svelte's single-stream chat runs on ONE session (created per
+//    channel-connect, disposed on disconnect / VOD-clip takeover) and hooks
+//    into it via the constructor options: onOpen couples the socket-level
+//    JOIN to the live-stream start, onPrivmsg drives mention notifications.
+//    This REPLACES the old parallel socket+reconnect+dispatch copy that used
+//    to live in App.svelte — the discipline exists exactly once now.
 //
-// This mirrors the chat discipline in App.svelte (generation-coupled socket,
-// exponential reconnect, channel+global emote load, parse-then-store with
-// presentation gated at render time) but is a standalone class so the
-// single-stream chat path in App.svelte stays byte-identical when multi-view is
-// OFF. It reuses the already-factored pure helpers: parseIrcEvent /
-// mergeRoomState / composeUsernoticeFallback / DELETED_MESSAGE_CLASS from
-// irc.ts and the emote loaders from emotes.ts — only the socket+reconnect
-// orchestration is duplicated (it is inherently per-connection state).
+// Generation-coupled socket, exponential reconnect, channel+global emote
+// load, parse-then-store with presentation gated at render time. It reuses
+// the already-factored pure helpers: parseIrcEvent / mergeRoomState /
+// composeUsernoticeFallback / DELETED_MESSAGE_CLASS from irc.ts and the emote
+// loaders from emotes.ts.
 //
-// The message buffer + roomState + badge override are Svelte `$state` so the
-// Tile/MultiView render reacts live. The client-side mute list and the Tier 2
-// chat toggles (notice groups / roomstate indicator / moderation / bits) are
-// applied at RENDER time by the component reading `settings`, exactly as
-// App.svelte does — the session always stores every event so flipping a toggle
-// retroactively re-evaluates already-buffered messages.
+// The message buffer + roomState + badge override are Svelte `$state` so any
+// component reading the session renders reactively. The client-side mute
+// list and the Tier 2 chat toggles (notice groups / roomstate indicator /
+// moderation / bits) are applied at RENDER time by the shared ChatPane
+// reading `settings` — the session always stores every event so flipping a
+// toggle retroactively re-evaluates already-buffered messages.
 
-import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, type IrcEvent, type RoomState } from './irc'
+import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, type BadgeInfo, type IrcEvent, type RoomState } from './irc'
 import { loadChannelEmotes, loadGlobalEmotes, buildEmoteMap, renderMessage, parseTwitchEmoteTag, type Emote, type RenderedMessagePart } from './emotes'
 import { fetchChannelBadges } from './gql'
 import { t } from './i18n/index.svelte'
@@ -30,7 +34,7 @@ export interface ChatMessage {
   color: string
   raw: string
   parts: RenderedMessagePart[]
-  badges: { id: string; version: string; label: string; imageUrl: string | null }[]
+  badges: BadgeInfo[]
   isAction: boolean
   emoteOnly: boolean
   timestamp: number
@@ -45,6 +49,23 @@ export interface ChatMessage {
 
 export type ChatConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected'
 
+export interface ChatSessionOptions {
+  /**
+   * Fires on every socket-level JOIN (after CAP/NICK/JOIN were sent), both
+   * the initial connect and a reconnect after a drop. The single-stream App
+   * uses it to record the joined channel and start the live stream; a
+   * reconnect for the SAME channel must NOT restart the stream (the player
+   * never dropped) — the receiver distinguishes via isReconnect.
+   */
+  onOpen?: (isReconnect: boolean) => void
+  /**
+   * Fires for every accepted PRIVMSG (after it was buffered). The
+   * single-stream App uses it for mention notifications; multi-view passes
+   * nothing.
+   */
+  onPrivmsg?: (ev: Extract<IrcEvent, { type: 'PRIVMSG' }>) => void
+}
+
 const MAX_BUFFER = 500
 const IRC_URL = 'wss://irc-ws.chat.twitch.tv:443'
 const MAX_RECONNECT_ATTEMPTS = 10
@@ -57,6 +78,7 @@ function randomUsername(): string {
 
 export class ChatSession {
   readonly channel: string
+  private readonly opts: ChatSessionOptions
 
   messages: ChatMessage[] = $state([])
   status: ChatConnectionStatus = $state('idle')
@@ -78,8 +100,9 @@ export class ChatSession {
   private badgeToken = 0
   private disposed = false
 
-  constructor(channel: string) {
+  constructor(channel: string, opts: ChatSessionOptions = {}) {
     this.channel = channel.toLowerCase()
+    this.opts = opts
   }
 
   start(): void {
@@ -155,6 +178,7 @@ export class ChatSession {
       ws.send('JOIN #' + this.channel)
       this.reconnectAttempts = 0
       this.status = 'connected'
+      this.opts.onOpen?.(isReconnect)
     }
     ws.onmessage = (ev) => {
       if (gen === this.generation && this.socket === ws && !this.disposed) {
@@ -242,6 +266,7 @@ export class ChatSession {
       systemText: null,
       noticeMsgId: null,
     })
+    this.opts.onPrivmsg?.(ev)
   }
 
   private onUsernotice(ev: Extract<IrcEvent, { type: 'USERNOTICE' }>): void {

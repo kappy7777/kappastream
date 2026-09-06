@@ -1,12 +1,17 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte'
+  import { onMount } from 'svelte'
   import Hls from 'hls.js'
   import { invoke, isTauri } from '@tauri-apps/api/core'
   import { getCurrentWindow } from '@tauri-apps/api/window'
-  import { loadChannelEmotes, loadGlobalEmotes, buildEmoteMap, renderMessage, parseTwitchEmoteTag, type Emote, type RenderedMessagePart } from './lib/emotes'
+  import { renderMessage, type Emote } from './lib/emotes'
   import './lib/emote.css'
-  import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, usernoticeCategory, isNoticeVisible, DELETED_MESSAGE_CLASS, isMessageStricken, resolveBadgeImageUrl, activeRoomModes, type BadgeInfo, type IrcEvent, type ParsedMessage, type RoomState } from './lib/irc'
+  import { activeRoomModes, type ParsedMessage, type RoomState } from './lib/irc'
+  import { ChatSession, type ChatMessage, type ChatConnectionStatus } from './lib/chat-session.svelte'
+  import ChatPane from './lib/ChatPane.svelte'
   import ChatModesPill from './lib/ChatModesPill.svelte'
+  import AboutModal from './lib/AboutModal.svelte'
+  import ShortcutsHelp from './lib/ShortcutsHelp.svelte'
+  import { singleChatEntries } from './lib/merged-chat'
   import { UI_ZOOM_VAR, zoomDivisor } from './lib/ui-zoom'
   import Sidebar from './lib/Sidebar.svelte'
   import PlayerControls from './lib/PlayerControls.svelte'
@@ -27,8 +32,8 @@
   import { firstLaunch } from './lib/first-launch.svelte'
   import { collabBadge, fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
-  import { fetchChannelBadges, fetchClipInfo, fetchCollaborators, fetchVideoExtras, type Collaborator, type VodChapter, type VodMuteSpan } from './lib/gql'
-  import { parseStoryboard, type Storyboard } from './lib/vod-extras'
+  import { fetchChannelBadges, fetchClipInfo, fetchCollaborators, type Collaborator } from './lib/gql'
+  import { VodPlaybackController, formatVodTime } from './lib/vod-playback.svelte.ts'
   import { VodChatController, fetchVodComments } from './lib/vodchat.svelte.ts'
   import { initBadgeRefresh } from './lib/badges'
   import { notifications } from './lib/notifications.svelte.ts'
@@ -38,10 +43,9 @@
   import MultiView from './lib/MultiView.svelte'
   import PinnedMessage from './lib/PinnedMessage.svelte'
   import { pinnedChat } from './lib/pinned-chat.svelte'
-  import LinkifiedText from './lib/LinkifiedText.svelte'
   import { parseTwitchClipUrl } from './lib/chat-links'
   import { t } from './lib/i18n/index.svelte'
-  import { formatCompact, formatChatTime, formatAge } from './lib/format'
+  import { formatCompact, formatAge } from './lib/format'
   import kappaUrl from './assets/kappa.png'
 
   // Tauri v2 webview origin differs by engine, and that changes whether a
@@ -122,58 +126,29 @@
     })
   })
 
-  type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error'
   type PlayerStatus = 'idle' | 'resolving' | 'loading' | 'playing' | 'paused' | 'offline' | 'error'
-
-  interface ChatMessage {
-    // 'message' = normal PRIVMSG; 'notice' = a USERNOTICE line (subs, gifts,
-    // raids, announcements). A notice renders only when its CATEGORY's toggle
-    // is on (unknown/exotic ids render when any of the four is on); with all
-    // four off a notice entry produces no DOM, so the baseline chat is
-    // byte-identical.
-    kind: 'message' | 'notice'
-    id: string
-    username: string
-    color: string
-    raw: string
-    parts: RenderedMessagePart[]
-    badges: BadgeInfo[]
-    isAction: boolean
-    emoteOnly: boolean
-    timestamp: number
-    // bits amount for cheers (Toggle D), null otherwise. Always stored; the
-    // bits indicator is rendered only under settings.chatBits.
-    bits: number | null
-    // `user-id` of the sender — the stable key CLEARCHAT matches on. Always
-    // stored on a PRIVMSG.
-    userId: string | null
-    // Sender's login (lowercased IRC nick from the PRIVMSG prefix, or the
-    // USERNOTICE `login` tag). The STABLE identity the client-side mute list
-    // matches on — never the displayName (user-settable caps). Always stored so
-    // a mute applied mid-stream retroactively hides already-buffered messages.
-    login: string | null
-    // Moderation (Toggle C). ALWAYS recorded from CLEARMSG / CLEARCHAT
-    // regardless of settings, so flipping the toggle on retroactively strikes
-    // already-deleted messages still in the buffer. Presentation is gated by
-    // isMessageStricken(settings.chatModeration, deleted).
-    deleted: boolean
-    deletedReason: string | null
-    // USERNOTICE-only (kind === 'notice'): Twitch's rendered system line and
-    // the msg-id (sub/raid/…). Null for normal messages.
-    systemText: string | null
-    noticeMsgId: string | null
-  }
 
   let channelInput = $state('')
   let browseOpen = $state(false)
   let channelJoined: string | null = $state(null)
-  let status = $state<ConnectionStatus>('idle')
-  let messages: ChatMessage[] = $state([])
-  // Current chat modes for the joined channel (Toggle B). Merged from
-  // ROOMSTATE events via mergeRoomState — never replaced, so a single-tag
-  // change message does not reset the other modes. Reset on disconnect.
-  let roomState = $state<RoomState>({})
-  let emoteStatus = $state<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  // The single-stream IRC chat runs on ONE ChatSession — the SAME class
+  // multi-view uses per tile (the socket + reconnect + dispatch copy that
+  // used to live here was deleted in its favour). Created per
+  // channel-connect in connect(), disposed on disconnect() and on the
+  // VOD/clip takeover (stopChatOnly — the disposed object stays referenced
+  // so its third-party emote map keeps feeding the VOD chat renderer).
+  let chatSession = $state<ChatSession | null>(null)
+  // UI reads of the session's reactive state; empty/idle fallbacks while no
+  // session exists. All of these are only ever REASSIGNED inside the session
+  // (never mutated in place), so property-read tracking is sufficient.
+  const status = $derived<ChatConnectionStatus>(chatSession?.status ?? 'idle')
+  const emoteStatus = $derived(chatSession?.emoteStatus ?? ('idle' as const))
+  const roomState = $derived<RoomState>(chatSession?.roomState ?? {})
+  // Third-party emote map (7TV/BTTV/FFZ, channel + global) for the chat
+  // renderer + pinned-message banner. A $derived off the session so the
+  // banner re-resolves when a channel's emotes land (message parts are baked
+  // on arrival and are unaffected).
+  const thirdPartyMap = $derived(chatSession?.thirdParty ?? new Map<string, Emote>())
 
   let playerStatus = $state<PlayerStatus>('idle')
   let playerError = $state('')
@@ -204,54 +179,18 @@
   let videoScrollEl = $state<HTMLElement | null>(null)
   let contentRef = $state<HTMLElement | null>(null)
 
-  // VOD resume: a transient bar shown after auto-resuming so the user can see
-  // they were resumed and restart in one action. Null when no bar is shown.
-  interface ResumeBar { vodId: string; position: number }
-  let resumeBar = $state<ResumeBar | null>(null)
-  let resumeBarTimer: ReturnType<typeof setTimeout> | null = null
-  let lastVodSaveAt = 0
-  const VOD_SAVE_INTERVAL_MS = 5_000
-
-  // VOD scrubber extras: chapter markers, muted-segment spans, and the
-  // seek-hover storyboard (see vod-extras.ts). Fetched per VOD play; cleared
-  // on any playback-mode change. Every piece is OPTIONAL — a fetch failure
-  // leaves them empty and the scrubber renders its baseline state.
-  let vodChapters = $state<VodChapter[]>([])
-  let vodMutedSpans = $state<VodMuteSpan[]>([])
-  let vodStoryboard = $state<Storyboard | null>(null)
-  let vodExtrasToken = 0
-  function clearVodExtras(): void {
-    vodExtrasToken++
-    vodChapters = []
-    vodMutedSpans = []
-    vodStoryboard = null
-  }
-  async function loadVodExtras(videoId: string): Promise<void> {
-    const myToken = ++vodExtrasToken
-    let extras
-    try {
-      extras = await fetchVideoExtras(videoId)
-    } catch {
-      return // optional data — no chapters/mutes/previews is fine
-    }
-    if (myToken !== vodExtrasToken) return
-    vodChapters = extras.chapters
-    vodMutedSpans = extras.mutedSpans
-    vodStoryboard = null
-    // The storyboard JSON lives on the VOD CDN (no CORS), so it goes through
-    // the ksvod proxy like every other VOD CDN read; the strip IMAGES are
-    // plain CSS background-images straight from the CDN (CORS-exempt).
-    const url = extras.seekPreviewsUrl
-    if (!url) return
-    try {
-      const res = await fetch(toKsvodProxyUrl(url))
-      if (!res.ok) return
-      const sb = parseStoryboard(await res.json(), url)
-      if (myToken !== vodExtrasToken) return
-      vodStoryboard = sb
-    } catch {
-      /* storyboard is the most optional of the extras */
-    }
+  // VOD playback support (scrub-bar extras, resume machinery, position
+  // save/restore, the resume bar) lives in VodPlaybackController — extracted
+  // from App.svelte; only the player lifecycle itself stays here. The
+  // proxyUrl/getVideo indirection keeps the controller platform-agnostic
+  // (it rewrites storyboard JSON reads through the ksvod proxy and reads the
+  // <video> element's position at call time).
+  const vodCtl = new VodPlaybackController({
+    proxyUrl: toKsvodProxyUrl,
+    getVideo: () => videoEl,
+  })
+  function currentVodId(): string | null {
+    return playback.kind === 'vod' ? playback.id : null
   }
 
   const SIDEBAR_VIS_KEY = 'twitch-sidebar-visible-v3'
@@ -290,8 +229,10 @@
   // Multi-stream split view. ALWAYS OFF on startup and NEVER persisted
   // (starting in multi-view after a restart would be surprising and would
   // spawn up to 4 streamlink resolves + 4 hls.js instances on launch). When on,
-  // MultiView.svelte renders the tile grid INSTEAD of the single-stream `.main`;
-  // when off, App.svelte's original markup renders byte-identical.
+  // MultiView.svelte renders the tile grid INSTEAD of App.svelte's single-stream
+  // `.main`; when off, this markup renders (the chat pane itself is the shared
+  // ChatPane component either way — rendering, not markup, is what stays
+  // identical between the two views).
   let multiView = $state(false)
   // The audio-authority tile's <video>, registered by Tile.svelte so the
   // keyboard shortcuts (space/k/m/arrows/f) target the AUTHORITY tile in
@@ -597,11 +538,8 @@
   $effect(() => {
     const currentId = playback.kind === 'vod' ? playback.id : null
     if (prevVodId !== null && prevVodId !== currentId) {
-      const el = videoEl
-      if (el) {
-        vodPositions.save(prevVodId, el.currentTime, Number.isFinite(el.duration) ? el.duration : 0)
-      }
-      dismissResumeBar()
+      vodCtl.save(prevVodId, true)
+      vodCtl.dismissResumeBar()
     }
     prevVodId = currentId
   })
@@ -614,7 +552,6 @@
     if (videoScrollEl) videoScrollEl.scrollTop = 0
   })
 
-  let socket: WebSocket | null = null
   let hls: Hls | null = null
   let streamGeneration = 0
   let manifestTimeout: ReturnType<typeof setTimeout> | null = null
@@ -663,7 +600,7 @@
 
   function onVideoPause(): void {
     // Flush the VOD resume checkpoint on any pause (works for every kind).
-    saveVodPosition(true)
+    vodCtl.save(currentVodId(), true)
     // Stall recovery is live-only — never force-seek a paused VOD/clip.
     if (playback.kind !== 'live') return
     // Ignore user-initiated pauses (togglePlay sets userPaused first). A
@@ -680,7 +617,7 @@
 
   function onVideoTimeUpdate(): void {
     // Throttled VOD position checkpoint (live + clips are ignored inside).
-    saveVodPosition()
+    vodCtl.save(currentVodId())
   }
 
   // A user scrub (or a programmatic seek). The `seeking` event fires ONLY for
@@ -694,14 +631,6 @@
     vodChat.seek(el.currentTime)
   }
   let cancelPendingAttach: (() => void) | null = null
-  let emoteAbort: AbortController | null = null
-  // Third-party emote map (7TV/BTTV/FFZ, channel + global) for the chat
-  // renderer. $state so the pinned-message banner — which renders through
-  // the same renderMessage pipeline at render time rather than baking parts
-  // at parse time — re-resolves when a channel's emotes land. Chat messages
-  // are unaffected (their parts are baked on arrival).
-  let thirdPartyMap = $state(new Map<string, Emote>())
-
   // ---- VOD chat replay ----------------------------------------------------
   // Past-broadcast chat, synced to the playhead. Each replay comment is
   // normalized to the same ChatMessage shape the live renderer uses, so there
@@ -749,12 +678,62 @@
     getChatVisible: () => settings.chatVisible,
   })
 
-  // The single chat render source: replay comments while a VOD is playing, the
-  // live IRC buffer otherwise. `messages` stays empty in VOD mode (playVod
-  // clears it and never appends); vodChat.visible stays empty otherwise.
-  const chatMessages = $derived(playback.kind === 'vod' ? vodChat.visible : messages)
+  // Per-channel custom badge override: setID -> { version -> image uuid }.
+  // Applied at RENDER time (inside the shared ChatPane, against each entry's
+  // override) ON TOP of the global map, so a channel's custom
+  // subscriber/founder art overrides the global default. Reactive: when the
+  // fetch lands, every buffered message (including ones parsed before it
+  // completed) re-renders with the override. Cleared to null on every channel
+  // change so the previous channel's custom badges can never bleed into the
+  // new one (worse than the global default). Declared BEFORE chatEntries,
+  // which reads it.
+  let channelBadgeOverride = $state<Record<string, Record<string, string>> | null>(null)
+  let channelBadgeToken = 0
+  $effect(() => {
+    const channel = channelJoined
+    // Clear immediately on any channel change (or leaving a channel).
+    channelBadgeOverride = null
+    if (!channel) return
+    const myToken = ++channelBadgeToken
+    void (async () => {
+      try {
+        const override = await fetchChannelBadges(channel)
+        if (myToken !== channelBadgeToken) return // superseded by a later join
+        channelBadgeOverride = override
+      } catch {
+        /* leave null -> global default badges */
+      }
+    })()
+  })
 
-  let chatEl = $state<HTMLElement | undefined>(undefined)
+  // The single chat render source feeding the shared ChatPane: replay
+  // comments while a VOD is playing, the live IRC buffer otherwise. Entry
+  // form (singleChatEntries) so the SAME pane component serves single-view
+  // and multi-view; the per-channel badge override rides each entry (VOD
+  // replay comments resolve against it too, exactly as before). The buffer
+  // is read INSIDE the derived so session pushes (in-place mutations of the
+  // session's $state array) re-run it — a pass-through derived would go
+  // stale. `messages` stays empty in VOD mode (playVod clears it and the
+  // session never appends); vodChat.visible stays empty otherwise.
+  const chatEntries = $derived.by(() => {
+    const buffer = playback.kind === 'vod' ? vodChat.visible : chatSession?.messages ?? []
+    return singleChatEntries(buffer, channelBadgeOverride)
+  })
+
+  // Placeholder / reset keys for the shared ChatPane (state text is composed
+  // here; the pane owns the rendering). resetKey: swapping between "a chat is
+  // (or was) live" and idle resets the pane's follow state — channel changes,
+  // disconnects and VOD takeovers all pass through idle.
+  const chatPlaceholder = $derived(
+    playback.kind === 'vod'
+      ? vodChat.failed
+        ? t('vod_chatUnavailable')
+        : t('vod_chatLoading')
+      : status === 'connected'
+        ? t('chat_waitingMessages')
+        : t('chat_joinToSee'),
+  )
+  const chatResetKey = $derived(status === 'idle' ? 'idle' : 'live')
 
   let mainEl = $state<HTMLElement | undefined>(undefined)
   let stacked = $state(false)
@@ -848,11 +827,6 @@
       /* ignore */
     }
   })
-
-  function randomUsername(): string {
-    const n = Math.floor(Math.random() * 1_000_000)
-    return 'justinfan' + n.toString().padStart(6, '0')
-  }
 
   function teardownPlayer(keepPip = false): void {
     streamGeneration++
@@ -1149,89 +1123,9 @@
     await loadStream(channelJoined, quality)
   }
 
-  let reconnectAttempts = 0
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-  let connectionGeneration = 0
-  let activeConnection: { channel: string; nick: string; generation: number } | null = null
-
-  const MAX_RECONNECT_ATTEMPTS = 10
-  const RECONNECT_BASE_MS = 1_000
-  const RECONNECT_MAX_MS = 30_000
-
-  function scheduleReconnect(generation: number): void {
-    const connection = activeConnection
-    if (!connection || connection.generation !== generation) return
-    if (reconnectTimer) return
-    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      status = 'disconnected'
-      return
-    }
-    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** reconnectAttempts)
-    reconnectAttempts++
-    status = 'connecting'
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null
-      if (activeConnection?.generation !== generation) return
-      openSocket(activeConnection, true)
-    }, delay)
-  }
-
-  function openSocket(connection: { channel: string; nick: string; generation: number }, isReconnect: boolean): void {
-    if (activeConnection?.generation !== connection.generation) return
-    let ws: WebSocket
-    try {
-      ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443')
-    } catch (_e) {
-      scheduleReconnect(connection.generation)
-      return
-    }
-    socket = ws
-
-    ws.onopen = () => {
-      if (activeConnection?.generation !== connection.generation || socket !== ws) {
-        ws.close()
-        return
-      }
-      ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands')
-      ws.send('NICK ' + connection.nick)
-      ws.send('JOIN #' + connection.channel)
-      reconnectAttempts = 0
-      const needsInitialStream = !isReconnect || channelJoined !== connection.channel
-      status = 'connected'
-      channelJoined = connection.channel
-      if (needsInitialStream) void startStream(connection.channel)
-    }
-
-    ws.onmessage = (ev) => {
-      if (activeConnection?.generation === connection.generation && socket === ws) {
-        handleMessage(ev.data as string, ws)
-      }
-    }
-
-    ws.onerror = () => {
-      /* let onclose handle reconnect */
-    }
-
-    ws.onclose = () => {
-      if (activeConnection?.generation !== connection.generation || socket !== ws) return
-      socket = null
-      scheduleReconnect(connection.generation)
-    }
-  }
-
-  async function loadEmotes(channel: string, generation: number, signal: AbortSignal): Promise<void> {
-    try {
-      const [channelEmotes, globalEmotes] = await Promise.all([
-        loadChannelEmotes(channel, signal),
-        loadGlobalEmotes(signal),
-      ])
-      if (signal.aborted || activeConnection?.generation !== generation) return
-      thirdPartyMap = buildEmoteMap([...channelEmotes, ...globalEmotes])
-      emoteStatus = 'ready'
-    } catch (_e) {
-      if (!signal.aborted && activeConnection?.generation === generation) emoteStatus = 'error'
-    }
-  }
+  // ---- Chat connection (single ChatSession; the socket + reconnect +
+  //      dispatch discipline lives in chat-session.svelte.ts, shared with
+  //      multi-view) ----
 
   function connect(): void {
     const channel = normalizeChannelName(channelInput)
@@ -1241,194 +1135,31 @@
     }
     // Any (re)connect returns to live mode — clears a prior VOD/clip playback.
     playback = { kind: 'live' }
-    clearVodExtras()
+    vodCtl.clearExtras()
     disconnect()
 
-    reconnectAttempts = 0
-    status = 'connecting'
+    chatSession = new ChatSession(channel, {
+      // The session reports the socket-level JOIN; App couples that to the
+      // player and records the joined channel. A pure reconnect (drop +
+      // resume of the SAME channel) must NOT restart the stream — the player
+      // never dropped.
+      onOpen: (isReconnect) => {
+        const needsInitialStream = !isReconnect || channelJoined !== channel
+        channelJoined = channel
+        if (needsInitialStream) void startStream(channel)
+      },
+      onPrivmsg: (ev) => fireMentionNotification(ev.message, ev.displayName, ev.color),
+    })
+    chatSession.start() // sets status 'connecting' + kicks the emote load
     channelInput = ''
-    const connection = { channel, nick: randomUsername(), generation: connectionGeneration }
-    activeConnection = connection
-    emoteAbort = new AbortController()
-    emoteStatus = 'loading'
-    void loadEmotes(channel, connection.generation, emoteAbort.signal)
-    openSocket(connection, false)
-  }
-
-  function handleMessage(raw: string, ws: WebSocket): void {
-    for (const rawLine of raw.split(/\r?\n/)) {
-      const line = rawLine.trim()
-      if (!line) continue
-      if (line.startsWith('PING ')) {
-        ws.send('PONG ' + line.slice(5))
-        continue
-      }
-      const ev: IrcEvent | null = parseIrcEvent(line)
-      if (!ev) continue
-      if (!channelJoined || ev.channel !== channelJoined) continue
-
-      switch (ev.type) {
-        case 'PRIVMSG':
-          handlePrivmsg(ev)
-          break
-        case 'USERNOTICE':
-          handleUsernotice(ev)
-          break
-        case 'ROOMSTATE':
-          // PARSING IS UNGATED: state is always merged; only the indicator's
-          // visibility keys off settings.chatRoomstate in the template.
-          roomState = mergeRoomState(roomState, ev)
-          break
-        case 'CLEARMSG':
-          // Record the deletion always; presentation is gated.
-          markMessageDeleted(ev.targetMsgId, t('mod_messageDeleted'))
-          break
-        case 'CLEARCHAT':
-          handleClearchat(ev)
-          break
-      }
-    }
-  }
-
-  function handlePrivmsg(ev: Extract<IrcEvent, { type: 'PRIVMSG' }>): void {
-    const parts = renderMessage({
-      message: ev.message,
-      thirdParty: thirdPartyMap,
-      twitchRanges: ev.twitchEmotes,
-    })
-
-    // Derive emoteOnly once from the rendered parts: at least one emote
-    // and every non-emote part whitespace-only. The old expression
-    // (`/^\s*$/.test(msg.raw.replace(/\s/g, ''))`) could only ever be true
-    // for a whitespace-only message and the .emote-only CSS rule did not
-    // exist, so the class was inert.
-    const emoteOnly =
-      parts.some((p) => p.type === 'emote') &&
-      parts.every((p) => p.type === 'emote' || p.text.trim() === '')
-
-    messages.push({
-      kind: 'message',
-      id: ev.id || crypto.randomUUID(),
-      username: ev.displayName,
-      color: ev.color,
-      raw: ev.message,
-      parts,
-      badges: ev.badges,
-      isAction: ev.isAction,
-      emoteOnly,
-      timestamp: ev.timestamp,
-      bits: ev.bits,
-      userId: ev.userId,
-      login: ev.username,
-      deleted: false,
-      deletedReason: null,
-      systemText: null,
-      noticeMsgId: null,
-    })
-
-    fireMentionNotification(ev.message, ev.displayName, ev.color)
-
-    if (stickyBottom && messages.length > 500) messages.splice(0, messages.length - 500)
-  }
-
-  function handleUsernotice(ev: Extract<IrcEvent, { type: 'USERNOTICE' }>): void {
-    // PREFER Twitch's own system-msg; fall back to msg-param composition only
-    // when it is absent (composeUsernoticeFallback never returns empty).
-    const systemText = ev.systemMsg || composeUsernoticeFallback(ev.msgId, ev.tags)
-
-    // A USERNOTICE may carry a user message in the trailing parameter (resub
-    // comments, announcements). Render it through the same emote pipeline so
-    // emotes in the message body work.
-    let parts: RenderedMessagePart[] = []
-    if (ev.message) {
-      const ranges = parseTwitchEmoteTag(ev.emotes, ev.message)
-      parts = renderMessage({
-        message: ev.message,
-        thirdParty: thirdPartyMap,
-        twitchRanges: ranges,
-      })
-    }
-
-    messages.push({
-      kind: 'notice',
-      id: crypto.randomUUID(),
-      username: ev.login ?? '',
-      color: '#ffffff',
-      raw: ev.message ?? '',
-      parts,
-      badges: [],
-      isAction: false,
-      emoteOnly: false,
-      timestamp: Date.now(),
-      bits: null,
-      userId: null,
-      login: ev.login,
-      deleted: false,
-      deletedReason: null,
-      systemText,
-      noticeMsgId: ev.msgId,
-    })
-
-    if (stickyBottom && messages.length > 500) messages.splice(0, messages.length - 500)
-  }
-
-  function handleClearchat(ev: Extract<IrcEvent, { type: 'CLEARCHAT' }>): void {
-    // No target user => whole room cleared. Otherwise match by user-id (the
-    // stable key), never by display name.
-    if (ev.targetUserId === null) {
-      for (const m of messages) {
-        if (m.kind === 'message') markEntryDeleted(m, t('mod_chatCleared'))
-      }
-      return
-    }
-    const reason =
-      ev.banDuration !== null ? t('mod_timedOut', { n: ev.banDuration }) : t('mod_banned')
-    for (const m of messages) {
-      if (m.kind === 'message' && m.userId === ev.targetUserId) {
-        markEntryDeleted(m, reason)
-      }
-    }
-  }
-
-  // Strike a single message by id (CLEARMSG). A target-msg-id for a message no
-  // longer in the buffer (scrolled out / dropped past the 500 cap) is a no-op —
-  // never an error.
-  function markMessageDeleted(targetMsgId: string, reason: string): void {
-    if (!targetMsgId) return
-    for (const m of messages) {
-      if (m.kind === 'message' && m.id === targetMsgId) markEntryDeleted(m, reason)
-    }
-  }
-
-  function markEntryDeleted(m: ChatMessage, reason: string): void {
-    if (m.deleted) return
-    m.deleted = true
-    m.deletedReason = reason
   }
 
   function disconnect(): void {
-    connectionGeneration++
-    vodChat.stop()
-    activeConnection = null
-    emoteAbort?.abort()
-    emoteAbort = null
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer)
-      reconnectTimer = null
-    }
-    if (socket) {
-      socket.onclose = null
-      socket.close()
-      socket = null
-    }
+    chatSession?.dispose()
+    chatSession = null // deriveds (status/emoteStatus/roomState/…) fall back to idle
     disconnectStream()
     mainStoppedForPip = false
     channelJoined = null
-    status = 'idle'
-    messages = []
-    roomState = {}
-    emoteStatus = 'idle'
-    thirdPartyMap = new Map()
   }
 
   function selectChannel(name: string): void {
@@ -1548,23 +1279,16 @@
   // path (backToLive → selectChannel). Stall recovery is live-only.
 
   // Stop the IRC chat connection without clearing `channelJoined` or the video
-  // element (the caller swaps the player source). Mirrors disconnect()'s socket
-  // teardown but preserves channel identity for back-to-live.
+  // element (the caller swaps the player source). The disposed session object
+  // stays referenced (chatSession) so its third-party emote map keeps feeding
+  // the VOD chat renderer — replay comments still render the channel's emotes.
+  // The buffer + room modes the callers used to reset on the old local state
+  // are reset on the session here; backToLive creates a fresh session anyway.
   function stopChatOnly(): void {
-    connectionGeneration++
-    activeConnection = null
-    emoteAbort?.abort()
-    emoteAbort = null
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer)
-      reconnectTimer = null
-    }
-    if (socket) {
-      socket.onclose = null
-      socket.close()
-      socket = null
-    }
-    status = 'idle'
+    if (!chatSession) return
+    chatSession.dispose()
+    chatSession.messages = []
+    chatSession.roomState = {}
   }
 
   // Attach an HLS source (VOD playlist) with a non-low-latency config and no
@@ -1638,85 +1362,8 @@
     return httpsUrl.replace('https://', prefix)
   }
 
-  // ---- VOD resume position ------------------------------------------------
-  // `position` is playlist-relative (the VOD runs through the ksvod proxy and
-  // currentTime is relative to that playlist). The same player writes and reads
-  // it, so it is self-consistent — but it does NOT match Twitch's broadcast
-  // offset. Clips are out of scope (too short). See vod-positions.svelte.ts for
-  // the bounded storage + thresholds.
-
-  function formatVodTime(s: number): string {
-    if (!Number.isFinite(s) || s < 0) s = 0
-    const total = Math.floor(s)
-    const h = Math.floor(total / 3600)
-    const m = Math.floor((total % 3600) / 60)
-    const sec = total % 60
-    const mm = h > 0 ? m.toString().padStart(2, '0') : String(m)
-    return (h > 0 ? h + ':' : '') + mm + ':' + sec.toString().padStart(2, '0')
-  }
-
-  function showResumeBar(vodId: string, position: number): void {
-    resumeBar = { vodId, position }
-    if (resumeBarTimer) clearTimeout(resumeBarTimer)
-    resumeBarTimer = setTimeout(() => { resumeBar = null; resumeBarTimer = null }, 8000)
-  }
-
-  function dismissResumeBar(): void {
-    if (resumeBarTimer) { clearTimeout(resumeBarTimer); resumeBarTimer = null }
-    resumeBar = null
-  }
-
-  function restartVod(): void {
-    const el = videoEl
-    if (el) {
-      try { el.currentTime = 0 } catch { /* ignore */ }
-      void el.play().catch(() => { /* ignore */ })
-    }
-    if (playback.kind === 'vod') vodPositions.clear(playback.id)
-    dismissResumeBar()
-  }
-
-  // Seek the just-loaded VOD to its saved position (if any) once the seekable
-  // range covers it, and surface a "Resumed from … — Restart" bar. HLS VOD
-  // playlists list every segment, so seekable usually covers the full duration
-  // right after manifest parse; we poll briefly as a safety net.
-  function restoreVodPosition(videoId: string): void {
-    const saved = vodPositions.get(videoId)
-    if (!saved || saved.position < 30) return
-    const el = videoEl
-    if (!el) return
-    let tries = 0
-    const attempt = (): boolean => {
-      const seekable = el.seekable
-      if (seekable.length === 0) return false
-      if (saved.position > seekable.end(seekable.length - 1)) return false
-      try { el.currentTime = saved.position } catch { /* ignore */ }
-      return true
-    }
-    if (attempt()) { showResumeBar(videoId, saved.position); return }
-    const onProgress = (): void => {
-      if (attempt()) {
-        el.removeEventListener('progress', onProgress)
-        showResumeBar(videoId, saved.position)
-      } else if (++tries > 200) {
-        el.removeEventListener('progress', onProgress)
-      }
-    }
-    el.addEventListener('progress', onProgress)
-  }
-
-  // Throttled save of the current VOD position. Called from timeupdate (every
-  // frame, throttled to VOD_SAVE_INTERVAL_MS) and force-flushed on pause and on
-  // leaving the VOD. No-op outside VOD playback.
-  function saveVodPosition(force = false): void {
-    if (playback.kind !== 'vod') return
-    const el = videoEl
-    if (!el) return
-    const now = Date.now()
-    if (!force && now - lastVodSaveAt < VOD_SAVE_INTERVAL_MS) return
-    lastVodSaveAt = now
-    vodPositions.save(playback.id, el.currentTime, Number.isFinite(el.duration) ? el.duration : 0)
-  }
+  // (VOD resume / save / restore / extras all live in vodCtl — the
+  // VodPlaybackController near the top of this file.)
 
   async function loadVod(videoId: string, q: string): Promise<void> {
     playerError = ''
@@ -1748,7 +1395,7 @@
     if (attach.ok) {
       playerStatus = 'playing'
       if (channelJoined) pipController.setStream({ url: proxyUrl, channel: channelJoined, quality: q })
-      restoreVodPosition(videoId)
+      vodCtl.restore(videoId)
       return
     }
     playerStatus = 'error'
@@ -1766,13 +1413,11 @@
       viewCount: video.viewCount,
       createdAt: video.createdAt,
     }
-    messages = []
-    roomState = {}
     stopChatOnly()
     userPaused = false
     if (videoScrollEl) videoScrollEl.scrollTop = 0
     await loadVod(video.id, quality)
-    void loadVodExtras(video.id)
+    void vodCtl.loadExtras(video.id)
     // Begin replay chat at the saved resume offset (or 0). restoreVodPosition
     // (inside loadVod) seeks the video to the same spot BEFORE this point, so
     // its `seeking` event is ignored by an un-started controller and chat/video
@@ -1784,7 +1429,7 @@
   async function playClip(clip: ChannelClip): Promise<void> {
     if (!channelJoined) return
     vodChat.stop()
-    clearVodExtras()
+    vodCtl.clearExtras()
     playback = {
       kind: 'clip',
       slug: clip.slug,
@@ -1793,8 +1438,6 @@
       viewCount: clip.viewCount,
       createdAt: clip.createdAt,
     }
-    messages = []
-    roomState = {}
     stopChatOnly()
     userPaused = false
     if (videoScrollEl) videoScrollEl.scrollTop = 0
@@ -1839,7 +1482,7 @@
   function backToLive(): void {
     const ch = channelJoined
     vodChat.stop()
-    clearVodExtras()
+    vodCtl.clearExtras()
     playback = { kind: 'live' }
     if (ch) selectChannel(ch)
   }
@@ -1859,88 +1502,12 @@
 
   // --------------------------------------------------------------------------
 
-  // Whether a stored USERNOTICE line renders under the four granular notice
-  // toggles (subs+resubs / gifts / raids / announcements; unknown msg-ids show
-  // when any of the four is on).
-  function noticeShown(msg: ChatMessage): boolean {
-    return isNoticeVisible(usernoticeCategory(msg.noticeMsgId ?? ''), {
-      sub: settings.chatNoticesSub,
-      gift: settings.chatNoticesGift,
-      raid: settings.chatNoticesRaid,
-      announcement: settings.chatNoticesAnnouncement,
-    })
-  }
-
   // Chat modes currently in effect for the joined channel (Toggle B), as
   // ordered label keys — shared logic with MultiView's pill (activeRoomModes
-  // in irc.ts is the single source of the per-mode activation rules).
+  // in irc.ts is the single source of the per-mode activation rules). The
+  // message list itself, its sticky-bottom discipline and the notice/mute/
+  // moderation/bits render gating live in the shared ChatPane component.
   const chatModeKeys = $derived(activeRoomModes(roomState))
-
-  let stickyBottom = $state(true)
-  let erroredBadges = $state<Set<string>>(new Set())
-  function markBadgeErrored(url: string): void {
-    if (erroredBadges.has(url)) return
-    const next = new Set(erroredBadges)
-    next.add(url)
-    erroredBadges = next
-  }
-  let erroredEmotes = $state<Set<string>>(new Set())
-  function markEmoteErrored(url: string): void {
-    if (erroredEmotes.has(url)) return
-    const next = new Set(erroredEmotes)
-    next.add(url)
-    erroredEmotes = next
-  }
-  let newMessageCount = $state(0)
-  let scrollBaseline = 0
-  const SCROLL_BOTTOM_THRESHOLD = 32
-
-  function onChatScroll(): void {
-    const el = chatEl
-    if (!el) return
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    const wasSticky = stickyBottom
-    stickyBottom = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD
-    if (stickyBottom) {
-      newMessageCount = 0
-      scrollBaseline = chatMessages.length
-    } else if (wasSticky && !stickyBottom) {
-      scrollBaseline = chatMessages.length
-      newMessageCount = 0
-    }
-  }
-
-  function jumpToPresent(): void {
-    if (chatEl) {
-      chatEl.scrollTop = chatEl.scrollHeight
-      stickyBottom = true
-      newMessageCount = 0
-      scrollBaseline = chatMessages.length
-    }
-  }
-
-  $effect(() => {
-    const len = chatMessages.length
-    void tick().then(() => {
-      if (!chatEl) return
-      if (stickyBottom) {
-        chatEl.scrollTop = chatEl.scrollHeight
-        scrollBaseline = len
-      } else {
-        const added = len - scrollBaseline
-        if (added > 0) newMessageCount += added
-        scrollBaseline = len
-      }
-    })
-  })
-
-  $effect(() => {
-    if (status === 'idle') {
-      stickyBottom = true
-      newMessageCount = 0
-      scrollBaseline = 0
-    }
-  })
 
   $effect(() => {
     void settings.sortMode
@@ -2081,42 +1648,19 @@
   })
   const activePin = $derived(settings.chatPinned ? pinnedChat.visiblePin : null)
   // Whether the chat-mode banner (Toggle B) renders at the bottom of the chat
-  // panel. Also drives the .chat--modes class, which lifts the floating
-  // jump pill above the banner so it stays uncovered — the open-on-Twitch
-  // pill stays on the banner's row, beside it. (The banner is a fixed-height
-  // one-liner — ChatModesPill marquees overflowing labels instead of
-  // wrapping — so a constant lift is correct.)
+  // panel. Also lifts the shared ChatPane's jump pill above the banner so it
+  // stays uncovered — the open-on-Twitch pill stays on the banner's row,
+  // beside it. (The banner is a fixed-height one-liner — ChatModesPill
+  // marquees overflowing labels instead of wrapping — so a constant lift is
+  // correct.)
   const chatModesShown = $derived(
     settings.chatRoomstate && !!channelJoined && chatModeKeys.length > 0,
   )
 
-  // Per-channel custom badge override: setID -> { version -> image uuid }.
-  // Applied at RENDER time (see the badge <img> block) ON TOP of the global
-  // map, so a channel's custom subscriber/founder art overrides the global
-  // default. Reactive: when the fetch lands, every buffered message (including
-  // ones parsed before it completed) re-renders with the override. Cleared to
-  // null on every channel change so the previous channel's custom badges can
-  // never bleed into the new one (worse than the global default).
-  let channelBadgeOverride = $state<Record<string, Record<string, string>> | null>(null)
-  let channelBadgeToken = 0
-  $effect(() => {
-    const channel = channelJoined
-    // Clear immediately on any channel change (or leaving a channel).
-    channelBadgeOverride = null
-    if (!channel) return
-    const myToken = ++channelBadgeToken
-    void (async () => {
-      try {
-        const override = await fetchChannelBadges(channel)
-        if (myToken !== channelBadgeToken) return // superseded by a later join
-        channelBadgeOverride = override
-      } catch {
-        /* leave null -> global default badges */
-      }
-    })()
+  onMount(() => () => {
+    disconnect()
+    vodCtl.dispose()
   })
-
-  onMount(() => () => disconnect())
 
   // Track maximize + fullscreen state so the title-bar control shows
   // restore vs. maximize and the player control shows exit vs. enter
@@ -2592,7 +2136,7 @@
         ontimeupdate={onVideoTimeUpdate}
         onseeking={onVideoSeeking}
       ></video>
-        <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { userPaused = !p }} oncontrolsvisible={(v) => { controlsVisible = v }} {activeStatus} isFullscreen={isFullscreen} ontogglefullscreen={toggleVideoFullscreen} chapters={vodChapters} mutedSpans={vodMutedSpans} storyboard={vodStoryboard} />
+        <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { userPaused = !p }} oncontrolsvisible={(v) => { controlsVisible = v }} {activeStatus} isFullscreen={isFullscreen} ontogglefullscreen={toggleVideoFullscreen} chapters={vodCtl.chapters} mutedSpans={vodCtl.mutedSpans} storyboard={vodCtl.storyboard} />
         {#if showPlayerOverlay}
           <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
             {#if isPlayerBusy}
@@ -2617,11 +2161,11 @@
             <button type="button" class="overlay-action" onclick={resumeStream}>{t('player_resumeStream')}</button>
           </div>
         {/if}
-        {#if resumeBar}
+        {#if vodCtl.resumeBar}
           <div class="resume-bar" role="status">
-            <span class="resume-bar-text">{t('player_resumedFrom', { time: formatVodTime(resumeBar.position) })}</span>
-            <button type="button" class="resume-bar-btn" onclick={restartVod}>{t('player_restart')}</button>
-            <button type="button" class="resume-bar-close" onclick={dismissResumeBar} aria-label={t('player_dismissResume')}>×</button>
+            <span class="resume-bar-text">{t('player_resumedFrom', { time: formatVodTime(vodCtl.resumeBar.position) })}</span>
+            <button type="button" class="resume-bar-btn" onclick={() => vodCtl.restart(currentVodId())}>{t('player_restart')}</button>
+            <button type="button" class="resume-bar-close" onclick={() => vodCtl.dismissResumeBar()} aria-label={t('player_dismissResume')}>×</button>
           </div>
         {/if}
       {:else}
@@ -2801,7 +2345,7 @@
       aria-valuemax={CHAT_SIZE_MAX}
       tabindex="0"
     ></div>
-    <main class="chat" class:chat--hidden={!settings.chatVisible} class:chat--modes={chatModesShown} style:--chat-size={`${chatSize}px`}>
+    <main class="chat" class:chat--hidden={!settings.chatVisible} style:--chat-size={`${chatSize}px`}>
       {#if activePin}
         <PinnedMessage
           pin={activePin}
@@ -2810,98 +2354,16 @@
           ondismiss={(pinId) => pinnedChat.dismiss(pinId)}
         />
       {/if}
-      <div class="chat-scroll" bind:this={chatEl} onscroll={onChatScroll}>
-        {#if chatMessages.length === 0}
-          <p class="placeholder">
-            {#if playback.kind === 'vod'}
-              {vodChat.failed ? t('vod_chatUnavailable') : t('vod_chatLoading')}
-            {:else if status === 'connected'}
-              {t('chat_waitingMessages')}
-            {:else}
-              {t('chat_joinToSee')}
-            {/if}
-          </p>
-        {:else}
-          {#each chatMessages as msg (msg.id)}
-          {#if msg.kind === 'notice'}
-            {#if noticeShown(msg) && !settings.isMuted(msg.login)}
-              <div class="message message--notice">
-                {#if settings.chatTimestamps}
-                  <span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span>
-                {/if}
-                <span class="notice-system">{msg.systemText}</span>
-                {#if msg.parts.length > 0}
-                  <span class="notice-msg">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img
-                    class="emote"
-                    class:emote--twitch={part.provider === 'twitch'}
-                    src={part.url}
-                    alt={part.name}
-                    title={part.name}
-                    loading="lazy"
-                    onerror={() => markEmoteErrored(part.url)}
-                  />{/if}{/each}</span>
-                {/if}
-              </div>
-            {/if}
-          {:else if !settings.isMuted(msg.login)}
-          <div
-            class="message{isMessageStricken(settings.chatModeration, msg.deleted) ? ' ' + DELETED_MESSAGE_CLASS : ''}"
-            class:action={msg.isAction}
-            class:emote-only={msg.emoteOnly && !msg.isAction}
-            title={isMessageStricken(settings.chatModeration, msg.deleted) ? (msg.deletedReason ?? '') : ''}
-          >
-            {#if settings.chatTimestamps}
-              <span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span>
-            {/if}
-            {#each msg.badges as b (b.id + b.version)}
-              {@const effUrl = resolveBadgeImageUrl(b, channelBadgeOverride)}
-              {#if effUrl && !erroredBadges.has(effUrl)}
-                <img
-                  class="badge badge--{b.id}"
-                  src={effUrl}
-                  alt={b.label}
-                  use:tooltip={b.label}
-                  loading="lazy"
-                  onerror={() => markBadgeErrored(effUrl!)}
-                />
-              {/if}
-            {/each}
-            <span class="username" style="color: {msg.color}">{msg.username}</span>{#if !msg.isAction}<span class="username-sep">:</span>{/if}
-            {#if msg.isAction}<span class="action-mark"> </span>{/if}
-            <span class="text">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img
-              class="emote"
-              class:emote--twitch={part.provider === 'twitch'}
-              src={part.url}
-              alt={part.name}
-              title={part.name}
-              loading="lazy"
-              onerror={() => markEmoteErrored(part.url)}
-            />{/if}{/each}</span>
-            {#if settings.chatBits && msg.bits}
-              <span class="bits-badge" use:tooltip={t('mod_bits', { n: msg.bits })}>
-                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-                  <path d="M8 1l5 5-5 9-5-9z" fill="currentColor"/>
-                  <path d="M3 6h10M8 1l3 5-3 9-3-9z" fill="none" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round"/>
-                </svg>
-                {formatCompact(msg.bits)}
-              </span>
-            {/if}
-          </div>
-          {/if}
-          {/each}
-        {/if}
-      </div>
-      {#if !stickyBottom && chatMessages.length > 0}
-        <button type="button" class="float-pill jump-end" onclick={jumpToPresent} title={t('chat_jumpToLatest')}>
-          <svg class="float-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M8 3v9M4 8l4 4 4-4"/>
-          </svg>
-          {t('chat_backToBottom')}
-          {#if newMessageCount > 0}
-            <span class="float-count">{newMessageCount}</span>
-          {/if}
-        </button>
-      {/if}
+      <!-- The shared chat renderer (message loop, sticky-bottom discipline,
+           errored-art tracking, jump pill) — the SAME component multi-view's
+           chat pane uses. Entries carry the per-channel badge override. -->
+      <ChatPane
+        entries={chatEntries}
+        placeholder={chatPlaceholder}
+        onlink={openChatLink}
+        resetKey={chatResetKey}
+        liftJump={chatModesShown}
+      />
       {#if channelJoined}
         <button
           type="button"
@@ -2951,73 +2413,11 @@
   <div class="zoom-probe" bind:this={probeEl} aria-hidden="true"></div>
 
   {#if aboutOpen}
-    <div class="about-backdrop" onclick={closeAbout} role="presentation"></div>
-    <div
-      class="about-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="about-title"
-    >
-      <button
-        type="button"
-        class="about-close"
-        onclick={closeAbout}
-        aria-label={t('close')}
-      >
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-      </button>
-      <div id="about-title" class="about-modal-name">Kappastream</div>
-      <div class="about-modal-version">v{__APP_VERSION__}</div>
-      <p class="about-modal-tagline">{t('about_tagline')}</p>
-      <p class="about-modal-body">{t('about_body')}</p>
-      <p class="about-modal-body">{t('about_streamlink')}</p>
-      <p class="about-modal-tagline about-modal-tagline--last">Built to watch, not to be watched.</p>
-      <!-- On-demand changelog: swaps the About modal for the version-log
-           overlay (the same log the post-update what's-new screen shows —
-           every recorded release, scrollable). About closes so only one
-           modal is up. -->
-      <button type="button" class="about-changelog-btn" onclick={openChangelogFromAbout}>
-        {t('about_changelog')}
-      </button>
-      <div class="about-modal-donate">
-        <span class="about-modal-donate-label">{t('donate')}</span>
-        <div class="about-modal-donate-addr-group">
-          <span
-            class="about-modal-btc-symbol"
-            aria-label={t('about_bitcoin')}
-            title={t('about_bitcoin')}>₿</span
-          >
-          <code class="about-modal-donate-addr"
-            >bc1qj9ge9ug4pp5mr3g0lepuyyjh4j6sazhg2hgcrv</code
-          >
-        </div>
-      </div>
-    </div>
+    <AboutModal onclose={closeAbout} onchangelog={openChangelogFromAbout} />
   {/if}
 
   {#if shortcutsHelpOpen}
-    <div class="about-backdrop" onclick={() => (shortcutsHelpOpen = false)} role="presentation"></div>
-    <div class="about-modal shortcuts-modal" role="dialog" aria-label={t('shortcuts_title')}>
-      <button
-        type="button"
-        class="about-close"
-        onclick={() => (shortcutsHelpOpen = false)}
-        aria-label={t('shortcuts_close')}
-      >×</button>
-      <h2 id="shortcuts-title" class="shortcuts-title">{t('shortcuts_title')}</h2>
-      <ul class="shortcuts-list" aria-labelledby="shortcuts-title">
-        <li><span class="shortcut-keys"><kbd>Space</kbd> <span class="shortcut-or">/</span> <kbd>K</kbd></span><span class="shortcut-desc">{t('shortcuts_playPause')}</span></li>
-        <li><span class="shortcut-keys"><kbd>M</kbd></span><span class="shortcut-desc">{t('shortcuts_muteUnmute')}</span></li>
-        <li><span class="shortcut-keys"><kbd>F</kbd></span><span class="shortcut-desc">{t('shortcuts_fullscreen')}</span></li>
-        <li><span class="shortcut-keys"><kbd>T</kbd></span><span class="shortcut-desc">{t('shortcuts_theater')}</span></li>
-        <li><span class="shortcut-keys"><kbd>←</kbd> <span class="shortcut-or">/</span> <kbd>→</kbd></span><span class="shortcut-desc">{t('shortcuts_seek')}</span></li>
-        <li><span class="shortcut-keys"><kbd>↑</kbd> <span class="shortcut-or">/</span> <kbd>↓</kbd></span><span class="shortcut-desc">{t('shortcuts_volume')}</span></li>
-        <li><span class="shortcut-keys"><kbd>?</kbd></span><span class="shortcut-desc">{t('shortcuts_showHelp')}</span></li>
-      </ul>
-      <p class="shortcuts-note">{t('shortcuts_note')}</p>
-    </div>
+    <ShortcutsHelp onclose={() => (shortcutsHelpOpen = false)} />
   {/if}
 
   {#if browseOpen}
@@ -3176,19 +2576,6 @@
   .rz-sw { bottom: 0; left: 0; width: 11px; height: 11px; cursor: nesw-resize; }
   .rz-se { bottom: 0; right: 0; width: 11px; height: 11px; cursor: nwse-resize; }
 
-  .tauri-diag {
-    display: inline-block;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    border: 1px solid var(--border);
-    font-variant-numeric: tabular-nums;
-  }
-
   .bar-center {
     display: flex;
     justify-content: center;
@@ -3315,200 +2702,6 @@
   .logo-btn:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
-  }
-
-  .about-backdrop {
-    position: fixed;
-    inset: 0;
-    background: var(--bg-overlay-strong);
-    z-index: 1000;
-  }
-  .about-modal {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 1001;
-    width: calc(min(480px, calc(100vw - 32px)) / var(--ui-zoom, 1));
-    max-height: calc((100vh - 64px) / var(--ui-zoom, 1));
-    overflow: auto;
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: var(--shadow-menu);
-    padding: 28px 24px 24px;
-    color: var(--text-primary);
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-  .about-close {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 26px;
-    height: 26px;
-    border-radius: 4px;
-    background: transparent;
-    border: 1px solid transparent;
-    color: var(--text-secondary);
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-  }
-  .about-close:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-
-  /* Keyboard-shortcuts help overlay (?). Reuses .about-modal chrome. */
-  .shortcuts-modal {
-    max-width: 420px;
-    width: calc(min(420px, calc(100vw - 32px)) / var(--ui-zoom, 1));
-  }
-  .shortcuts-title {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 700;
-  }
-  .shortcuts-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .shortcuts-list li {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-  }
-  .shortcut-keys {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    min-width: 96px;
-  }
-  .shortcut-or {
-    color: var(--text-dim);
-    font-size: 11px;
-  }
-  .shortcut-desc {
-    flex: 1 1 auto;
-    text-align: right;
-    color: var(--text-secondary);
-    font-size: 13px;
-  }
-  .shortcuts-list kbd {
-    display: inline-block;
-    padding: 2px 7px;
-    border: 1px solid var(--border);
-    border-bottom-width: 2px;
-    border-radius: 4px;
-    background: var(--bg-input);
-    color: var(--text-primary);
-    font-family: 'Menlo', 'Consolas', monospace;
-    font-size: 12px;
-    line-height: 1.4;
-    min-width: 16px;
-    text-align: center;
-  }
-  .shortcuts-note {
-    margin: 4px 0 0;
-    font-size: 12px;
-    color: var(--text-dim);
-  }
-  .about-modal-name {
-    font-size: 20px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-  }
-  .about-modal-version {
-    font-size: 12px;
-    color: var(--text-dim);
-    margin-top: -10px;
-  }
-  .about-modal-tagline {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
-    line-height: 1.4;
-    margin: 0;
-  }
-  .about-modal-tagline--last {
-    font-style: italic;
-    color: var(--accent);
-  }
-  /* Changelog button (opens the version-log overlay). Text-sized and pinned
-     to the modal's LEFT edge (align-self overrides the flex column's stretch,
-     which would make it a full-width row). */
-  .about-changelog-btn {
-    align-self: flex-start;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-    font-family: inherit;
-    padding: 3px 10px;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .about-changelog-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--accent);
-    color: var(--text-primary);
-  }
-  .about-modal-body {
-    font-size: 13px;
-    color: var(--text-secondary);
-    line-height: 1.55;
-    margin: 0;
-  }
-  .about-modal-donate {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding-top: 12px;
-    margin-top: 2px;
-    border-top: 1px solid var(--border);
-    font-size: 12px;
-  }
-  .about-modal-donate-label {
-    flex: 0 0 auto;
-    color: var(--text-dim);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-  .about-modal-donate-addr {
-    font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Segoe UI Mono', Consolas, monospace;
-    font-size: 11px;
-    color: var(--text-secondary);
-    word-break: break-all;
-    user-select: all;
-  }
-  .about-modal-donate-addr-group {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 3px;
-    min-width: 0;
-  }
-  .about-modal-btc-symbol {
-    flex: 0 0 auto;
-    color: #f7931a;
-    font-size: 14px;
-    font-weight: 700;
-    line-height: 1;
-    user-select: none;
   }
 
   .logo {
@@ -4207,14 +3400,9 @@
     margin: -4px 0;
   }
 
-  .chat-scroll {
-    flex: 1 1 auto;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 8px 10px;
-    min-height: 0;
-  }
-
+  /* The message list / jump pill / placeholder styles moved into the shared
+     ChatPane component (chat rendering was deduplicated there). .float-pill
+     remains for the open-on-Twitch pill at the chat's bottom-right. */
   .float-pill {
     position: absolute;
     bottom: 10px;
@@ -4231,38 +3419,11 @@
     color: var(--text-primary);
     font-size: 11px;
     font-weight: 600;
+    font-family: inherit;
     cursor: pointer;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
     transition: color 150ms, background 150ms, border-color 150ms, transform 150ms;
     white-space: nowrap;
-  }
-
-  .jump-end {
-    left: 50%;
-    transform: translateX(-50%);
-    color: var(--text-secondary);
-  }
-
-  .jump-end:hover {
-    color: var(--accent);
-    background: var(--bg-hover);
-    border-color: var(--accent);
-    transform: translateX(-50%) translateY(-1px);
-  }
-
-  .float-count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: 8px;
-    background: var(--accent);
-    color: #fff;
-    font-size: 10px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
   }
 
   .chat-link {
@@ -4281,15 +3442,6 @@
     background: var(--bg-hover);
     border-color: var(--accent);
     transform: translateY(-1px);
-  }
-
-  .message-time {
-    color: var(--text-dim);
-    font-size: 11px;
-    font-weight: 500;
-    font-variant-numeric: tabular-nums;
-    margin-right: 4px;
-    flex: 0 0 auto;
   }
 
   .chat--hidden {
@@ -4346,144 +3498,9 @@
     .notif-toggle { padding: 4px 6px; }
   }
 
-  .placeholder {
-    text-align: center;
-    color: var(--text-dim);
-    margin-top: 40px;
-    font-size: 13px;
-  }
-
-  .message {
-    margin: 1px 0;
-    padding: 2px 0;
-    line-height: 1.4;
-    word-wrap: break-word;
-    font-size: 13px;
-  }
-
-  .username {
-    font-weight: 700;
-    margin-right: 4px;
-  }
-
-  .username-sep {
-    color: var(--text-primary);
-    margin-right: 4px;
-  }
-
-  .badge {
-    display: inline-block;
-    width: 16px;
-    height: 16px;
-    margin-right: 3px;
-    vertical-align: -3px;
-    object-fit: contain;
-  }
-
-  .action {
-    color: var(--accent);
-  }
-
-  .action-mark {
-    color: var(--accent);
-    margin-right: 4px;
-  }
-
-  .text {
-    color: var(--text-primary);
-  }
-
-  /* Fallback span rendered in place of an emote <img> whose URL failed to
-     load — mirrors the erroredBadges pattern so a broken image is
-     distinguishable from a lookup miss (the alt text would otherwise look
-     identical to plain chat text). */
-  .emote-fallback {
-    color: var(--text-primary);
-  }
-
-  /* ---- Tier 2 chat features (Toggle B/C/D + USERNOTICE) ----
-     All use existing theme tokens only — no hardcoded colours, so they adapt
-     to all 34 themes. These rules are inert when the toggles are off (the
-     elements are not rendered at all). The chat-mode pill itself (Toggle B)
-     lives in ChatModesPill.svelte with its own scoped styles. */
-
-  /* The centered jump pill is lifted clear above the (fixed-height,
-     one-line) chat-modes pill; the open-on-Twitch pill shares the modes
-     pill's row at the right edge instead of stacking above it. */
-  .chat--modes .jump-end {
-    bottom: 48px;
-  }
-
-  /* Deleted / timed-out message presentation (Toggle C). This single rule is
-     the source of truth for how a stricken message looks — the class is added
-     via isMessageStricken() + DELETED_MESSAGE_CLASS. Tradeoff: strikethrough
-     keeps the moderator-removed text VISIBLE. A future collapsed-placeholder
-     presentation can change only this rule + the predicate. */
-  .message--deleted .text,
-  .message--deleted .username {
-    text-decoration: line-through;
-    opacity: 0.6;
-  }
-
-  /* Bits / cheer indicator (Toggle D). Amount only — animated cheermote
-     images are out of scope. */
-  .bits-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    margin-left: 6px;
-    padding: 0 4px;
-    border-radius: 3px;
-    background: var(--bg-hover);
-    color: var(--accent);
-    font-size: 11px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    vertical-align: 1px;
-  }
-
-  .bits-badge svg {
-    flex: 0 0 auto;
-  }
-
-  /* USERNOTICE line (Toggle A) — subs, raids, announcements, gifts. Visually
-     distinct from normal chat: a tinted, italic, bordered line. */
-  .message--notice {
-    margin: 3px 0;
-    padding: 3px 6px;
-    border-left: 3px solid var(--accent);
-    background: var(--bg-hover);
-    border-radius: 3px;
-    font-size: 12px;
-  }
-
-  .notice-system {
-    display: block;
-    color: var(--accent);
-    font-weight: 600;
-    font-style: italic;
-  }
-
-  .notice-msg {
-    display: block;
-    margin-top: 2px;
-    color: var(--text-secondary);
-  }
-
-  .chat::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  .chat::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .chat::-webkit-scrollbar-thumb {
-    background: var(--bg-hover);
-    border-radius: 3px;
-  }
-
-  .chat::-webkit-scrollbar-thumb:hover {
-    background: var(--track);
-  }
+  /* All message-rendering rules (.message/.message-time/.username/.badge/
+     .emote-fallback/.message--deleted/.bits-badge/.message--notice/.notice-*)
+     moved into the shared ChatPane component together with the message loop.
+     The Tier-2 chat toggles still gate rendering at ChatPane render time; the
+     chat-mode pill (Toggle B) lives in ChatModesPill.svelte. */
 </style>

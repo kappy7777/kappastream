@@ -3,8 +3,8 @@
   // pane with ONE persistent IRC connection per tile (scrollback survives tab
   // switches), and a status bar showing every open stream with the
   // audio-authority tile most prominent. Rendered INSTEAD of App.svelte's
-  // single-stream `.main` when multi-view is on; when off, App.svelte's original
-  // markup renders untouched (byte-identical baseline).
+  // single-stream `.main` when multi-view is on. Both views render chat
+  // through the SAME shared ChatPane component.
   //
   // Focus is split (see tile-store.svelte): the AUDIO AUTHORITY (which tile has
   // sound; moved by tile clicks) and the ACTIVE CHAT (which chat is displayed;
@@ -17,19 +17,19 @@
   // `settings`, exactly as App.svelte does, so the session always stores every
   // event and toggles apply retroactively.
 
-  import { tick, onDestroy } from 'svelte'
+  import { onDestroy } from 'svelte'
   import { invoke, isTauri } from '@tauri-apps/api/core'
   import { tileStore } from './tile-store.svelte'
   import { ChatSession } from './chat-session.svelte'
   import { settings } from './settings.svelte.ts'
   import Tile from './Tile.svelte'
+  import ChatPane from './ChatPane.svelte'
   import PinnedMessage from './PinnedMessage.svelte'
   import { pinnedChat } from './pinned-chat.svelte'
-  import LinkifiedText from './LinkifiedText.svelte'
-  import { resolveBadgeImageUrl, isMessageStricken, usernoticeCategory, isNoticeVisible, DELETED_MESSAGE_CLASS, activeRoomModes, type BadgeInfo } from './irc'
+  import { activeRoomModes } from './irc'
   import ChatModesPill from './ChatModesPill.svelte'
   import { singleChatEntries, mergedChatEntries, toggleMergedId, reconcileMergedIds, type ChatEntry, type MergeSource } from './merged-chat'
-  import { formatCompact, formatChatTime } from './format'
+  import { formatCompact } from './format'
   import { tooltip } from './tooltip.ts'
   import { t } from './i18n/index.svelte'
 
@@ -191,50 +191,12 @@
   }
   const count = $derived(tileStore.count)
 
-  // ---- chat scroll / sticky-bottom (mirrors App.svelte) ----
-  let chatEl = $state<HTMLElement | undefined>(undefined)
-  let stickyBottom = $state(true)
-  let newMessageCount = $state(0)
-  let scrollBaseline = 0
-  const SCROLL_BOTTOM_THRESHOLD = 32
-
-  function onChatScroll(): void {
-    const el = chatEl
-    if (!el) return
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    const wasSticky = stickyBottom
-    stickyBottom = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD
-    if (stickyBottom) { newMessageCount = 0; scrollBaseline = chatEntries.length }
-    else if (wasSticky && !stickyBottom) { scrollBaseline = chatEntries.length; newMessageCount = 0 }
-  }
-  function jumpToPresent(): void {
-    const el = chatEl
-    if (el) { el.scrollTop = el.scrollHeight; stickyBottom = true; newMessageCount = 0; scrollBaseline = chatEntries.length }
-  }
-  $effect(() => {
-    const len = chatEntries.length
-    void tick().then(() => {
-      const el = chatEl
-      if (!el) return
-      if (stickyBottom) { el.scrollTop = el.scrollHeight; scrollBaseline = len }
-      else { const added = len - scrollBaseline; if (added > 0) newMessageCount += added; scrollBaseline = len }
-    })
-  })
-  // Reset scroll state when the active chat tab changes or the merged view
-  // is toggled — both swap the whole rendered buffer.
-  $effect(() => {
-    void activeChatId
-    void mergedView
-    stickyBottom = true
-    newMessageCount = 0
-    scrollBaseline = 0
-  })
-
-  // ---- render helpers ----
-  let erroredBadges = $state<Set<string>>(new Set())
-  function markBadgeErrored(url: string): void { const n = new Set(erroredBadges); n.add(url); erroredBadges = n }
-  let erroredEmotes = $state<Set<string>>(new Set())
-  function markEmoteErrored(url: string): void { const n = new Set(erroredEmotes); n.add(url); erroredEmotes = n }
+  // The scroll-following message list itself (loop, sticky-bottom discipline,
+  // errored-art tracking, jump pill) is the SHARED ChatPane component — the
+  // same renderer the single-stream chat uses. The pane resets its follow
+  // state when this key changes: a chat-tab switch or a merged-view toggle
+  // both swap the whole rendered buffer.
+  const chatResetKey = $derived(`${activeChatId ?? 'none'}:${mergedView ? 'merged' : 'single'}`)
 
   // A twitch.tv link clicked in chat or the pinned banner. Multi-view has no
   // player of its own (each tile owns one, and hijacking a tile for a clip
@@ -248,13 +210,10 @@
     })
   }
 
-  // Badge art resolves against the message's OWN session override — in the
-  // merged view each entry carries its origin session's per-channel art, so
-  // channel A's custom subscriber badge never bleeds onto channel B's
-  // messages.
-  function effectiveBadgeUrl(b: BadgeInfo, override: Record<string, Record<string, string>> | null): string | null {
-    return resolveBadgeImageUrl(b, override)
-  }
+  // Badge art resolves against each entry's OWN session override inside the
+  // shared ChatPane (resolveBadgeImageUrl(b, e.override)) — in the merged view
+  // each entry carries its origin session's per-channel art, so channel A's
+  // custom subscriber badge never bleeds onto channel B's messages.
 
   // The merged view needs no per-channel avatar URL state of its own — the
   // tile's polled liveStatus already carries it (fallback initial otherwise).
@@ -662,52 +621,19 @@
       </div>
 
       <div class="mv-chat-body">
-        <div class="mv-chat-scroll" bind:this={chatEl} onscroll={onChatScroll}>
-          {#if chatEntries.length === 0}
-            <p class="mv-placeholder">{placeholderText}</p>
-          {:else}
-            {#each chatEntries as e (e.key)}
-              {@const msg = e.msg}
-              {#if msg.kind === 'notice'}
-                {#if isNoticeVisible(usernoticeCategory(msg.noticeMsgId ?? ''), { sub: settings.chatNoticesSub, gift: settings.chatNoticesGift, raid: settings.chatNoticesRaid, announcement: settings.chatNoticesAnnouncement }) && !settings.isMuted(msg.login)}
-                  <div class="message message--notice">
-                    {#if settings.chatTimestamps}<span class="message-time">{formatChatTime(msg.timestamp)}</span>{/if}
-                    {@render mergeBadge(e)}
-                    <span class="notice-system">{msg.systemText}</span>
-                    {#if msg.parts.length > 0}
-                      <span class="notice-msg">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img class="emote" class:emote--twitch={part.provider === 'twitch'} src={part.url} alt={part.name} title={part.name} loading="lazy" onerror={() => markEmoteErrored(part.url)} />{/if}{/each}</span>
-                    {/if}
-                  </div>
-                {/if}
-              {:else if !settings.isMuted(msg.login)}
-                <div class="message{isMessageStricken(settings.chatModeration, msg.deleted) ? ' ' + DELETED_MESSAGE_CLASS : ''}" class:action={msg.isAction} title={isMessageStricken(settings.chatModeration, msg.deleted) ? (msg.deletedReason ?? '') : ''}>
-                  {#if settings.chatTimestamps}<span class="message-time">{formatChatTime(msg.timestamp)}</span>{/if}
-                  {@render mergeBadge(e)}
-                  {#each msg.badges as b (b.id + b.version)}
-                    {@const effUrl = effectiveBadgeUrl(b, e.override)}
-                    {#if effUrl && !erroredBadges.has(effUrl)}
-                      <img class="badge badge--{b.id}" src={effUrl} alt={b.label} loading="lazy" onerror={() => markBadgeErrored(effUrl!)} />
-                    {/if}
-                  {/each}
-                  <span class="username" style="color: {msg.color}">{msg.username}</span>{#if !msg.isAction}<span class="username-sep">:</span>{/if}
-                  {#if msg.isAction}<span class="action-mark"> </span>{/if}
-                  <span class="text">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img class="emote" class:emote--twitch={part.provider === 'twitch'} src={part.url} alt={part.name} title={part.name} loading="lazy" onerror={() => markEmoteErrored(part.url)} />{/if}{/each}</span>
-                  {#if settings.chatBits && msg.bits}
-                    <span class="bits-badge">{formatCompact(msg.bits)}</span>
-                  {/if}
-                </div>
-              {/if}
-            {/each}
-          {/if}
-        </div>
-        {#if !stickyBottom && chatEntries.length > 0}
-          <button
-            type="button"
-            class="mv-jump"
-            class:mv-jump--lifted={chatModeKeys.length > 0}
-            onclick={jumpToPresent}
-          >{t('chat_backToBottom')}{#if newMessageCount > 0}<span class="mv-jump-count">{newMessageCount}</span>{/if}</button>
-        {/if}
+        <!-- The shared chat renderer (loop + sticky-bottom + jump pill). The
+             attribution snippet renders the merged-view per-message source
+             mark; in the single-session view entries carry no origin and it
+             stays hidden. Padding matches the old mv-chat-scroll. -->
+        <ChatPane
+          entries={chatEntries}
+          placeholder={placeholderText}
+          onlink={openChatLink}
+          resetKey={chatResetKey}
+          liftJump={chatModeKeys.length > 0}
+          padding="6px 8px"
+          attribution={mergeBadge}
+        />
         {#if activePin}
           <PinnedMessage
             pin={activePin}
@@ -1076,47 +1002,8 @@
     display: flex;
     flex-direction: column;
   }
-  .mv-chat-scroll { flex: 1 1 auto; overflow-y: auto; padding: 6px 8px; min-height: 0; }
-  .mv-placeholder { color: var(--text-secondary); padding: 12px; font-size: 12px; }
-  .mv-jump {
-    position: absolute;
-    bottom: 8px;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 1px solid var(--border);
-    background: var(--bg-panel);
-    color: var(--text-primary);
-    padding: 4px 10px;
-    border-radius: 14px;
-    font-size: 12px;
-    font-family: inherit;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-    z-index: 5;
-  }
-  .mv-jump:hover { background: var(--bg-hover); }
-  /* Lifted above the floating chat-mode pill (bottom:10, fixed one-line
-     height — see ChatModesPill.svelte). */
-  .mv-jump--lifted { bottom: 48px; }
-  .mv-jump-count { margin-left: 5px; background: var(--accent); color: #fff; border-radius: 8px; padding: 0 6px; font-size: 11px; }
+  /* The message list / jump pill styles live in the shared ChatPane component
+     (chat rendering was deduplicated there — no local copies to keep in
+     sync). */
 
-  /* ---- chat message rendering (local copies of App.svelte's scoped rules;
-     kept in sync so multi-view chat looks identical to single-view chat). ---- */
-  .mv-chat .message { margin: 1px 0; padding: 2px 0; line-height: 1.4; word-wrap: break-word; font-size: 13px; }
-  .mv-chat .username { font-weight: 700; margin-right: 4px; }
-  .mv-chat .username-sep { color: var(--text-primary); margin-right: 4px; }
-  .mv-chat .text { color: var(--text-primary); }
-  .mv-chat .action { color: var(--accent); }
-  .mv-chat .action-mark { color: var(--accent); margin-right: 4px; }
-  .mv-chat .badge { display: inline-block; width: 16px; height: 16px; margin-right: 3px; vertical-align: -3px; object-fit: contain; }
-  .mv-chat .message-time { color: var(--text-dim); font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; margin-right: 4px; flex: 0 0 auto; }
-  .mv-chat .emote-fallback { color: var(--text-primary); }
-  /* The floating chat-mode pill is the shared ChatModesPill component with
-     its own scoped styles — no local rules to keep in sync. */
-  .mv-chat .message--deleted .text,
-  .mv-chat .message--deleted .username { text-decoration: line-through; opacity: 0.6; }
-  .mv-chat .bits-badge { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; padding: 0 4px; border-radius: 3px; background: var(--bg-hover); color: var(--accent); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; vertical-align: 1px; }
-  .mv-chat .message--notice { margin: 3px 0; padding: 3px 6px; border-left: 3px solid var(--accent); background: var(--bg-hover); border-radius: 3px; font-size: 12px; }
-  .mv-chat .notice-system { display: block; color: var(--accent); font-weight: 600; font-style: italic; }
-  .mv-chat .notice-msg { display: block; margin-top: 2px; color: var(--text-secondary); }
 </style>
