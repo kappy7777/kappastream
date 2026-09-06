@@ -836,6 +836,7 @@
      Same 33px bar height as before the merge button existed (31px content +
      2px border on the row). */
   .mv-chat-tabs-row {
+    position: relative; /* positioning context for the merge picker panel */
     flex: 0 0 auto;
     display: flex;
     border-bottom: 1px solid var(--border);
@@ -850,8 +851,11 @@
   }
   .mv-chat-tabs::-webkit-scrollbar { display: none; }
 
-  /* Merge button + picker. The wrap is the picker's positioning context. */
-  .mv-merge-wrap { position: relative; flex: 0 0 auto; display: inline-flex; }
+  /* Merge button + picker. The TABS ROW is the picker's positioning context
+     (the wrap is only 36px wide — the panel's percentage max-width must
+     resolve against the full pane width so it can never reach past the
+     window's right border). */
+  .mv-merge-wrap { flex: 0 0 auto; display: inline-flex; }
   .mv-merge-btn {
     width: 36px;
     height: 31px;
@@ -871,10 +875,17 @@
   .mv-merge-panel {
     position: absolute;
     top: calc(100% + 4px);
-    left: 4px;
+    /* Horizontally CENTERED on the chat pane (the tabs row is the
+       containing block and spans the pane's full width). Width is capped
+       to the pane minus 16px so the panel keeps ~8px clearance on BOTH
+       sides — the pane can be as narrow as 200px, and an uncapped panel
+       would extend past the window's right border, where the pane's
+       overflow:hidden truncates it. */
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 41;
-    min-width: 200px;
-    max-width: 280px;
+    min-width: min(200px, calc(100% - 16px));
+    max-width: min(280px, calc(100% - 16px));
     background: var(--bg-panel);
     border: 1px solid var(--border);
     border-radius: 6px;
