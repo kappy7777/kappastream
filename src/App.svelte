@@ -2401,7 +2401,14 @@
         aria-label={sidebarMode === 'full' ? t('tb_minimizeFavorites') : sidebarMode === 'icons' ? t('tb_hideFavorites') : t('tb_showFavorites')}
         use:tooltip={sidebarMode === 'full' ? t('tb_minimizeFavorites') : sidebarMode === 'icons' ? t('tb_hideFavorites') : t('tb_showFavorites')}
       >
-        {sidebarMode === 'full' ? '◀' : sidebarMode === 'icons' ? '⏵' : '▶'}
+        <!-- Direction-neutral panel icon (same glyph in every state — the
+             old Unicode triangles '◀'/'⏵'/'▶' had font-metric side bearings
+             that made the button look off-center depending on which way
+             they pointed). Tooltip + aria-label carry the state. -->
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <rect x="2" y="2" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <rect x="3.7" y="3.7" width="3.4" height="8.6" rx="0.7" fill="currentColor"/>
+        </svg>
       </button>
       <button
         type="button"
@@ -3169,9 +3176,10 @@
     border-radius: 4px;
     background: transparent;
     color: var(--text-secondary);
-    font-size: 12px;
     cursor: pointer;
-    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     transition: background 150ms, color 150ms;
   }
 
@@ -3181,12 +3189,18 @@
   }
 
   /* Plain-text "Browse" button — sits right of the sidebar toggle. Matches the
-     surrounding title-bar buttons (transparent, themed, hover lifts) but shows
-     a word instead of an icon. */
+     surrounding title-bar buttons (transparent, themed, hover lifts) but shows a
+     word instead of an icon. The negative margin pulls it 6px closer to the
+     toggle (box gap 8→2px): the toggle's 14px icon sits ~8px inside its 30px
+     box, so at the plain 8px gap the visible text read ~26px from the icon ink
+     while the logo→icon ink gap is ~16px. At a 2px box gap + 6px symmetric
+     padding both visual gaps are ~16px and the text stays centered in the
+     button (and its hover pill). */
   .browse-btn {
     flex: 0 0 auto;
     height: 30px;
-    padding: 0 10px;
+    padding: 0 6px;
+    margin-left: -6px;
     border: none;
     border-radius: 4px;
     background: transparent;
