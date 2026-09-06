@@ -267,6 +267,23 @@
     }
   }
   let sidebarMode = $state(loadSidebarMode())
+  // Auto-minimize: below this viewport width a 'full' sidebar renders in the
+  // normal icons mode instead (the SAME mode the panel button switches to —
+  // hover tooltips, centered avatars, everything). The user's persisted
+  // sidebarMode is NOT overwritten: it is the preferred mode, and the
+  // effective one below derives from it + the window size, so growing the
+  // window restores 'full' by itself. (Replaces the old pure-CSS
+  // @media (max-width: 900px) squeeze in Sidebar.svelte, which rendered a
+  // 50px bar WITHOUT the icons-mode logic — no hover infos.)
+  const SIDEBAR_COMPACT_WIDTH = 900
+  let viewportWidth = $state(window.innerWidth)
+  function onWindowResize(): void {
+    viewportWidth = window.innerWidth
+  }
+  const compactViewport = $derived(viewportWidth < SIDEBAR_COMPACT_WIDTH)
+  const effectiveSidebarMode = $derived(
+    sidebarMode === 'full' && compactViewport ? 'icons' : sidebarMode,
+  )
   let aboutOpen = $state(false)
   // Multi-stream split view. ALWAYS OFF on startup and NEVER persisted
   // (starting in multi-view after a restart would be surprising and would
@@ -802,7 +819,16 @@
 
   function toggleSidebar(): void {
     if (settings.theaterMode) settings.setTheaterMode(false)
-    sidebarMode = sidebarMode === 'full' ? 'icons' : sidebarMode === 'icons' ? 'hidden' : 'full'
+    // Cycle the EFFECTIVE mode: while the window is narrow, 'full' renders as
+    // icons, so the click must step from what the user SEES (icons → hidden;
+    // hidden → 'full', which shows icons again while narrow — as much sidebar
+    // as fits — and the full sidebar once the window grows).
+    sidebarMode =
+      effectiveSidebarMode === 'full'
+        ? 'icons'
+        : effectiveSidebarMode === 'icons'
+          ? 'hidden'
+          : 'full'
   }
 
   $effect(() => {
@@ -2378,9 +2404,9 @@
   )
 </script>
 
-<svelte:window onkeydown={onGlobalKeydown} />
+<svelte:window onkeydown={onGlobalKeydown} onresize={onWindowResize} />
 
-<div class="app" class:app--sidebar-icons={sidebarMode === 'icons'} class:app--sidebar-hidden={sidebarMode === 'hidden'} class:app--fullscreen={isFullscreen}>
+<div class="app" class:app--sidebar-icons={effectiveSidebarMode === 'icons'} class:app--sidebar-hidden={effectiveSidebarMode === 'hidden'} class:app--fullscreen={isFullscreen}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <!-- Double-click on empty title-bar space toggles maximize (mouse-only
        convenience; the dedicated maximize button is the accessible path). -->
@@ -2398,8 +2424,8 @@
         type="button"
         class="sidebar-toggle"
         onclick={toggleSidebar}
-        aria-label={sidebarMode === 'full' ? t('tb_minimizeFavorites') : sidebarMode === 'icons' ? t('tb_hideFavorites') : t('tb_showFavorites')}
-        use:tooltip={sidebarMode === 'full' ? t('tb_minimizeFavorites') : sidebarMode === 'icons' ? t('tb_hideFavorites') : t('tb_showFavorites')}
+        aria-label={effectiveSidebarMode === 'full' ? t('tb_minimizeFavorites') : effectiveSidebarMode === 'icons' ? t('tb_hideFavorites') : t('tb_showFavorites')}
+        use:tooltip={effectiveSidebarMode === 'full' ? t('tb_minimizeFavorites') : effectiveSidebarMode === 'icons' ? t('tb_hideFavorites') : t('tb_showFavorites')}
       >
         <!-- Direction-neutral panel icon (same glyph in every state — the
              old Unicode triangles '◀'/'⏵'/'▶' had font-metric side bearings
@@ -2528,8 +2554,8 @@
   {/if}
 
   <div class="body">
-    {#if !settings.theaterMode && sidebarMode !== 'hidden'}
-      <Sidebar currentChannel={channelJoined} onselect={openChannel} iconsOnly={sidebarMode === 'icons'} {zoomK} />
+    {#if !settings.theaterMode && effectiveSidebarMode !== 'hidden'}
+      <Sidebar currentChannel={channelJoined} onselect={openChannel} iconsOnly={effectiveSidebarMode === 'icons'} {zoomK} />
     {/if}
     {#if multiView}
       <MultiView isWindows={isWindows} chatSize={chatSize} onAuthorityVideo={(el) => { authorityTileVideo = el }} />

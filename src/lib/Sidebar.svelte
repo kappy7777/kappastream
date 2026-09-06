@@ -936,29 +936,4 @@
   .sidebar-list::-webkit-scrollbar-thumb:hover {
     background: var(--track);
   }
-
-  @media (max-width: 900px) {
-    .sidebar:not(.sidebar--icons) {
-      flex: 0 0 200px;
-      width: 200px;
-    }
-  }
-
-  @media (max-width: 900px) {
-    .sidebar:not(.sidebar--icons) {
-      flex: 0 0 50px;
-      width: 50px;
-      overflow: hidden;
-    }
-    .sidebar:not(.sidebar--icons) .sidebar-header,
-    .sidebar:not(.sidebar--icons) .fav-body,
-    .sidebar:not(.sidebar--icons) .fav-meta {
-      display: none;
-    }
-    .sidebar:not(.sidebar--icons) .fav {
-      justify-content: center;
-      padding: 6px 0 6px 0;
-      border-left-width: 3px;
-    }
-  }
 </style>
