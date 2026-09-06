@@ -103,13 +103,25 @@
 
 <style>
   .pin-banner {
-    flex: 0 0 auto;
+    /* Floating card over the chat (same aesthetic as the jump-to-bottom
+       pill): rounded, bordered, translucent blur background, drop shadow.
+       Anchored by the chat pane (App.svelte) / the .mv-chat-body wrapper
+       (MultiView), both position:relative. Content unchanged. */
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    z-index: 5;
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 5px 8px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-panel);
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-overlay-strong);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
     min-width: 0;
   }
 

@@ -104,6 +104,11 @@
     pinnedChat.setTarget(activeSession?.channel ?? null, null)
   })
   const activePin = $derived(settings.chatPinned ? pinnedChat.visiblePin : null)
+  // The room state the floating chat-mode pill renders for (null = hidden);
+  // also lifts the jump button above the pill.
+  const modesRoomState = $derived(
+    activeSession && settings.chatRoomstate && roomStateActive() ? activeSession.roomState : null,
+  )
 
   // Wheel over the tab strip scrolls it horizontally (scrollbar is hidden;
   // without this the strip only scrolls via shift+wheel, so the rightmost
@@ -470,64 +475,71 @@
         {/each}
       </div>
 
-      {#if activePin}
-        <PinnedMessage
-          pin={activePin}
-          thirdParty={activeSession?.thirdParty ?? new Map()}
-          onlink={openChatLink}
-          ondismiss={(pinId) => pinnedChat.dismiss(pinId)}
-        />
-      {/if}
-
-      {#if activeSession && settings.chatRoomstate && roomStateActive()}
-        {@const rs = activeSession.roomState}
-        <div class="chat-modes" role="status">
-          {#if rs.subsOnly}<span class="mode-pill">{t('chat_subsOnly')}</span>{/if}
-          {#if rs.followersOnly !== undefined && rs.followersOnly >= 0}<span class="mode-pill">{rs.followersOnly > 0 ? t('chat_followersOnlyMin', { min: String(rs.followersOnly) }) : t('chat_followersOnly')}</span>{/if}
-          {#if rs.slow !== undefined && rs.slow > 0}<span class="mode-pill">{t('chat_slowSecs', { n: rs.slow })}</span>{/if}
-          {#if rs.emoteOnly}<span class="mode-pill">{t('chat_emoteOnly')}</span>{/if}
-          {#if rs.r9k}<span class="mode-pill">{t('chat_r9k')}</span>{/if}
-        </div>
-      {/if}
-
-      <div class="mv-chat-scroll" bind:this={chatEl} onscroll={onChatScroll}>
-        {#if messages.length === 0}
-          <p class="mv-placeholder">{placeholderText}</p>
-        {:else}
-          {#each messages as msg (msg.id)}
-            {#if msg.kind === 'notice'}
-              {#if settings.chatSubnotices && !settings.isMuted(msg.login)}
-                <div class="message message--notice">
+      <div class="mv-chat-body">
+        <div class="mv-chat-scroll" bind:this={chatEl} onscroll={onChatScroll}>
+          {#if messages.length === 0}
+            <p class="mv-placeholder">{placeholderText}</p>
+          {:else}
+            {#each messages as msg (msg.id)}
+              {#if msg.kind === 'notice'}
+                {#if settings.chatSubnotices && !settings.isMuted(msg.login)}
+                  <div class="message message--notice">
+                    {#if settings.chatTimestamps}<span class="message-time">{formatChatTime(msg.timestamp)}</span>{/if}
+                    <span class="notice-system">{msg.systemText}</span>
+                    {#if msg.parts.length > 0}
+                      <span class="notice-msg">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img class="emote" class:emote--twitch={part.provider === 'twitch'} src={part.url} alt={part.name} title={part.name} loading="lazy" onerror={() => markEmoteErrored(part.url)} />{/if}{/each}</span>
+                    {/if}
+                  </div>
+                {/if}
+              {:else if !settings.isMuted(msg.login)}
+                <div class="message{isMessageStricken(settings.chatModeration, msg.deleted) ? ' ' + DELETED_MESSAGE_CLASS : ''}" class:action={msg.isAction} title={isMessageStricken(settings.chatModeration, msg.deleted) ? (msg.deletedReason ?? '') : ''}>
                   {#if settings.chatTimestamps}<span class="message-time">{formatChatTime(msg.timestamp)}</span>{/if}
-                  <span class="notice-system">{msg.systemText}</span>
-                  {#if msg.parts.length > 0}
-                    <span class="notice-msg">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img class="emote" class:emote--twitch={part.provider === 'twitch'} src={part.url} alt={part.name} title={part.name} loading="lazy" onerror={() => markEmoteErrored(part.url)} />{/if}{/each}</span>
+                  {#each msg.badges as b (b.id + b.version)}
+                    {@const effUrl = effectiveBadgeUrl(b)}
+                    {#if effUrl && !erroredBadges.has(effUrl)}
+                      <img class="badge badge--{b.id}" src={effUrl} alt={b.label} loading="lazy" onerror={() => markBadgeErrored(effUrl!)} />
+                    {/if}
+                  {/each}
+                  <span class="username" style="color: {msg.color}">{msg.username}</span>{#if !msg.isAction}<span class="username-sep">:</span>{/if}
+                  {#if msg.isAction}<span class="action-mark"> </span>{/if}
+                  <span class="text">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img class="emote" class:emote--twitch={part.provider === 'twitch'} src={part.url} alt={part.name} title={part.name} loading="lazy" onerror={() => markEmoteErrored(part.url)} />{/if}{/each}</span>
+                  {#if settings.chatBits && msg.bits}
+                    <span class="bits-badge">{formatCompact(msg.bits)}</span>
                   {/if}
                 </div>
               {/if}
-            {:else if !settings.isMuted(msg.login)}
-              <div class="message{isMessageStricken(settings.chatModeration, msg.deleted) ? ' ' + DELETED_MESSAGE_CLASS : ''}" class:action={msg.isAction} title={isMessageStricken(settings.chatModeration, msg.deleted) ? (msg.deletedReason ?? '') : ''}>
-                {#if settings.chatTimestamps}<span class="message-time">{formatChatTime(msg.timestamp)}</span>{/if}
-                {#each msg.badges as b (b.id + b.version)}
-                  {@const effUrl = effectiveBadgeUrl(b)}
-                  {#if effUrl && !erroredBadges.has(effUrl)}
-                    <img class="badge badge--{b.id}" src={effUrl} alt={b.label} loading="lazy" onerror={() => markBadgeErrored(effUrl!)} />
-                  {/if}
-                {/each}
-                <span class="username" style="color: {msg.color}">{msg.username}</span>{#if !msg.isAction}<span class="username-sep">:</span>{/if}
-                {#if msg.isAction}<span class="action-mark"> </span>{/if}
-                <span class="text">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img class="emote" class:emote--twitch={part.provider === 'twitch'} src={part.url} alt={part.name} title={part.name} loading="lazy" onerror={() => markEmoteErrored(part.url)} />{/if}{/each}</span>
-                {#if settings.chatBits && msg.bits}
-                  <span class="bits-badge">{formatCompact(msg.bits)}</span>
-                {/if}
-              </div>
-            {/if}
-          {/each}
+            {/each}
+          {/if}
+        </div>
+        {#if !stickyBottom && messages.length > 0}
+          <button type="button" class="mv-jump" class:mv-jump--lifted={!!modesRoomState} onclick={jumpToPresent}>{t('chat_backToBottom')}{#if newMessageCount > 0}<span class="mv-jump-count">{newMessageCount}</span>{/if}</button>
+        {/if}
+        {#if activePin}
+          <PinnedMessage
+            pin={activePin}
+            thirdParty={activeSession?.thirdParty ?? new Map()}
+            onlink={openChatLink}
+            ondismiss={(pinId) => pinnedChat.dismiss(pinId)}
+          />
+        {/if}
+        {#if modesRoomState}
+          {@const rs = modesRoomState}
+          <!-- Floating chat-mode pill (mirrors App.svelte): one line, leading
+               info symbol, plain labels — no parenthesized thresholds. -->
+          <div class="chat-modes" role="status">
+            <svg class="chat-modes-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M8 7.4v3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <circle cx="8" cy="4.9" r="0.95" fill="currentColor"/>
+            </svg>
+            {#if rs.subsOnly}<span class="mode-pill">{t('chat_subsOnly')}</span>{/if}
+            {#if rs.followersOnly !== undefined && rs.followersOnly >= 0}<span class="mode-pill">{t('chat_followersOnly')}</span>{/if}
+            {#if rs.slow !== undefined && rs.slow > 0}<span class="mode-pill">{t('chat_slow')}</span>{/if}
+            {#if rs.emoteOnly}<span class="mode-pill">{t('chat_emoteOnly')}</span>{/if}
+            {#if rs.r9k}<span class="mode-pill">{t('chat_r9k')}</span>{/if}
+          </div>
         {/if}
       </div>
-      {#if !stickyBottom && messages.length > 0}
-        <button type="button" class="mv-jump" onclick={jumpToPresent}>{t('chat_backToBottom')}{#if newMessageCount > 0}<span class="mv-jump-count">{newMessageCount}</span>{/if}</button>
-      {/if}
     </main>
   {/if}
 </div>
@@ -740,7 +752,17 @@
   .mv-chat-tab--active { color: var(--accent); border-bottom-color: var(--accent); }
   .mv-chat-tab--live::before { content: '● '; color: var(--live); }
 
-  .mv-chat-scroll { flex: 1 1 auto; overflow-y: auto; padding: 6px 8px; min-height: 0; position: relative; }
+  .mv-chat-body {
+    /* Anchor for the floating overlays (pinned-message card, chat-mode pill,
+       jump button) so they position within the scroll area BELOW the chat
+       tabs, not over them. */
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .mv-chat-scroll { flex: 1 1 auto; overflow-y: auto; padding: 6px 8px; min-height: 0; }
   .mv-placeholder { color: var(--text-secondary); padding: 12px; font-size: 12px; }
   .mv-jump {
     position: absolute;
@@ -759,6 +781,8 @@
     z-index: 5;
   }
   .mv-jump:hover { background: var(--bg-hover); }
+  /* Lifted above the floating chat-mode pill (bottom:10, ~25px tall). */
+  .mv-jump--lifted { bottom: 48px; }
   .mv-jump-count { margin-left: 5px; background: var(--accent); color: #fff; border-radius: 8px; padding: 0 6px; font-size: 11px; }
 
   /* ---- chat message rendering (local copies of App.svelte's scoped rules;
@@ -772,8 +796,30 @@
   .mv-chat .badge { display: inline-block; width: 16px; height: 16px; margin-right: 3px; vertical-align: -3px; object-fit: contain; }
   .mv-chat .message-time { color: var(--text-dim); font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; margin-right: 4px; flex: 0 0 auto; }
   .mv-chat .emote-fallback { color: var(--text-primary); }
-  .mv-chat .chat-modes { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
-  .mv-chat .mode-pill { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 3px; color: var(--accent); background: var(--bg-hover); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  /* Floating chat-mode pill — same aesthetic as the jump button: centered at
+     the bottom edge, rounded, translucent blur background, one line. */
+  .mv-chat .chat-modes {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    max-width: calc(100% - 20px);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-overlay-strong);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+  }
+  .mv-chat .chat-modes-icon { flex: 0 0 auto; display: inline-flex; color: var(--text-dim); }
+  .mv-chat .mode-pill { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .mv-chat .message--deleted .text,
   .mv-chat .message--deleted .username { text-decoration: line-through; opacity: 0.6; }
   .mv-chat .bits-badge { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; padding: 0 4px; border-radius: 3px; background: var(--bg-hover); color: var(--accent); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; vertical-align: 1px; }

@@ -1849,25 +1849,6 @@
 
   // --------------------------------------------------------------------------
 
-  // followers-only is in minutes (-1 off, 0 any follower, N minutes); slow is
-  // in seconds. Compact labels for the chat-mode indicator (Toggle B).
-  function formatFollowersMin(n: number): string {
-    if (n <= 0) return ''
-    if (n < 60) return n + 'm'
-    const h = Math.floor(n / 60)
-    const m = n % 60
-    return m ? `${h}h ${m}m` : `${h}h`
-  }
-
-  function formatSlow(s: number): string {
-    if (s <= 0) return ''
-    if (s >= 60) {
-      const m = Math.round(s / 60)
-      return m + 'm'
-    }
-    return s + 's'
-  }
-
   function roomStateActive(rs: RoomState): boolean {
     return (
       rs.emoteOnly === true ||
@@ -2082,6 +2063,12 @@
     pinnedChat.setTarget(live && userId ? channel : null, userId)
   })
   const activePin = $derived(settings.chatPinned ? pinnedChat.visiblePin : null)
+  // Whether the chat-mode banner (Toggle B) renders at the bottom of the chat
+  // panel. Also drives the .chat--modes class, which lifts the floating
+  // jump/open pills above the banner so they stay uncovered.
+  const chatModesShown = $derived(
+    settings.chatRoomstate && !!channelJoined && roomStateActive(roomState),
+  )
 
   // Per-channel custom badge override: setID -> { version -> image uuid }.
   // Applied at RENDER time (see the badge <img> block) ON TOP of the global
@@ -2794,7 +2781,7 @@
       aria-valuemax={CHAT_SIZE_MAX}
       tabindex="0"
     ></div>
-    <main class="chat" class:chat--hidden={!settings.chatVisible} style:--chat-size={`${chatSize}px`}>
+    <main class="chat" class:chat--hidden={!settings.chatVisible} class:chat--modes={chatModesShown} style:--chat-size={`${chatSize}px`}>
       {#if activePin}
         <PinnedMessage
           pin={activePin}
@@ -2802,25 +2789,6 @@
           onlink={openChatLink}
           ondismiss={(pinId) => pinnedChat.dismiss(pinId)}
         />
-      {/if}
-      {#if settings.chatRoomstate && channelJoined && roomStateActive(roomState)}
-        <div class="chat-modes" role="status" aria-label={t('chat_chatModes')}>
-          {#if roomState.subsOnly}
-            <span class="mode-pill">{t('chat_subsOnly')}</span>
-          {/if}
-          {#if roomState.followersOnly !== undefined && roomState.followersOnly >= 0}
-            <span class="mode-pill">{roomState.followersOnly > 0 ? t('chat_followersOnlyMin', { min: formatFollowersMin(roomState.followersOnly) }) : t('chat_followersOnly')}</span>
-          {/if}
-          {#if roomState.slow !== undefined && roomState.slow > 0}
-            <span class="mode-pill">{t('chat_slowSecs', { n: formatSlow(roomState.slow) })}</span>
-          {/if}
-          {#if roomState.emoteOnly}
-            <span class="mode-pill">{t('chat_emoteOnly')}</span>
-          {/if}
-          {#if roomState.r9k}
-            <span class="mode-pill">{t('chat_r9k')}</span>
-          {/if}
-        </div>
       {/if}
       <div class="chat-scroll" bind:this={chatEl} onscroll={onChatScroll}>
         {#if chatMessages.length === 0}
@@ -2926,6 +2894,35 @@
             <path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7zM19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7z" fill="currentColor"/>
           </svg>
         </button>
+      {/if}
+      {#if chatModesShown}
+        <!-- Chat-mode banner (Toggle B) pinned to the BOTTOM of the chat panel:
+             one non-wrapping line (modes never stack), a leading info symbol,
+             and no parenthesized thresholds — twitch.tv shows plain labels. -->
+        <div class="chat-modes" role="status" aria-label={t('chat_chatModes')}>
+          <span class="chat-modes-icon" use:tooltip={t('chat_chatModes')}>
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M8 7.4v3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <circle cx="8" cy="4.9" r="0.95" fill="currentColor"/>
+            </svg>
+          </span>
+          {#if roomState.subsOnly}
+            <span class="mode-pill">{t('chat_subsOnly')}</span>
+          {/if}
+          {#if roomState.followersOnly !== undefined && roomState.followersOnly >= 0}
+            <span class="mode-pill">{t('chat_followersOnly')}</span>
+          {/if}
+          {#if roomState.slow !== undefined && roomState.slow > 0}
+            <span class="mode-pill">{t('chat_slow')}</span>
+          {/if}
+          {#if roomState.emoteOnly}
+            <span class="mode-pill">{t('chat_emoteOnly')}</span>
+          {/if}
+          {#if roomState.r9k}
+            <span class="mode-pill">{t('chat_r9k')}</span>
+          {/if}
+        </div>
       {/if}
     </main>
     {/if}
@@ -4384,25 +4381,52 @@
 
   /* Chat-mode indicator (Toggle B). Compact bar pinned above the chat scroll. */
   .chat-modes {
+    /* Floating pill over the chat (mirrors the jump-to-bottom button):
+       centered at the bottom edge, rounded, translucent blur background.
+       One non-wrapping line — multiple active modes (slow + followers-only
+       etc.) share the single row; overflow clips instead of wrapping. */
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    align-items: center;
     gap: 4px;
-    padding: 4px 8px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-panel);
+    padding: 4px 10px;
+    max-width: calc(100% - 20px);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-overlay-strong);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
   }
 
+  .chat-modes-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    color: var(--text-dim);
+  }
+
+  /* The floating jump/open pills anchor to the chat panel's bottom edge —
+     lift them clear above the modes pill (bottom:10 + ~30px height + gap). */
+  .chat--modes .float-pill {
+    bottom: 48px;
+  }
+
+  /* Plain text labels — no per-mode chip background/border; the floating
+     Gesamtbox (the pill itself) provides the only background. */
   .mode-pill {
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    padding: 2px 6px;
-    border-radius: 3px;
     color: var(--accent);
-    background: var(--bg-hover);
-    border: 1px solid var(--border);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   /* Deleted / timed-out message presentation (Toggle C). This single rule is
