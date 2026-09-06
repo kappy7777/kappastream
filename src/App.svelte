@@ -2078,7 +2078,8 @@
   const activePin = $derived(settings.chatPinned ? pinnedChat.visiblePin : null)
   // Whether the chat-mode banner (Toggle B) renders at the bottom of the chat
   // panel. Also drives the .chat--modes class, which lifts the floating
-  // jump/open pills above the banner so they stay uncovered.
+  // jump pill above the banner so it stays uncovered — the open-on-Twitch
+  // pill stays on the banner's row, beside it.
   const chatModesShown = $derived(
     settings.chatRoomstate && !!channelJoined && roomStateActive(roomState),
   )
@@ -4255,7 +4256,9 @@
 
   .chat-link {
     right: 10px;
-    padding: 6px;
+    /* 4px vertical padding + 13px icon ≈ the .chat-modes pill's height, so
+       the two sit flush on the same row (both anchored at bottom: 10px). */
+    padding: 4px 6px;
   }
 
   .chat-link-icon {
@@ -4408,7 +4411,10 @@
     align-items: center;
     gap: 4px;
     padding: 4px 10px;
-    max-width: calc(100% - 20px);
+    /* Keep clear of the open-on-Twitch pill that shares this row at the right
+       edge (~37px zone incl. its offset): at max width the pill's right edge
+       stays 45px from the panel edge. */
+    max-width: calc(100% - 90px);
     border: 1px solid var(--border);
     border-radius: 999px;
     background: var(--bg-overlay-strong);
@@ -4424,9 +4430,10 @@
     color: var(--text-dim);
   }
 
-  /* The floating jump/open pills anchor to the chat panel's bottom edge —
-     lift them clear above the modes pill (bottom:10 + ~30px height + gap). */
-  .chat--modes .float-pill {
+  /* The centered jump pill is the only one lifted clear above the modes pill
+     (bottom:10 + ~22px height + gap); the open-on-Twitch pill shares the
+     modes pill's row at the right edge instead of stacking above it. */
+  .chat--modes .jump-end {
     bottom: 48px;
   }
 
