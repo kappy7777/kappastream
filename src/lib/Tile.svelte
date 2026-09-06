@@ -51,12 +51,15 @@
     /** True while another tile is being dragged over this one (drop highlight). */
     isDropTarget: boolean
     onAuthorityVideo: (el: HTMLVideoElement | null) => void
+    /** Tile activation (video-surface click) — MultiView routes it through
+     *  its merged-chats policy (a merged tile moves only audio authority). */
+    onTileActivate: (tileId: string) => void
     /** Drag-handle pointer-down — MultiView owns hit-testing for the drop target. */
     onTileDragStart: (tileId: string, e: PointerEvent) => void
     /** CSS grid-area shorthand for this tile's placement (empty = auto-place). */
     gridArea?: string
   }
-  const { tile, isAuthority, isWindows, isDragging, isDropTarget, onAuthorityVideo, onTileDragStart, gridArea }: Props = $props()
+  const { tile, isAuthority, isWindows, isDragging, isDropTarget, onAuthorityVideo, onTileActivate, onTileDragStart, gridArea }: Props = $props()
 
   const QUALITY_IDS = ['best', '1080p60', '720p60', '720p', '480p', '360p', '160p', 'audio_only'] as const
   function qualityLabel(id: string): string {
@@ -426,7 +429,7 @@
     type="button"
     class="mv-tile-surface"
     aria-label={isAuthority ? t('mv_focusedTile') : t('mv_focusTile')}
-    onclick={() => tileStore.focusTile(tile.id)}
+    onclick={() => onTileActivate(tile.id)}
   ></button>
 
   <!-- Drag handle (pointer-events): grabbing here starts a reorder. Deliberately

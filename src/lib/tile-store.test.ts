@@ -120,6 +120,25 @@ describe('TileStore authority/chat pointer split (tile click moves both; chat ta
     expect(store.activeChat?.id).toBe(b.id)
   })
 
+  it('a MERGED-view tile click (focusTileKeepChat) moves ONLY audio authority — the chat pointer stays', () => {
+    const a = store.addOrReplace('chan1').tile
+    const b = store.addOrReplace('chan2').tile
+    store.focusTile(a.id) // both pointers on a
+    // While the merged stream is showing, clicking merged tile b claims
+    // audio but must not move the chat pointer (MultiView drops the merged
+    // view whenever chatId changes — keeping it put keeps the merge alive).
+    store.focusTileKeepChat(b.id)
+    expect(store.isAuthority(b.id)).toBe(true)
+    expect(store.activeChat?.id).toBe(a.id)
+  })
+
+  it('focusTileKeepChat ignores unknown ids', () => {
+    const a = store.addOrReplace('chan1').tile
+    store.focusTileKeepChat('does-not-exist')
+    expect(store.authority?.id).toBe(a.id)
+    expect(store.activeChat?.id).toBe(a.id)
+  })
+
   it('pointer setters are idempotent and ignore unknown ids', () => {
     const a = store.addOrReplace('chan1').tile
     store.focusTile('does-not-exist')

@@ -121,16 +121,32 @@
     if (mergedIds.length < 2 && mergedView) mergedView = false
   })
 
-  // Any move of the active-chat pointer (tile click, status-bar row, opening
-  // a channel into the grid) switches the pane back to that tile's OWN chat.
-  // The merged tab is deliberately not a pointer target: it is a VIEW over
-  // several chats, not a chat. (Clicking an individual tab also sets
-  // mergedView = false directly — selectChat is a no-op when that tile is
-  // already active, so the pointer would not move and this effect not run.)
+  // Any move of the active-chat pointer (chat-tab click, opening a channel
+  // into the grid, a tile click OUTSIDE the merge group) switches the pane
+  // back to that tile's OWN chat. The merged tab is deliberately not a
+  // pointer target: it is a VIEW over several chats, not a chat. While the
+  // merged view is showing, tile clicks on a MERGED tile route through
+  // activateTile below, which moves only the audio authority — the chat
+  // pointer (and with it this effect) never runs, so the merged stream
+  // stays up. (Clicking an individual tab also sets mergedView = false
+  // directly — selectChat is a no-op when that tile is already active, so
+  // the pointer would not move and this effect not run.)
   $effect(() => {
     void activeChatId
     mergedView = false
   })
+
+  // Tile activation (video surface / status-bar row / drag handle) with the
+  // merged-view exception: when the pane is showing the MERGED stream and
+  // the clicked tile is one of the merged chats, only the AUDIO AUTHORITY
+  // moves (focusTileKeepChat) — the chat pointer staying put is what keeps
+  // the merged stream displayed (see the effect above). Clicking any tile
+  // outside the group keeps the original behaviour: both pointers move and
+  // the pane switches to that tile's own chat.
+  function activateTile(tileId: string): void {
+    if (mergedView && mergedIds.includes(tileId)) tileStore.focusTileKeepChat(tileId)
+    else tileStore.focusTile(tileId)
+  }
 
   // Tiles in the merge group, in GRID order (stable regardless of the order
   // the user ticked them). Empty unless the group actually has two members.
@@ -285,8 +301,9 @@
 
   function startDrag(tileId: string, e: PointerEvent): void {
     // Only react to primary button presses; make the tile the audio authority
-    // too, so a handle interaction also claims audio + chat for that tile.
-    tileStore.focusTile(tileId)
+    // too, so a handle interaction also claims the tile (audio + normally
+    // chat — unless the merged view is showing and this tile is merged).
+    activateTile(tileId)
     if (e.button !== 0) return
     dragStart = { x: e.clientX, y: e.clientY, id: tileId }
     if (!dragListeners) {
@@ -381,6 +398,7 @@
             isDropTarget={dropTargetId === tile.id}
             {isWindows}
             {onAuthorityVideo}
+            onTileActivate={activateTile}
             onTileDragStart={startDrag}
             gridArea={tileGridArea(i)}
           />
@@ -439,7 +457,7 @@
         {#each tileStore.tiles as tile (tile.id)}
           {@const s = tile.liveStatus}
           {@const authority = tileStore.isAuthority(tile.id)}
-          <button type="button" class="mv-status-row" class:mv-status-row--active={authority} onclick={() => tileStore.focusTile(tile.id)} aria-label={t('mv_focusTile') + ' — ' + tile.channel} aria-current={authority ? 'true' : 'false'}>
+          <button type="button" class="mv-status-row" class:mv-status-row--active={authority} onclick={() => activateTile(tile.id)} aria-label={t('mv_focusTile') + ' — ' + tile.channel} aria-current={authority ? 'true' : 'false'}>
             {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
               <img class="mv-status-avatar" class:mv-status-avatar--off={s.state === 'offline'} src={s.avatarUrl} alt="" />
           {/if}

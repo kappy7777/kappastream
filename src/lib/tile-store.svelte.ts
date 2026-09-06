@@ -18,7 +18,10 @@
 //        by chat-tab clicks AND by tile clicks. The relationship is
 //        ASYMMETRIC: a tile click moves both; a chat-tab click moves chat
 //        only, so the user can read one channel's chat while listening to
-//        another.
+//        another. ONE exception: while the merged-chats view is showing,
+//        MultiView routes tile clicks on a MERGED tile to
+//        focusTileKeepChat (audio authority only) so the pane stays on the
+//        merged stream.
 //    Both pointers are repaired on tile close and cleared on exit. While any
 //    tile exists, each resolves to a live tile (getters fall back to the first
 //    tile so the chat pane never shows "No streams open" spuriously).
@@ -305,6 +308,18 @@ export class TileStore {
       this.authorityId = id
       this.chatId = id
     }
+  }
+
+  /**
+   * TILE click while the chat pane shows a MERGED stream and the clicked tile
+   * is one of the merged chats (MultiView's activateTile picks this variant):
+   * moves ONLY the audio authority. The chat pointer deliberately stays —
+   * MultiView drops the merged view whenever the chat pointer moves, so NOT
+   * moving it is what keeps the merged stream displayed. The dormant chatId
+   * remains the single chat a later exit from the merged view falls back to.
+   */
+  focusTileKeepChat(id: string): void {
+    if (this.byId(id)) this.authorityId = id
   }
 
   /**
