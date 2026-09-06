@@ -25,11 +25,18 @@ describe('chat links: allowlist', () => {
     expect(links).toHaveLength(2)
     expect(links[0].url).toBe('https://www.twitch.tv/trymacs')
     expect(links[1].url).toBe('https://twitch.tv/videos/1')
+    // Every emitted URL parses as an https://(*.)twitch.tv link — a
+    // whitelist, so no scheme or host denylist can miss a case.
+    for (const link of links) {
+      const u = new URL(link.url!)
+      expect(u.protocol).toBe('https:')
+      expect(u.hostname === 'twitch.tv' || u.hostname.endsWith('.twitch.tv')).toBe(true)
+    }
     // The dangerous tokens survive as plain text, never as links.
-    expect(chunks.some((c) => c.url?.startsWith('javascript:'))).toBe(false)
-    expect(chunks.some((c) => c.url?.startsWith('data:'))).toBe(false)
-    expect(chunks.some((c) => !c.url && c.text.includes('javascript:alert(1)'))).toBe(true)
-    expect(chunks.some((c) => !c.url && c.text.includes('https://bit.ly/x'))).toBe(true)
+    const plain = chunks.filter((c) => !c.url).map((c) => c.text).join(' ')
+    expect(plain).toMatch(/javascript:alert\(1\)/)
+    expect(plain).toMatch(/data:text\/html,x/)
+    expect(plain).toMatch(/https:\/\/bit\.ly\/x/)
   })
 
   it('rejects twitch URLs with credentials, ports, or backslash tricks', () => {
