@@ -28,6 +28,7 @@
   import LinkifiedText from './LinkifiedText.svelte'
   import { resolveBadgeImageUrl, isMessageStricken, usernoticeCategory, isNoticeVisible, DELETED_MESSAGE_CLASS, activeRoomModes, type BadgeInfo } from './irc'
   import ChatModesPill from './ChatModesPill.svelte'
+  import { singleChatEntries, mergedChatEntries, toggleMergedId, reconcileMergedIds, type ChatEntry, type MergeSource } from './merged-chat'
   import { formatCompact, formatChatTime } from './format'
   import { tooltip } from './tooltip.ts'
   import { t } from './i18n/index.svelte'
@@ -92,6 +93,51 @@
   const activeChatId = $derived(tileStore.activeChat?.id ?? null)
   const activeSession = $derived(activeChatId ? sessions.get(activeChatId) ?? null : null)
 
+  // ---- merged chats ---------------------------------------------------------
+  // Any subset of the open tiles' chats can be MERGED into one interleaved
+  // stream (picked via the merge button at the left of the tab strip). Pure
+  // group + view-model logic lives in merged-chat.ts (unit-tested there);
+  // this is the session-only UI state — never persisted, like multi-view
+  // itself and the splitter positions.
+  let mergedIds = $state<string[]>([])
+  // Whether the pane displays the merged stream (vs the active chat tab's
+  // own session).
+  let mergedView = $state(false)
+  let mergePickerOpen = $state(false)
+
+  function toggleMerged(id: string): void {
+    mergedIds = toggleMergedId(mergedIds, id)
+    // Forming a group jumps to the merged stream; falling below two
+    // members (or un-merging entirely) drops back to the active tab.
+    mergedView = mergedIds.length >= 2
+  }
+
+  // Keep the group valid as tiles close: drop gone ids, collapse a group
+  // smaller than two (reconcileMergedIds returns the same reference when
+  // nothing changed, so this never writes redundant state).
+  $effect(() => {
+    const next = reconcileMergedIds(mergedIds, tileStore.tiles.map((tile) => tile.id))
+    if (next !== mergedIds) mergedIds = next
+    if (mergedIds.length < 2 && mergedView) mergedView = false
+  })
+
+  // Any move of the active-chat pointer (tile click, status-bar row, opening
+  // a channel into the grid) switches the pane back to that tile's OWN chat.
+  // The merged tab is deliberately not a pointer target: it is a VIEW over
+  // several chats, not a chat. (Clicking an individual tab also sets
+  // mergedView = false directly — selectChat is a no-op when that tile is
+  // already active, so the pointer would not move and this effect not run.)
+  $effect(() => {
+    void activeChatId
+    mergedView = false
+  })
+
+  // Tiles in the merge group, in GRID order (stable regardless of the order
+  // the user ticked them). Empty unless the group actually has two members.
+  const mergedTiles = $derived(
+    mergedIds.length >= 2 ? tileStore.tiles.filter((tile) => mergedIds.includes(tile.id)) : [],
+  )
+
   // ---- Pinned chat messages (multi-view) ------------------------------------
   // Pins are fetched for the ACTIVE CHAT TAB ONLY, not every open tile: the
   // banner lives in the chat pane and can only ever describe the channel whose
@@ -104,16 +150,34 @@
     void settings.chatPinned // a toggle flip re-targets at once
     pinnedChat.setTarget(activeSession?.channel ?? null, null)
   })
-  const activePin = $derived(settings.chatPinned ? pinnedChat.visiblePin : null)
+  const activePin = $derived(settings.chatPinned && !mergedView ? pinnedChat.visiblePin : null)
   // Chat modes the floating chat-mode pill renders for the active tile's
   // session ([] = hidden); also lifts the jump button above the pill (the
   // pill is a fixed-height one-liner — ChatModesPill marquees overflowing
   // labels instead of wrapping — so a constant lift is correct).
   // chatModeKeys uses the SAME shared activation rules as App.svelte's pill
-  // (activeRoomModes in irc.ts).
+  // (activeRoomModes in irc.ts). Hidden in the merged view: each merged
+  // room has its OWN modes and showing one channel's would mislead.
   const chatModeKeys = $derived(
-    activeSession && settings.chatRoomstate ? activeRoomModes(activeSession.roomState) : [],
+    !mergedView && activeSession && settings.chatRoomstate ? activeRoomModes(activeSession.roomState) : [],
   )
+
+  // What the pane renders: the merged stream's interleaved entries, or the
+  // active session's plain buffer. Entries (not raw ChatMessages) so one
+  // template serves both views — merged entries carry their origin for
+  // per-message attribution and per-channel badge art.
+  const chatEntries = $derived.by(() => {
+    if (mergedView) {
+      const sources: MergeSource[] = []
+      for (const tile of mergedTiles) {
+        const s = sessions.get(tile.id)
+        if (s) sources.push({ tileId: tile.id, channel: s.channel, override: s.badgeOverride, messages: s.messages })
+      }
+      return mergedChatEntries(sources)
+    }
+    const s = activeSession
+    return s ? singleChatEntries(s.messages, s.badgeOverride) : []
+  })
 
   // Wheel over the tab strip scrolls it horizontally (scrollbar is hidden;
   // without this the strip only scrolls via shift+wheel, so the rightmost
@@ -125,7 +189,6 @@
     el.scrollLeft += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
     if (el.scrollLeft !== before) e.preventDefault()
   }
-  const messages = $derived(activeSession?.messages ?? [])
   const count = $derived(tileStore.count)
 
   // ---- chat scroll / sticky-bottom (mirrors App.svelte) ----
@@ -141,15 +204,15 @@
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     const wasSticky = stickyBottom
     stickyBottom = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD
-    if (stickyBottom) { newMessageCount = 0; scrollBaseline = messages.length }
-    else if (wasSticky && !stickyBottom) { scrollBaseline = messages.length; newMessageCount = 0 }
+    if (stickyBottom) { newMessageCount = 0; scrollBaseline = chatEntries.length }
+    else if (wasSticky && !stickyBottom) { scrollBaseline = chatEntries.length; newMessageCount = 0 }
   }
   function jumpToPresent(): void {
     const el = chatEl
-    if (el) { el.scrollTop = el.scrollHeight; stickyBottom = true; newMessageCount = 0; scrollBaseline = messages.length }
+    if (el) { el.scrollTop = el.scrollHeight; stickyBottom = true; newMessageCount = 0; scrollBaseline = chatEntries.length }
   }
   $effect(() => {
-    const len = messages.length
+    const len = chatEntries.length
     void tick().then(() => {
       const el = chatEl
       if (!el) return
@@ -157,9 +220,11 @@
       else { const added = len - scrollBaseline; if (added > 0) newMessageCount += added; scrollBaseline = len }
     })
   })
-  // Reset scroll state when the active chat tab changes.
+  // Reset scroll state when the active chat tab changes or the merged view
+  // is toggled — both swap the whole rendered buffer.
   $effect(() => {
     void activeChatId
+    void mergedView
     stickyBottom = true
     newMessageCount = 0
     scrollBaseline = 0
@@ -183,17 +248,29 @@
     })
   }
 
-  function effectiveBadgeUrl(b: BadgeInfo): string | null {
-    const u = resolveBadgeImageUrl(b, activeSession?.badgeOverride ?? null)
-    return u
+  // Badge art resolves against the message's OWN session override — in the
+  // merged view each entry carries its origin session's per-channel art, so
+  // channel A's custom subscriber badge never bleeds onto channel B's
+  // messages.
+  function effectiveBadgeUrl(b: BadgeInfo, override: Record<string, Record<string, string>> | null): string | null {
+    return resolveBadgeImageUrl(b, override)
+  }
+
+  // The merged view needs no per-channel avatar URL state of its own — the
+  // tile's polled liveStatus already carries it (fallback initial otherwise).
+  function mergeAvatarUrl(tileId: string): string | null {
+    const s = tileStore.tiles.find((tile) => tile.id === tileId)?.liveStatus
+    return s && (s.state === 'live' || s.state === 'offline') ? s.avatarUrl : null
   }
 
   const placeholderText = $derived(
-    activeSession
-      ? activeSession.status === 'connected'
-        ? t('chat_waitingMessages')
-        : t('chat_joinToSee')
-      : t('mv_noTiles'),
+    mergedView
+      ? t('chat_waitingMessages')
+      : activeSession
+        ? activeSession.status === 'connected'
+          ? t('chat_waitingMessages')
+          : t('chat_joinToSee')
+        : t('mv_noTiles'),
   )
 
   // ---- drag-to-reorder (pointer events on a tile's drag handle) ----
@@ -450,53 +527,152 @@
 
   {#if settings.chatVisible}
     <main class="mv-chat">
-      <!-- Tabs: one per tile, active = active chat. Clicking a tab moves ONLY
-           the active chat — the audio authority stays where it is, so you can
-           read one channel's chat while listening to another (asymmetric with
-           tile clicks, which move both). Each tab is the channel's circular
-           profile picture (from the tile's polled liveStatus; the channel
-           initial stands in until the first poll lands), with a live dot for
-           live channels — hover shows the channel name. Tabs share the strip
-           width EQUALLY (max 4 tiles → 4 avatars quarter the bar). The strip
-           still scrolls horizontally for absurdly narrow panes: its scrollbar
-           is hidden, so the wheel is translated to horizontal scrolling — a
-           bare overflow-x:auto strip would only scroll via shift+wheel, which
-           reads as "the right tabs are unreachable". -->
-      <div class="mv-chat-tabs" role="tablist" onwheel={onTabsWheel}>
-        {#each tileStore.tiles as tile (tile.id)}
-          {@const s = tile.liveStatus}
-          <button
-            type="button"
-            class="mv-chat-tab"
-            class:mv-chat-tab--active={tileStore.isActiveChat(tile.id)}
-            role="tab"
-            aria-selected={tileStore.isActiveChat(tile.id)}
-            onclick={() => tileStore.selectChat(tile.id)}
-            title={tile.channel}
-            aria-label={tile.channel}
-          >
-            <span class="mv-tab-avatar-wrap">
-              {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
-                <img class="mv-tab-avatar" class:mv-tab-avatar--off={s.state === 'offline'} src={s.avatarUrl} alt="" />
-              {:else}
-                <span class="mv-tab-avatar mv-tab-avatar--fallback" aria-hidden="true">{tile.channel.charAt(0).toUpperCase()}</span>
-              {/if}
-              {#if s.state === 'live'}<span class="mv-tab-live-dot" aria-hidden="true"></span>{/if}
-            </span>
-          </button>
-        {/each}
+      <!-- Per-message source mark for the merged view (snippet: shared by
+           the message and notice branches below). Hidden entirely in the
+           single-session view (e.channel is null there). -->
+      {#snippet mergeBadge(e: ChatEntry)}
+        {#if e.channel !== null}
+          {@const av = e.tileId !== null ? mergeAvatarUrl(e.tileId) : null}
+          <span class="mv-merge-src" title={e.channel}>
+            {#if av}
+              <img class="mv-mini-avatar" src={av} alt="" loading="lazy" />
+            {:else}
+              <span class="mv-mini-avatar mv-mini-avatar--fallback" aria-hidden="true">{e.channel.charAt(0).toUpperCase()}</span>
+            {/if}
+          </span>
+        {/if}
+      {/snippet}
+
+      <!-- Tab strip row: the MERGE button (left) + the chat tabs. Merging
+           combines any subset of the open chats into one interleaved stream
+           (see merged-chat.ts); merged chats appear as ONE tab with their
+           avatars stacked, and stop getting individual tabs. -->
+      <div class="mv-chat-tabs-row">
+        {#if tileStore.tiles.length >= 2}
+          <div class="mv-merge-wrap">
+            <button
+              type="button"
+              class="mv-merge-btn"
+              class:mv-merge-btn--on={mergedIds.length >= 2}
+              onclick={() => (mergePickerOpen = !mergePickerOpen)}
+              title={t('mv_mergeChats')}
+              aria-label={t('mv_mergeChats')}
+              aria-expanded={mergePickerOpen}
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 4.5h7M6.5 2l3 2.5-3 2.5"/>
+                <path d="M14 11.5H7M9.5 9l-3 2.5 3 2.5"/>
+              </svg>
+            </button>
+            {#if mergePickerOpen}
+              <!-- Invisible full-screen layer: any click outside the picker
+                   (or re-clicking the button, handled above) closes it. -->
+              <div class="mv-merge-backdrop" onclick={() => (mergePickerOpen = false)} role="presentation"></div>
+              <div class="mv-merge-panel" role="group" aria-label={t('mv_mergeChats')}>
+                <div class="mv-merge-title">{t('mv_mergeChats')}</div>
+                {#each tileStore.tiles as tile (tile.id)}
+                  {@const s = tile.liveStatus}
+                  {@const checked = mergedIds.includes(tile.id)}
+                  <button
+                    type="button"
+                    class="mv-merge-row"
+                    class:mv-merge-row--checked={checked}
+                    aria-pressed={checked}
+                    onclick={() => toggleMerged(tile.id)}
+                  >
+                    <span class="mv-tab-avatar-wrap">
+                      {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
+                        <img class="mv-tab-avatar" class:mv-tab-avatar--off={s.state === 'offline'} src={s.avatarUrl} alt="" />
+                      {:else}
+                        <span class="mv-tab-avatar mv-tab-avatar--fallback" aria-hidden="true">{tile.channel.charAt(0).toUpperCase()}</span>
+                      {/if}
+                    </span>
+                    <span class="mv-merge-name">{tile.channel}</span>
+                    <span class="mv-merge-check" aria-hidden="true">{checked ? '✓' : ''}</span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        <!-- Tabs: one per tile, active = active chat. Clicking a tab moves ONLY
+             the active chat — the audio authority stays where it is, so you can
+             read one channel's chat while listening to another (asymmetric with
+             tile clicks, which move both). Each tab is the channel's circular
+             profile picture (from the tile's polled liveStatus; the channel
+             initial stands in until the first poll lands), with a live dot for
+             live channels — hover shows the channel name. Tabs share the strip
+             width EQUALLY (max 4 tiles → 4 avatars quarter the bar). The strip
+             still scrolls horizontally for absurdly narrow panes: its scrollbar
+             is hidden, so the wheel is translated to horizontal scrolling — a
+             bare overflow-x:auto strip would only scroll via shift+wheel, which
+             reads as "the right tabs are unreachable". -->
+        <div class="mv-chat-tabs" role="tablist" onwheel={onTabsWheel}>
+          {#if mergedTiles.length >= 2}
+            <button
+              type="button"
+              class="mv-chat-tab"
+              class:mv-chat-tab--active={mergedView}
+              role="tab"
+              aria-selected={mergedView}
+              onclick={() => (mergedView = true)}
+              title={mergedTiles.map((tile) => tile.channel).join(', ')}
+              aria-label={t('mv_mergeChats')}
+            >
+              <span class="mv-tab-avatar-stack">
+                {#each mergedTiles as tile (tile.id)}
+                  {@const s = tile.liveStatus}
+                  <span class="mv-tab-stack-item">
+                    {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
+                      <img class="mv-tab-avatar mv-tab-avatar--stack" src={s.avatarUrl} alt="" />
+                    {:else}
+                      <span class="mv-tab-avatar mv-tab-avatar--stack mv-tab-avatar--fallback" aria-hidden="true">{tile.channel.charAt(0).toUpperCase()}</span>
+                    {/if}
+                  </span>
+                {/each}
+              </span>
+            </button>
+          {/if}
+          {#each tileStore.tiles as tile (tile.id)}
+            {#if !mergedIds.includes(tile.id)}
+              {@const s = tile.liveStatus}
+              <button
+                type="button"
+                class="mv-chat-tab"
+                class:mv-chat-tab--active={!mergedView && tileStore.isActiveChat(tile.id)}
+                role="tab"
+                aria-selected={!mergedView && tileStore.isActiveChat(tile.id)}
+                onclick={() => { mergedView = false; tileStore.selectChat(tile.id) }}
+                title={tile.channel}
+                aria-label={tile.channel}
+              >
+                <span class="mv-tab-avatar-wrap">
+                  {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
+                    <img class="mv-tab-avatar" class:mv-tab-avatar--off={s.state === 'offline'} src={s.avatarUrl} alt="" />
+                  {:else}
+                    <span class="mv-tab-avatar mv-tab-avatar--fallback" aria-hidden="true">{tile.channel.charAt(0).toUpperCase()}</span>
+                  {/if}
+                  {#if s.state === 'live'}<span class="mv-tab-live-dot" aria-hidden="true"></span>{/if}
+                </span>
+              </button>
+            {/if}
+          {/each}
+        </div>
       </div>
 
       <div class="mv-chat-body">
         <div class="mv-chat-scroll" bind:this={chatEl} onscroll={onChatScroll}>
-          {#if messages.length === 0}
+          {#if chatEntries.length === 0}
             <p class="mv-placeholder">{placeholderText}</p>
           {:else}
-            {#each messages as msg (msg.id)}
+            {#each chatEntries as e (e.key)}
+              {@const msg = e.msg}
               {#if msg.kind === 'notice'}
                 {#if isNoticeVisible(usernoticeCategory(msg.noticeMsgId ?? ''), { sub: settings.chatNoticesSub, gift: settings.chatNoticesGift, raid: settings.chatNoticesRaid, announcement: settings.chatNoticesAnnouncement }) && !settings.isMuted(msg.login)}
                   <div class="message message--notice">
                     {#if settings.chatTimestamps}<span class="message-time">{formatChatTime(msg.timestamp)}</span>{/if}
+                    {@render mergeBadge(e)}
                     <span class="notice-system">{msg.systemText}</span>
                     {#if msg.parts.length > 0}
                       <span class="notice-msg">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img class="emote" class:emote--twitch={part.provider === 'twitch'} src={part.url} alt={part.name} title={part.name} loading="lazy" onerror={() => markEmoteErrored(part.url)} />{/if}{/each}</span>
@@ -506,8 +682,9 @@
               {:else if !settings.isMuted(msg.login)}
                 <div class="message{isMessageStricken(settings.chatModeration, msg.deleted) ? ' ' + DELETED_MESSAGE_CLASS : ''}" class:action={msg.isAction} title={isMessageStricken(settings.chatModeration, msg.deleted) ? (msg.deletedReason ?? '') : ''}>
                   {#if settings.chatTimestamps}<span class="message-time">{formatChatTime(msg.timestamp)}</span>{/if}
+                  {@render mergeBadge(e)}
                   {#each msg.badges as b (b.id + b.version)}
-                    {@const effUrl = effectiveBadgeUrl(b)}
+                    {@const effUrl = effectiveBadgeUrl(b, e.override)}
                     {#if effUrl && !erroredBadges.has(effUrl)}
                       <img class="badge badge--{b.id}" src={effUrl} alt={b.label} loading="lazy" onerror={() => markBadgeErrored(effUrl!)} />
                     {/if}
@@ -523,7 +700,7 @@
             {/each}
           {/if}
         </div>
-        {#if !stickyBottom && messages.length > 0}
+        {#if !stickyBottom && chatEntries.length > 0}
           <button
             type="button"
             class="mv-jump"
@@ -729,15 +906,111 @@
     border-left: 1px solid var(--border);
     overflow: hidden;
   }
-  .mv-chat-tabs {
+  /* Tab strip row: merge button (fixed width) + the tabs (share the rest).
+     Same 33px bar height as before the merge button existed (31px content +
+     2px border on the row). */
+  .mv-chat-tabs-row {
     flex: 0 0 auto;
     display: flex;
-    overflow-x: auto;
-    scrollbar-width: none;
     border-bottom: 1px solid var(--border);
     background: var(--bg-app);
   }
+  .mv-chat-tabs {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
   .mv-chat-tabs::-webkit-scrollbar { display: none; }
+
+  /* Merge button + picker. The wrap is the picker's positioning context. */
+  .mv-merge-wrap { position: relative; flex: 0 0 auto; display: inline-flex; }
+  .mv-merge-btn {
+    width: 36px;
+    height: 31px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .mv-merge-btn:hover { background: var(--bg-hover-faint); color: var(--text-primary); }
+  .mv-merge-btn--on { color: var(--accent); border-bottom-color: var(--accent); }
+  .mv-merge-backdrop { position: fixed; inset: 0; z-index: 40; }
+  .mv-merge-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 4px;
+    z-index: 41;
+    min-width: 200px;
+    max-width: 280px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: var(--shadow-menu);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .mv-merge-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    padding: 2px 6px 4px;
+  }
+  .mv-merge-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    text-align: left;
+  }
+  .mv-merge-row:hover { background: var(--bg-hover-faint); color: var(--text-primary); }
+  .mv-merge-row--checked { color: var(--text-primary); }
+  .mv-merge-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mv-merge-check { flex: 0 0 auto; width: 14px; color: var(--accent); font-weight: 700; }
+
+  /* Stacked avatar cluster for the merged tab (up to 4 tiles): overlapping
+     circles, each ringed in the strip background so they read separately. */
+  .mv-tab-avatar-stack { display: inline-flex; align-items: center; }
+  .mv-tab-stack-item { display: inline-flex; line-height: 0; }
+  .mv-tab-stack-item + .mv-tab-stack-item { margin-left: -7px; }
+  .mv-tab-avatar--stack { width: 18px; height: 18px; box-shadow: 0 0 0 1.5px var(--bg-app); }
+
+  /* Per-message source mark in the merged stream: the origin channel's
+     avatar (or initial) before the username. */
+  .mv-merge-src { display: inline-flex; margin-right: 4px; vertical-align: -3px; }
+  .mv-mini-avatar { width: 14px; height: 14px; border-radius: 50%; object-fit: cover; display: block; }
+  .mv-mini-avatar--fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    font-size: 8px;
+    font-weight: 700;
+  }
   .mv-chat-tab {
     /* Even distribution: each tab takes an EQUAL share of the strip (the
        grid holds at most 4 tiles, so 4 avatars fill the bar's width

@@ -145,6 +145,7 @@ export const fr: Record<TKey, string> = {
   mv_noTiles: 'Aucun flux ouvert',
   mv_addStreamHint: 'Cliquez sur un favori ou recherchez pour ajouter un flux',
   mv_statusBar: 'Flux ouverts',
+  mv_mergeChats: 'Fusionner les chats',
   mv_dragTile: 'Glisser pour réorganiser',
   mv_moveLeft: 'Déplacer le flux à gauche',
   mv_moveRight: 'Déplacer le flux à droite',

@@ -162,6 +162,7 @@ export const en = {
   mv_noTiles: 'No streams open',
   mv_addStreamHint: 'Click a favorite or search to add a stream',
   mv_statusBar: 'Open streams',
+  mv_mergeChats: 'Merge chats',
   mv_dragTile: 'Drag to reorder',
   mv_moveLeft: 'Move tile left',
   mv_moveRight: 'Move tile right',

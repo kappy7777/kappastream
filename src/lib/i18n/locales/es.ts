@@ -145,6 +145,7 @@ export const es: Record<TKey, string> = {
   mv_noTiles: 'Sin transmisiones abiertas',
   mv_addStreamHint: 'Haz clic en un favorito o busca para añadir una transmisión',
   mv_statusBar: 'Transmisiones abiertas',
+  mv_mergeChats: 'Combinar chats',
   mv_dragTile: 'Arrastrar para reordenar',
   mv_moveLeft: 'Mover transmisión a la izquierda',
   mv_moveRight: 'Mover transmisión a la derecha',

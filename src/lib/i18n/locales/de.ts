@@ -146,6 +146,7 @@ export const de: Record<TKey, string> = {
   mv_noTiles: 'Keine Streams geöffnet',
   mv_addStreamHint: 'Klicke auf einen Favoriten oder suche, um einen Stream hinzuzufügen',
   mv_statusBar: 'Geöffnete Streams',
+  mv_mergeChats: 'Chats zusammenführen',
   mv_dragTile: 'Ziehen zum Sortieren',
   mv_moveLeft: 'Stream nach links',
   mv_moveRight: 'Stream nach rechts',
