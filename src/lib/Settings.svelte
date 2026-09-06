@@ -516,6 +516,24 @@ async function exportFavorites(): Promise<void> {
                 <span class="toggle-knob"></span>
               </span>
             </div>
+            <div class="toggle-row">
+              <span class="toggle-label" id="chat-pinned-label">
+                {t('settings_chatPinned')}
+                <span class="toggle-hint">{t('settings_chatPinnedHint')}</span>
+              </span>
+              <span
+                class="toggle"
+                class:toggle--on={settings.chatPinned}
+                role="switch"
+                tabindex="0"
+                aria-checked={settings.chatPinned}
+                aria-labelledby="chat-pinned-label"
+                onclick={() => settings.toggleChatPinned()}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatPinned() } }}
+              >
+                <span class="toggle-knob"></span>
+              </span>
+            </div>
             <div class="chat-subgroup-label">{t('settings_mutedUsers')} <span class="mute-count">{settings.mutedUsers.length || ''}</span></div>
             <div class="mute-input-row">
               <span class="mention-prefix" aria-hidden="true">@</span>

@@ -185,6 +185,13 @@ export const fr: Record<TKey, string> = {
   chat_jumpToLatest: 'Aller au dernier message',
   chat_openOnTwitch: 'Ouvrir #{channel} sur Twitch',
 
+  // ---- PinnedMessage.svelte -----------------------------------------------
+  pin_aria: 'Message épinglé',
+  pin_pinnedBy: 'Épinglé par {name}',
+  pin_expand: 'Afficher le message épinglé complet',
+  pin_collapse: 'Réduire le message épinglé',
+  pin_dismiss: 'Masquer le message épinglé',
+
   about_tagline: 'Twitch, réduit à l’essentiel : le stream et le chat.',
   about_body: 'Pas de connexion, télémétrie, analytique ni serveur géré par le projet. Le chat se connecte anonymement — rien n’est lié à votre identité. Les appels réseau ne vont qu’aux services nécessaires pour regarder : l’infrastructure de Twitch et les API communautaires ouvertes (7TV, BTTV, FFZ) qui fournissent les emotes et les infos du stream.',
   about_streamlink: 'Résolution du stream propulsée par streamlink.',
@@ -222,6 +229,8 @@ export const fr: Record<TKey, string> = {
   settings_moderationHint: 'messages supprimés et timeouts/bannissements affichés barrés',
   settings_bits: 'Afficher les bits',
   settings_bitsHint: 'montants des cheers sur les messages',
+  settings_chatPinned: 'Messages épinglés',
+  settings_chatPinnedHint: "afficher le message épinglé du canal au-dessus du tchat ; actualisé avec le cycle des favoris",
   settings_mutedUsers: 'Utilisateurs masqués',
   settings_mutePlaceholder: 'masquer par login',
   settings_addMuteAria: 'Ajouter un utilisateur à la liste des masqués',

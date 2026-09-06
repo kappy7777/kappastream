@@ -905,3 +905,132 @@ describe('gql collaboration roster (channel(id:).collaboration)', () => {
     await expect(G.fetchCollaborators(['531019578'])).rejects.toThrow()
   })
 })
+
+describe('gql pinned chat messages (channel(id:).pinnedChatMessages)', () => {
+  // Fixture mirrors the VERIFIED live response shape (2026-09-06 research
+  // session on channels with actively pinned messages; same field the
+  // twitch.tv logged-out client reads via its GetPinnedChat operation).
+  const pinNode = {
+    id: '176a8770-ccee-465f-8468-44265040bb56', // PIN id — distinct from the message id
+    type: 'MOD',
+    startsAt: '2026-09-05T21:33:21Z',
+    updatedAt: '2026-09-05T21:33:23Z',
+    endsAt: null,
+    pinnedBy: { id: '54527144', login: 'syanitv', displayName: 'SyaniTV' },
+    pinnedMessage: {
+      id: 'e11f6936-b8d3-4c60-b035-331f8579b5de',
+      sentAt: '2026-09-05T21:33:18.484601997Z',
+      content: {
+        text: 'check this Kappa https://bit.ly/x',
+        fragments: [
+          { text: 'check this ', content: null },
+          { text: 'Kappa', content: { id: '1712' } }, // Emote member of FragmentContent
+          { text: ' https://bit.ly/x', content: null },
+        ],
+      },
+      sender: {
+        id: '105166207',
+        login: 'streamlabs',
+        displayName: 'Streamlabs',
+        chatColor: '#32C3A2',
+        displayBadges: [
+          { id: 'bW9kZXJhdG9yOzE7', setID: 'moderator', version: '1' },
+          { id: 'cGFydG5lcjsxOw==', setID: 'partner', version: '1' },
+        ],
+      },
+    },
+  }
+
+  it('parses the verified response shape, keeping pin id ≠ message id', async () => {
+    gql.handler = async () => ok({ channel: { pinnedChatMessages: { edges: [{ node: pinNode }] } } })
+    const pins = await G.fetchPinnedChatMessages('656099497')
+    expect(pins).toHaveLength(1)
+    const pin = pins[0]
+    expect(pin.pinId).toBe('176a8770-ccee-465f-8468-44265040bb56')
+    expect(pin.messageId).toBe('e11f6936-b8d3-4c60-b035-331f8579b5de')
+    expect(pin.pinId).not.toBe(pin.messageId)
+    expect(pin.type).toBe('MOD')
+    expect(pin.endsAt).toBe('') // null → '' (no expiry)
+    expect(pin.pinnedBy).toEqual({ login: 'syanitv', displayName: 'SyaniTV' })
+    expect(pin.message?.text).toBe('check this Kappa https://bit.ly/x')
+    expect(pin.message?.fragments).toEqual([
+      { text: 'check this ', emoteId: null },
+      { text: 'Kappa', emoteId: '1712' },
+      { text: ' https://bit.ly/x', emoteId: null },
+    ])
+    expect(pin.message?.sender).toEqual({
+      login: 'streamlabs',
+      displayName: 'Streamlabs',
+      chatColor: '#32C3A2',
+      badges: [
+        { setID: 'moderator', version: '1' },
+        { setID: 'partner', version: '1' },
+      ],
+    })
+    expect(lastVars()).toMatchObject({ id: '656099497' })
+  })
+
+  it('empty edges / null connection / null channel are all successes (returns [])', async () => {
+    gql.handler = async () => ok({ channel: { pinnedChatMessages: { edges: [] } } })
+    await expect(G.fetchPinnedChatMessages('1')).resolves.toEqual([])
+    gql.handler = async () => ok({ channel: { pinnedChatMessages: null } })
+    await expect(G.fetchPinnedChatMessages('1')).resolves.toEqual([])
+    gql.handler = async () => ok({ channel: null })
+    await expect(G.fetchPinnedChatMessages('1')).resolves.toEqual([])
+  })
+
+  it('drops malformed nodes and pins without a message body, keeps the rest', async () => {
+    gql.handler = async () =>
+      ok({
+        channel: {
+          pinnedChatMessages: {
+            edges: [
+              null,
+              { node: null },
+              { node: { ...pinNode, pinnedMessage: null } }, // nothing to render
+              { node: { ...pinNode, id: 'pin-2' } },
+            ],
+          },
+        },
+      })
+    const pins = await G.fetchPinnedChatMessages('1')
+    expect(pins).toHaveLength(1)
+    expect(pins[0].pinId).toBe('pin-2')
+  })
+
+  it('caps fragments at 50 and the rebuilt text at 2000 chars', async () => {
+    const many = Array.from({ length: 80 }, (_, i) => ({ text: `frag${i} `, content: null }))
+    gql.handler = async () =>
+      ok({ channel: { pinnedChatMessages: { edges: [{ node: { ...pinNode, pinnedMessage: { ...pinNode.pinnedMessage, content: { text: many.map((f) => f.text).join(''), fragments: many } } } }] } } })
+    const pins = await G.fetchPinnedChatMessages('1')
+    expect(pins[0].message?.fragments).toHaveLength(50)
+    expect(pins[0].message?.text.length).toBeLessThanOrEqual(2000)
+  })
+
+  it('never selects pinnedChatSettings and never paginates (no after/first args)', async () => {
+    gql.handler = async () => ok({ channel: { pinnedChatMessages: { edges: [] } } })
+    await G.fetchPinnedChatMessages('1')
+    const body = gql.calls.at(-1) ?? ''
+    expect(body).toContain('pinnedChatMessages')
+    expect(body).not.toContain('pinnedChatSettings')
+    expect(body).not.toContain('$after')
+    expect(body).not.toContain('after:')
+    expect(body).not.toContain('first:')
+  })
+
+  it('validates the channel id before any request', async () => {
+    gql.handler = async () => ok({ channel: null })
+    await expect(G.fetchPinnedChatMessages('abc')).rejects.toThrow('invalid channel id')
+    await expect(G.fetchPinnedChatMessages('')).rejects.toThrow('invalid channel id')
+    expect(gql.calls).toHaveLength(0)
+  })
+
+  it('throws on transport failure (caller degrades to no pin)', async () => {
+    gql.handler = async () => gqlErrors()
+    await expect(G.fetchPinnedChatMessages('1')).rejects.toThrow()
+    gql.handler = async () => {
+      throw new Error('HTTP 500')
+    }
+    await expect(G.fetchPinnedChatMessages('1')).rejects.toThrow('HTTP 500')
+  })
+})

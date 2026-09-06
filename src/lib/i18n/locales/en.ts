@@ -204,6 +204,13 @@ export const en = {
   chat_jumpToLatest: 'Jump to the latest message',
   chat_openOnTwitch: 'Open #{channel} on Twitch',
 
+  // ---- PinnedMessage.svelte -----------------------------------------------
+  pin_aria: 'Pinned message',
+  pin_pinnedBy: 'Pinned by {name}',
+  pin_expand: 'Show the full pinned message',
+  pin_collapse: 'Collapse the pinned message',
+  pin_dismiss: 'Dismiss the pinned message',
+
   // ---- App.svelte: About modal --------------------------------------------
   about_tagline: 'Twitch, stripped down to what matters: the stream and the chat.',
   about_body: 'No login, project telemetry, analytics, or project-operated backend. Chat connects anonymously — nothing tied to who you are. Network calls go only to the services needed to watch: Twitch infrastructure and the open community APIs (7TV, BTTV, FFZ) that power emotes and stream info.',
@@ -244,6 +251,8 @@ export const en = {
   settings_moderationHint: 'deleted messages and timeouts/bans shown struck through',
   settings_bits: 'Show bits',
   settings_bitsHint: 'cheer amounts on messages',
+  settings_chatPinned: 'Pinned messages',
+  settings_chatPinnedHint: "show the channel's pinned chat message above chat; refreshed with the favorites poll",
   settings_mutedUsers: 'Muted users',
   settings_mutePlaceholder: 'hide by login',
   settings_addMuteAria: 'Add a user to the mute list',

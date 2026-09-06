@@ -186,6 +186,13 @@ export const de: Record<TKey, string> = {
   chat_jumpToLatest: 'Zur neuesten Nachricht springen',
   chat_openOnTwitch: '#{channel} auf Twitch öffnen',
 
+  // ---- PinnedMessage.svelte -----------------------------------------------
+  pin_aria: 'Angepinnte Nachricht',
+  pin_pinnedBy: 'Angepinnt von {name}',
+  pin_expand: 'Angepinnte Nachricht vollständig anzeigen',
+  pin_collapse: 'Angepinnte Nachricht einklappen',
+  pin_dismiss: 'Angepinnte Nachricht ausblenden',
+
   about_tagline: 'Twitch, reduziert auf das Wesentliche: der Stream und der Chat.',
   about_body: 'Kein Login, keine Telemetrie, kein Analytics, kein vom Projekt betriebener Server. Der Chat verbindet sich anonym — nichts wird mit deiner Identität verknüpft. Netzwerkanfragen gehen nur an die Dienste, die zum Schauen nötig sind: Twitch-Infrastruktur und die offenen Community-APIs (7TV, BTTV, FFZ), die Emotes und Stream-Infos bereitstellen.',
   about_streamlink: 'Stream-Auflösung powered by streamlink.',
@@ -223,6 +230,8 @@ export const de: Record<TKey, string> = {
   settings_moderationHint: 'gelöschte Nachrichten sowie Timeouts/Bans durchgestrichen anzeigen',
   settings_bits: 'Bits anzeigen',
   settings_bitsHint: 'Cheer-Beträge auf Nachrichten',
+  settings_chatPinned: 'Angepinnte Nachrichten',
+  settings_chatPinnedHint: 'die angepinnte Chat-Nachricht des Kanals über dem Chat anzeigen; wird mit dem Favoriten-Abrufintervall aktualisiert',
   settings_mutedUsers: 'Stummgeschaltete Nutzer',
   settings_mutePlaceholder: 'nach Login ausblenden',
   settings_addMuteAria: 'Nutzer zur Stummliste hinzufügen',

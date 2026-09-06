@@ -186,6 +186,13 @@ export const pt: Record<TKey, string> = {
   chat_jumpToLatest: 'Ir para a última mensagem',
   chat_openOnTwitch: 'Abrir #{channel} na Twitch',
 
+  // ---- PinnedMessage.svelte -----------------------------------------------
+  pin_aria: 'Mensagem fixada',
+  pin_pinnedBy: 'Fixado por {name}',
+  pin_expand: 'Mostrar a mensagem fixada completa',
+  pin_collapse: 'Recolher a mensagem fixada',
+  pin_dismiss: 'Descartar a mensagem fixada',
+
   about_tagline: 'Twitch, reduzido ao que importa: o stream e o chat.',
   about_body: 'Sem login, telemetria, analítica nem servidor gerido pelo projeto. O chat liga-se anonimamente — nada fica associado à tua identidade. Os pedidos de rede vão apenas para os serviços necessários para ver: infraestrutura da Twitch e as APIs comunitárias abertas (7TV, BTTV, FFZ) que fornecem emotes e informações do stream.',
   about_streamlink: 'Resolução do stream com o streamlink.',
@@ -223,6 +230,8 @@ export const pt: Record<TKey, string> = {
   settings_moderationHint: 'mensagens eliminadas e timeouts/bans mostrados rasurados',
   settings_bits: 'Mostrar bits',
   settings_bitsHint: 'quantidades de cheer nas mensagens',
+  settings_chatPinned: 'Mensagens fixadas',
+  settings_chatPinnedHint: 'mostrar a mensagem fixada do canal acima do bate-papo; atualizada com o ciclo de favoritos',
   settings_mutedUsers: 'Utilizadores silenciados',
   settings_mutePlaceholder: 'ocultar por login',
   settings_addMuteAria: 'Adicionar um utilizador à lista de silenciados',

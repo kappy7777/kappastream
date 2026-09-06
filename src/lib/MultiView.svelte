@@ -18,10 +18,14 @@
   // event and toggles apply retroactively.
 
   import { tick, onDestroy } from 'svelte'
+  import { invoke, isTauri } from '@tauri-apps/api/core'
   import { tileStore } from './tile-store.svelte'
   import { ChatSession } from './chat-session.svelte'
   import { settings } from './settings.svelte.ts'
   import Tile from './Tile.svelte'
+  import PinnedMessage from './PinnedMessage.svelte'
+  import { pinnedChat } from './pinned-chat.svelte'
+  import LinkifiedText from './LinkifiedText.svelte'
   import { resolveBadgeImageUrl, isMessageStricken, DELETED_MESSAGE_CLASS, type BadgeInfo } from './irc'
   import { formatCompact, formatChatTime } from './format'
   import { tooltip } from './tooltip.ts'
@@ -87,6 +91,20 @@
   const activeChatId = $derived(tileStore.activeChat?.id ?? null)
   const activeSession = $derived(activeChatId ? sessions.get(activeChatId) ?? null : null)
 
+  // ---- Pinned chat messages (multi-view) ------------------------------------
+  // Pins are fetched for the ACTIVE CHAT TAB ONLY, not every open tile: the
+  // banner lives in the chat pane and can only ever describe the channel whose
+  // chat is displayed, so per-tile fetches would quadruple the requests for
+  // pins nobody sees. The store rides App.svelte's favorites-poll tick; this
+  // effect just moves the target when the tab (or the toggle) changes. There
+  // is no status batch for tiles, so the store resolves the numeric id once
+  // per channel (memoized), never per poll.
+  $effect(() => {
+    void settings.chatPinned // a toggle flip re-targets at once
+    pinnedChat.setTarget(activeSession?.channel ?? null, null)
+  })
+  const activePin = $derived(settings.chatPinned ? pinnedChat.visiblePin : null)
+
   // Wheel over the tab strip scrolls it horizontally (scrollbar is hidden;
   // without this the strip only scrolls via shift+wheel, so the rightmost
   // tabs are effectively unreachable with a plain mouse wheel).
@@ -142,6 +160,18 @@
   function markBadgeErrored(url: string): void { const n = new Set(erroredBadges); n.add(url); erroredBadges = n }
   let erroredEmotes = $state<Set<string>>(new Set())
   function markEmoteErrored(url: string): void { const n = new Set(erroredEmotes); n.add(url); erroredEmotes = n }
+
+  // A twitch.tv link clicked in chat or the pinned banner. Multi-view has no
+  // player of its own (each tile owns one, and hijacking a tile for a clip
+  // would kill a live stream), so every link — clips included — opens the
+  // twitch page through the existing robust opener. Only twitch URLs are ever
+  // interactive in the first place (chat-links.ts).
+  function openChatLink(url: string): void {
+    if (!isTauri()) return
+    void invoke('open_url_robust', { url }).catch((e) => {
+      if (import.meta.env.DEV) console.error('chat-link: open_url_robust threw', e)
+    })
+  }
 
   function effectiveBadgeUrl(b: BadgeInfo): string | null {
     const u = resolveBadgeImageUrl(b, activeSession?.badgeOverride ?? null)
@@ -440,6 +470,15 @@
         {/each}
       </div>
 
+      {#if activePin}
+        <PinnedMessage
+          pin={activePin}
+          thirdParty={activeSession?.thirdParty ?? new Map()}
+          onlink={openChatLink}
+          ondismiss={(pinId) => pinnedChat.dismiss(pinId)}
+        />
+      {/if}
+
       {#if activeSession && settings.chatRoomstate && roomStateActive()}
         {@const rs = activeSession.roomState}
         <div class="chat-modes" role="status">
@@ -462,7 +501,7 @@
                   {#if settings.chatTimestamps}<span class="message-time">{formatChatTime(msg.timestamp)}</span>{/if}
                   <span class="notice-system">{msg.systemText}</span>
                   {#if msg.parts.length > 0}
-                    <span class="notice-msg">{#each msg.parts as part}{#if part.type === 'text'}{part.text}{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img class="emote" class:emote--twitch={part.provider === 'twitch'} src={part.url} alt={part.name} title={part.name} loading="lazy" onerror={() => markEmoteErrored(part.url)} />{/if}{/each}</span>
+                    <span class="notice-msg">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img class="emote" class:emote--twitch={part.provider === 'twitch'} src={part.url} alt={part.name} title={part.name} loading="lazy" onerror={() => markEmoteErrored(part.url)} />{/if}{/each}</span>
                   {/if}
                 </div>
               {/if}
@@ -477,7 +516,7 @@
                 {/each}
                 <span class="username" style="color: {msg.color}">{msg.username}</span>{#if !msg.isAction}<span class="username-sep">:</span>{/if}
                 {#if msg.isAction}<span class="action-mark"> </span>{/if}
-                <span class="text">{#each msg.parts as part}{#if part.type === 'text'}{part.text}{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img class="emote" class:emote--twitch={part.provider === 'twitch'} src={part.url} alt={part.name} title={part.name} loading="lazy" onerror={() => markEmoteErrored(part.url)} />{/if}{/each}</span>
+                <span class="text">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img class="emote" class:emote--twitch={part.provider === 'twitch'} src={part.url} alt={part.name} title={part.name} loading="lazy" onerror={() => markEmoteErrored(part.url)} />{/if}{/each}</span>
                 {#if settings.chatBits && msg.bits}
                   <span class="bits-badge">{formatCompact(msg.bits)}</span>
                 {/if}

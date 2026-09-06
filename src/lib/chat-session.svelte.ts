@@ -70,7 +70,11 @@ export class ChatSession {
   private reconnectAttempts = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private emoteAbort: AbortController | null = null
-  private thirdParty = new Map<string, Emote>()
+  // Third-party emote map for the renderer. Public + $state so the pinned-
+  // message banner — which renders through renderMessage at render time —
+  // re-resolves when the channel's emotes land (message parts are baked on
+  // arrival and are unaffected by the reactivity).
+  thirdParty = $state(new Map<string, Emote>())
   private badgeToken = 0
   private disposed = false
 

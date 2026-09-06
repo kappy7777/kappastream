@@ -1355,6 +1355,205 @@ export async function fetchVideoExtras(
 
 /*
  * ============================================================================
+ * Pinned chat messages.
+ *
+ * `channel(id:).pinnedChatMessages` — verified live (2026-09-06) against a
+ * channel with an actively pinned message, anonymous with the public web
+ * Client-ID; it is the same field twitch.tv's logged-out client reads (its
+ * persisted operation is `GetPinnedChat`). Shape notes from that session:
+ *   - The parent is Channel, keyed by NUMERIC id only (dead on User/Stream).
+ *   - node.id is the PIN id and pinnedMessage.id the MESSAGE id — DISTINCT
+ *     ids that merely happened to coincide on one test channel. Callers key
+ *     dismissal/identity on node.id, never on the message id.
+ *   - `type` was observed only as "MOD"; other values almost certainly exist
+ *     (paid pins). It is surfaced as an opaque string so unknown values
+ *     render generically instead of being dropped.
+ *   - `endsAt` is null (no expiry) or a timestamp. A pin can therefore lapse
+ *     BETWEEN polls — callers hide it locally when it passes.
+ *   - This is a connection, but cursor pagination returns IntegrityCheckFailed
+ *     anonymously throughout this API — the FIRST page only, never `after`.
+ *   - channel(id:).pinnedChatSettings EXISTS but is auth-gated
+ *     (`Unauthenticated`); it is deliberately NOT selected here.
+ *
+ * The `content { ... on Emote { id } }` inline fragment (the union is
+ * `FragmentContent`) is the one extension beyond the verified minimal shape,
+ * validated separately so native Twitch emotes in a pin render through the
+ * existing emote pipeline instead of degrading to text.
+ * ============================================================================
+ */
+
+export interface PinnedChatBadgeRow {
+  setID: string
+  version: string
+}
+
+/** Transport-level pin row (badge/color normalization lives in pinned-chat.svelte). */
+export interface PinnedChatMessageData {
+  /** PIN id (node.id) — the identity/dismissal key, NOT the message id. */
+  pinId: string
+  messageId: string
+  /** Opaque enum string ("MOD" observed; unknown values render generically). */
+  type: string
+  startsAt: string
+  updatedAt: string
+  /** '' when null (no expiry). */
+  endsAt: string
+  pinnedBy: { login: string; displayName: string }
+  message: {
+    sentAt: string
+    text: string
+    fragments: { text: string; emoteId: string | null }[]
+    sender: { login: string; displayName: string; chatColor: string; badges: PinnedChatBadgeRow[] }
+  } | null
+}
+
+// Remote caps so a pathologically long pin can never blow up the render or
+// push chat off screen. 50 fragments / 2000 chars is far beyond any real pin
+// (the verified sample: 6 fragments, ~230 chars).
+const PINNED_CHAT_MAX_FRAGMENTS = 50
+const PINNED_CHAT_MAX_CHARS = 2000
+
+const PINNED_CHAT_QUERY = `
+  query($id: ID!) {
+    channel(id: $id) {
+      id
+      pinnedChatMessages {
+        edges {
+          node {
+            id
+            type
+            startsAt
+            updatedAt
+            endsAt
+            pinnedBy { id login displayName }
+            pinnedMessage {
+              id
+              sentAt
+              content {
+                text
+                fragments { text content { ... on Emote { id } } }
+              }
+              sender { id login displayName chatColor displayBadges { id setID version } }
+            }
+          }
+        }
+        pageInfo { hasNextPage }
+      }
+    }
+  }
+`
+
+interface RawPinBadge {
+  setID?: string | null
+  version?: string | null
+}
+
+interface RawPinMessage {
+  id?: string | null
+  sentAt?: string | null
+  content?: {
+    text?: string | null
+    fragments?: ({ text?: string | null; content?: { id?: string | null } | null } | null)[] | null
+  } | null
+  sender?: {
+    login?: string | null
+    displayName?: string | null
+    chatColor?: string | null
+    displayBadges?: (RawPinBadge | null)[] | null
+  } | null
+}
+
+interface RawPinnedNode {
+  id?: string | null
+  type?: string | null
+  startsAt?: string | null
+  updatedAt?: string | null
+  endsAt?: string | null
+  pinnedBy?: { login?: string | null; displayName?: string | null } | null
+  pinnedMessage?: RawPinMessage | null
+}
+
+function toPinnedData(node: RawPinnedNode | null | undefined): PinnedChatMessageData | null {
+  if (!node || !node.id) return null
+  const rawFragments = node.pinnedMessage?.content?.fragments ?? []
+  const fragments: { text: string; emoteId: string | null }[] = []
+  let chars = 0
+  for (const f of rawFragments) {
+    if (fragments.length >= PINNED_CHAT_MAX_FRAGMENTS || chars >= PINNED_CHAT_MAX_CHARS) break
+    const text = typeof f?.text === 'string' ? f.text : ''
+    const emoteId = f?.content?.id ?? null
+    fragments.push({ text, emoteId })
+    chars += text.length
+  }
+  // The message text is rebuilt from the (capped) fragments rather than
+  // content.text so emote offsets derived from the same fragments always
+  // align with the string the renderer slices. content.text is only a fallback
+  // for a fragments-less payload.
+  const text =
+    fragments.length > 0
+      ? fragments.map((f) => f.text).join('')
+      : (node.pinnedMessage?.content?.text ?? '').slice(0, PINNED_CHAT_MAX_CHARS)
+  const badges: PinnedChatBadgeRow[] = []
+  for (const b of node.pinnedMessage?.sender?.displayBadges ?? []) {
+    if (b?.setID) badges.push({ setID: b.setID, version: b.version ?? '1' })
+  }
+  return {
+    pinId: node.id,
+    messageId: node.pinnedMessage?.id ?? '',
+    type: node.type ?? '',
+    startsAt: node.startsAt ?? '',
+    updatedAt: node.updatedAt ?? '',
+    endsAt: node.endsAt ?? '',
+    pinnedBy: {
+      login: node.pinnedBy?.login ?? '',
+      displayName: node.pinnedBy?.displayName ?? node.pinnedBy?.login ?? '',
+    },
+    message: node.pinnedMessage
+      ? {
+          sentAt: node.pinnedMessage.sentAt ?? '',
+          text,
+          fragments,
+          sender: {
+            login: node.pinnedMessage.sender?.login ?? '',
+            displayName:
+              node.pinnedMessage.sender?.displayName ?? node.pinnedMessage.sender?.login ?? '',
+            chatColor: node.pinnedMessage.sender?.chatColor ?? '',
+            badges,
+          },
+        }
+      : null,
+  }
+}
+
+/**
+ * Fetch the currently-pinned chat messages of one channel (numeric id).
+ * Returns the FIRST page only (no pagination — anonymous cursors fail with
+ * IntegrityCheckFailed). Empty is a SUCCESS (nothing pinned right now).
+ * Throws on transport failure; the caller degrades to no pin and never lets
+ * the failure reach the chat path.
+ */
+export async function fetchPinnedChatMessages(
+  channelId: string,
+  signal?: AbortSignal,
+): Promise<PinnedChatMessageData[]> {
+  if (!CHANNEL_ID_RE.test(channelId)) throw new Error('invalid channel id')
+  const data = await gqlRequest<{
+    channel?: {
+      pinnedChatMessages?: { edges?: ({ node?: RawPinnedNode | null } | null)[] | null } | null
+    } | null
+  }>(PINNED_CHAT_QUERY, { id: channelId }, signal)
+  const edges = data?.channel?.pinnedChatMessages?.edges ?? []
+  const out: PinnedChatMessageData[] = []
+  for (const edge of edges) {
+    const pin = toPinnedData(edge?.node ?? null)
+    // A pin whose message body is entirely absent carries nothing to render.
+    if (pin && pin.message) out.push(pin)
+  }
+  return out
+}
+
+/*
+ * ============================================================================
  * Stream Together / costream collaboration roster.
  *
  * The full participant list (logins, display names, avatars, roles) is NOT

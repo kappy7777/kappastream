@@ -35,6 +35,10 @@
   import { tooltipState } from './lib/tooltip.svelte.ts'
   import { tileStore } from './lib/tile-store.svelte.ts'
   import MultiView from './lib/MultiView.svelte'
+  import PinnedMessage from './lib/PinnedMessage.svelte'
+  import { pinnedChat } from './lib/pinned-chat.svelte'
+  import LinkifiedText from './lib/LinkifiedText.svelte'
+  import { parseTwitchClipUrl } from './lib/chat-links'
   import { t } from './lib/i18n/index.svelte'
   import { formatCompact, formatChatTime, formatAge } from './lib/format'
   import kappaUrl from './assets/kappa.png'
@@ -664,7 +668,12 @@
   }
   let cancelPendingAttach: (() => void) | null = null
   let emoteAbort: AbortController | null = null
-  let thirdPartyMap = new Map<string, Emote>()
+  // Third-party emote map (7TV/BTTV/FFZ, channel + global) for the chat
+  // renderer. $state so the pinned-message banner — which renders through
+  // the same renderMessage pipeline at render time rather than baking parts
+  // at parse time — re-resolves when a channel's emotes land. Chat messages
+  // are unaffected (their parts are baked on arrival).
+  let thirdPartyMap = $state(new Map<string, Emote>())
 
   // ---- VOD chat replay ----------------------------------------------------
   // Past-broadcast chat, synced to the playhead. Each replay comment is
@@ -2016,6 +2025,10 @@
   // favorites, which the poll won't cover).
   onMount(() => {
     const unsubscribe = favoritesStore.subscribe((snapshot) => {
+      // Pinned messages ride the SAME 150s poll cadence (no second timer):
+      // every favorites cycle nudges the store, whose internal throttle caps
+      // any single channel at one request per cycle.
+      pinnedChat.tick()
       if (playback.kind !== 'live') return
       const channel = channelJoined
       if (!channel) return
@@ -2026,6 +2039,23 @@
     })
     return unsubscribe
   })
+
+  // ---- Pinned chat messages (single-stream view) ---------------------------
+  // The banner follows the joined channel while live. The numeric id is the
+  // one the status data already carries (activeStatus.userId rides the same
+  // GQL batch as the status bar) — it is never re-resolved; until it lands
+  // the store simply holds off. MultiView owns the target while multi-view
+  // is on (its active chat tab), hence the null here. With the toggle off
+  // the store issues no request at all (and hides any pin immediately).
+  $effect(() => {
+    void settings.chatPinned // a toggle flip re-targets at once
+    const channel = channelJoined
+    const s = activeStatus
+    const live = !multiView && playback.kind === 'live'
+    const userId = live && s.state === 'live' ? s.userId ?? null : null
+    pinnedChat.setTarget(live && userId ? channel : null, userId)
+  })
+  const activePin = $derived(settings.chatPinned ? pinnedChat.visiblePin : null)
 
   // Per-channel custom badge override: setID -> { version -> image uuid }.
   // Applied at RENDER time (see the badge <img> block) ON TOP of the global
@@ -2143,6 +2173,35 @@
   })
 
   let notifBlocked = $derived(false)
+
+  // A twitch.tv link clicked in chat or in the pinned-message banner. CLIP
+  // links play IN-APP through the same player path ChannelContent clips use
+  // (playClip; back-to-live restores the current channel afterwards); every
+  // other twitch page opens through the existing robust opener. Non-twitch
+  // URLs are never interactive in the first place (chat-links.ts), so this
+  // handler only ever receives an open_url_robust-compatible URL.
+  function openChatLink(url: string): void {
+    if (channelJoined) {
+      const slug = parseTwitchClipUrl(url)
+      if (slug) {
+        // A synthetic ChannelClip: the player only needs the slug (resolve +
+        // playback); the empty metadata falls back to the generic clip title.
+        void playClip({
+          id: '', slug, title: '', game: '', viewCount: 0, createdAt: '',
+          durationSeconds: 0, thumbnailUrl: '', curator: '',
+        })
+        return
+      }
+    }
+    void (async () => {
+      if (!isTauri()) return
+      try {
+        await invoke('open_url_robust', { url })
+      } catch (err) {
+        if (import.meta.env.DEV) console.error('chat-link: open_url_robust threw', err)
+      }
+    })()
+  }
 
   async function openChatPopout(): Promise<void> {
     if (!channelJoined) return
@@ -2686,6 +2745,14 @@
       tabindex="0"
     ></div>
     <main class="chat" class:chat--hidden={!settings.chatVisible} style:--chat-size={`${chatSize}px`}>
+      {#if activePin}
+        <PinnedMessage
+          pin={activePin}
+          thirdParty={thirdPartyMap}
+          onlink={openChatLink}
+          ondismiss={(pinId) => pinnedChat.dismiss(pinId)}
+        />
+      {/if}
       {#if settings.chatRoomstate && channelJoined && roomStateActive(roomState)}
         <div class="chat-modes" role="status" aria-label={t('chat_chatModes')}>
           {#if roomState.subsOnly}
@@ -2726,7 +2793,7 @@
                 {/if}
                 <span class="notice-system">{msg.systemText}</span>
                 {#if msg.parts.length > 0}
-                  <span class="notice-msg">{#each msg.parts as part}{#if part.type === 'text'}{part.text}{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img
+                  <span class="notice-msg">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img
                     class="emote"
                     class:emote--twitch={part.provider === 'twitch'}
                     src={part.url}
@@ -2763,7 +2830,7 @@
             {/each}
             <span class="username" style="color: {msg.color}">{msg.username}</span>{#if !msg.isAction}<span class="username-sep">:</span>{/if}
             {#if msg.isAction}<span class="action-mark"> </span>{/if}
-            <span class="text">{#each msg.parts as part}{#if part.type === 'text'}{part.text}{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img
+            <span class="text">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} onlink={openChatLink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img
               class="emote"
               class:emote--twitch={part.provider === 'twitch'}
               src={part.url}

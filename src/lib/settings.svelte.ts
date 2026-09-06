@@ -116,6 +116,10 @@ const CHAT_SUBNOTICES_KEY = 'app-chat-subnotices-v1'
 const CHAT_ROOMSTATE_KEY = 'app-chat-roomstate-v1'
 const CHAT_MODERATION_KEY = 'app-chat-moderation-v1'
 const CHAT_BITS_KEY = 'app-chat-bits-v1'
+// Pinned chat messages. Unlike the four Tier 2 toggles above (parse always,
+// gate only rendering), this one gates the FETCH itself: with it off, no
+// pinned-message GQL query is issued at all.
+const CHAT_PINNED_KEY = 'app-chat-pinned-v1'
 // Multi-view status bar visibility (persisted). Default shown. Hidden by the
 // user to reclaim vertical space; revealed by hovering the bottom edge.
 const MV_STATUSBAR_HIDDEN_KEY = 'app-mv-statusbar-hidden-v1'
@@ -225,6 +229,9 @@ function readChatModeration(): boolean {
 function readChatBits(): boolean {
   return safeRead(CHAT_BITS_KEY) === 'true'
 }
+function readChatPinned(): boolean {
+  return safeRead(CHAT_PINNED_KEY) === 'true'
+}
 
 function readMvStatusBarHidden(): boolean {
   return safeRead(MV_STATUSBAR_HIDDEN_KEY) === 'true'
@@ -294,6 +301,7 @@ class SettingsStore {
   chatRoomstate: boolean = $state(readChatRoomstate())
   chatModeration: boolean = $state(readChatModeration())
   chatBits: boolean = $state(readChatBits())
+  chatPinned: boolean = $state(readChatPinned())
   mvStatusBarHidden: boolean = $state(readMvStatusBarHidden())
   // Client-side chat mute list (logins). Reactive so adding/removing an entry
   // re-renders messages already in the buffer — same "gate presentation, not
@@ -448,6 +456,15 @@ class SettingsStore {
 
   toggleChatBits(): void {
     this.setChatBits(!this.chatBits)
+  }
+
+  setChatPinned(v: boolean): void {
+    this.chatPinned = v
+    safeWrite(CHAT_PINNED_KEY, v ? 'true' : 'false')
+  }
+
+  toggleChatPinned(): void {
+    this.setChatPinned(!this.chatPinned)
   }
 
   setMvStatusBarHidden(v: boolean): void {
