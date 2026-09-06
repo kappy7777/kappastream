@@ -24,7 +24,22 @@ export function isVersionNewer(candidate: string, current: string): boolean {
   const c = parseCore(candidate)
   const cur = parseCore(current)
   if (!c || !cur) return false
-  if (c[0] !== cur[0]) return c[0] > cur[0]
-  if (c[1] !== cur[1]) return c[1] > cur[1]
-  return c[2] > cur[2]
+  return compareSemverCore(candidate, current) > 0
+}
+
+/**
+ * Three-way SemVer-core compare of two version strings (negative / zero /
+ * positive). Pre-release tails are ignored — an rc compares as its core, the
+ * same rule `isVersionNewer` applies. An unparseable string compares LOWEST
+ * (as 0.0.0) so a malformed value never wins a "newest first" sort; callers
+ * that must fail closed on unparseable input keep their own parse check (as
+ * `isVersionNewer` does).
+ */
+export function compareSemverCore(a: string, b: string): number {
+  const x = parseCore(a) ?? [0, 0, 0]
+  const y = parseCore(b) ?? [0, 0, 0]
+  for (let i = 0; i < 3; i++) {
+    if (x[i] !== y[i]) return x[i] - y[i]
+  }
+  return 0
 }

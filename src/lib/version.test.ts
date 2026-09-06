@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isVersionNewer } from './version'
+import { isVersionNewer, compareSemverCore } from './version'
 
 describe('isVersionNewer (downgrade guard)', () => {
   it('a higher patch is newer', () => {
@@ -41,5 +41,39 @@ describe('isVersionNewer (downgrade guard)', () => {
     expect(isVersionNewer('garbage', '0.2.6')).toBe(false)
     expect(isVersionNewer('0.2.7', 'garbage')).toBe(false)
     expect(isVersionNewer('', '0.2.6')).toBe(false)
+  })
+})
+
+describe('compareSemverCore (three-way sort key)', () => {
+  it('negative / zero / positive by core, numeric not lexical', () => {
+    expect(compareSemverCore('0.2.6', '0.2.7')).toBeLessThan(0)
+    expect(compareSemverCore('0.2.7', '0.2.6')).toBeGreaterThan(0)
+    expect(compareSemverCore('0.2.6', '0.2.6')).toBe(0)
+    // 0.2.10 > 0.2.9 numerically (a lexical sort would flip these).
+    expect(compareSemverCore('0.2.10', '0.2.9')).toBeGreaterThan(0)
+    expect(compareSemverCore('1.0.0', '0.9.9')).toBeGreaterThan(0)
+    expect(compareSemverCore('0.3.0', '0.2.99')).toBeGreaterThan(0)
+  })
+
+  it('ignores pre-release tails (an rc compares as its core)', () => {
+    expect(compareSemverCore('0.2.6-rc1', '0.2.6')).toBe(0)
+    expect(compareSemverCore('0.2.7-rc1', '0.2.6')).toBeGreaterThan(0)
+  })
+
+  it('sorts an unparseable string LOWEST (never wins a newest-first sort)', () => {
+    expect(compareSemverCore('garbage', '0.0.1')).toBeLessThan(0)
+    expect(compareSemverCore('', '0.0.1')).toBeLessThan(0)
+    expect(compareSemverCore('garbage', 'garbage')).toBe(0)
+  })
+
+  it('drives a newest-first sort', () => {
+    const versions = ['0.2.9', '1.0.0', '0.3.1', '1.0.3', '1.0.1']
+    expect([...versions].sort((a, b) => compareSemverCore(b, a))).toEqual([
+      '1.0.3',
+      '1.0.1',
+      '1.0.0',
+      '0.3.1',
+      '0.2.9',
+    ])
   })
 })

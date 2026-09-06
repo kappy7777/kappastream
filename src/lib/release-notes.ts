@@ -28,6 +28,8 @@
 // title, buttons, the section headers, the streamlink hint — IS translated
 // (see the i18n catalogue). Revisit if release cadence rises.
 
+import { compareSemverCore } from './version'
+
 export interface VersionNotes {
   /** New features (mirrors the CHANGELOG's ### Added bullets). */
   added?: string[]
@@ -122,4 +124,19 @@ const FALLBACK_NOTES: VersionNotes = {}
 /** The curated highlights for `version`, or empty sections if none are recorded. */
 export function releaseNotesFor(version: string): VersionNotes {
   return RELEASE_NOTES[version] ?? FALLBACK_NOTES
+}
+
+/**
+ * Every recorded version that has curated notes, NEWEST FIRST, capped at
+ * `currentVersion` (the running build). The what's-new screen and the
+ * About-modal changelog render this list scrollably, so highlights from
+ * previous releases stay reachable. Versions NEWER than the running build
+ * are excluded: an owner drafting the next release's entry before tagging
+ * it must never surface unreleased notes in a shipped build. Comparison is
+ * SemVer-core (rc tails compare as their core).
+ */
+export function releaseNoteVersions(currentVersion: string): string[] {
+  return Object.keys(RELEASE_NOTES)
+    .filter((v) => compareSemverCore(v, currentVersion) <= 0)
+    .sort((a, b) => compareSemverCore(b, a))
 }

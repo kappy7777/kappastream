@@ -3,6 +3,7 @@ import {
   parseIrcLine,
   parseIrcEvent,
   mergeRoomState,
+  activeRoomModes,
   composeUsernoticeFallback,
   usernoticeCategory,
   isNoticeVisible,
@@ -280,6 +281,42 @@ describe('parseIrcEvent ROOMSTATE + mergeRoomState', () => {
   it('followers-only 0 means "any follower", not off', () => {
     const ev = parseIrcEvent(roomstate('followers-only=0'))
     if (ev?.type === 'ROOMSTATE') expect(ev.followersOnly).toBe(0)
+  })
+})
+
+describe('activeRoomModes (chat-mode pill)', () => {
+  it('lists every active mode in display order', () => {
+    const rs: RoomState = {
+      subsOnly: true,
+      followersOnly: 30,
+      slow: 5,
+      emoteOnly: true,
+      r9k: true,
+    }
+    expect(activeRoomModes(rs)).toEqual(['subsOnly', 'followersOnly', 'slow', 'emoteOnly', 'r9k'])
+  })
+
+  it('excludes off values: followers-only -1, slow 0, false booleans, absent fields', () => {
+    const rs: RoomState = {
+      emoteOnly: false,
+      followersOnly: -1,
+      subsOnly: false,
+      slow: 0,
+      r9k: false,
+    }
+    expect(activeRoomModes(rs)).toEqual([])
+  })
+
+  it('followers-only 0 counts as active (any follower)', () => {
+    expect(activeRoomModes({ followersOnly: 0 })).toEqual(['followersOnly'])
+  })
+
+  it('a subset renders in the same fixed order regardless of merge history', () => {
+    // r9k arrived first, emote-only later — display order stays subs → …
+    let rs: RoomState = { r9k: true }
+    rs = mergeRoomState(rs, { type: 'ROOMSTATE', channel: 'c', emoteOnly: true, followersOnly: null, subsOnly: null, slow: null, r9k: null })
+    rs = mergeRoomState(rs, { type: 'ROOMSTATE', channel: 'c', emoteOnly: null, followersOnly: null, subsOnly: true, slow: null, r9k: null })
+    expect(activeRoomModes(rs)).toEqual(['subsOnly', 'emoteOnly', 'r9k'])
   })
 })
 

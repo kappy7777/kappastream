@@ -193,6 +193,7 @@ export const es: Record<TKey, string> = {
   about_tagline: 'Twitch, reducido a lo que importa: el stream y el chat.',
   about_body: 'Sin inicio de sesión, telemetría, analítica ni servidor propio. El chat se conecta de forma anónima — nada te identifica. Las conexiones de red van solo a los servicios necesarios para ver: infraestructura de Twitch y las APIs comunitarias abiertas (7TV, BTTV, FFZ) que proporcionan emotes e información del stream.',
   about_streamlink: 'Resolución del stream gracias a streamlink.',
+  about_changelog: 'Novedades',
   about_bitcoin: 'Bitcoin',
 
   shortcuts_title: 'Atajos de teclado',

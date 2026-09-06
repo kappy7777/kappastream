@@ -1,6 +1,6 @@
 import type { EmoteRange } from './emotes'
 import { parseTwitchEmoteTag } from './emotes'
-import { t } from './i18n/index.svelte'
+import { t, type TKey } from './i18n/index.svelte'
 
 export interface ParsedMessage {
   id: string
@@ -292,6 +292,36 @@ export function mergeRoomState(prev: RoomState, ev: RoomstateEvent): RoomState {
   if (ev.slow !== null) next.slow = ev.slow
   if (ev.r9k !== null) next.r9k = ev.r9k
   return next
+}
+
+// Which chat modes a RoomState says are in effect, in display order (the
+// order twitch.tv lists its room-state chips). The per-field activation
+// rules come from ROOMSTATE semantics: followersOnly is a minimum
+// follow-duration in minutes where -1 means OFF and >= 0 ON (0 = any
+// follower), and slow is a per-user delay in seconds where 0 means OFF.
+// Single source of truth for App.svelte's and MultiView.svelte's chat-mode
+// pills AND their "any mode active?" checks, so the conditions can never
+// drift between the two views.
+export type RoomModeKey = 'subsOnly' | 'followersOnly' | 'slow' | 'emoteOnly' | 'r9k'
+
+export function activeRoomModes(rs: RoomState): RoomModeKey[] {
+  const modes: RoomModeKey[] = []
+  if (rs.subsOnly === true) modes.push('subsOnly')
+  if (rs.followersOnly !== undefined && rs.followersOnly >= 0) modes.push('followersOnly')
+  if (rs.slow !== undefined && rs.slow > 0) modes.push('slow')
+  if (rs.emoteOnly === true) modes.push('emoteOnly')
+  if (rs.r9k === true) modes.push('r9k')
+  return modes
+}
+
+// i18n key for each mode label (typed TKey, so a missing translation in any
+// locale is a compile error via the catalogue Record).
+export const ROOM_MODE_LABEL_KEYS: Record<RoomModeKey, TKey> = {
+  subsOnly: 'chat_subsOnly',
+  followersOnly: 'chat_followersOnly',
+  slow: 'chat_slow',
+  emoteOnly: 'chat_emoteOnly',
+  r9k: 'chat_r9k',
 }
 
 // Compose a display line from msg-param-* only when Twitch did not send a

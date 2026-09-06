@@ -1,14 +1,18 @@
 <script lang="ts">
-  // First-launch welcome + post-update "what's new" overlay.
+  // First-launch welcome + post-update "what's new" overlay + on-demand
+  // changelog viewer.
   //
   // Shown when `firstLaunch.visible` is true (first install → welcome; updated
-  // → what's new; normal launch / downgrade → renders nothing). Dismissal is
+  // → what's new; normal launch / downgrade → renders nothing) OR when the
+  // user opens the changelog from the About modal (`firstLaunch.changelogOpen`
+  // — never writes `lastSeenVersion`). The what's-new and changelog surfaces
+  // render the same scrollable per-version log (see `isLog`). Dismissal is
   // one click (the button, the ×, the backdrop, or Escape via App.svelte's
-  // global handler) and writes `lastSeenVersion` so the screen never re-shows
-  // for the current version. It is purely additive DOM: it does not delay
-  // startup, block playback, or interrupt any in-progress action — everything
-  // else (IRC, HLS, favorites polling) is user-triggered and runs after the
-  // user dismisses.
+  // global handler) and — for the launch screens — writes `lastSeenVersion`
+  // so the screen never re-shows for the current version. It is purely
+  // additive DOM: it does not delay startup, block playback, or interrupt any
+  // in-progress action — everything else (IRC, HLS, favorites polling) is
+  // user-triggered and runs after the user dismisses.
   //
   // Non-conflict: the overlay's backdrop (z-index 1000, same as the About
   // modal) covers the top bar, so the About modal, multi-view toggle, and the
@@ -19,7 +23,7 @@
   import { invoke, isTauri } from '@tauri-apps/api/core'
   import { t } from './i18n/index.svelte'
   import { firstLaunch, streamlinkProbeFromResult } from './first-launch.svelte'
-  import { releaseNotesFor } from './release-notes'
+  import { releaseNotesFor, releaseNoteVersions } from './release-notes'
 
   // Streamlink presence probe. Fires once on mount ONLY for the welcome screen
   // (first install) and ONLY under Tauri; the what's-new screen never probes.
@@ -55,12 +59,16 @@
   ])
   const installCommands = $derived(STREAMLINK_INSTALL[platform] ?? STREAMLINK_INSTALL.linux)
 
-  const notes = $derived(releaseNotesFor(__APP_VERSION__))
-  // Sections (Added / Changed / Fixed) mirror the CHANGELOG's headings; a
-  // version with no curated sections shows the generic line instead.
-  const hasNotes = $derived(
-    (notes.added?.length ?? 0) + (notes.changed?.length ?? 0) + (notes.fixed?.length ?? 0) > 0,
-  )
+  // Which surface the overlay shows: the on-demand changelog (opened from the
+  // About modal) takes precedence; otherwise the launch screen. They cannot
+  // both be up (the store's changelogOpen comment explains why).
+  const mode = $derived(firstLaunch.changelogOpen ? 'changelog' : firstLaunch.screen)
+  // Both the post-update screen and the changelog viewer render the full
+  // version LOG — every recorded release, newest first, scrollable — so
+  // highlights from previous updates stay reachable. Only the first-install
+  // welcome keeps its own layout.
+  const isLog = $derived(mode === 'whats-new' || mode === 'changelog')
+  const noteVersions = $derived(releaseNoteVersions(__APP_VERSION__))
 
   onMount(() => {
     if (firstLaunch.screen !== 'welcome') return
@@ -78,14 +86,15 @@
   })
 
   function dismiss(): void {
-    firstLaunch.dismiss()
+    firstLaunch.close()
   }
 </script>
 
-{#if firstLaunch.visible}
+{#if firstLaunch.visible || firstLaunch.changelogOpen}
   <div class="welcome-backdrop" onclick={dismiss} role="presentation"></div>
   <div
     class="welcome-modal"
+    class:welcome-modal--log={isLog}
     role="dialog"
     aria-modal="true"
     aria-labelledby="welcome-title"
@@ -97,7 +106,7 @@
       aria-label={t('close')}
     >×</button>
 
-    {#if firstLaunch.screen === 'welcome'}
+    {#if mode === 'welcome'}
       <h2 id="welcome-title" class="welcome-title">{t('welcome_title')}</h2>
       <p class="welcome-tagline">{t('welcome_tagline')}</p>
 
@@ -138,36 +147,48 @@
         {/if}
       </section>
     {:else}
-      <h2 id="welcome-title" class="welcome-title">{t('whatsnew_title')}</h2>
+      <!-- Version log (post-update what's-new AND the on-demand changelog):
+           every recorded release, newest first, scrollable — the running
+           version leads with the accent header. Sections (Added / Changed /
+           Fixed) mirror the CHANGELOG's headings per version. -->
+      <h2 id="welcome-title" class="welcome-title">{mode === 'changelog' ? t('about_changelog') : t('whatsnew_title')}</h2>
       <p class="welcome-version">v{__APP_VERSION__}</p>
-      {#if hasNotes}
-        {#if notes.added && notes.added.length > 0}
-          <p class="welcome-section-h">{t('whatsnew_added')}</p>
-          <ul class="welcome-list">
-            {#each notes.added as h (h)}
-              <li>{h}</li>
-            {/each}
-          </ul>
+      <div class="welcome-log">
+        {#if noteVersions.length === 0}
+          <p class="welcome-intro">{t('whatsnew_generic')}</p>
+        {:else}
+          {#each noteVersions as version, idx (version)}
+            {@const vn = releaseNotesFor(version)}
+            <section class="welcome-version-block" class:welcome-version-block--first={idx === 0}>
+              <h3 class="welcome-version-h" class:welcome-version-h--latest={version === __APP_VERSION__}>v{version}</h3>
+              {#if vn.added && vn.added.length > 0}
+                <p class="welcome-section-h">{t('whatsnew_added')}</p>
+                <ul class="welcome-list">
+                  {#each vn.added as h (h)}
+                    <li>{h}</li>
+                  {/each}
+                </ul>
+              {/if}
+              {#if vn.changed && vn.changed.length > 0}
+                <p class="welcome-section-h">{t('whatsnew_changed')}</p>
+                <ul class="welcome-list">
+                  {#each vn.changed as h (h)}
+                    <li>{h}</li>
+                  {/each}
+                </ul>
+              {/if}
+              {#if vn.fixed && vn.fixed.length > 0}
+                <p class="welcome-section-h">{t('whatsnew_fixed')}</p>
+                <ul class="welcome-list">
+                  {#each vn.fixed as h (h)}
+                    <li>{h}</li>
+                  {/each}
+                </ul>
+              {/if}
+            </section>
+          {/each}
         {/if}
-        {#if notes.changed && notes.changed.length > 0}
-          <p class="welcome-section-h">{t('whatsnew_changed')}</p>
-          <ul class="welcome-list">
-            {#each notes.changed as h (h)}
-              <li>{h}</li>
-            {/each}
-          </ul>
-        {/if}
-        {#if notes.fixed && notes.fixed.length > 0}
-          <p class="welcome-section-h">{t('whatsnew_fixed')}</p>
-          <ul class="welcome-list">
-            {#each notes.fixed as h (h)}
-              <li>{h}</li>
-            {/each}
-          </ul>
-        {/if}
-      {:else}
-        <p class="welcome-intro">{t('whatsnew_generic')}</p>
-      {/if}
+      </div>
     {/if}
 
     <div class="welcome-actions">
@@ -175,7 +196,7 @@
         type="button"
         class="welcome-primary"
         onclick={dismiss}
-      >{firstLaunch.screen === 'welcome' ? t('welcome_getStarted') : t('whatsnew_continue')}</button>
+      >{mode === 'welcome' ? t('welcome_getStarted') : mode === 'changelog' ? t('close') : t('whatsnew_continue')}</button>
     </div>
   </div>
 {/if}
@@ -206,6 +227,48 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
+  }
+
+  /* Log mode (what's-new + changelog): a fixed comfortable height whose only
+     scrolling region is the version log — title and button stay put. */
+  .welcome-modal--log {
+    height: calc(min(600px, 100vh - 64px) / var(--ui-zoom, 1));
+    overflow: hidden;
+  }
+
+  /* The scrollable per-version log. min-height:0 lets it shrink inside the
+     flex-column modal (without it the content height wins and overflows). */
+  .welcome-log {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding-right: 6px;
+  }
+
+  .welcome-version-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .welcome-version-block--first {
+    padding-top: 0;
+    border-top: none;
+  }
+  .welcome-version-h {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  /* The RUNNING version leads the log in both modes — accent it so the
+     "what changed in THIS update" answer is visually first. */
+  .welcome-version-h--latest {
+    color: var(--accent);
   }
 
   .welcome-close {

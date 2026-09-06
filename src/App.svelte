@@ -5,7 +5,8 @@
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { loadChannelEmotes, loadGlobalEmotes, buildEmoteMap, renderMessage, parseTwitchEmoteTag, type Emote, type RenderedMessagePart } from './lib/emotes'
   import './lib/emote.css'
-  import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, usernoticeCategory, isNoticeVisible, DELETED_MESSAGE_CLASS, isMessageStricken, resolveBadgeImageUrl, type BadgeInfo, type IrcEvent, type ParsedMessage, type RoomState } from './lib/irc'
+  import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, usernoticeCategory, isNoticeVisible, DELETED_MESSAGE_CLASS, isMessageStricken, resolveBadgeImageUrl, activeRoomModes, type BadgeInfo, type IrcEvent, type ParsedMessage, type RoomState } from './lib/irc'
+  import ChatModesPill from './lib/ChatModesPill.svelte'
   import { UI_ZOOM_VAR, zoomDivisor } from './lib/ui-zoom'
   import Sidebar from './lib/Sidebar.svelte'
   import PlayerControls from './lib/PlayerControls.svelte'
@@ -392,6 +393,12 @@
   function closeAbout(): void {
     aboutOpen = false
   }
+  // About → changelog: close About, open the version-log overlay (one modal
+  // at a time — the log otherwise renders over the About dialog).
+  function openChangelogFromAbout(): void {
+    closeAbout()
+    firstLaunch.openChangelog()
+  }
   let shortcutsHelpOpen = $state(false)
 
   // Player keyboard shortcuts (space/k play-pause, m mute, f fullscreen, t
@@ -480,7 +487,9 @@
       aboutOpen,
       browseOpen,
       helpOpen: shortcutsHelpOpen,
-      welcomeOpen: firstLaunch.visible,
+      // The welcome/what's-new/changelog overlay (all one component) must
+      // suppress player shortcuts and win the Escape race.
+      welcomeOpen: firstLaunch.visible || firstLaunch.changelogOpen,
       isLive: playback.kind === 'live',
     })
     if (!action) return
@@ -495,7 +504,7 @@
         return
       case 'close-welcome':
         e.preventDefault()
-        firstLaunch.dismiss()
+        firstLaunch.close()
         return
       case 'toggle-help':
         shortcutsHelpOpen = !shortcutsHelpOpen
@@ -1862,15 +1871,10 @@
     })
   }
 
-  function roomStateActive(rs: RoomState): boolean {
-    return (
-      rs.emoteOnly === true ||
-      rs.subsOnly === true ||
-      rs.r9k === true ||
-      (rs.followersOnly !== undefined && rs.followersOnly >= 0) ||
-      (rs.slow !== undefined && rs.slow > 0)
-    )
-  }
+  // Chat modes currently in effect for the joined channel (Toggle B), as
+  // ordered label keys — shared logic with MultiView's pill (activeRoomModes
+  // in irc.ts is the single source of the per-mode activation rules).
+  const chatModeKeys = $derived(activeRoomModes(roomState))
 
   let stickyBottom = $state(true)
   let erroredBadges = $state<Set<string>>(new Set())
@@ -2079,9 +2083,11 @@
   // Whether the chat-mode banner (Toggle B) renders at the bottom of the chat
   // panel. Also drives the .chat--modes class, which lifts the floating
   // jump pill above the banner so it stays uncovered — the open-on-Twitch
-  // pill stays on the banner's row, beside it.
+  // pill stays on the banner's row, beside it. (The banner is a fixed-height
+  // one-liner — ChatModesPill marquees overflowing labels instead of
+  // wrapping — so a constant lift is correct.)
   const chatModesShown = $derived(
-    settings.chatRoomstate && !!channelJoined && roomStateActive(roomState),
+    settings.chatRoomstate && !!channelJoined && chatModeKeys.length > 0,
   )
 
   // Per-channel custom badge override: setID -> { version -> image uuid }.
@@ -2910,33 +2916,11 @@
         </button>
       {/if}
       {#if chatModesShown}
-        <!-- Chat-mode banner (Toggle B) pinned to the BOTTOM of the chat panel:
-             one non-wrapping line (modes never stack), a leading info symbol,
-             and no parenthesized thresholds — twitch.tv shows plain labels. -->
-        <div class="chat-modes" role="status" aria-label={t('chat_chatModes')}>
-          <span class="chat-modes-icon" use:tooltip={t('chat_chatModes')}>
-            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-              <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"/>
-              <path d="M8 7.4v3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-              <circle cx="8" cy="4.9" r="0.95" fill="currentColor"/>
-            </svg>
-          </span>
-          {#if roomState.subsOnly}
-            <span class="mode-pill">{t('chat_subsOnly')}</span>
-          {/if}
-          {#if roomState.followersOnly !== undefined && roomState.followersOnly >= 0}
-            <span class="mode-pill">{t('chat_followersOnly')}</span>
-          {/if}
-          {#if roomState.slow !== undefined && roomState.slow > 0}
-            <span class="mode-pill">{t('chat_slow')}</span>
-          {/if}
-          {#if roomState.emoteOnly}
-            <span class="mode-pill">{t('chat_emoteOnly')}</span>
-          {/if}
-          {#if roomState.r9k}
-            <span class="mode-pill">{t('chat_r9k')}</span>
-          {/if}
-        </div>
+        <!-- Chat-mode banner (Toggle B) pinned to the BOTTOM of the chat panel
+             (shared component — see ChatModesPill.svelte). The tighter
+             max-width keeps it clear of the open-on-Twitch pill that shares
+             this row at the right edge. -->
+        <ChatModesPill modes={chatModeKeys} label={t('chat_chatModes')} maxWidth="calc(100% - 90px)" />
       {/if}
     </main>
     {/if}
@@ -2990,6 +2974,13 @@
       <p class="about-modal-body">{t('about_body')}</p>
       <p class="about-modal-body">{t('about_streamlink')}</p>
       <p class="about-modal-tagline about-modal-tagline--last">Built to watch, not to be watched.</p>
+      <!-- On-demand changelog: swaps the About modal for the version-log
+           overlay (the same log the post-update what's-new screen shows —
+           every recorded release, scrollable). About closes so only one
+           modal is up. -->
+      <button type="button" class="about-changelog-btn" onclick={openChangelogFromAbout}>
+        {t('about_changelog')}
+      </button>
       <div class="about-modal-donate">
         <span class="about-modal-donate-label">{t('donate')}</span>
         <div class="about-modal-donate-addr-group">
@@ -3452,6 +3443,26 @@
   .about-modal-tagline--last {
     font-style: italic;
     color: var(--accent);
+  }
+  /* Changelog button (opens the version-log overlay). Text-sized and pinned
+     to the modal's LEFT edge (align-self overrides the flex column's stretch,
+     which would make it a full-width row). */
+  .about-changelog-btn {
+    align-self: flex-start;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    padding: 3px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .about-changelog-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+    color: var(--text-primary);
   }
   .about-modal-body {
     font-size: 13px;
@@ -4393,60 +4404,14 @@
   /* ---- Tier 2 chat features (Toggle B/C/D + USERNOTICE) ----
      All use existing theme tokens only — no hardcoded colours, so they adapt
      to all 34 themes. These rules are inert when the toggles are off (the
-     elements are not rendered at all). */
+     elements are not rendered at all). The chat-mode pill itself (Toggle B)
+     lives in ChatModesPill.svelte with its own scoped styles. */
 
-  /* Chat-mode indicator (Toggle B). Compact bar pinned above the chat scroll. */
-  .chat-modes {
-    /* Floating pill over the chat (mirrors the jump-to-bottom button):
-       centered at the bottom edge, rounded, translucent blur background.
-       One non-wrapping line — multiple active modes (slow + followers-only
-       etc.) share the single row; overflow clips instead of wrapping. */
-    position: absolute;
-    bottom: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 5;
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    /* Keep clear of the open-on-Twitch pill that shares this row at the right
-       edge (~37px zone incl. its offset): at max width the pill's right edge
-       stays 45px from the panel edge. */
-    max-width: calc(100% - 90px);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--bg-overlay-strong);
-    -webkit-backdrop-filter: blur(6px);
-    backdrop-filter: blur(6px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
-    overflow: hidden;
-  }
-
-  .chat-modes-icon {
-    flex: 0 0 auto;
-    display: inline-flex;
-    color: var(--text-dim);
-  }
-
-  /* The centered jump pill is the only one lifted clear above the modes pill
-     (bottom:10 + ~22px height + gap); the open-on-Twitch pill shares the
-     modes pill's row at the right edge instead of stacking above it. */
+  /* The centered jump pill is lifted clear above the (fixed-height,
+     one-line) chat-modes pill; the open-on-Twitch pill shares the modes
+     pill's row at the right edge instead of stacking above it. */
   .chat--modes .jump-end {
     bottom: 48px;
-  }
-
-  /* Plain text labels — no per-mode chip background/border; the floating
-     Gesamtbox (the pill itself) provides the only background. */
-  .mode-pill {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--accent);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
   }
 
   /* Deleted / timed-out message presentation (Toggle C). This single rule is

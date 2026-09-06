@@ -88,8 +88,9 @@ export function resolveShortcut(e: KeyboardEvent, ctx: ShortcutCtx): ShortcutAct
   // No player shortcuts while typing in any editable field.
   if (isEditableTarget(e.target)) return null
 
-  // No player shortcuts behind an open modal/overlay (about, browse, help, the
-  // first-launch welcome / what's-new overlay).
+  // No player shortcuts behind an open modal/overlay (about, browse, help,
+  // the first-launch welcome / what's-new overlay, the on-demand changelog —
+  // all fed through welcomeOpen by App.svelte).
   if (ctx.aboutOpen || ctx.browseOpen || ctx.helpOpen || ctx.welcomeOpen) return null
 
   const key = e.key

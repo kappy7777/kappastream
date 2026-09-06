@@ -94,17 +94,46 @@ class FirstLaunchStore {
   screen: LaunchScreen = $state(classifyLaunch(__APP_VERSION__, readLastSeenVersion()))
   // Whether the screen is currently shown (true until dismissed this session).
   shown = $state(true)
+  // On-demand changelog viewer (the About modal's button). Completely
+  // independent of the launch flow: opening it NEVER writes lastSeenVersion
+  // (the write-on-dismissal contract belongs to the launch screen only), and
+  // it cannot co-occur with one — the launch overlay covers the top bar, so
+  // the About modal (and thus the button) is unreachable until it is gone.
+  changelogOpen = $state(false)
 
   get visible(): boolean {
     return this.screen !== null && this.shown
   }
 
-  // Dismiss the screen and record the current version as seen. Writing on
-  // dismissal — not on show — means a crash before dismissal re-shows next
+  // Dismiss the LAUNCH screen and record the current version as seen. Writing
+  // on dismissal — not on show — means a crash before dismissal re-shows next
   // launch (the version is only persisted once the user actually interacts).
   dismiss(): void {
     writeLastSeenVersion(__APP_VERSION__)
     this.shown = false
+  }
+
+  openChangelog(): void {
+    this.changelogOpen = true
+  }
+
+  closeChangelog(): void {
+    this.changelogOpen = false
+  }
+
+  /**
+   * Close whichever overlay surface is up — the on-demand changelog if that
+   * is what the user is looking at, otherwise the launch screen. Only the
+   * launch path writes lastSeenVersion. One entry point for all dismissal
+   * paths (button, ×, backdrop, Escape) so the changelog viewer can never be
+   * mistaken for a launch screen.
+   */
+  close(): void {
+    if (this.changelogOpen) {
+      this.changelogOpen = false
+      return
+    }
+    this.dismiss()
   }
 }
 

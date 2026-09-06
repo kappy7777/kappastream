@@ -26,7 +26,8 @@
   import PinnedMessage from './PinnedMessage.svelte'
   import { pinnedChat } from './pinned-chat.svelte'
   import LinkifiedText from './LinkifiedText.svelte'
-  import { resolveBadgeImageUrl, isMessageStricken, usernoticeCategory, isNoticeVisible, DELETED_MESSAGE_CLASS, type BadgeInfo } from './irc'
+  import { resolveBadgeImageUrl, isMessageStricken, usernoticeCategory, isNoticeVisible, DELETED_MESSAGE_CLASS, activeRoomModes, type BadgeInfo } from './irc'
+  import ChatModesPill from './ChatModesPill.svelte'
   import { formatCompact, formatChatTime } from './format'
   import { tooltip } from './tooltip.ts'
   import { t } from './i18n/index.svelte'
@@ -104,10 +105,14 @@
     pinnedChat.setTarget(activeSession?.channel ?? null, null)
   })
   const activePin = $derived(settings.chatPinned ? pinnedChat.visiblePin : null)
-  // The room state the floating chat-mode pill renders for (null = hidden);
-  // also lifts the jump button above the pill.
-  const modesRoomState = $derived(
-    activeSession && settings.chatRoomstate && roomStateActive() ? activeSession.roomState : null,
+  // Chat modes the floating chat-mode pill renders for the active tile's
+  // session ([] = hidden); also lifts the jump button above the pill (the
+  // pill is a fixed-height one-liner — ChatModesPill marquees overflowing
+  // labels instead of wrapping — so a constant lift is correct).
+  // chatModeKeys uses the SAME shared activation rules as App.svelte's pill
+  // (activeRoomModes in irc.ts).
+  const chatModeKeys = $derived(
+    activeSession && settings.chatRoomstate ? activeRoomModes(activeSession.roomState) : [],
   )
 
   // Wheel over the tab strip scrolls it horizontally (scrollbar is hidden;
@@ -181,13 +186,6 @@
   function effectiveBadgeUrl(b: BadgeInfo): string | null {
     const u = resolveBadgeImageUrl(b, activeSession?.badgeOverride ?? null)
     return u
-  }
-
-  function roomStateActive(): boolean {
-    const rs = activeSession?.roomState ?? {}
-    return rs.emoteOnly === true || rs.subsOnly === true || rs.r9k === true ||
-      (rs.followersOnly !== undefined && rs.followersOnly >= 0) ||
-      (rs.slow !== undefined && rs.slow > 0)
   }
 
   const placeholderText = $derived(
@@ -455,23 +453,37 @@
       <!-- Tabs: one per tile, active = active chat. Clicking a tab moves ONLY
            the active chat — the audio authority stays where it is, so you can
            read one channel's chat while listening to another (asymmetric with
-           tile clicks, which move both). The strip scrolls horizontally when
-           the tabs overflow the (often narrow) chat pane: its scrollbar is
-           hidden, so the wheel is translated to horizontal scrolling — a bare
-           overflow-x:auto strip would only scroll via shift+wheel, which
+           tile clicks, which move both). Each tab is the channel's circular
+           profile picture (from the tile's polled liveStatus; the channel
+           initial stands in until the first poll lands), with a live dot for
+           live channels — hover shows the channel name. Tabs share the strip
+           width EQUALLY (max 4 tiles → 4 avatars quarter the bar). The strip
+           still scrolls horizontally for absurdly narrow panes: its scrollbar
+           is hidden, so the wheel is translated to horizontal scrolling — a
+           bare overflow-x:auto strip would only scroll via shift+wheel, which
            reads as "the right tabs are unreachable". -->
       <div class="mv-chat-tabs" role="tablist" onwheel={onTabsWheel}>
         {#each tileStore.tiles as tile (tile.id)}
+          {@const s = tile.liveStatus}
           <button
             type="button"
             class="mv-chat-tab"
             class:mv-chat-tab--active={tileStore.isActiveChat(tile.id)}
-            class:mv-chat-tab--live={tile.liveStatus.state === 'live'}
             role="tab"
             aria-selected={tileStore.isActiveChat(tile.id)}
             onclick={() => tileStore.selectChat(tile.id)}
             title={tile.channel}
-          >{tile.channel}</button>
+            aria-label={tile.channel}
+          >
+            <span class="mv-tab-avatar-wrap">
+              {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
+                <img class="mv-tab-avatar" class:mv-tab-avatar--off={s.state === 'offline'} src={s.avatarUrl} alt="" />
+              {:else}
+                <span class="mv-tab-avatar mv-tab-avatar--fallback" aria-hidden="true">{tile.channel.charAt(0).toUpperCase()}</span>
+              {/if}
+              {#if s.state === 'live'}<span class="mv-tab-live-dot" aria-hidden="true"></span>{/if}
+            </span>
+          </button>
         {/each}
       </div>
 
@@ -512,7 +524,12 @@
           {/if}
         </div>
         {#if !stickyBottom && messages.length > 0}
-          <button type="button" class="mv-jump" class:mv-jump--lifted={!!modesRoomState} onclick={jumpToPresent}>{t('chat_backToBottom')}{#if newMessageCount > 0}<span class="mv-jump-count">{newMessageCount}</span>{/if}</button>
+          <button
+            type="button"
+            class="mv-jump"
+            class:mv-jump--lifted={chatModeKeys.length > 0}
+            onclick={jumpToPresent}
+          >{t('chat_backToBottom')}{#if newMessageCount > 0}<span class="mv-jump-count">{newMessageCount}</span>{/if}</button>
         {/if}
         {#if activePin}
           <PinnedMessage
@@ -522,22 +539,10 @@
             ondismiss={(pinId) => pinnedChat.dismiss(pinId)}
           />
         {/if}
-        {#if modesRoomState}
-          {@const rs = modesRoomState}
-          <!-- Floating chat-mode pill (mirrors App.svelte): one line, leading
-               info symbol, plain labels — no parenthesized thresholds. -->
-          <div class="chat-modes" role="status">
-            <svg class="chat-modes-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-              <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"/>
-              <path d="M8 7.4v3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-              <circle cx="8" cy="4.9" r="0.95" fill="currentColor"/>
-            </svg>
-            {#if rs.subsOnly}<span class="mode-pill">{t('chat_subsOnly')}</span>{/if}
-            {#if rs.followersOnly !== undefined && rs.followersOnly >= 0}<span class="mode-pill">{t('chat_followersOnly')}</span>{/if}
-            {#if rs.slow !== undefined && rs.slow > 0}<span class="mode-pill">{t('chat_slow')}</span>{/if}
-            {#if rs.emoteOnly}<span class="mode-pill">{t('chat_emoteOnly')}</span>{/if}
-            {#if rs.r9k}<span class="mode-pill">{t('chat_r9k')}</span>{/if}
-          </div>
+        {#if chatModeKeys.length > 0}
+          <!-- Floating chat-mode pill (shared component — see
+               ChatModesPill.svelte). -->
+          <ChatModesPill modes={chatModeKeys} label={t('chat_chatModes')} />
         {/if}
       </div>
     </main>
@@ -734,23 +739,59 @@
   }
   .mv-chat-tabs::-webkit-scrollbar { display: none; }
   .mv-chat-tab {
-    flex: 0 0 auto;
+    /* Even distribution: each tab takes an EQUAL share of the strip (the
+       grid holds at most 4 tiles, so 4 avatars fill the bar's width
+       quartered; fewer tiles spread wider). The strip's overflow-x scroll
+       + wheel handler remain as the safety net for absurdly narrow panes
+       where even the 22px avatars stop fitting. */
+    flex: 1 1 0;
+    justify-content: center;
     border: none;
     border-bottom: 2px solid transparent;
     background: transparent;
-    color: var(--text-secondary);
-    padding: 7px 12px;
-    font-size: 12px;
-    font-family: inherit;
     cursor: pointer;
-    white-space: nowrap;
-    max-width: 140px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 8px;
+    /* Avatar tabs: 31px content + the 2px underline = the same 33px strip
+       height the text tabs had (7+7 padding + 17 line-box + 2 border) — the
+       chat pane below must not shift by a pixel. */
+    height: 31px;
   }
-  .mv-chat-tab:hover { background: var(--bg-hover-faint); color: var(--text-primary); }
-  .mv-chat-tab--active { color: var(--accent); border-bottom-color: var(--accent); }
-  .mv-chat-tab--live::before { content: '● '; color: var(--live); }
+  .mv-chat-tab:hover { background: var(--bg-hover-faint); }
+  .mv-chat-tab--active { border-bottom-color: var(--accent); }
+  .mv-tab-avatar-wrap { position: relative; display: inline-flex; }
+  .mv-tab-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
+  }
+  /* No avatar yet (the tile's first status poll hasn't landed) — the channel
+     initial stands in, themed like an empty profile circle. */
+  .mv-tab-avatar--fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .mv-tab-avatar--off { filter: grayscale(1); opacity: 0.6; }
+  /* Live marker replacing the old text tabs' "●" prefix: a small dot on the
+     avatar's corner, ringed in the strip background so it reads as a badge. */
+  .mv-tab-live-dot {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--live);
+    border: 1.5px solid var(--bg-app);
+  }
 
   .mv-chat-body {
     /* Anchor for the floating overlays (pinned-message card, chat-mode pill,
@@ -781,7 +822,8 @@
     z-index: 5;
   }
   .mv-jump:hover { background: var(--bg-hover); }
-  /* Lifted above the floating chat-mode pill (bottom:10, ~25px tall). */
+  /* Lifted above the floating chat-mode pill (bottom:10, fixed one-line
+     height — see ChatModesPill.svelte). */
   .mv-jump--lifted { bottom: 48px; }
   .mv-jump-count { margin-left: 5px; background: var(--accent); color: #fff; border-radius: 8px; padding: 0 6px; font-size: 11px; }
 
@@ -796,30 +838,8 @@
   .mv-chat .badge { display: inline-block; width: 16px; height: 16px; margin-right: 3px; vertical-align: -3px; object-fit: contain; }
   .mv-chat .message-time { color: var(--text-dim); font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; margin-right: 4px; flex: 0 0 auto; }
   .mv-chat .emote-fallback { color: var(--text-primary); }
-  /* Floating chat-mode pill — same aesthetic as the jump button: centered at
-     the bottom edge, rounded, translucent blur background, one line. */
-  .mv-chat .chat-modes {
-    position: absolute;
-    bottom: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 5;
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    max-width: calc(100% - 20px);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--bg-overlay-strong);
-    -webkit-backdrop-filter: blur(6px);
-    backdrop-filter: blur(6px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
-    overflow: hidden;
-  }
-  .mv-chat .chat-modes-icon { flex: 0 0 auto; display: inline-flex; color: var(--text-dim); }
-  .mv-chat .mode-pill { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* The floating chat-mode pill is the shared ChatModesPill component with
+     its own scoped styles — no local rules to keep in sync. */
   .mv-chat .message--deleted .text,
   .mv-chat .message--deleted .username { text-decoration: line-through; opacity: 0.6; }
   .mv-chat .bits-badge { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; padding: 0 4px; border-radius: 3px; background: var(--bg-hover); color: var(--accent); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; vertical-align: 1px; }
