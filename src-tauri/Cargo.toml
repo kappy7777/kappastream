@@ -61,6 +61,7 @@ tauri-plugin-single-instance = "2"
 # `updater` feature in lib.rs (see the note above).
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-window-state = "2.4.1"
 
 [dev-dependencies]
 # Used in resolve.rs tests to set/unset env vars without mutating the global

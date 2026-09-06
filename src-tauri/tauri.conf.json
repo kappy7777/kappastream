@@ -10,9 +10,13 @@
 "windows": [
     {
       "title": "kappastream",
-      "width": 800,
-      "height": 600,
+      "width": 1280,
+      "height": 800,
+      "minWidth": 960,
+      "minHeight": 600,
+      "center": true,
       "resizable": true,
+      "visible": false,
       "fullscreen": false,
       "devtools": true,
       "decorations": false

@@ -21,6 +21,29 @@ pub fn run() {
         .manage(gql::GqlClient::new().expect("failed to build GQL HTTP client"))
         .plugin(tauri_plugin_notification::init());
 
+    // Remember the main window's size / position / maximized state across
+    // launches: saved to a small JSON file in the app config dir and restored
+    // Rust-side at window creation, so there is no first-frame flash and no JS
+    // involvement (first launch falls back to the tauri.conf.json default).
+    // The flag set is deliberate: VISIBLE is excluded because close-to-tray
+    // can quit the app with the window hidden — restoring that would look
+    // like "the app didn't open"; FULLSCREEN is excluded because fullscreen /
+    // theater state is deliberately never persisted in this app. The PiP
+    // window is denylisted because pip-controller owns its rect entirely
+    // (localStorage persistence + the 16:9 snap) and a second state manager
+    // would race it.
+    builder = builder.plugin(
+        tauri_plugin_window_state::Builder::new()
+            .with_denylist(&["pip"])
+            .with_state_flags(
+                tauri_plugin_window_state::StateFlags::SIZE
+                    | tauri_plugin_window_state::StateFlags::POSITION
+                    | tauri_plugin_window_state::StateFlags::MAXIMIZED
+                    | tauri_plugin_window_state::StateFlags::DECORATIONS,
+            )
+            .build(),
+    );
+
     // In-app self-update. Gated behind the `updater` Cargo feature (default
     // on). AUR builds compile with `--no-default-features`, so neither the
     // updater nor the process (relaunch) plugin is registered there — pacman
@@ -70,6 +93,18 @@ pub fn run() {
                 )?;
             }
             tray::build(app.handle())?;
+
+            // The main window is created hidden (tauri.conf.json
+            // `visible: false`) so the window-state plugin's creation-time
+            // restore can apply the saved geometry BEFORE the first paint —
+            // a visible creation would flash the 1280x800 default and then
+            // jump to the remembered size/position. Config windows are built
+            // before this setup hook runs (tauri creates them, THEN calls
+            // setup), so the restore has already fired by the time we show.
+            #[cfg(desktop)]
+            if let Some(window) = app.get_webview_window(tray::MAIN_WINDOW) {
+                let _ = window.show();
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
