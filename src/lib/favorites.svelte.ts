@@ -67,7 +67,6 @@ export const MAX_FAVORITES = 1000
 // breaker so the sidebar can show a "having trouble reaching Twitch" banner,
 // and schedules an exponential-backoff retry of the SAME GQL batch. Channels
 // simply stop updating until the next successful poll.
-const NOTIFY_STARTUP_GRACE_MS = 10 * 60 * 1000
 const CIRCUIT_BREAKER_MS = 30_000
 const RETRY_JITTER_MS = 5_000
 
@@ -230,7 +229,6 @@ export class FavoritesStore {
   private pollTimer: ReturnType<typeof setTimeout> | null = null
   private disposed = false
   private notifChannels: Set<string> = new Set()
-  private readonly startedAt = Date.now()
   // Per-channel version counter. Bumped on add/remove/import so a batch GQL
   // response that was snapshotted BEFORE a channel was removed (+ possibly
   // re-added) can be detected and skipped in applyGqlStatuses — the newer
@@ -597,7 +595,6 @@ export class FavoritesStore {
         continue // a newer fetch owns this channel
       }
       const prev = this.statuses.get(cs.login)
-      const wasLive = prev?.status.state === 'live'
 
       // A fresh batch rebuilds the whole status, but the roster data lands
       // via a separate follow-up request moments later — carry the
@@ -631,7 +628,13 @@ export class FavoritesStore {
         lastError: null,
         updateDelayed: false,
       })
-      if (!wasLive && cs.live && Date.now() - this.startedAt >= NOTIFY_STARTUP_GRACE_MS) {
+      // Notify ONLY on a known offline→live transition. A channel resolving
+      // live from 'unknown' — the first poll after launch, or a freshly
+      // added/imported favorite — was already live when we first learned its
+      // status, so it must not fire an "is live" notification. This state
+      // gate replaced the old 10-minute startup grace, which also swallowed
+      // genuine offline→live transitions inside its window.
+      if (prev?.status.state === 'offline' && cs.live) {
         void this.fireLiveNotification(cs.login, status)
       }
       changed = true

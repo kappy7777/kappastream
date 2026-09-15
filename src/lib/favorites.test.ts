@@ -27,6 +27,10 @@ const gql = vi.hoisted(() => ({
   calls: [] as { body: string; ts: number }[],
 }))
 
+// Every in-app toast the store fires is recorded here (the OS-notification
+// half of fireLiveNotification never runs under isTauri() = false).
+const notifLog = vi.hoisted(() => [] as { kind: string; title: string; body: string; channel: string }[])
+
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (cmd: string, args: Record<string, unknown>): Promise<unknown> => {
     if (cmd === 'gql_fetch') {
@@ -38,7 +42,13 @@ vi.mock('@tauri-apps/api/core', () => ({
   },
   isTauri: () => false,
 }))
-vi.mock('./notifications.svelte.ts', () => ({ notifications: { record: () => {} } }))
+vi.mock('./notifications.svelte.ts', () => ({
+  notifications: {
+    record: (kind: string, title: string, body: string, channel: string) => {
+      notifLog.push({ kind, title, body, channel })
+    },
+  },
+}))
 vi.mock('./settings.svelte.ts', () => ({ settings: { sortMode: 'manual' } }))
 
 type FavMod = typeof import('./favorites.svelte')
@@ -139,6 +149,7 @@ beforeEach(async () => {
   vi.resetModules()
   localStorage.clear()
   gql.calls.length = 0
+  notifLog.length = 0
   gql.handler = async () => {
     throw new Error('gql handler not configured')
   }
@@ -395,6 +406,78 @@ describe('startup polling cadence', () => {
     store.start()
     await vi.advanceTimersByTimeAsync(135_000) // < 150s interval
     expect(gql.calls).toHaveLength(1) // only the initial poll
+  })
+})
+
+describe('live notifications — known offline→live only, no startup grace', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+  })
+
+  it('channels already live on the first poll never notify (unknown → live is silent)', async () => {
+    seedFavorites(['alpha', 'beta'])
+    gql.handler = gqlStatusHandler({ alpha: { live: true }, beta: { live: false } })
+    const store = new F.FavoritesStore()
+    store.setNotifEnabled('alpha', true)
+    store.setNotifEnabled('beta', true)
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(store.getStatus('alpha')!.status.state).toBe('live')
+    expect(store.getStatus('beta')!.status.state).toBe('offline')
+    expect(notifLog).toEqual([])
+  })
+
+  it('offline → live fires immediately — a store seconds old still notifies', async () => {
+    seedFavorites(['alpha'])
+    gql.handler = gqlStatusHandler({ alpha: { live: false } })
+    const store = new F.FavoritesStore()
+    store.setNotifEnabled('alpha', true)
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000) // first poll: KNOWN offline
+    gql.handler = gqlStatusHandler({ alpha: { live: true, title: 'She lives' } })
+    store.retryFetch('alpha') // immediate re-poll, well inside the old 10-min grace
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(notifLog).toHaveLength(1)
+    expect(notifLog[0]).toMatchObject({ kind: 'live', channel: 'alpha' })
+    expect(notifLog[0].body).toBe('She lives')
+  })
+
+  it('live → live on a later poll does not re-notify', async () => {
+    seedFavorites(['alpha'])
+    gql.handler = gqlStatusHandler({ alpha: { live: true } })
+    const store = new F.FavoritesStore()
+    store.setNotifEnabled('alpha', true)
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000) // first poll: live (silent — unknown → live)
+    store.retryFetch('alpha')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(notifLog).toEqual([])
+  })
+
+  it('respects the per-channel notification opt-in', async () => {
+    seedFavorites(['alpha', 'beta'])
+    gql.handler = gqlStatusHandler({ alpha: { live: false }, beta: { live: false } })
+    const store = new F.FavoritesStore()
+    store.setNotifEnabled('alpha', true) // beta stays opted out
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    gql.handler = gqlStatusHandler({ alpha: { live: true }, beta: { live: true } })
+    store.retryFetch('alpha')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(notifLog).toHaveLength(1)
+    expect(notifLog[0]).toMatchObject({ channel: 'alpha' })
+  })
+
+  it('a channel added mid-session that is already live also resolves silently', async () => {
+    seedFavorites([])
+    const store = new F.FavoritesStore()
+    store.setNotifEnabled('late', true)
+    gql.handler = gqlStatusHandler({ late: { live: true } })
+    store.add('late') // resolveSingle → the channel's FIRST known status is live
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(store.getStatus('late')!.status.state).toBe('live')
+    expect(notifLog).toEqual([])
   })
 })
 
