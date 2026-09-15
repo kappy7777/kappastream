@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Plain JavaScript (.mjs) on purpose — must run with bare `node` and no build
+// step (type-stripping only became flag-free in Node 22.18).
 // Regenerates src/lib/badges.generated.ts — the SHIPPED BASELINE of global
 // Twitch chat-badge image UUIDs, compiled into the binary.
 //
