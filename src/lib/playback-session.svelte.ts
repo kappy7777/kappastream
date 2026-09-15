@@ -102,8 +102,12 @@ export interface AttachHlsOptions {
 export interface AttachNativeOptions {
   /** Optional staleness check applied AFTER play() resolves (live paths). */
   isCurrent?: () => boolean
-  /** Prefix for the play-failure error (call-site string, includes the separator). */
-  errorPrefix: string
+  /**
+   * Prefix for the play-failure error (call-site string, includes the
+   * separator). Optional: PiP's native fallback has no error-string policy
+   * (it shows a gesture button instead of an error message).
+   */
+  errorPrefix?: string
   /** Fires after the staleness check passes (call-site status transition). */
   onPlayed?: () => void
 }
@@ -211,7 +215,7 @@ export class PlaybackSession {
       opts.onPlayed?.()
       return { ok: true }
     } catch (err) {
-      return { ok: false, error: opts.errorPrefix + (err as Error).message }
+      return { ok: false, error: (opts.errorPrefix ?? '') + (err as Error).message }
     }
   }
 

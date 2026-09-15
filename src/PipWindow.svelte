@@ -5,7 +5,8 @@
   import { isTauri } from '@tauri-apps/api/core'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { PhysicalSize } from '@tauri-apps/api/dpi'
-  import { buildHlsConfig } from './lib/hls-config'
+  import { shouldRecoverStallAfterPause } from './lib/playback'
+  import { PlaybackSession } from './lib/playback-session.svelte'
   import { settings } from './lib/settings.svelte.ts'
   import { t } from './lib/i18n/index.svelte'
 
@@ -26,14 +27,23 @@
     volume: number
     muted: boolean
     mediaKind?: 'hls' | 'mp4'
+    isLive?: boolean
   }
   interface StreamPayload {
     url: string
     mediaKind?: 'hls' | 'mp4'
+    isLive?: boolean
   }
 
   let videoEl: HTMLVideoElement | undefined = $state()
-  let hls: Hls | null = null
+  // The playback engine (hls.js attach / manifest timeout / stall recovery /
+  // teardown) — the same PlaybackSession the main player and every multi-view
+  // tile run on. PiP keeps only its own policy: gesture handling, aspect-lock
+  // snapping, the volume hand-off.
+  const playback = new PlaybackSession()
+  // Whether the CURRENT source is a live stream (gates stall recovery — an
+  // absent flag means not live; VODs and clips must never be force-seeked).
+  let isLive = false
   let muted = $state(false)
   let volume = $state(1)
   let paused = $state(true)
@@ -51,13 +61,24 @@
   let snapTimer: ReturnType<typeof setTimeout> | null = null
   let suppressSnapUntil = 0
 
-  function loadSource(url: string, mediaKind: 'hls' | 'mp4' = 'hls'): void {
+  function loadSource(url: string, mediaKind: 'hls' | 'mp4' = 'hls', live?: boolean): void {
     if (!videoEl) return
+    isLive = live === true
     loading = true
     errorMsg = ''
     needsGesture = false
-    if (hls) { try { hls.destroy() } catch { /* ignore */ } hls = null }
+    // Real staleness guard: the main window drives PiP asynchronously
+    // (quality change, channel change, VOD open, back-to-live all re-fire
+    // here), so a superseded attach must never win its race. Same
+    // generation discipline as App and Tile.
+    const gen = playback.nextGeneration()
+    playback.clearStallRecover()
+    // A new source implies the user wants playback; clear stale pause-intent.
+    playback.userPaused = false
 
+    // The mp4 branch stays hand-written: it is pure policy (gesture
+    // handling, no error overlay), and a paused clip must never be touched
+    // by the live stall recovery.
     if (mediaKind === 'mp4') {
       videoEl.src = url
       videoEl.play().then(() => { loading = false }).catch(() => {
@@ -68,29 +89,32 @@
     }
 
     if (Hls.isSupported()) {
-      const inst = new Hls(buildHlsConfig(settings.lowLatency))
-      hls = inst
-      inst.on(Hls.Events.MANIFEST_PARSED, () => {
-        loading = false
-        videoEl?.play().catch(() => { needsGesture = true })
+      void playback.attachHls({
+        video: videoEl,
+        url,
+        lowLatency: settings.lowLatency,
+        isCurrent: () => gen === playback.generation,
+        onManifestParsed: () => { loading = false },
+        onPlayBlocked: () => { needsGesture = true },
+      }).then((r) => {
+        if (gen !== playback.generation) return // superseded by a newer loadSource
+        if (!r.ok) {
+          errorMsg = t('pip_streamError')
+          loading = false
+        }
       })
-      inst.on(Hls.Events.ERROR, (_e, data) => {
-        if (!data.fatal) return
-        errorMsg = t('pip_streamError')
-        loading = false
-      })
-      inst.loadSource(url)
-      inst.attachMedia(videoEl)
-    } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-      videoEl.src = url
-      videoEl.play().then(() => { loading = false }).catch(() => {
-        needsGesture = true
-        loading = false
-      })
-    } else {
-      errorMsg = t('pip_hlsNotSupported')
-      loading = false
+      return
     }
+    if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+      void playback.attachNative(videoEl, url, {}).then((r) => {
+        if (gen !== playback.generation) return
+        loading = false
+        if (!r.ok) needsGesture = true
+      })
+      return
+    }
+    errorMsg = t('pip_hlsNotSupported')
+    loading = false
   }
 
   function emitVolume(): void {
@@ -114,14 +138,44 @@
 
   function togglePlay(): void {
     if (!videoEl) return
-    if (videoEl.paused) void videoEl.play()
-    else videoEl.pause()
+    if (videoEl.paused) {
+      playback.userPaused = false
+      void videoEl.play()
+    } else {
+      // Flag the user pause BEFORE pausing (mirrors App) so onPipPause can
+      // tell a deliberate pause from a webkit2gtk stall-induced one.
+      playback.userPaused = true
+      videoEl.pause()
+    }
   }
 
   async function gesturePlay(): Promise<void> {
     if (!videoEl) return
     needsGesture = false
+    // Explicit play intent (also cleared by the onplaying handler).
+    playback.userPaused = false
     try { await videoEl.play() } catch { needsGesture = true }
+  }
+
+  // ---- live stall recovery (mirrors App.svelte; live-only) ----
+  // webkit2gtk PAUSES on a low-latency underrun instead of just buffering,
+  // and never self-resumes — so both `waiting` and a non-user `pause` arm
+  // the recovery, which snaps to the live edge after ~1s. Gated on isLive:
+  // a paused VOD/clip must never be force-seeked (its seekable end is the
+  // END of the video).
+  function onVideoWaiting(): void {
+    if (isLive && videoEl) playback.scheduleStallRecover(videoEl)
+  }
+
+  function onVideoPlaying(): void {
+    playback.clearStallRecover()
+    playback.userPaused = false
+  }
+
+  function onPipPause(): void {
+    if (shouldRecoverStallAfterPause(isLive, playback.userPaused) && videoEl) {
+      playback.scheduleStallRecover(videoEl)
+    }
   }
 
   async function emitClosedWithRect(): Promise<void> {
@@ -191,12 +245,12 @@
       volume = typeof p.volume === 'number' ? Math.max(0, Math.min(1, p.volume)) : 1
       muted = !!p.muted
       if (videoEl) { videoEl.volume = volume; videoEl.muted = muted }
-      loadSource(p.url, p.mediaKind ?? 'hls')
+      loadSource(p.url, p.mediaKind ?? 'hls', p.isLive)
     })
     unlisteners.push(uInit)
 
     const uStream = await listen<StreamPayload>(EV_STREAM, (e) => {
-      loadSource(e.payload.url, e.payload.mediaKind ?? 'hls')
+      loadSource(e.payload.url, e.payload.mediaKind ?? 'hls', e.payload.isLive)
     })
     unlisteners.push(uStream)
 
@@ -244,11 +298,11 @@
   })
 
   onDestroy(() => {
+    playback.dispose(videoEl)
     if (hideTimer) clearTimeout(hideTimer)
     if (snapTimer) clearTimeout(snapTimer)
     for (const u of unlisteners) { try { u() } catch { /* ignore */ } }
     unlisteners.length = 0
-    if (hls) { try { hls.destroy() } catch { /* ignore */ } hls = null }
   })
 </script>
 
@@ -266,7 +320,9 @@
     data-tauri-drag-region
     onclick={gesturePlay}
     onplay={() => { paused = false; bumpControls() }}
-    onpause={() => { paused = true; bumpControls() }}
+    onpause={() => { paused = true; bumpControls(); onPipPause() }}
+    onwaiting={onVideoWaiting}
+    onplaying={onVideoPlaying}
   ></video>
 
   {#if loading}

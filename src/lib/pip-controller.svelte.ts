@@ -10,12 +10,17 @@ import { settings } from './settings.svelte.ts'
 // while open and the main video is force-muted (without persisting that mute).
 //
 // Everything is coordinated over Tauri global events:
-//   main -> pip   ks://pip-init       { url, channel, quality, volume, muted, mediaKind? }
-//   main -> pip   ks://pip-stream     { url, mediaKind? }    (channel/quality change)
+//   main -> pip   ks://pip-init       { url, channel, quality, volume, muted, mediaKind?, isLive? }
+//   main -> pip   ks://pip-stream     { url, mediaKind?, isLive? }    (channel/quality change)
 //   main -> pip   ks://pip-do-close                        (main requests close)
 //   pip  -> main  ks://pip-ready                           (pip listening, wants init)
 //   pip  -> main  ks://pip-volume     { volume, muted }    (pip is audio authority)
 //   pip  -> main  ks://pip-closed     { rect? }            (pip window closed)
+//
+// `isLive` (absent = false) gates the PiP stall recovery: a live edge snap
+// must never force-seek a paused VOD (its seekable end is the END of the
+// video). The main window derives it from its playback kind at every
+// setStream call site.
 
 const PIP_LABEL = 'pip'
 const RECT_KEY = 'pip-window-rect-v1'
@@ -39,6 +44,8 @@ interface StreamInfo {
   channel: string
   quality: string
   mediaKind?: 'hls' | 'mp4'
+  /** Whether the URL is a LIVE stream (gates PiP stall recovery). Absent = false. */
+  isLive?: boolean
 }
 
 function readRect(): PipRect | null {
@@ -108,7 +115,7 @@ class PipController {
     this.currentStream = info
     if (!this.isOpen) return
     if (!isTauri()) return
-    void emit(EV_STREAM, { url: info.url, mediaKind: info.mediaKind ?? 'hls' })
+    void emit(EV_STREAM, { url: info.url, mediaKind: info.mediaKind ?? 'hls', isLive: info.isLive === true })
   }
 
   /** Called when the stream tears down (channel change, stop). Closes PiP. */
@@ -165,6 +172,7 @@ class PipController {
       channel: this.currentStream.channel,
       quality: this.currentStream.quality,
       mediaKind: this.currentStream.mediaKind ?? 'hls',
+      isLive: this.currentStream.isLive === true,
       volume: settings.volume,
       muted: false,
     })

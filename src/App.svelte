@@ -972,7 +972,8 @@
       // Mirror attachStream: route through the ksvod proxy on Windows so the
       // PiP WebView2 can load the manifest (it would hit the same CORS block).
       const pipUrl = isWindows ? toKsvodProxyUrl(resolved.url, isWindows) : resolved.url
-      pipController.setStream({ url: pipUrl, channel, quality: q })
+      // isLive gates PiP's stall recovery (never force-seek a VOD/clip).
+      pipController.setStream({ url: pipUrl, channel, quality: q, isLive: playback.kind === 'live' })
       return
     }
     playerStatus = 'error'
@@ -1238,7 +1239,7 @@
     const attach = await attachMediaHls(proxyUrl)
     if (attach.ok) {
       playerStatus = 'playing'
-      if (channelJoined) pipController.setStream({ url: proxyUrl, channel: channelJoined, quality: q })
+      if (channelJoined) pipController.setStream({ url: proxyUrl, channel: channelJoined, quality: q, isLive: playback.kind === 'live' })
       vodCtl.restore(videoId)
       return
     }
@@ -1306,7 +1307,11 @@
     const attach = await attachClipMp4(raw.url)
     if (attach.ok) {
       playerStatus = 'playing'
-      if (channelJoined) pipController.setStream({ url: raw.url, channel: channelJoined, quality: 'best', mediaKind: 'mp4' })
+      // isLive is a literal false here by necessity: playClip flow-narrows
+      // `playback` to the clip variant, so the `playback.kind === 'live'`
+      // derivation used at the other call sites is a TS no-overlap error in
+      // this scope — the type system proves a clip is never live.
+      if (channelJoined) pipController.setStream({ url: raw.url, channel: channelJoined, quality: 'best', mediaKind: 'mp4', isLive: false })
       return
     }
     playerStatus = 'error'
