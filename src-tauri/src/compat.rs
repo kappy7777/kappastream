@@ -5,7 +5,9 @@
 //!
 //! There are two independent NVIDIA-specific workarounds, each applied only on
 //! the matching session type and only when the user has not already supplied a
-//! value. AMD, Intel and unknown sessions are always left untouched, and the two
+//! value, plus one AppImage-only backend selection (`GDK_BACKEND`, see the
+//! dedicated section below) that is deliberately GPU-independent. AMD, Intel
+//! and unknown sessions are never touched by the NVIDIA rules, and the two
 //! workarounds are never both selected during a single session.
 //!
 //! ## Wayland — `__NV_DISABLE_EXPLICIT_SYNC=1`
@@ -31,6 +33,39 @@
 //! It does not disable compositing globally and does not imply every NVIDIA or
 //! every WebKitGTK version is affected.
 //!
+//! ## AppImage — `GDK_BACKEND=wayland,x11`
+//!
+//! Tauri's AppImage bundler fetches `linuxdeploy-plugin-gtk.sh` from an
+//! unpinned `master` branch at build time, and the AppRun hook that script
+//! generates unconditionally runs `export GDK_BACKEND=x11` before `main()` —
+//! stomping any value the user had set. That export is a 2024 workaround for
+//! a WebKitGTK 2.38 GSettings-schema crash (tauri-apps/tauri#8541) and no
+//! longer applies to this bundle: it ships WebKitGTK 2.52.5, verified on
+//! hardware (KDE Plasma Wayland + NVIDIA) to render, play streams and
+//! register as a native Wayland client with none of the #8541 symptoms.
+//! Forcing XWayland also silently defeated the Wayland workaround above —
+//! `__NV_DISABLE_EXPLICIT_SYNC` only acts on a Wayland EGL surface, so an
+//! AppImage rendered through XWayland never received it.
+//!
+//! Undoing the hook here is the ONE deliberate exception to the
+//! never-overwrite rule below: inside an AppImage the hook ALWAYS sets
+//! `GDK_BACKEND`, so a hook-supplied `x11` is indistinguishable from a
+//! user-supplied one and "only set when absent" is impossible. The exception
+//! gets its own escape hatch the hook cannot stomp, the user-override
+//! variable `KAPPASTREAM_GDK_BACKEND`:
+//!  - non-empty ⇒ written to `GDK_BACKEND` verbatim, regardless of session
+//!    (the user is in charge; `x11` restores the old XWayland behaviour);
+//!  - present but empty ⇒ "don't touch" — the hook's `x11` stands;
+//!  - absent ⇒ an AppImage on a Wayland session sets
+//!    `GDK_BACKEND=wayland,x11` (GDK tries backends in order; the `x11` tail
+//!    keeps an XWayland path available if the compositor refuses a Wayland
+//!    connection), while X11/Other/Unknown sessions keep the hook's `x11`,
+//!    which is already the correct backend there.
+//!
+//! Native builds (AUR/deb/rpm — anything without the AppRun hook) never have
+//! a hook-supplied `GDK_BACKEND` in the environment and are untouched by
+//! construction.
+//!
 //! ## Common rules
 //!
 //! Both variables are applied only when ALL hold for their respective path:
@@ -40,12 +75,21 @@
 //!
 //! A user-provided value (including `"0"`, `"1"`, an arbitrary string, or even an
 //! empty string) is always preserved — we only ever set a variable when it is
-//! entirely absent.
+//! entirely absent. The single exception is the AppImage `GDK_BACKEND`
+//! selection above, which overwrites the hook's value by necessity and uses
+//! `KAPPASTREAM_GDK_BACKEND` as its user-override channel instead.
 
 use std::path::Path;
 
 const NV_EXPLICIT_SYNC_VAR: &str = "__NV_DISABLE_EXPLICIT_SYNC";
 const WEBKIT_DMABUF_VAR: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+const GDK_BACKEND_VAR: &str = "GDK_BACKEND";
+const KAPPASTREAM_GDK_BACKEND_VAR: &str = "KAPPASTREAM_GDK_BACKEND";
+/// Backend list set for AppImage runs on Wayland sessions. GDK tries the
+/// backends in order; the `x11` tail keeps an XWayland path available if the
+/// compositor refuses a Wayland connection. See the module doc's
+/// "AppImage — GDK_BACKEND" section.
+const APPIMAGE_WAYLAND_GDK_BACKENDS: &str = "wayland,x11";
 
 /// Whether an NVIDIA kernel driver appears to be loaded, via two
 /// dependency-free kernel signals. `/sys/module/nvidia` is a directory created
@@ -119,15 +163,28 @@ struct CompatInputs {
     webkit_disable_dmabuf_renderer: Option<String>,
     /// NVIDIA kernel module / procfs signal.
     nvidia_loaded: bool,
+    /// Whether the process runs from a packed AppImage (the Type-2 runtime
+    /// sets `APPIMAGE`). Canonical test: `env_spawn::in_appimage()`, called
+    /// from `read_inputs()` so the two consumers can never disagree.
+    appimage: bool,
+    /// `KAPPASTREAM_GDK_BACKEND` env value, if the user supplied one — the
+    /// override channel for the AppImage `GDK_BACKEND` selection. Captured
+    /// raw like the other user overrides: an empty value still counts as
+    /// "user supplied" (and means "don't touch").
+    kappastream_gdk_backend: Option<String>,
 }
 
 /// The concrete compatibility actions to apply for a given `CompatInputs`.
-/// At most one of these is selected for any normal session (Wayland selects the
-/// explicit-sync path, X11 selects the DMA-BUF-renderer path).
+/// At most one NVIDIA workaround is selected for any normal session (Wayland
+/// selects the explicit-sync path, X11 selects the DMA-BUF-renderer path).
+/// `gdk_backend` is independent of both — AppImage-only and GPU-independent —
+/// and is the one action allowed to overwrite an existing env value.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct CompatActions {
     disable_nvidia_explicit_sync: bool,
     disable_webkit_dmabuf_renderer: bool,
+    /// `GDK_BACKEND` value to set, or `None` to leave the environment alone.
+    gdk_backend: Option<String>,
 }
 
 /// Select the compatibility actions for the given inputs.
@@ -138,8 +195,13 @@ struct CompatActions {
 /// - `Other`/`Unknown` sessions ⇒ nothing.
 /// - Any user-supplied value (incl. `"0"`, `"1"`, arbitrary, or empty) ⇒ preserved
 ///   (the matching action is suppressed).
+/// - `gdk_backend` is selected independently of all of the above (no NVIDIA
+///   requirement) — see `select_gdk_backend` and the module doc.
 fn select_actions(inputs: &CompatInputs) -> CompatActions {
-    let mut actions = CompatActions::default();
+    let mut actions = CompatActions {
+        gdk_backend: select_gdk_backend(inputs),
+        ..CompatActions::default()
+    };
     if !inputs.nvidia_loaded {
         return actions;
     }
@@ -159,6 +221,27 @@ fn select_actions(inputs: &CompatInputs) -> CompatActions {
     actions
 }
 
+/// Select the `GDK_BACKEND` value for an AppImage run, or `None` to leave the
+/// environment alone. Independent of the NVIDIA rules — a Wayland session is
+/// the right backend on every GPU. See the module doc's
+/// "AppImage — GDK_BACKEND" section for the rationale and the escape hatch.
+fn select_gdk_backend(inputs: &CompatInputs) -> Option<String> {
+    if !inputs.appimage {
+        return None;
+    }
+    if let Some(override_value) = &inputs.kappastream_gdk_backend {
+        if override_value.is_empty() {
+            // Present but empty = explicit "don't touch": the hook's x11 stands.
+            return None;
+        }
+        return Some(override_value.clone());
+    }
+    match classify_session(inputs) {
+        Session::Wayland => Some(APPIMAGE_WAYLAND_GDK_BACKENDS.to_string()),
+        Session::X11 | Session::Other | Session::Unknown => None,
+    }
+}
+
 /// Gather the real process environment + kernel state into `CompatInputs`.
 fn read_inputs() -> CompatInputs {
     CompatInputs {
@@ -171,6 +254,8 @@ fn read_inputs() -> CompatInputs {
             Path::new("/proc/driver/nvidia/version"),
             Path::new("/sys/module/nvidia"),
         ),
+        appimage: crate::env_spawn::in_appimage(),
+        kappastream_gdk_backend: std::env::var(KAPPASTREAM_GDK_BACKEND_VAR).ok(),
     }
 }
 
@@ -178,16 +263,20 @@ fn read_inputs() -> CompatInputs {
 ///
 /// MUST be called at the very start of `main()`, before Tauri/GTK/WebKitGTK/EGL
 /// initialize, so `__NV_DISABLE_EXPLICIT_SYNC` is visible to EGL-Wayland when it
-/// first creates a surface and `WEBKIT_DISABLE_DMABUF_RENDERER` is visible to
-/// WebKitGTK before it picks its renderer. Calling it from `main()` is early
-/// enough because all EGL/Wayland surface creation and WebKitGTK renderer
-/// selection happens later, during Tauri window/webview setup (inside
-/// `tauri::Builder::run`) — nothing touches EGL or the renderer before `main()`
-/// runs.
+/// first creates a surface, `WEBKIT_DISABLE_DMABUF_RENDERER` is visible to
+/// WebKitGTK before it picks its renderer, and the AppImage `GDK_BACKEND`
+/// selection is in place before GTK reads that variable at display-open time.
+/// Calling it from `main()` is early enough because all EGL/Wayland surface
+/// creation, WebKitGTK renderer selection and GDK display-open happen later,
+/// during Tauri window/webview setup (inside `tauri::Builder::run`, reached
+/// from `app_lib::run()` in `lib.rs`) — nothing touches EGL, the renderer or
+/// the display before `main()` runs.
 ///
 /// `std::env::set_var` is safe here because this runs on the single main thread
 /// at process startup, before any other thread or library reads the
-/// environment. User-provided values are never overwritten.
+/// environment. User-provided values are never overwritten — with one
+/// documented exception: the AppImage `GDK_BACKEND` selection may replace the
+/// linuxdeploy hook's pre-set `x11` (see the module doc).
 pub fn configure() {
     let actions = select_actions(&read_inputs());
     if actions.disable_nvidia_explicit_sync {
@@ -195,6 +284,18 @@ pub fn configure() {
     }
     if actions.disable_webkit_dmabuf_renderer {
         std::env::set_var(WEBKIT_DMABUF_VAR, "1");
+    }
+    if let Some(backend) = actions.gdk_backend {
+        // The one call in this function that may OVERWRITE an existing value:
+        // inside an AppImage the linuxdeploy gtk hook already exported
+        // GDK_BACKEND=x11 before main() (see the module doc), so "only set
+        // when absent" is impossible there. It is safe to break because the
+        // user's escape hatch (KAPPASTREAM_GDK_BACKEND) was consulted first
+        // and native builds never see the hook's value; and for the same
+        // reason as the calls above, nothing has read the environment yet
+        // (GDK reads GDK_BACKEND later, at display-open inside
+        // `tauri::Builder::run`).
+        std::env::set_var(GDK_BACKEND_VAR, backend);
     }
 }
 
@@ -204,7 +305,8 @@ mod tests {
 
     // Test input builder: every signal is explicit so each case documents exactly
     // which environment it represents. Fields: (xdg, wayland, display, nv_sync,
-    // webkit_dmabuf, nvidia_loaded).
+    // webkit_dmabuf, nvidia_loaded). Defaults to a NON-AppImage run with no
+    // KAPPASTREAM_GDK_BACKEND override; use compat_appimage() for those axes.
     fn compat(
         xdg: Option<&str>,
         wayland: Option<&str>,
@@ -220,6 +322,27 @@ mod tests {
             nv_disable_explicit_sync: nv_sync.map(String::from),
             webkit_disable_dmabuf_renderer: webkit.map(String::from),
             nvidia_loaded: nvidia,
+            appimage: false,
+            kappastream_gdk_backend: None,
+        }
+    }
+
+    // AppImage variant of the builder above: same six signals, plus the
+    // KAPPASTREAM_GDK_BACKEND override, with appimage=true fixed — so the
+    // non-AppImage cases in the table above stay byte-identical.
+    fn compat_appimage(
+        xdg: Option<&str>,
+        wayland: Option<&str>,
+        display: Option<&str>,
+        nv_sync: Option<&str>,
+        webkit: Option<&str>,
+        nvidia: bool,
+        gdk_override: Option<&str>,
+    ) -> CompatInputs {
+        CompatInputs {
+            appimage: true,
+            kappastream_gdk_backend: gdk_override.map(String::from),
+            ..compat(xdg, wayland, display, nv_sync, webkit, nvidia)
         }
     }
 
@@ -227,6 +350,7 @@ mod tests {
         CompatActions {
             disable_nvidia_explicit_sync: true,
             disable_webkit_dmabuf_renderer: false,
+            gdk_backend: None,
         }
     }
 
@@ -234,11 +358,20 @@ mod tests {
         CompatActions {
             disable_nvidia_explicit_sync: false,
             disable_webkit_dmabuf_renderer: true,
+            gdk_backend: None,
         }
     }
 
     fn actions_none() -> CompatActions {
         CompatActions::default()
+    }
+
+    fn actions_wayland_appimage() -> CompatActions {
+        CompatActions {
+            disable_nvidia_explicit_sync: true,
+            disable_webkit_dmabuf_renderer: false,
+            gdk_backend: Some(APPIMAGE_WAYLAND_GDK_BACKENDS.to_string()),
+        }
     }
 
     // #1 NVIDIA Wayland with unset variables selects only the explicit-sync path.
@@ -526,5 +659,194 @@ mod tests {
             Path::new("/proc/driver/nvidia/does-not-exist-version"),
             Path::new("/sys/module"),
         ));
+    }
+
+    // #16 Non-AppImage runs never touch GDK_BACKEND on any session type —
+    //     native builds (AUR/deb/rpm) have no hook value to undo.
+    #[test]
+    fn non_appimage_never_sets_gdk_backend() {
+        assert_eq!(
+            select_actions(&compat(
+                Some("wayland"),
+                Some("wayland-0"),
+                None,
+                None,
+                None,
+                true
+            ))
+            .gdk_backend,
+            None
+        );
+        assert_eq!(
+            select_actions(&compat(Some("x11"), None, Some(":0"), None, None, true)).gdk_backend,
+            None
+        );
+        assert_eq!(
+            select_actions(&compat(Some("tty"), None, None, None, None, true)).gdk_backend,
+            None
+        );
+        assert_eq!(
+            select_actions(&compat(None, None, None, None, None, true)).gdk_backend,
+            None
+        );
+    }
+
+    // #17 AppImage + Wayland + NVIDIA selects BOTH the explicit-sync action
+    //     and the backend override — the whole point: the sync fix only acts
+    //     on a Wayland EGL surface, so the app must BE a Wayland client.
+    #[test]
+    fn appimage_wayland_nvidia_selects_explicit_sync_and_gdk_backend() {
+        assert_eq!(
+            select_actions(&compat_appimage(
+                Some("wayland"),
+                Some("wayland-0"),
+                None,
+                None,
+                None,
+                true,
+                None
+            )),
+            actions_wayland_appimage()
+        );
+    }
+
+    // #18 AppImage + Wayland WITHOUT NVIDIA still overrides the backend — the
+    //     backend choice is GPU-independent — but selects no explicit-sync
+    //     action (AMD/Intel are untouched by the NVIDIA rules).
+    #[test]
+    fn appimage_wayland_without_nvidia_still_overrides_backend() {
+        assert_eq!(
+            select_actions(&compat_appimage(
+                Some("wayland"),
+                Some("wayland-0"),
+                None,
+                None,
+                None,
+                false,
+                None
+            )),
+            CompatActions {
+                disable_nvidia_explicit_sync: false,
+                disable_webkit_dmabuf_renderer: false,
+                gdk_backend: Some(APPIMAGE_WAYLAND_GDK_BACKENDS.to_string()),
+            }
+        );
+    }
+
+    // #19 AppImage + X11 keeps the hook's x11 (already the correct backend
+    //     there) while the NVIDIA X11 workaround is unaffected.
+    #[test]
+    fn appimage_x11_keeps_hook_backend_and_dmabuf_untouched() {
+        assert_eq!(
+            select_actions(&compat_appimage(
+                Some("x11"),
+                None,
+                Some(":0"),
+                None,
+                None,
+                true,
+                None
+            )),
+            actions_x11_only()
+        );
+    }
+
+    // #20 AppImage + Other/Unknown sessions leave GDK_BACKEND alone (the
+    //     hook's x11 stands; we cannot tell what the right backend is).
+    #[test]
+    fn appimage_other_and_unknown_leave_gdk_backend_alone() {
+        assert_eq!(
+            select_actions(&compat_appimage(
+                Some("tty"),
+                None,
+                None,
+                None,
+                None,
+                true,
+                None
+            ))
+            .gdk_backend,
+            None
+        );
+        assert_eq!(
+            select_actions(&compat_appimage(None, None, None, None, None, true, None)).gdk_backend,
+            None
+        );
+    }
+
+    // #21 KAPPASTREAM_GDK_BACKEND=x11 on a Wayland AppImage wins verbatim —
+    //     the user can still force the old XWayland behaviour.
+    #[test]
+    fn appimage_wayland_user_override_x11_wins() {
+        assert_eq!(
+            select_actions(&compat_appimage(
+                Some("wayland"),
+                Some("wayland-0"),
+                None,
+                None,
+                None,
+                true,
+                Some("x11")
+            ))
+            .gdk_backend,
+            Some("x11".to_string())
+        );
+    }
+
+    // #22 The override is honoured regardless of session: an X11 AppImage
+    //     with KAPPASTREAM_GDK_BACKEND=wayland still forwards `wayland`.
+    #[test]
+    fn appimage_x11_user_override_wayland_wins() {
+        assert_eq!(
+            select_actions(&compat_appimage(
+                Some("x11"),
+                None,
+                Some(":0"),
+                None,
+                None,
+                true,
+                Some("wayland")
+            ))
+            .gdk_backend,
+            Some("wayland".to_string())
+        );
+    }
+
+    // #23 Present-but-empty override = explicit "don't touch": the hook's
+    //     x11 stands even on a Wayland session.
+    #[test]
+    fn appimage_wayland_empty_override_means_dont_touch() {
+        assert_eq!(
+            select_actions(&compat_appimage(
+                Some("wayland"),
+                Some("wayland-0"),
+                None,
+                None,
+                None,
+                true,
+                Some("")
+            ))
+            .gdk_backend,
+            None
+        );
+    }
+
+    // #24 The exact environment the AppImage currently runs in: a Wayland
+    //     session where XWayland ALSO exports DISPLAY. Still classified
+    //     Wayland (#3), still selects both Wayland actions.
+    #[test]
+    fn appimage_wayland_with_display_still_overrides_backend() {
+        assert_eq!(
+            select_actions(&compat_appimage(
+                Some("wayland"),
+                Some("wayland-0"),
+                Some(":0"),
+                None,
+                None,
+                true,
+                None
+            )),
+            actions_wayland_appimage()
+        );
     }
 }

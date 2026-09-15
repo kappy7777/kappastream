@@ -39,10 +39,12 @@ pub const SAFE_ENV_VARS: &[&str] = &[
 ];
 
 /// True when the app was launched from a Type-2 AppImage (the runtime
-/// sets `APPIMAGE` for the main process, which we inherit). The
-/// env-clearing whitelist below exists ONLY to counteract AppImage env
-/// pollution, so it is applied exclusively in that case.
-fn in_appimage() -> bool {
+/// sets `APPIMAGE` for the main process, which we inherit). Two consumers:
+/// the env-clearing whitelist below exists ONLY to counteract AppImage env
+/// pollution, so it is applied exclusively in that case; and `compat.rs`
+/// gates its AppImage `GDK_BACKEND` selection on the same signal so the two
+/// can never disagree about what an AppImage run is.
+pub(crate) fn in_appimage() -> bool {
     std::env::var("APPIMAGE").is_ok()
 }
 
