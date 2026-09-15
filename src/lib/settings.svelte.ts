@@ -187,15 +187,19 @@ function readCheckUpdates(): boolean {
   return safeRead(STORAGE_KEYS.checkUpdates) !== 'false'
 }
 
-// All Tier 2 chat-feature toggles default OFF — the baseline chat is
-// byte-identical with every one of these false. The old single sub/raid
-// toggle was SPLIT into four individually togglable notice groups; each new
-// key falls back to the legacy key while unset (a legacy 'true' keeps the
-// user's notices on until they flip a group themselves).
+// Tier 2 chat-feature toggles — all default ON (flipped from opt-in after the
+// experiment settled). Opt-outs survive: only an explicit 'false' counts, the
+// same convention as every other default-on reader (junk → default). The old
+// single sub/raid toggle was SPLIT into four individually togglable notice
+// groups; each new key falls back to the legacy key while unset (a legacy
+// 'false' keeps that user's notices off), and only when both keys are unset
+// does the ON default apply.
 function readChatNoticeGroup(key: string): boolean {
   const own = safeRead(key)
-  if (own !== null) return own === 'true'
-  return safeRead(STORAGE_KEYS.legacyChatSubnotices) === 'true'
+  if (own !== null) return own !== 'false'
+  const legacy = safeRead(STORAGE_KEYS.legacyChatSubnotices)
+  if (legacy !== null) return legacy !== 'false'
+  return true
 }
 function readChatNoticesSub(): boolean {
   return readChatNoticeGroup(STORAGE_KEYS.chatNoticesSub)
@@ -210,13 +214,13 @@ function readChatNoticesAnnouncement(): boolean {
   return readChatNoticeGroup(STORAGE_KEYS.chatNoticesAnnouncement)
 }
 function readChatRoomstate(): boolean {
-  return safeRead(STORAGE_KEYS.chatRoomstate) === 'true'
+  return safeRead(STORAGE_KEYS.chatRoomstate) !== 'false'
 }
 function readChatModeration(): boolean {
-  return safeRead(STORAGE_KEYS.chatModeration) === 'true'
+  return safeRead(STORAGE_KEYS.chatModeration) !== 'false'
 }
 function readChatBits(): boolean {
-  return safeRead(STORAGE_KEYS.chatBits) === 'true'
+  return safeRead(STORAGE_KEYS.chatBits) !== 'false'
 }
 function readChatPinned(): boolean {
   // Unlike the Tier 2 toggles above (parse always, gate only rendering), this

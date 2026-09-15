@@ -9,7 +9,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * persistence — not the state left over by an earlier test.
  *
  * Acceptance criteria covered here:
- *  - every chat-feature toggle defaults to false on a fresh store;
+ *  - every chat-feature toggle defaults to TRUE on a fresh store (flipped
+ *    from opt-in; timestamps and pinned chat stay default-off — pinned gates
+ *    a network fetch);
+ *  - an explicit 'false' always survives (opt-out persists; the legacy
+ *    single-toggle opt-out is honored through the split-key fallback);
  *  - each toggle persists to its own localStorage key and is independent of the
  *    others (toggling one never flips another);
  *  - Toggle C is retroactive: it gates only PRESENTATION, and the predicate
@@ -39,36 +43,41 @@ const KEYS = {
 } as const
 
 describe('chat-feature toggle defaults', () => {
-  it('all chat-feature toggles default to false on a fresh store', () => {
-    expect(S.settings.chatNoticesSub).toBe(false)
-    expect(S.settings.chatNoticesGift).toBe(false)
-    expect(S.settings.chatNoticesRaid).toBe(false)
-    expect(S.settings.chatNoticesAnnouncement).toBe(false)
-    expect(S.settings.chatRoomstate).toBe(false)
-    expect(S.settings.chatModeration).toBe(false)
-    expect(S.settings.chatBits).toBe(false)
+  it('all chat-feature toggles default to true on a fresh store', () => {
+    expect(S.settings.chatNoticesSub).toBe(true)
+    expect(S.settings.chatNoticesGift).toBe(true)
+    expect(S.settings.chatNoticesRaid).toBe(true)
+    expect(S.settings.chatNoticesAnnouncement).toBe(true)
+    expect(S.settings.chatRoomstate).toBe(true)
+    expect(S.settings.chatModeration).toBe(true)
+    expect(S.settings.chatBits).toBe(true)
   })
 
-  it('a stored "true" is respected (opt-in persists across reloads)', async () => {
-    localStorage.setItem(KEYS.moderation, 'true')
-    localStorage.setItem(KEYS.bits, 'true')
+  it('a stored "false" is respected (opt-out persists across reloads)', async () => {
+    localStorage.setItem(KEYS.moderation, 'false')
+    localStorage.setItem(KEYS.bits, 'false')
     vi.resetModules()
     const mod = await import('./settings.svelte')
-    expect(mod.settings.chatModeration).toBe(true)
-    expect(mod.settings.chatBits).toBe(true)
-    // The others remain off.
-    expect(mod.settings.chatNoticesSub).toBe(false)
-    expect(mod.settings.chatNoticesGift).toBe(false)
-    expect(mod.settings.chatNoticesRaid).toBe(false)
-    expect(mod.settings.chatNoticesAnnouncement).toBe(false)
-    expect(mod.settings.chatRoomstate).toBe(false)
+    expect(mod.settings.chatModeration).toBe(false)
+    expect(mod.settings.chatBits).toBe(false)
+    // The others remain on.
+    expect(mod.settings.chatNoticesSub).toBe(true)
+    expect(mod.settings.chatNoticesGift).toBe(true)
+    expect(mod.settings.chatNoticesRaid).toBe(true)
+    expect(mod.settings.chatNoticesAnnouncement).toBe(true)
+    expect(mod.settings.chatRoomstate).toBe(true)
   })
 
-  it('a junk value is treated as false (default off)', async () => {
+  it('a junk value is treated as true (default on)', async () => {
     localStorage.setItem(KEYS.noticesSub, 'garbage')
     vi.resetModules()
     const mod = await import('./settings.svelte')
-    expect(mod.settings.chatNoticesSub).toBe(false)
+    expect(mod.settings.chatNoticesSub).toBe(true)
+  })
+
+  it('timestamps and pinned chat keep their default-off (pinned gates a fetch)', () => {
+    expect(S.settings.chatTimestamps).toBe(false)
+    expect(S.settings.chatPinned).toBe(false)
   })
 })
 
@@ -83,8 +92,8 @@ describe('notice-group split: legacy single-toggle migration', () => {
     expect(mod.settings.chatNoticesAnnouncement).toBe(true)
   })
 
-  it('a legacy "false"/junk keeps all groups off', async () => {
-    localStorage.setItem(KEYS.legacySubnotices, 'garbage')
+  it('a legacy "false" keeps all groups off (an old opt-out survives the default flip)', async () => {
+    localStorage.setItem(KEYS.legacySubnotices, 'false')
     vi.resetModules()
     const mod = await import('./settings.svelte')
     expect(mod.settings.chatNoticesSub).toBe(false)
@@ -94,43 +103,43 @@ describe('notice-group split: legacy single-toggle migration', () => {
   })
 
   it('an explicit group key OVERRIDES the legacy fallback for that group only', async () => {
-    localStorage.setItem(KEYS.legacySubnotices, 'true')
-    localStorage.setItem(KEYS.noticesSub, 'false')
+    localStorage.setItem(KEYS.legacySubnotices, 'false')
+    localStorage.setItem(KEYS.noticesSub, 'true')
     vi.resetModules()
     const mod = await import('./settings.svelte')
-    expect(mod.settings.chatNoticesSub).toBe(false)
-    // The untouched groups still follow the legacy opt-in.
-    expect(mod.settings.chatNoticesGift).toBe(true)
-    expect(mod.settings.chatNoticesRaid).toBe(true)
-    expect(mod.settings.chatNoticesAnnouncement).toBe(true)
+    expect(mod.settings.chatNoticesSub).toBe(true)
+    // The untouched groups still follow the legacy opt-out.
+    expect(mod.settings.chatNoticesGift).toBe(false)
+    expect(mod.settings.chatNoticesRaid).toBe(false)
+    expect(mod.settings.chatNoticesAnnouncement).toBe(false)
   })
 })
 
 describe('chat-feature toggle persistence + independence', () => {
   it('toggleChatModeration writes its own key and leaves the others alone', () => {
     S.settings.toggleChatModeration()
-    expect(S.settings.chatModeration).toBe(true)
-    expect(localStorage.getItem(KEYS.moderation)).toBe('true')
-    // Independence: the other toggles stay false / unwritten.
-    expect(S.settings.chatNoticesSub).toBe(false)
-    expect(S.settings.chatRoomstate).toBe(false)
-    expect(S.settings.chatBits).toBe(false)
+    expect(S.settings.chatModeration).toBe(false)
+    expect(localStorage.getItem(KEYS.moderation)).toBe('false')
+    // Independence: the other toggles stay on / unwritten.
+    expect(S.settings.chatNoticesSub).toBe(true)
+    expect(S.settings.chatRoomstate).toBe(true)
+    expect(S.settings.chatBits).toBe(true)
     expect(localStorage.getItem(KEYS.noticesSub)).toBeNull()
     expect(localStorage.getItem(KEYS.roomstate)).toBeNull()
     expect(localStorage.getItem(KEYS.bits)).toBeNull()
   })
 
   it('each toggle persists and flips only itself', () => {
-    S.settings.setChatNoticesSub(true)
-    S.settings.setChatRoomstate(true)
-    S.settings.setChatBits(true)
-    expect(S.settings.chatNoticesSub).toBe(true)
-    expect(S.settings.chatRoomstate).toBe(true)
-    expect(S.settings.chatBits).toBe(true)
-    expect(S.settings.chatModeration).toBe(false) // untouched
-    expect(localStorage.getItem(KEYS.noticesSub)).toBe('true')
-    expect(localStorage.getItem(KEYS.roomstate)).toBe('true')
-    expect(localStorage.getItem(KEYS.bits)).toBe('true')
+    S.settings.setChatNoticesSub(false)
+    S.settings.setChatRoomstate(false)
+    S.settings.setChatBits(false)
+    expect(S.settings.chatNoticesSub).toBe(false)
+    expect(S.settings.chatRoomstate).toBe(false)
+    expect(S.settings.chatBits).toBe(false)
+    expect(S.settings.chatModeration).toBe(true) // untouched
+    expect(localStorage.getItem(KEYS.noticesSub)).toBe('false')
+    expect(localStorage.getItem(KEYS.roomstate)).toBe('false')
+    expect(localStorage.getItem(KEYS.bits)).toBe('false')
     expect(localStorage.getItem(KEYS.moderation)).toBeNull()
   })
 
@@ -146,18 +155,18 @@ describe('chat-feature toggle persistence + independence', () => {
 
 describe('Toggle C is retroactive (live, no reconnect)', () => {
   it('flipping chatModeration re-evaluates presentation immediately', () => {
-    // Start: moderation off. A message deleted earlier in the session is
-    // stored as deleted=true (parsing is ungated) but not yet presented.
+    // Start: moderation on (the default). A message deleted earlier in the
+    // session is stored as deleted=true (parsing is ungated) and presented.
     const deletedStored = true
-    expect(S.settings.chatModeration).toBe(false)
+    expect(S.settings.chatModeration).toBe(true)
     // The render predicate is settings.chatModeration && msg.deleted.
     let presented = S.settings.chatModeration && deletedStored
-    expect(presented).toBe(false)
+    expect(presented).toBe(true)
 
-    // User enables the toggle mid-stream — same stored deletion now shows.
+    // User disables the toggle mid-stream — same stored deletion hides now.
     S.settings.toggleChatModeration()
     presented = S.settings.chatModeration && deletedStored
-    expect(presented).toBe(true)
+    expect(presented).toBe(false)
   })
 })
 
