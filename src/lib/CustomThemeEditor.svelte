@@ -26,6 +26,7 @@
   // export contract for compatibility.
 
   import { onDestroy } from 'svelte'
+  import { invoke } from '@tauri-apps/api/core'
   import {
     THEME_PROP_GROUPS,
     THEME_PALETTE,
@@ -350,14 +351,7 @@
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '') || 'theme'
     try {
-      await (
-        window as unknown as {
-          __TAURI_INTERNALS__: { invoke(cmd: string, args?: unknown): Promise<unknown> }
-        }
-      ).__TAURI_INTERNALS__.invoke('save_theme_export', {
-        content: json,
-        suggestedFilename: 'kappastream-theme-' + slug + '.json',
-      })
+      await invoke('save_theme_export', { content: json, suggestedFilename: 'kappastream-theme-' + slug + '.json' })
     } catch (err) {
       if (import.meta.env.DEV) console.error('theme export failed', err)
       exportError = t('settings_ctExportFailed')

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { slide } from 'svelte/transition'
   import { onMount } from 'svelte'
+  import { invoke } from '@tauri-apps/api/core'
   import {
     settings,
     THEMES,
@@ -228,11 +229,7 @@
     const stamp = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
     const filename = 'twitch-favorites-' + stamp + '.json'
     try {
-      await (
-        window as unknown as {
-          __TAURI_INTERNALS__: { invoke(cmd: string, args?: unknown): Promise<unknown> }
-        }
-      ).__TAURI_INTERNALS__.invoke('save_favorites_export', { content: json, suggestedFilename: filename })
+      await invoke('save_favorites_export', { content: json, suggestedFilename: filename })
     } catch (err) {
       if (import.meta.env.DEV) console.error('favorites export failed', err)
     }
