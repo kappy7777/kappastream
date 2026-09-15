@@ -91,16 +91,6 @@ export interface AttachHlsOptions {
    * PiP) must not pass it — they get formatFatalHlsError.
    */
   formatFatalError?: (data: HlsErrorData) => string
-  /**
-   * Transitional per-path fidelity (default true = the live paths' historical
-   * discipline). The pre-refactor VOD attach used a LOCAL timeout variable —
-   * a teardown could neither cancel the pending attach nor destroy the timed-
-   * out instance. The VOD call site passes false for both until the follow-up
-   * fix commit flips it to the unified behavior and deletes these flags.
-   */
-  cancelPendingOnTeardown?: boolean
-  /** See cancelPendingOnTeardown. */
-  destroyOnTimeout?: boolean
   /** Fires after the staleness check passes on MANIFEST_PARSED (e.g. status → loading). */
   onManifestParsed?: () => void
   /** Fires when the autoplay play() resolves and the attach is still current. */
@@ -157,11 +147,9 @@ export class PlaybackSession {
     this.hls = instance
     return new Promise((resolve) => {
       let done = false
-      // Local timeout handle (like the historical copies' variable): a
-      // cancellable attach is torn down via the cancel hook — which also
-      // clears this timer — while a non-cancellable one (VOD fidelity) keeps
-      // running so its promise still resolves at the 20s mark, exactly like
-      // the old local-`to` VOD copy.
+      // Local timeout handle (like the historical copies' variable). It is
+      // cleared by finish; teardown cancels a still-pending attach through
+      // the cancel hook, which runs finish.
       let to: ReturnType<typeof setTimeout> | null = null
       const finish = (r: PlaybackAttachResult): void => {
         if (done) return
@@ -176,8 +164,7 @@ export class PlaybackSession {
       // Cancellation hook (teardown resolves a still-pending attach with the
       // stale error instead of leaving it hanging on a destroyed instance).
       const cancel = () => finish({ ok: false, error: STALE_STREAM_REQUEST })
-      if (opts.cancelPendingOnTeardown === false) this.cancelPendingAttach = null
-      else this.cancelPendingAttach = cancel
+      this.cancelPendingAttach = cancel
 
       instance.on(Hls.Events.MANIFEST_PARSED, () => {
         if (!opts.isCurrent()) {
@@ -207,9 +194,7 @@ export class PlaybackSession {
       to = setTimeout(() => {
         to = null
         if (!done) {
-          if (opts.destroyOnTimeout !== false) {
-            try { instance.destroy() } catch { /* ignore */ }
-          }
+          try { instance.destroy() } catch { /* ignore */ }
           finish({ ok: false, error: 'timeout waiting for manifest' })
         }
       }, MANIFEST_TIMEOUT_MS)

@@ -1180,12 +1180,8 @@
         isCurrent: () => true,
         // The VOD error taxonomy predates the shared engine and stays: a
         // plain 'media error: <type>', no networkish split, no details
-        // suffix. The two false flags preserve the old VOD timeout
-        // discipline (no teardown cancel, no destroy on timeout) until the
-        // follow-up fix unifies it.
+        // suffix.
         formatFatalError: (d) => 'media error: ' + d.type,
-        cancelPendingOnTeardown: false,
-        destroyOnTimeout: false,
       })
     }
     if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {

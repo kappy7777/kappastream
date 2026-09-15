@@ -200,36 +200,6 @@ describe('PlaybackSession.attachHls', () => {
     expect(vi.mocked(video.load)).toHaveBeenCalled()
   })
 
-  // Transitional fidelity for the pre-refactor VOD path (local timeout, no
-  // teardown cancel, no destroy on timeout) — the VOD call site opts out
-  // until the follow-up fix commit unifies the behavior and deletes these.
-  it('VOD fidelity: teardown does NOT resolve a pending attach registered with cancelPendingOnTeardown: false', async () => {
-    const video = makeVideo()
-    const session = new PlaybackSession()
-    const p = session.attachHls(baseOpts(video, { cancelPendingOnTeardown: false, destroyOnTimeout: false }))
-    const inst = lastInstance()
-    session.teardown(video)
-    // teardown destroyed the instance (as the old teardownPlayer did), but
-    // must NOT have resolved the promise — that is left to the local 20s
-    // timer, exactly like the old local-`to` VOD copy.
-    const destroysAfterTeardown = inst.destroy.mock.calls.length
-    const settled = await Promise.race([p.then(() => true), Promise.resolve(false)])
-    expect(settled).toBe(false) // still pending
-    await vi.advanceTimersByTimeAsync(20_000)
-    expect(await p).toEqual({ ok: false, error: 'timeout waiting for manifest' })
-    expect(inst.destroy.mock.calls.length).toBe(destroysAfterTeardown) // the tick added no destroy
-  })
-
-  it('VOD fidelity: destroyOnTimeout: false leaves the timed-out instance alive', async () => {
-    const video = makeVideo()
-    const session = new PlaybackSession()
-    const p = session.attachHls(baseOpts(video, { destroyOnTimeout: false }))
-    const inst = lastInstance()
-    await vi.advanceTimersByTimeAsync(20_000)
-    expect(await p).toEqual({ ok: false, error: 'timeout waiting for manifest' })
-    expect(inst.destroy).not.toHaveBeenCalled()
-  })
-
   it('attachHls after dispose resolves ok:false without creating an instance', async () => {
     hlsMock.instances.length = 0
     const session = new PlaybackSession()
