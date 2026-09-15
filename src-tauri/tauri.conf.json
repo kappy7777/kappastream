@@ -1,13 +1,13 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "kappastream",
+  "productName": "kappastream",
   "identifier": "dev.kappy.kappastream",
   "build": {
     "frontendDist": "../dist",
     "beforeBuildCommand": "npm run build"
   },
   "app": {
-"windows": [
+    "windows": [
     {
       "title": "kappastream",
       "width": 1280,
@@ -25,59 +25,6 @@
     "withGlobalTauri": false,
     "security": {
       "csp": {
-        "default-src": ["'self'"],
-        "base-uri": ["'none'"],
-        "form-action": ["'none'"],
-        "frame-ancestors": ["'none'"],
-        "object-src": ["'none'"],
-        "frame-src": ["'none'"],
-        "script-src": ["'self'"],
-        "style-src": ["'self'", "'unsafe-inline'"],
-        "font-src": ["'self'"],
-        "img-src": [
-          "'self'",
-          "https://static-cdn.jtvnw.net",
-          "https://cdn.7tv.app",
-          "https://cdn.betterttv.net",
-          "https://cdn.frankerfacez.com",
-          "https://cloudfront.net",
-          "https://*.cloudfront.net"
-        ],
-        "connect-src": [
-          "'self'",
-          "ipc:",
-          "http://ipc.localhost",
-          "https://7tv.io",
-          "https://api.betterttv.net",
-          "https://api.frankerfacez.com",
-          "wss://irc-ws.chat.twitch.tv:443",
-          "https://ttvnw.net",
-          "https://*.ttvnw.net",
-          "https://twitch.tv",
-          "https://*.twitch.tv",
-          "https://ttv-clips.net",
-          "https://*.ttv-clips.net",
-          "https://cloudfront.net",
-          "https://*.cloudfront.net",
-          "ksvod:",
-          "http://ksvod.localhost"
-        ],
-        "media-src": [
-          "'self'",
-          "blob:",
-          "https://ttvnw.net",
-          "https://*.ttvnw.net",
-          "https://twitch.tv",
-          "https://*.twitch.tv",
-          "https://ttv-clips.net",
-          "https://*.ttv-clips.net",
-          "https://cloudfront.net",
-          "https://*.cloudfront.net"
-        ],
-        "worker-src": ["'self'", "blob:"],
-        "child-src": ["'self'", "blob:"]
-      },
-      "devCsp": {
         "default-src": ["'self'"],
         "base-uri": ["'none'"],
         "form-action": ["'none'"],
