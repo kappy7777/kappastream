@@ -68,12 +68,6 @@ describe('compareSemverCore (three-way sort key)', () => {
 
   it('drives a newest-first sort', () => {
     const versions = ['0.2.9', '1.0.0', '0.3.1', '1.0.3', '1.0.1']
-    expect([...versions].sort((a, b) => compareSemverCore(b, a))).toEqual([
-      '1.0.3',
-      '1.0.1',
-      '1.0.0',
-      '0.3.1',
-      '0.2.9',
-    ])
+    expect([...versions].sort((a, b) => compareSemverCore(b, a))).toEqual(['1.0.3', '1.0.1', '1.0.0', '0.3.1', '0.2.9'])
   })
 })

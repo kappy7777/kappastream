@@ -65,7 +65,10 @@
     use:tooltip={t('notifications')}
   >
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-      <path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm7-5-1.4-1.4a2 2 0 0 1-.6-1.4V10a5 5 0 0 0-4-4.9V4a1 1 0 1 0-2 0v1.1A5 5 0 0 0 7 10v4.2a2 2 0 0 1-.6 1.4L5 17h14z" fill="currentColor"/>
+      <path
+        d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm7-5-1.4-1.4a2 2 0 0 1-.6-1.4V10a5 5 0 0 0-4-4.9V4a1 1 0 1 0-2 0v1.1A5 5 0 0 0 7 10v4.2a2 2 0 0 1-.6 1.4L5 17h14z"
+        fill="currentColor"
+      />
     </svg>
     {#if count > 0}
       <span class="notify-badge">{count > 99 ? '99+' : count}</span>
@@ -84,7 +87,11 @@
       {#if notifications.items.length === 0}
         <div class="empty">
           <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
-            <path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm7-5-1.4-1.4a2 2 0 0 1-.6-1.4V10a5 5 0 0 0-4-4.9V4a1 1 0 1 0-2 0v1.1A5 5 0 0 0 7 10v4.2a2 2 0 0 1-.6 1.4L5 17h14z" fill="currentColor" opacity="0.5"/>
+            <path
+              d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm7-5-1.4-1.4a2 2 0 0 1-.6-1.4V10a5 5 0 0 0-4-4.9V4a1 1 0 1 0-2 0v1.1A5 5 0 0 0 7 10v4.2a2 2 0 0 1-.6 1.4L5 17h14z"
+              fill="currentColor"
+              opacity="0.5"
+            />
           </svg>
           <span>{t('notify_empty')}</span>
         </div>
@@ -92,12 +99,28 @@
         <div class="notif-list">
           {#each notifications.items as item (item.id)}
             <div class="notif-item" class:notif-item--live={item.kind === 'live'} data-read={item.read}>
-              <span class="notif-icon" class:notif-icon--live={item.kind === 'live'} aria-hidden="true">{iconFor(item.kind)}</span>
+              <span class="notif-icon" class:notif-icon--live={item.kind === 'live'} aria-hidden="true"
+                >{iconFor(item.kind)}</span
+              >
               <div class="notif-body">
                 <div class="notif-title-row">
                   <span class="notif-title">{item.title}</span>
-                  <button type="button" class="notif-dismiss" aria-label={t('notify_dismiss')} onclick={() => removeItem(item.id)}>
-                    <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                  <button
+                    type="button"
+                    class="notif-dismiss"
+                    aria-label={t('notify_dismiss')}
+                    onclick={() => removeItem(item.id)}
+                  >
+                    <svg
+                      viewBox="0 0 16 16"
+                      width="10"
+                      height="10"
+                      aria-hidden="true"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                    >
                       <path d="M4 4 L12 12 M12 4 L4 12" />
                     </svg>
                   </button>
@@ -135,7 +158,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 150ms, color 150ms;
+    transition:
+      background 150ms,
+      color 150ms;
   }
 
   .notify-btn:hover,
@@ -181,8 +206,14 @@
   }
 
   @keyframes panel-in {
-    from { opacity: 0; transform: scale(0.96) translateY(-4px); }
-    to { opacity: 1; transform: scale(1) translateY(0); }
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
   }
 
   .panel-head {
@@ -211,7 +242,9 @@
     cursor: pointer;
     padding: 2px 6px;
     border-radius: 3px;
-    transition: background 150ms, color 150ms;
+    transition:
+      background 150ms,
+      color 150ms;
   }
 
   .clear-btn:hover {
@@ -313,7 +346,10 @@
     align-items: center;
     justify-content: center;
     opacity: 0;
-    transition: background 150ms, color 150ms, opacity 150ms;
+    transition:
+      background 150ms,
+      color 150ms,
+      opacity 150ms;
   }
 
   .notif-item:hover .notif-dismiss {

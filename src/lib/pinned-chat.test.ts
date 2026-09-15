@@ -22,12 +22,7 @@ import { readFileSync, readdirSync } from 'node:fs'
  *   - the render path contains no raw-HTML injection.
  */
 
-import {
-  PinnedChatStore,
-  toDisplayPin,
-  isPinExpired,
-  type PinnedChatPin,
-} from './pinned-chat.svelte'
+import { PinnedChatStore, toDisplayPin, isPinExpired, type PinnedChatPin } from './pinned-chat.svelte'
 import type { PinnedChatMessageData } from './gql'
 
 function fixturePin(over: Partial<PinnedChatMessageData> = {}): PinnedChatMessageData {
@@ -77,8 +72,12 @@ function makeHarness(initial: PinnedChatMessageData[][] = []): Harness {
     store,
     fetch,
     resolveUserId,
-    setEnabled(v: boolean) { enabled = v },
-    advance(ms: number) { now += ms },
+    setEnabled(v: boolean) {
+      enabled = v
+    },
+    advance(ms: number) {
+      now += ms
+    },
   }
 }
 
@@ -343,11 +342,18 @@ describe('pinned chat: display model', () => {
 
   it('isPinExpired only fires for a lapsed endsAt', () => {
     const base: PinnedChatPin = {
-      pinId: 'p', messageId: 'm', type: 'MOD',
-      startsAtMs: null, endsAtMs: null, updatedAtMs: null, sentAtMs: null,
+      pinId: 'p',
+      messageId: 'm',
+      type: 'MOD',
+      startsAtMs: null,
+      endsAtMs: null,
+      updatedAtMs: null,
+      sentAtMs: null,
       pinnedBy: { login: 'a', displayName: 'A' },
       sender: { login: 's', displayName: 'S', color: '#ffffff' },
-      badges: [], text: 'x', emoteRanges: [],
+      badges: [],
+      text: 'x',
+      emoteRanges: [],
     }
     expect(isPinExpired(base, 1000)).toBe(false)
     expect(isPinExpired({ ...base, endsAtMs: 999 }, 1000)).toBe(true)
@@ -371,7 +377,8 @@ describe('pinned chat: render path hardening', () => {
           // after an odd-cwd run; it is not source and its sourcemaps false-
           // positive the needle.
           if (entry.name === 'node_modules' || entry.name === '.vite') continue
-          walk(full); continue
+          walk(full)
+          continue
         }
         if (!/\.(svelte|ts|js)$/.test(entry.name) || entry.name.includes('.test.')) continue
         if (readFileSync(full, 'utf8').includes(needle)) offenders.push(full)

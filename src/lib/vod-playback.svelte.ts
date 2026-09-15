@@ -51,13 +51,15 @@ export class VodPlaybackController {
   private resumeBarTimer: ReturnType<typeof setTimeout> | null = null
   private lastSaveAt = 0
 
-  constructor(private readonly opts: {
-    /** Rewrites an https URL to the ksvod-proxy form for the current platform. */
-    proxyUrl: (httpsUrl: string) => string
-    /** The <video> element positions are saved from / restored to (may be
-     *  briefly absent mid source-swap). */
-    getVideo: () => HTMLVideoElement | undefined
-  }) {}
+  constructor(
+    private readonly opts: {
+      /** Rewrites an https URL to the ksvod-proxy form for the current platform. */
+      proxyUrl: (httpsUrl: string) => string
+      /** The <video> element positions are saved from / restored to (may be
+       *  briefly absent mid source-swap). */
+      getVideo: () => HTMLVideoElement | undefined
+    },
+  ) {}
 
   /** Reset the scrub-bar extras. Called on every playback-mode change. */
   clearExtras(): void {
@@ -131,7 +133,11 @@ export class VodPlaybackController {
       const seekable = el.seekable
       if (seekable.length === 0) return false
       if (saved.position > seekable.end(seekable.length - 1)) return false
-      try { el.currentTime = saved.position } catch { /* ignore */ }
+      try {
+        el.currentTime = saved.position
+      } catch {
+        /* ignore */
+      }
       return true
     }
     if (attempt()) {
@@ -153,8 +159,14 @@ export class VodPlaybackController {
   restart(videoId: string | null): void {
     const el = this.opts.getVideo()
     if (el) {
-      try { el.currentTime = 0 } catch { /* ignore */ }
-      void el.play().catch(() => { /* ignore */ })
+      try {
+        el.currentTime = 0
+      } catch {
+        /* ignore */
+      }
+      void el.play().catch(() => {
+        /* ignore */
+      })
     }
     if (videoId) vodPositions.clear(videoId)
     this.dismissResumeBar()

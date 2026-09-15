@@ -145,7 +145,10 @@ async function fetch7TVGlobal(signal?: AbortSignal): Promise<Emote[]> {
   }
 }
 
-interface BttvEmote { id: string; code: string }
+interface BttvEmote {
+  id: string
+  code: string
+}
 interface BttvUser {
   channelEmotes?: BttvEmote[]
   sharedEmotes?: BttvEmote[]
@@ -182,7 +185,10 @@ async function fetchBTTVGlobal(signal?: AbortSignal): Promise<Emote[]> {
   }
 }
 
-interface FfzEmote { id: number; name: string }
+interface FfzEmote {
+  id: number
+  name: string
+}
 interface FfzUser {
   sets?: Record<string, { emoticons?: FfzEmote[] }>
 }
@@ -314,13 +320,10 @@ export interface RenderInput {
 }
 
 export type RenderedMessagePart =
-  | { type: 'text'; text: string }
-  | { type: 'emote'; name: string; url: string; provider: EmoteProvider }
+  { type: 'text'; text: string } | { type: 'emote'; name: string; url: string; provider: EmoteProvider }
 
 export function renderMessage({ message, thirdParty, twitchRanges = [] }: RenderInput): RenderedMessagePart[] {
-  const merged = [...twitchRanges, ...thirdPartyRanges(message, thirdParty)].sort(
-    (x, y) => x.start - y.start,
-  )
+  const merged = [...twitchRanges, ...thirdPartyRanges(message, thirdParty)].sort((x, y) => x.start - y.start)
   if (merged.length === 0) return [{ type: 'text', text: message }]
 
   let cursor = 0

@@ -225,13 +225,20 @@
               <span class="cc-dur">{formatDuration(v.lengthSeconds)}</span>
             </div>
             <span class="cc-name">{v.title || t('cc_untitledVod')}</span>
-            <span class="cc-meta">{formatViewers(v.viewCount)} {t('cc_views')}{#if v.game}<span class="cc-dot">·</span>{v.game}{/if}</span>
+            <span class="cc-meta"
+              >{formatViewers(v.viewCount)}
+              {t('cc_views')}{#if v.game}<span class="cc-dot">·</span>{v.game}{/if}</span
+            >
             <span class="cc-age">{formatAge(v.createdAt)}</span>
           </button>
         {/each}
       </div>
       {#if hasMoreToShow(archivesVisible, archives.length)}
-        <button type="button" class="cc-more" onclick={() => (archivesVisible = revealMore(archivesVisible, archives.length))}>{t('loadMore')}</button>
+        <button
+          type="button"
+          class="cc-more"
+          onclick={() => (archivesVisible = revealMore(archivesVisible, archives.length))}>{t('loadMore')}</button
+        >
       {/if}
     {/if}
   </section>
@@ -258,13 +265,20 @@
               <span class="cc-dur">{formatDuration(v.lengthSeconds)}</span>
             </div>
             <span class="cc-name">{v.title || t('cc_untitledHighlight')}</span>
-            <span class="cc-meta">{formatViewers(v.viewCount)} {t('cc_views')}{#if v.game}<span class="cc-dot">·</span>{v.game}{/if}</span>
+            <span class="cc-meta"
+              >{formatViewers(v.viewCount)}
+              {t('cc_views')}{#if v.game}<span class="cc-dot">·</span>{v.game}{/if}</span
+            >
             <span class="cc-age">{formatAge(v.createdAt)}</span>
           </button>
         {/each}
       </div>
       {#if hasMoreToShow(highlightsVisible, highlights.length)}
-        <button type="button" class="cc-more" onclick={() => (highlightsVisible = revealMore(highlightsVisible, highlights.length))}>{t('loadMore')}</button>
+        <button
+          type="button"
+          class="cc-more"
+          onclick={() => (highlightsVisible = revealMore(highlightsVisible, highlights.length))}>{t('loadMore')}</button
+        >
       {/if}
     {/if}
   </section>
@@ -291,13 +305,23 @@
               <span class="cc-dur">{formatDuration(c.durationSeconds)}</span>
             </div>
             <span class="cc-name">{c.title || t('cc_untitledClip')}</span>
-            <span class="cc-meta">{formatViewers(c.viewCount)} {t('cc_views')}{#if c.game}<span class="cc-dot">·</span>{c.game}{/if}</span>
-            <span class="cc-age">{#if c.curator}{c.curator}<span class="cc-dot">·</span>{/if}{formatAge(c.createdAt)}</span>
+            <span class="cc-meta"
+              >{formatViewers(c.viewCount)}
+              {t('cc_views')}{#if c.game}<span class="cc-dot">·</span>{c.game}{/if}</span
+            >
+            <span class="cc-age"
+              >{#if c.curator}{c.curator}<span class="cc-dot">·</span>{/if}{formatAge(c.createdAt)}</span
+            >
           </button>
         {/each}
       </div>
       {#if hasMoreToShow(recentClipsVisible, recentClips.length)}
-        <button type="button" class="cc-more" onclick={() => (recentClipsVisible = revealMore(recentClipsVisible, recentClips.length))}>{t('loadMore')}</button>
+        <button
+          type="button"
+          class="cc-more"
+          onclick={() => (recentClipsVisible = revealMore(recentClipsVisible, recentClips.length))}
+          >{t('loadMore')}</button
+        >
       {/if}
     {/if}
   </section>
@@ -324,13 +348,23 @@
               <span class="cc-dur">{formatDuration(c.durationSeconds)}</span>
             </div>
             <span class="cc-name">{c.title || t('cc_untitledClip')}</span>
-            <span class="cc-meta">{formatViewers(c.viewCount)} {t('cc_views')}{#if c.game}<span class="cc-dot">·</span>{c.game}{/if}</span>
-            <span class="cc-age">{#if c.curator}{c.curator}<span class="cc-dot">·</span>{/if}{formatAge(c.createdAt)}</span>
+            <span class="cc-meta"
+              >{formatViewers(c.viewCount)}
+              {t('cc_views')}{#if c.game}<span class="cc-dot">·</span>{c.game}{/if}</span
+            >
+            <span class="cc-age"
+              >{#if c.curator}{c.curator}<span class="cc-dot">·</span>{/if}{formatAge(c.createdAt)}</span
+            >
           </button>
         {/each}
       </div>
       {#if hasMoreToShow(popularClipsVisible, popularClips.length)}
-        <button type="button" class="cc-more" onclick={() => (popularClipsVisible = revealMore(popularClipsVisible, popularClips.length))}>{t('loadMore')}</button>
+        <button
+          type="button"
+          class="cc-more"
+          onclick={() => (popularClipsVisible = revealMore(popularClipsVisible, popularClips.length))}
+          >{t('loadMore')}</button
+        >
       {/if}
     {/if}
   </section>

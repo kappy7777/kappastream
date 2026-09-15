@@ -26,8 +26,7 @@ const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 const CDN_HOST = 'https://static-cdn.jtvnw.net'
 const OUT_PATH = new URL('../src/lib/badges.generated.ts', import.meta.url)
 
-const QUERY =
-  'query { badges { setID version title imageURL(size: NORMAL) } }'
+const QUERY = 'query { badges { setID version title imageURL(size: NORMAL) } }'
 
 // Hand-curated setID labels where a short label beats Twitch's raw title (shown
 // in tooltips). Everything not listed takes Twitch's `title` (or a prettified
@@ -322,10 +321,7 @@ async function main() {
     for (const v of versions.values()) allVersions.push({ setID, ...v })
   }
   console.log(`Verifying ${allVersions.length} image URLs resolve...`)
-  const results = await mapLimited(allVersions, 16, async (rec) => [
-    rec,
-    await uuidResolves(rec.uuid),
-  ])
+  const results = await mapLimited(allVersions, 16, async (rec) => [rec, await uuidResolves(rec.uuid)])
   const failed = results.filter(([, ok]) => !ok).map(([r]) => r)
   if (failed.length) {
     console.log(`  DROPPING ${failed.length} unresolved version(s):`)
@@ -346,10 +342,7 @@ async function main() {
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
     .map(([setID, versions]) => [setID, buildEntry(setID, versions)])
 
-  const versionCount = entries.reduce(
-    (n, [, e]) => n + (e.perVersion ? Object.keys(e.perVersion).length : 1),
-    0,
-  )
+  const versionCount = entries.reduce((n, [, e]) => n + (e.perVersion ? Object.keys(e.perVersion).length : 1), 0)
   const dateStr = new Date().toISOString().slice(0, 10)
   const file = emitFile(entries, dateStr, entries.length, versionCount)
 

@@ -83,7 +83,13 @@ describe('gql favorites layer (refactor smoke)', () => {
               game: { id: 'g1', name: 'just-chatting', displayName: 'Just Chatting' },
             },
           },
-          { id: '2', login: 'offlinechan', displayName: 'OfflineChan', profileImageURL: 'https://img/o.png', stream: null },
+          {
+            id: '2',
+            login: 'offlinechan',
+            displayName: 'OfflineChan',
+            profileImageURL: 'https://img/o.png',
+            stream: null,
+          },
           null,
         ],
       })
@@ -110,9 +116,7 @@ describe('gql favorites layer (refactor smoke)', () => {
     // treats it as a transport failure (keeps last-known status) rather than
     // committing a wrong status.
     gql.handler = async () => ok({ users: [] })
-    await expect(G.fetchChannelStatuses(['alpha', 'beta'])).rejects.toThrow(
-      'gql short response',
-    )
+    await expect(G.fetchChannelStatuses(['alpha', 'beta'])).rejects.toThrow('gql short response')
   })
 })
 
@@ -291,15 +295,28 @@ describe('gql browse — top categories', () => {
       ok({
         games: {
           edges: [
-            { node: { id: 'g1', name: 'just-chatting', displayName: 'Just Chatting', boxArtURL: 'https://img/b1.jpg' } },
-            { node: { id: 'g2', name: 'league-of-legends', displayName: 'League of Legends', boxArtURL: 'https://img/b2.jpg' } },
+            {
+              node: { id: 'g1', name: 'just-chatting', displayName: 'Just Chatting', boxArtURL: 'https://img/b1.jpg' },
+            },
+            {
+              node: {
+                id: 'g2',
+                name: 'league-of-legends',
+                displayName: 'League of Legends',
+                boxArtURL: 'https://img/b2.jpg',
+              },
+            },
           ],
         },
       })
 
     const page = await G.fetchTopCategories()
     expect(page.categories).toHaveLength(2)
-    expect(page.categories[0]).toMatchObject({ name: 'just-chatting', displayName: 'Just Chatting', boxArtUrl: 'https://img/b1.jpg' })
+    expect(page.categories[0]).toMatchObject({
+      name: 'just-chatting',
+      displayName: 'Just Chatting',
+      boxArtUrl: 'https://img/b1.jpg',
+    })
   })
 
   it('treats empty edges as success', async () => {
@@ -644,9 +661,33 @@ describe('gql VOD extras (chapters / mutes / storyboard URL)', () => {
           },
           moments: {
             edges: [
-              { node: { type: 'GAME_CHANGE', positionMilliseconds: 0, durationMilliseconds: 83000, description: 'Chapter 1', details: null } },
-              { node: { type: 'GAME_CHANGE', positionMilliseconds: 83000, durationMilliseconds: 10890000, description: '', details: { game: { displayName: 'Just Chatting' } } } },
-              { node: { type: 'GAME_CHANGE', positionMilliseconds: 10973000, durationMilliseconds: 74000, description: '', details: { game: { displayName: 'Grand Theft Auto V' } } } },
+              {
+                node: {
+                  type: 'GAME_CHANGE',
+                  positionMilliseconds: 0,
+                  durationMilliseconds: 83000,
+                  description: 'Chapter 1',
+                  details: null,
+                },
+              },
+              {
+                node: {
+                  type: 'GAME_CHANGE',
+                  positionMilliseconds: 83000,
+                  durationMilliseconds: 10890000,
+                  description: '',
+                  details: { game: { displayName: 'Just Chatting' } },
+                },
+              },
+              {
+                node: {
+                  type: 'GAME_CHANGE',
+                  positionMilliseconds: 10973000,
+                  durationMilliseconds: 74000,
+                  description: '',
+                  details: { game: { displayName: 'Grand Theft Auto V' } },
+                },
+              },
             ],
           },
         },
@@ -701,7 +742,9 @@ describe('gql VOD extras (chapters / mutes / storyboard URL)', () => {
       ok({
         video: {
           id: '1',
-          muteInfo: { mutedSegmentConnection: { nodes: [{ offset: 10 }, { duration: 30 }, { offset: -1, duration: 5 }] } },
+          muteInfo: {
+            mutedSegmentConnection: { nodes: [{ offset: 10 }, { duration: 30 }, { offset: -1, duration: 5 }] },
+          },
         },
       })
     expect((await G.fetchVideoExtras('1')).mutedSpans).toEqual([])
@@ -738,10 +781,7 @@ describe('gql favorites batch — Stream Together / costream fields', () => {
               collaborationViewersCount: 14986,
               costreamDetails: {
                 costreamersCount: 5,
-                topCostreamers: [
-                  { profileImageURL: 'https://img/c1.png' },
-                  { profileImageURL: 'https://img/c2.png' },
-                ],
+                topCostreamers: [{ profileImageURL: 'https://img/c1.png' }, { profileImageURL: 'https://img/c2.png' }],
               },
               game: { id: 'g1', name: 'league-of-legends', displayName: 'League of Legends' },
             },
@@ -854,8 +894,12 @@ describe('gql favorites batch — followers + organizer combined count', () => {
             displayName: 'Chan7',
             followers: { totalCount: 12345678 },
             stream: {
-              id: 's1', title: 'x', type: 'live', viewersCount: 1,
-              createdAt: '2024-01-01T00:00:00Z', collaborationViewersCount: null,
+              id: 's1',
+              title: 'x',
+              type: 'live',
+              viewersCount: 1,
+              createdAt: '2024-01-01T00:00:00Z',
+              collaborationViewersCount: null,
             },
           },
           { id: '2', login: 'off', displayName: 'off', followers: null, stream: null },
@@ -877,7 +921,10 @@ describe('gql favorites batch — followers + organizer combined count', () => {
             displayName: 'Chan12',
             followers: { totalCount: 100 },
             stream: {
-              id: 's1', title: 'FINAL', type: 'live', viewersCount: 3041,
+              id: 's1',
+              title: 'FINAL',
+              type: 'live',
+              viewersCount: 3041,
               createdAt: '2024-01-01T00:00:00Z',
               collaborationViewersCount: null,
               costreamDetails: {
@@ -897,7 +944,6 @@ describe('gql favorites batch — followers + organizer combined count', () => {
   })
 })
 
-
 describe('gql collaboration roster (channel(id:).collaboration)', () => {
   it('fetches aliased rosters in one request, ACTIVE members only, self included', async () => {
     gql.handler = async (body) => {
@@ -907,9 +953,21 @@ describe('gql collaboration roster (channel(id:).collaboration)', () => {
         c0: {
           collaboration: {
             collaborators: [
-              { role: 'LEADER', status: 'ACTIVE', user: { login: 'cohost1', displayName: 'cohost1', profileImageURL: 'https://img/r.png' } },
-              { role: 'MEMBER', status: 'ACTIVE', user: { login: 'cohost2', displayName: 'Cohost2', profileImageURL: 'https://img/n.png' } },
-              { role: 'MEMBER', status: 'INVITED', user: { login: 'ghost_guest', displayName: 'ghost', profileImageURL: 'https://img/g.png' } },
+              {
+                role: 'LEADER',
+                status: 'ACTIVE',
+                user: { login: 'cohost1', displayName: 'cohost1', profileImageURL: 'https://img/r.png' },
+              },
+              {
+                role: 'MEMBER',
+                status: 'ACTIVE',
+                user: { login: 'cohost2', displayName: 'Cohost2', profileImageURL: 'https://img/n.png' },
+              },
+              {
+                role: 'MEMBER',
+                status: 'INVITED',
+                user: { login: 'ghost_guest', displayName: 'ghost', profileImageURL: 'https://img/g.png' },
+              },
               { role: 'MEMBER', status: 'ACTIVE', user: { login: '', displayName: 'nologin', profileImageURL: null } },
               null,
             ],
@@ -944,7 +1002,11 @@ describe('gql collaboration roster (channel(id:).collaboration)', () => {
       const data: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(vars)) {
         data[k.replace('id', 'c')] = {
-          collaboration: { collaborators: [{ role: 'LEADER', status: 'ACTIVE', user: { login: 'x' + v, displayName: 'x', profileImageURL: null } }] },
+          collaboration: {
+            collaborators: [
+              { role: 'LEADER', status: 'ACTIVE', user: { login: 'x' + v, displayName: 'x', profileImageURL: null } },
+            ],
+          },
         }
       }
       return ok(data)
@@ -1056,7 +1118,23 @@ describe('gql pinned chat messages (channel(id:).pinnedChatMessages)', () => {
   it('caps fragments at 50 and the rebuilt text at 2000 chars', async () => {
     const many = Array.from({ length: 80 }, (_, i) => ({ text: `frag${i} `, content: null }))
     gql.handler = async () =>
-      ok({ channel: { pinnedChatMessages: { edges: [{ node: { ...pinNode, pinnedMessage: { ...pinNode.pinnedMessage, content: { text: many.map((f) => f.text).join(''), fragments: many } } } }] } } })
+      ok({
+        channel: {
+          pinnedChatMessages: {
+            edges: [
+              {
+                node: {
+                  ...pinNode,
+                  pinnedMessage: {
+                    ...pinNode.pinnedMessage,
+                    content: { text: many.map((f) => f.text).join(''), fragments: many },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      })
     const pins = await G.fetchPinnedChatMessages('1')
     expect(pins[0].message?.fragments).toHaveLength(50)
     expect(pins[0].message?.text.length).toBeLessThanOrEqual(2000)

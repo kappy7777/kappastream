@@ -90,9 +90,7 @@ class UpdateStore {
         // A malformed or retagged latest.json must never walk an install back to
         // an older legitimately-signed build — signature verification would not
         // catch that, since every archived release is signed by the same key.
-        console.warn(
-          `[update] ignoring non-newer version ${update.version} (current ${update.currentVersion})`,
-        )
+        console.warn(`[update] ignoring non-newer version ${update.version} (current ${update.currentVersion})`)
       }
       // else: no update available — stay idle, no UI.
     } catch (err) {

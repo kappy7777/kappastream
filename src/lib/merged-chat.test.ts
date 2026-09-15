@@ -39,7 +39,12 @@ function msg(id: string, timestamp: number): ChatMessage {
   }
 }
 
-function source(tileId: string, channel: string, messages: ChatMessage[], override: MergeSource['override'] = null): MergeSource {
+function source(
+  tileId: string,
+  channel: string,
+  messages: ChatMessage[],
+  override: MergeSource['override'] = null,
+): MergeSource {
   return { tileId, channel, override, messages }
 }
 
@@ -103,10 +108,7 @@ describe('mergedChatEntries — the interleaved view model', () => {
 
   it('carries per-entry attribution: tile, channel, and badge override', () => {
     const ov = { subscriber: { '1': 'uuid-1' } }
-    const [e1, e2] = mergedChatEntries([
-      source('t1', 'chan1', [msg('a', 1)], ov),
-      source('t2', 'chan2', [msg('b', 2)]),
-    ])
+    const [e1, e2] = mergedChatEntries([source('t1', 'chan1', [msg('a', 1)], ov), source('t2', 'chan2', [msg('b', 2)])])
     expect(e1.tileId).toBe('t1')
     expect(e1.channel).toBe('chan1')
     expect(e1.override).toBe(ov)

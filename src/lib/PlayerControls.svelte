@@ -14,16 +14,7 @@
   // and are NOT translated; only the two display words ('Source', 'Audio only')
   // are, resolved reactively via qualityLabel() so a language switch updates
   // the open menu live (a module-level const label would freeze on first load).
-  const QUALITY_IDS = [
-    'best',
-    '1080p60',
-    '720p60',
-    '720p',
-    '480p',
-    '360p',
-    '160p',
-    'audio_only',
-  ] as const
+  const QUALITY_IDS = ['best', '1080p60', '720p60', '720p', '480p', '360p', '160p', 'audio_only'] as const
 
   function qualityLabel(id: string): string {
     if (id === 'best') return t('pc_sourceQuality')
@@ -108,10 +99,18 @@
   }
 
   function attach(v: HTMLVideoElement): () => void {
-    const onPlay = () => { playing = true }
-    const onPause = () => { playing = false }
-    const onTime = () => { currentTime = v.currentTime }
-    const onMeta = () => { duration = v.duration }
+    const onPlay = () => {
+      playing = true
+    }
+    const onPause = () => {
+      playing = false
+    }
+    const onTime = () => {
+      currentTime = v.currentTime
+    }
+    const onMeta = () => {
+      duration = v.duration
+    }
     const onVol = () => {
       volume = v.volume
       muted = v.muted
@@ -176,10 +175,18 @@
     const detach = attach(video)
 
     const v: HTMLVideoElement = video
-    const onEnter = () => { bumpActivity() }
-    const onLeave = () => { lastActivityAt = Date.now() }
-    const onMove = () => { bumpActivity() }
-    const onClick = () => { bumpActivity() }
+    const onEnter = () => {
+      bumpActivity()
+    }
+    const onLeave = () => {
+      lastActivityAt = Date.now()
+    }
+    const onMove = () => {
+      bumpActivity()
+    }
+    const onClick = () => {
+      bumpActivity()
+    }
     v.addEventListener('mouseenter', onEnter)
     v.addEventListener('mouseleave', onLeave)
     v.addEventListener('mousemove', onMove)
@@ -303,12 +310,8 @@
 
   // VOD scrubber extras: the hovered storyboard thumbnail, the chapter label
   // in effect at the hovered time, and the percent geometry for muted spans.
-  const hoverThumb = $derived(
-    hoverTime !== null && storyboard ? storyboardThumbAt(storyboard, hoverTime) : null,
-  )
-  const hoverChapterLabel = $derived(
-    hoverTime !== null ? (chapterAt(chapters, hoverTime)?.label ?? '') : '',
-  )
+  const hoverThumb = $derived(hoverTime !== null && storyboard ? storyboardThumbAt(storyboard, hoverTime) : null)
+  const hoverChapterLabel = $derived(hoverTime !== null ? (chapterAt(chapters, hoverTime)?.label ?? '') : '')
 
   function mutedSpanStyle(span: VodMuteSpan): string {
     const left = progressPct(span.startSec)
@@ -323,12 +326,7 @@
   const CTRL_SCALE_MIN = 0.65
   const CTRL_SCALE_MAX = 1.6
 
-  let ctrlScale = $derived(
-    Math.max(
-      CTRL_SCALE_MIN,
-      Math.min(CTRL_SCALE_MAX, playerWidth / CTRL_SCALE_BASELINE),
-    ),
-  )
+  let ctrlScale = $derived(Math.max(CTRL_SCALE_MIN, Math.min(CTRL_SCALE_MAX, playerWidth / CTRL_SCALE_BASELINE)))
 
   function onProgressClick(e: MouseEvent): void {
     seekFromEvent(e)
@@ -374,7 +372,9 @@
     <div class="theater-info-text">
       <div class="theater-info-title">{activeStatus.title}</div>
       <div class="theater-info-meta">
-        {#if activeStatus.game}<span class="theater-info-game">{activeStatus.game}</span><span class="theater-info-dot">·</span>{/if}
+        {#if activeStatus.game}<span class="theater-info-game">{activeStatus.game}</span><span class="theater-info-dot"
+            >·</span
+          >{/if}
         <span class="theater-info-viewers">{formatCompact(activeStatus.viewers)} {t('viewers')}</span>
       </div>
     </div>
@@ -382,19 +382,9 @@
 {/if}
 
 {#if visible && controlsShown}
-  <div
-    class="controls"
-    role="presentation"
-    onkeydown={onControlsKey}
-    style="--ctrl-scale: {ctrlScale.toFixed(3)}"
-  >
+  <div class="controls" role="presentation" onkeydown={onControlsKey} style="--ctrl-scale: {ctrlScale.toFixed(3)}">
     {#if menuOpen}
-      <button
-        type="button"
-        class="menu-backdrop"
-        aria-label={t('pc_closeMenu')}
-        onclick={closeMenu}
-      ></button>
+      <button type="button" class="menu-backdrop" aria-label={t('pc_closeMenu')} onclick={closeMenu}></button>
     {/if}
     <div
       class="progress"
@@ -429,12 +419,16 @@
           {#if hoverThumb}
             <div
               class="progress-hover-thumb"
-              style="width: {storyboard?.width}px; height: {storyboard?.height}px; background-image: url('{hoverThumb.url}'); background-size: {(storyboard?.cols ?? 1) * (storyboard?.width ?? 0)}px {(storyboard?.rows ?? 1) * (storyboard?.height ?? 0)}px; background-position: {hoverThumb.x}px {hoverThumb.y}px;"
+              style="width: {storyboard?.width}px; height: {storyboard?.height}px; background-image: url('{hoverThumb.url}'); background-size: {(storyboard?.cols ??
+                1) * (storyboard?.width ?? 0)}px {(storyboard?.rows ?? 1) *
+                (storyboard?.height ?? 0)}px; background-position: {hoverThumb.x}px {hoverThumb.y}px;"
               aria-hidden="true"
             ></div>
           {/if}
           <div class="progress-hover-bubble">
-            {formatTime(hoverTime)}{#if hoverChapterLabel}<span class="progress-hover-chapter"> · {hoverChapterLabel}</span>{/if}
+            {formatTime(hoverTime)}{#if hoverChapterLabel}<span class="progress-hover-chapter">
+                · {hoverChapterLabel}</span
+              >{/if}
           </div>
         </div>
       {/if}
@@ -449,12 +443,12 @@
       >
         {#if playing}
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <rect x="6" y="5" width="4" height="14" fill="currentColor"/>
-            <rect x="14" y="5" width="4" height="14" fill="currentColor"/>
+            <rect x="6" y="5" width="4" height="14" fill="currentColor" />
+            <rect x="14" y="5" width="4" height="14" fill="currentColor" />
           </svg>
         {:else}
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <path d="M8 5v14l11-7z" fill="currentColor"/>
+            <path d="M8 5v14l11-7z" fill="currentColor" />
           </svg>
         {/if}
       </button>
@@ -467,7 +461,7 @@
         use:tooltip={t('pc_stopStream')}
       >
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/>
+          <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" />
         </svg>
       </button>
 
@@ -480,15 +474,18 @@
       >
         {#if muted || volume === 0}
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3l2.7-2.7-1.4-1.4L15 10.6l-2.8-2.8-1.4 1.4L13.6 12l-2.8 2.8 1.4 1.4L15 13.4l2.7 2.7 1.4-1.4L16.4 12z" fill="currentColor"/>
+            <path
+              d="M3 9v6h4l5 5V4L7 9H3zm13.5 3l2.7-2.7-1.4-1.4L15 10.6l-2.8-2.8-1.4 1.4L13.6 12l-2.8 2.8 1.4 1.4L15 13.4l2.7 2.7 1.4-1.4L16.4 12z"
+              fill="currentColor"
+            />
           </svg>
         {:else if volume < 0.5}
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <path d="M3 9v6h4l5 5V4L7 9H3z" fill="currentColor"/>
+            <path d="M3 9v6h4l5 5V4L7 9H3z" fill="currentColor" />
           </svg>
         {:else}
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <path d="M3 9v6h4l5 5V4L7 9H3zm11 .2v5.6c1.5-.5 2.5-1.9 2.5-3.5s-1-3-2.5-3.5z" fill="currentColor"/>
+            <path d="M3 9v6h4l5 5V4L7 9H3zm11 .2v5.6c1.5-.5 2.5-1.9 2.5-3.5s-1-3-2.5-3.5z" fill="currentColor" />
           </svg>
         {/if}
       </button>
@@ -519,7 +516,10 @@
           use:tooltip={t('settings')}
         >
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <path d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.31-.09.63-.09.94s.02.63.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" fill="currentColor"/>
+            <path
+              d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.31-.09.63-.09.94s.02.63.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"
+              fill="currentColor"
+            />
           </svg>
         </button>
         {#if menuOpen}
@@ -538,7 +538,7 @@
                   <span>{qualityLabel(qid)}</span>
                   {#if quality === qid}
                     <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-                      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" fill="currentColor"/>
+                      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" fill="currentColor" />
                     </svg>
                   {/if}
                 </button>
@@ -559,20 +559,20 @@
           use:tooltip={pipActive ? t('pc_exitPip') : t('pc_pip')}
         >
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z" fill="currentColor"/>
+            <path
+              d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z"
+              fill="currentColor"
+            />
           </svg>
         </button>
       {/if}
 
-      <button
-        type="button"
-        class="ctrl-btn"
-        onclick={onmpv}
-        aria-label={t('pc_mpv')}
-        use:tooltip={t('pc_mpv')}
-      >
+      <button type="button" class="ctrl-btn" onclick={onmpv} aria-label={t('pc_mpv')} use:tooltip={t('pc_mpv')}>
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h6v2h6v-2h6c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM10 15l7-4-7-4z" fill="currentColor"/>
+          <path
+            d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h6v2h6v-2h6c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM10 15l7-4-7-4z"
+            fill="currentColor"
+          />
         </svg>
       </button>
 
@@ -586,7 +586,10 @@
         use:tooltip={settings.theaterMode ? t('pc_exitTheater') : t('pc_theater')}
       >
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path d="M19 7H5c-1.1 0-2 .9-2 2v6c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zm0 8H5V9h14v6zM3 4h18v2H3V4zm0 14h18v2H3v-2z" fill="currentColor"/>
+          <path
+            d="M19 7H5c-1.1 0-2 .9-2 2v6c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zm0 8H5V9h14v6zM3 4h18v2H3V4zm0 14h18v2H3v-2z"
+            fill="currentColor"
+          />
         </svg>
       </button>
 
@@ -599,11 +602,17 @@
       >
         {#if isFullscreen}
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" fill="currentColor"/>
+            <path
+              d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"
+              fill="currentColor"
+            />
           </svg>
         {:else}
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/>
+            <path
+              d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"
+              fill="currentColor"
+            />
           </svg>
         {/if}
       </button>
@@ -686,8 +695,12 @@
   }
 
   @keyframes controls-fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 
   .progress {

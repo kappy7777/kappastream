@@ -283,18 +283,11 @@ function toChannelStatus(user: RawUser | null): ChannelStatus {
  * numeric ID the 7TV/BTTV/FFZ channel endpoints expect. Nonexistent logins
  * (null entries) are omitted from the returned map.
  */
-export async function resolveUserIds(
-  logins: string[],
-  signal?: AbortSignal,
-): Promise<Map<string, string>> {
+export async function resolveUserIds(logins: string[], signal?: AbortSignal): Promise<Map<string, string>> {
   const out = new Map<string, string>()
   for (const batch of chunk(logins, GQL_BATCH_SIZE)) {
     if (signal?.aborted) return out
-    const data = await gqlRequest<{ users?: (RawUser | null)[] | null }>(
-      USER_ID_QUERY,
-      { logins: batch },
-      signal,
-    )
+    const data = await gqlRequest<{ users?: (RawUser | null)[] | null }>(USER_ID_QUERY, { logins: batch }, signal)
     for (const user of data?.users ?? []) {
       if (user && typeof user.id === 'string' && user.login) {
         out.set(user.login, user.id)
@@ -310,18 +303,11 @@ export async function resolveUserIds(
  * with empty-login placeholders for nonexistent users so callers can zip by
  * index if needed.
  */
-export async function fetchChannelStatuses(
-  logins: string[],
-  signal?: AbortSignal,
-): Promise<ChannelStatus[]> {
+export async function fetchChannelStatuses(logins: string[], signal?: AbortSignal): Promise<ChannelStatus[]> {
   const out: ChannelStatus[] = []
   for (const batch of chunk(logins, GQL_BATCH_SIZE)) {
     if (signal?.aborted) return out
-    const data = await gqlRequest<{ users?: (RawUser | null)[] | null }>(
-      USER_STATUS_QUERY,
-      { logins: batch },
-      signal,
-    )
+    const data = await gqlRequest<{ users?: (RawUser | null)[] | null }>(USER_STATUS_QUERY, { logins: batch }, signal)
     const users = data?.users ?? []
     // A short `users` array (fewer entries than requested) is anomalous — a
     // legitimate batch always returns one positional entry per login (null for
@@ -563,7 +549,11 @@ interface RawSearchUser {
   login: string
   displayName: string
   profileImageURL?: string | null
-  stream?: { title?: string | null; viewersCount?: number | null; game?: { name?: string; displayName?: string } | null } | null
+  stream?: {
+    title?: string | null
+    viewersCount?: number | null
+    game?: { name?: string; displayName?: string } | null
+  } | null
 }
 interface RawSearchFor {
   searchFor?: { channels?: { items?: (RawSearchUser | null)[] | null } | null } | null
@@ -673,10 +663,7 @@ export async function fetchTopCategories(signal?: AbortSignal): Promise<Category
  * drills into a category from the Browse grid. Over-fetches GAME_STREAMS_FIRST
  * (100) so BrowseView can reveal more client-side.
  */
-export async function fetchGameStreams(
-  gameName: string,
-  signal?: AbortSignal,
-): Promise<StreamPage> {
+export async function fetchGameStreams(gameName: string, signal?: AbortSignal): Promise<StreamPage> {
   const data = await gqlRequest<{ game?: { streams?: RawBrowseStreamConnection | null } | null }>(
     GAME_STREAMS_QUERY,
     { name: gameName, first: GAME_STREAMS_FIRST },
@@ -990,11 +977,7 @@ export async function fetchClipInfo(slug: string, signal?: AbortSignal): Promise
  */
 export async function fetchClipMedia(slug: string, signal?: AbortSignal): Promise<ClipMedia> {
   if (!isValidClipSlug(slug)) throw new Error('invalid clip slug')
-  const data = await gqlRequest<{ clip?: RawClipMedia | null }>(
-    CLIP_MEDIA_QUERY,
-    { slug },
-    signal,
-  )
+  const data = await gqlRequest<{ clip?: RawClipMedia | null }>(CLIP_MEDIA_QUERY, { slug }, signal)
   const clip = data?.clip ?? null
   if (!clip || !clip.id) throw new Error('clip not found')
   const qualities: ClipQuality[] = []
@@ -1133,9 +1116,7 @@ export async function fetchVodCommentPage(
       const eid = f.emote?.emoteID
       fragments.push({ text: f.text ?? '', emote: eid ? { emoteID: eid } : null })
     }
-    const message = n.message
-      ? { userColor: n.message.userColor ?? null, userBadges, fragments }
-      : null
+    const message = n.message ? { userColor: n.message.userColor ?? null, userBadges, fragments } : null
     out.push({
       id: n.id,
       contentOffsetSeconds: typeof n.contentOffsetSeconds === 'number' ? n.contentOffsetSeconds : 0,
@@ -1348,9 +1329,7 @@ function toVodExtras(raw: RawVideoExtras | null | undefined): VideoExtras {
     const startMs = typeof n.positionMilliseconds === 'number' ? n.positionMilliseconds : NaN
     if (!Number.isFinite(startMs) || startMs < 0) continue
     const label =
-      (typeof n.description === 'string' && n.description.trim()) ||
-      n.details?.game?.displayName?.trim() ||
-      ''
+      (typeof n.description === 'string' && n.description.trim()) || n.details?.game?.displayName?.trim() || ''
     chapters.push({ startSec: Math.floor(startMs / 1000), label: label || `Chapter ${i}` })
   }
   chapters.sort((a, b) => a.startSec - b.startSec)
@@ -1374,19 +1353,11 @@ function toVodExtras(raw: RawVideoExtras | null | undefined): VideoExtras {
  * URL in one request. Throws on transport failure; the caller treats every
  * extra as optional (no chapters/mutes/previews is a valid render state).
  */
-export async function fetchVideoExtras(
-  videoId: string,
-  signal?: AbortSignal,
-): Promise<VideoExtras> {
+export async function fetchVideoExtras(videoId: string, signal?: AbortSignal): Promise<VideoExtras> {
   if (!isValidVodId(videoId)) throw new Error('invalid vod id')
-  const data = await gqlRequest<{ video?: RawVideoExtras | null }>(
-    VIDEO_EXTRAS_QUERY,
-    { id: videoId },
-    signal,
-  )
+  const data = await gqlRequest<{ video?: RawVideoExtras | null }>(VIDEO_EXTRAS_QUERY, { id: videoId }, signal)
   return toVodExtras(data?.video ?? null)
 }
-
 
 /*
  * ============================================================================
@@ -1550,8 +1521,7 @@ function toPinnedData(node: RawPinnedNode | null | undefined): PinnedChatMessage
           fragments,
           sender: {
             login: node.pinnedMessage.sender?.login ?? '',
-            displayName:
-              node.pinnedMessage.sender?.displayName ?? node.pinnedMessage.sender?.login ?? '',
+            displayName: node.pinnedMessage.sender?.displayName ?? node.pinnedMessage.sender?.login ?? '',
             chatColor: node.pinnedMessage.sender?.chatColor ?? '',
             badges,
           },
@@ -1658,11 +1628,9 @@ export async function fetchCollaborators(
     group.forEach((id, i) => {
       variables[`id${i}`] = id
     })
-    const data = await gqlRequest<Record<string, { collaboration?: { collaborators?: (RawCollaborator | null)[] | null } | null } | null>>(
-      collaborationQuery(group.length),
-      variables,
-      signal,
-    )
+    const data = await gqlRequest<
+      Record<string, { collaboration?: { collaborators?: (RawCollaborator | null)[] | null } | null } | null>
+    >(collaborationQuery(group.length), variables, signal)
     group.forEach((id, i) => {
       const collaborators = data?.[`c${i}`]?.collaboration?.collaborators ?? []
       const members: Collaborator[] = []

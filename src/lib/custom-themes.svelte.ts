@@ -85,10 +85,14 @@ export interface Hsl {
 }
 
 function rgbToHsl(r: number, g: number, b: number): Hsl {
-  const rr = r / 255, gg = g / 255, bb = b / 255
-  const max = Math.max(rr, gg, bb), min = Math.min(rr, gg, bb)
+  const rr = r / 255,
+    gg = g / 255,
+    bb = b / 255
+  const max = Math.max(rr, gg, bb),
+    min = Math.min(rr, gg, bb)
   const l = (max + min) / 2
-  let h = 0, s = 0
+  let h = 0,
+    s = 0
   if (max !== min) {
     const d = max - min
     s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
@@ -113,11 +117,7 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   else if (hp < 5) rgb = [x, 0, c]
   else rgb = [c, 0, x]
   const m = ll - c / 2
-  return [
-    Math.round((rgb[0] + m) * 255),
-    Math.round((rgb[1] + m) * 255),
-    Math.round((rgb[2] + m) * 255),
-  ]
+  return [Math.round((rgb[0] + m) * 255), Math.round((rgb[1] + m) * 255), Math.round((rgb[2] + m) * 255)]
 }
 
 /** Any parseable colour token → HSL (for seeding the sliders). */
@@ -145,7 +145,14 @@ export function hslToHex(h: number, s: number, l: number): string {
  */
 export const THEME_PALETTE: readonly string[] = (() => {
   const out: string[] = ['#000000', '#1A1A1A', '#333333', '#555555', '#808080', '#B0B0B0', '#DCDCDC', '#FFFFFF']
-  const tones: ReadonlyArray<[number, number]> = [[8, 35], [16, 50], [27, 60], [42, 80], [60, 90], [82, 55]]
+  const tones: ReadonlyArray<[number, number]> = [
+    [8, 35],
+    [16, 50],
+    [27, 60],
+    [42, 80],
+    [60, 90],
+    [82, 55],
+  ]
   for (let hue = 0; hue < 360; hue += 30) {
     for (const [l, s] of tones) out.push(hslToHex(hue, s, l))
   }
@@ -452,8 +459,7 @@ export function exportThemeJson(theme: CustomTheme): string {
 }
 
 export type ThemeImportParse =
-  | { ok: true; name: string; values: ThemeValues }
-  | { ok: false; reason: 'too-large' | 'malformed' }
+  { ok: true; name: string; values: ThemeValues } | { ok: false; reason: 'too-large' | 'malformed' }
 
 /**
  * Parse + validate ONE theme from a JSON document (the export format above).
@@ -478,8 +484,7 @@ export function parseThemeJson(text: string): ThemeImportParse {
 }
 
 export type ThemeImportOutcome =
-  | { ok: true; theme: CustomTheme }
-  | { ok: false; reason: 'too-large' | 'malformed' | 'full' }
+  { ok: true; theme: CustomTheme } | { ok: false; reason: 'too-large' | 'malformed' | 'full' }
 
 /** Import + store in one step (the UI's entry point). */
 export function importAndStoreThemeJson(text: string): ThemeImportOutcome {
@@ -528,10 +533,16 @@ export interface ThemePropGroup {
  * unused tokens (UNUSED_THEME_PROPS) are deliberately absent.
  */
 export const THEME_PROP_GROUPS: readonly ThemePropGroup[] = [
-  { id: 'backgrounds', props: ['--bg-app', '--bg-panel', '--bg-input', '--bg-hover', '--bg-overlay', '--bg-overlay-strong'] },
+  {
+    id: 'backgrounds',
+    props: ['--bg-app', '--bg-panel', '--bg-input', '--bg-hover', '--bg-overlay', '--bg-overlay-strong'],
+  },
   { id: 'text', props: ['--text-primary', '--text-secondary', '--text-dim'] },
   { id: 'accent', props: ['--accent', '--accent-hover', '--live'] },
-  { id: 'chrome', props: ['--border', '--track', '--track-hover', '--track-buffered', '--bg-hover-faint', '--shadow-menu'] },
+  {
+    id: 'chrome',
+    props: ['--border', '--track', '--track-hover', '--track-buffered', '--bg-hover-faint', '--shadow-menu'],
+  },
 ]
 
 /**
@@ -570,7 +581,7 @@ export function readThemeValuesFor(id: string): ThemeValues | null {
       const normalized =
         prop === SHADOW_PROP
           ? normalizeShadowToken(raw)
-          : normalizeColorToken(raw) ?? (isValidThemeValue(prop, raw.trim()) ? raw.trim() : null)
+          : (normalizeColorToken(raw) ?? (isValidThemeValue(prop, raw.trim()) ? raw.trim() : null))
       if (normalized) out[prop] = normalized
     }
     if (Object.keys(out).length !== CUSTOM_THEME_PROPS.length) return null

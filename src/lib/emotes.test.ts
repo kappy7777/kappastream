@@ -23,8 +23,7 @@ const tauriInvoke = vi.hoisted(() => ({
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (cmd: string, args: Record<string, unknown>): Promise<unknown> =>
-    tauriInvoke.handler(cmd, args),
+  invoke: (cmd: string, args: Record<string, unknown>): Promise<unknown> => tauriInvoke.handler(cmd, args),
   isTauri: () => false,
 }))
 
@@ -73,9 +72,7 @@ describe('7TV set-entry alias', () => {
         return jsonRes({
           emote_set: {
             id: 'set1',
-            emotes: [
-              { id: 'abc', name: 'erm', data: { id: 'abc', name: 'catErm', state: [], listed: true } },
-            ],
+            emotes: [{ id: 'abc', name: 'erm', data: { id: 'abc', name: 'catErm', state: [], listed: true } }],
           },
         })
       }
@@ -175,9 +172,7 @@ describe('FFZ global default_sets', () => {
 
 describe('renderMessage — trailing punctuation', () => {
   it('renders "omE!" as an emote followed by "!" text (punctuation not absorbed)', () => {
-    const map = E.buildEmoteMap([
-      { id: 'ome', name: 'omE', url: 'https://example/ome.webp', provider: '7tv' },
-    ])
+    const map = E.buildEmoteMap([{ id: 'ome', name: 'omE', url: 'https://example/ome.webp', provider: '7tv' }])
     const parts = E.renderMessage({ message: 'omE!', thirdParty: map })
 
     expect(parts).toHaveLength(2)
@@ -193,16 +188,11 @@ describe('emoteOnly predicate (mirrors App.svelte handleMessage)', () => {
   // so the test reconstructs the same expression over the parts produced by
   // renderMessage to verify its behavior.
   function isEmoteOnly(parts: RenderedMessagePart[]): boolean {
-    return (
-      parts.some((p) => p.type === 'emote') &&
-      parts.every((p) => p.type === 'emote' || p.text.trim() === '')
-    )
+    return parts.some((p) => p.type === 'emote') && parts.every((p) => p.type === 'emote' || p.text.trim() === '')
   }
 
   it('is true for a single-emote message', () => {
-    const map = E.buildEmoteMap([
-      { id: 'kappa', name: 'Kappa', url: 'u', provider: 'twitch' },
-    ])
+    const map = E.buildEmoteMap([{ id: 'kappa', name: 'Kappa', url: 'u', provider: 'twitch' }])
     const parts = E.renderMessage({ message: 'Kappa', thirdParty: map })
     expect(isEmoteOnly(parts)).toBe(true)
   })
@@ -217,9 +207,7 @@ describe('emoteOnly predicate (mirrors App.svelte handleMessage)', () => {
   })
 
   it('is false for "hi Kappa" (has non-emote text)', () => {
-    const map = E.buildEmoteMap([
-      { id: 'kappa', name: 'Kappa', url: 'u', provider: 'twitch' },
-    ])
+    const map = E.buildEmoteMap([{ id: 'kappa', name: 'Kappa', url: 'u', provider: 'twitch' }])
     const parts = E.renderMessage({ message: 'hi Kappa', thirdParty: map })
     expect(isEmoteOnly(parts)).toBe(false)
   })

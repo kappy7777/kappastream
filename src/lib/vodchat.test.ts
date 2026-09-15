@@ -26,7 +26,9 @@ import { VodChatController } from './vodchat.svelte'
 // maxOffset = the last comment's offset and the page bracketing O. This is the
 // shape the live endpoint serves, so it exercises dedupe + the advance rule for real.
 
-interface StreamMsg { id: string }
+interface StreamMsg {
+  id: string
+}
 
 function buildStream(maxOffset: number): { offset: number; id: string }[] {
   const out: { offset: number; id: string }[] = []
@@ -350,7 +352,10 @@ describe('normalizeVodComment', () => {
       commenter: null,
       message: {
         userColor: null,
-        userBadges: [{ setID: '', version: '' }, { setID: 'moderator', version: '1' }],
+        userBadges: [
+          { setID: '', version: '' },
+          { setID: 'moderator', version: '1' },
+        ],
         fragments: [{ text: 'hi', emote: null }],
       },
     }

@@ -51,9 +51,7 @@ export const RELEASE_NOTES: Record<string, VersionNotes> = {
       '🎠 Overflowing chat-mode labels glide back and forth inside the pill instead of wrapping.',
       "🧩 Multi-view chat renders with the single-view chat's polish: tooltips, bits badge, jump pill.",
     ],
-    fixed: [
-      '📌 A transient channel-id lookup failure no longer disables pinned messages until restart.',
-    ],
+    fixed: ['📌 A transient channel-id lookup failure no longer disables pinned messages until restart.'],
   },
   '1.0.3': {
     added: [
@@ -75,11 +73,9 @@ export const RELEASE_NOTES: Record<string, VersionNotes> = {
       '🤝 Stream Together: favorites in a shared session show a +N chip, co-streamer avatars, and the combined viewership.',
       '📺 New "Watch together" button opens the whole Stream Together session in the multi-view grid.',
       '🎬 The VOD scrub bar gains chapter ticks, muted-segment stripes, and storyboard thumbnails on hover.',
-      '👥 The status bar now shows the channel\'s follower count.',
+      "👥 The status bar now shows the channel's follower count.",
     ],
-    fixed: [
-      '📐 The status bar no longer leaves an empty band below itself on tall windows.',
-    ],
+    fixed: ['📐 The status bar no longer leaves an empty band below itself on tall windows.'],
   },
   '1.0.1': {
     added: [
@@ -110,12 +106,8 @@ export const RELEASE_NOTES: Record<string, VersionNotes> = {
     ],
   },
   '0.3.0': {
-    added: [
-      '🍎 macOS support (Apple Silicon) — a .dmg alongside the Linux and Windows builds.',
-    ],
-    fixed: [
-      '🔍 Fixed UI scaling at non-1× zoom on macOS.',
-    ],
+    added: ['🍎 macOS support (Apple Silicon) — a .dmg alongside the Linux and Windows builds.'],
+    fixed: ['🔍 Fixed UI scaling at non-1× zoom on macOS.'],
   },
   '0.2.9': {
     added: [
@@ -123,12 +115,8 @@ export const RELEASE_NOTES: Record<string, VersionNotes> = {
       '🌍 UI localization — English, Deutsch, Español, Français, Português.',
       '🏷️ VOD and clip titles in the status bar.',
     ],
-    changed: [
-      '▶️ A less intrusive "Back to live" banner while watching VODs or clips.',
-    ],
-    fixed: [
-      '🔄 The live status bar no longer goes stale — title, game, and viewers refresh with each poll.',
-    ],
+    changed: ['▶️ A less intrusive "Back to live" banner while watching VODs or clips.'],
+    fixed: ['🔄 The live status bar no longer goes stale — title, game, and viewers refresh with each poll.'],
   },
 }
 

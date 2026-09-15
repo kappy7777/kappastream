@@ -70,7 +70,8 @@ describe('localStorage call sites go through the registry', () => {
           // Stray vitest/vite caches under src/ are not source (same skip
           // as pinned-chat.test.ts's raw-HTML walk).
           if (entry.name === 'node_modules' || entry.name === '.vite') continue
-          walk(full); continue
+          walk(full)
+          continue
         }
         if (!/\.(svelte|ts|js)$/.test(entry.name) || entry.name.includes('.test.')) continue
         if (re.test(readFileSync(full, 'utf8'))) offenders.push(full)

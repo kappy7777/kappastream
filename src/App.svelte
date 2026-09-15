@@ -32,7 +32,14 @@
   import { vodPositions } from './lib/vod-positions.svelte.ts'
   import { resolveShortcut } from './lib/shortcuts'
   import { firstLaunch } from './lib/first-launch.svelte'
-  import { collabBadge, fetchLiveStatus, type LiveStatus, favoritesStore, isValidChannelName, normalizeChannelName } from './lib/favorites.svelte'
+  import {
+    collabBadge,
+    fetchLiveStatus,
+    type LiveStatus,
+    favoritesStore,
+    isValidChannelName,
+    normalizeChannelName,
+  } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
   import { fetchChannelBadges, fetchClipInfo, fetchCollaborators, type Collaborator } from './lib/gql'
   import { VodPlaybackController, formatVodTime } from './lib/vod-playback.svelte.ts'
@@ -87,7 +94,9 @@
         isWindows = os === 'windows'
         isMacOS = os === 'macos'
       })
-      .catch((e) => { console.error('[platform] target_os failed; assuming non-Windows (live playback may regress on Windows)', e) })
+      .catch((e) => {
+        console.error('[platform] target_os failed; assuming non-Windows (live playback may regress on Windows)', e)
+      })
   })
 
   // macOS-only viewport-unit zoom compensation. WKWebView scales the
@@ -99,10 +108,7 @@
   // Reacts to both the platform signal and the live UI-scale value.
   $effect(() => {
     if (!isMacOS) return
-    document.documentElement.style.setProperty(
-      UI_ZOOM_VAR,
-      String(zoomDivisor(settings.uiScale)),
-    )
+    document.documentElement.style.setProperty(UI_ZOOM_VAR, String(zoomDivisor(settings.uiScale)))
   })
 
   // Sleep timer expiry = STOP playback completely (not just pause): tear down
@@ -225,9 +231,7 @@
     viewportWidth = window.innerWidth
   }
   const compactViewport = $derived(viewportWidth < SIDEBAR_COMPACT_WIDTH)
-  const effectiveSidebarMode = $derived(
-    sidebarMode === 'full' && compactViewport ? 'icons' : sidebarMode,
-  )
+  const effectiveSidebarMode = $derived(sidebarMode === 'full' && compactViewport ? 'icons' : sidebarMode)
   let aboutOpen = $state(false)
   // Multi-stream split view. ALWAYS OFF on startup and NEVER persisted
   // (starting in multi-view after a restart would be surprising and would
@@ -318,10 +322,34 @@
   // Tauri's startResizeDragging takes a ResizeDirection union it doesn't
   // export, so derive the type from the typed method signature.
   type ResizeDirection = Parameters<ReturnType<typeof getCurrentWindow>['startResizeDragging']>[0]
-  function winMinimize(): void { void currentWin()?.minimize().catch(() => { /* ignore */ }) }
-  function winToggleMaximize(): void { void currentWin()?.toggleMaximize().catch(() => { /* ignore */ }) }
-  function winClose(): void { void currentWin()?.close().catch(() => { /* ignore */ }) }
-  function startWinResize(direction: ResizeDirection): void { void currentWin()?.startResizeDragging(direction).catch(() => { /* ignore */ }) }
+  function winMinimize(): void {
+    void currentWin()
+      ?.minimize()
+      .catch(() => {
+        /* ignore */
+      })
+  }
+  function winToggleMaximize(): void {
+    void currentWin()
+      ?.toggleMaximize()
+      .catch(() => {
+        /* ignore */
+      })
+  }
+  function winClose(): void {
+    void currentWin()
+      ?.close()
+      .catch(() => {
+        /* ignore */
+      })
+  }
+  function startWinResize(direction: ResizeDirection): void {
+    void currentWin()
+      ?.startResizeDragging(direction)
+      .catch(() => {
+        /* ignore */
+      })
+  }
 
   // Double-click on empty title-bar space toggles maximize. Tauri's drag.js
   // would also fire its own internal_toggle_maximize on double-click of a
@@ -355,7 +383,9 @@
     if (!el) return
     if (el.paused) {
       playbackSession.userPaused = false
-      void el.play().catch(() => { /* ignore */ })
+      void el.play().catch(() => {
+        /* ignore */
+      })
     } else {
       // Flag the user pause BEFORE pausing so the live stall-recovery watcher
       // doesn't treat it as a stall and auto-resume.
@@ -380,7 +410,7 @@
       // multi-view). WebKitGTK supports element fullscreen.
       const el = authorityTileVideo
       if (!el) return
-      const target = el.closest('.mv-tile') as HTMLElement | null ?? el.parentElement
+      const target = (el.closest('.mv-tile') as HTMLElement | null) ?? el.parentElement
       if (document.fullscreenElement) void document.exitFullscreen()
       else if (target) void target.requestFullscreen?.()
       return
@@ -395,9 +425,12 @@
       // Tauri window API is the single path under the app shell — it drives
       // real OS-level fullscreen on every platform (Lion-style own-Space on
       // macOS). isFullscreen is reflected via the onResized handler below.
-      void win.isFullscreen()
+      void win
+        .isFullscreen()
         .then((fs) => win.setFullscreen(!fs))
-        .catch(() => { /* ignore */ })
+        .catch(() => {
+          /* ignore */
+        })
     } else if (document.fullscreenElement) {
       void document.exitFullscreen()
     } else {
@@ -410,7 +443,11 @@
     if (!el) return
     let next = el.currentTime + delta
     if (Number.isFinite(el.duration) && el.duration > 0) next = Math.min(next, el.duration)
-    try { el.currentTime = Math.max(0, next) } catch { /* ignore */ }
+    try {
+      el.currentTime = Math.max(0, next)
+    } catch {
+      /* ignore */
+    }
   }
   function nudgeVolume(delta: number): void {
     if (multiView) {
@@ -620,8 +657,7 @@
   function pmToChatMessage(pm: ParsedMessage): ChatMessage {
     const parts = renderMessage({ message: pm.message, thirdParty: thirdPartyMap, twitchRanges: pm.twitchEmotes })
     const emoteOnly =
-      parts.some((p) => p.type === 'emote') &&
-      parts.every((p) => p.type === 'emote' || p.text.trim() === '')
+      parts.some((p) => p.type === 'emote') && parts.every((p) => p.type === 'emote' || p.text.trim() === '')
     return {
       kind: 'message',
       id: pm.id,
@@ -695,7 +731,7 @@
   // stale. `messages` stays empty in VOD mode (playVod clears it and the
   // session never appends); vodChat.visible stays empty otherwise.
   const chatEntries = $derived.by(() => {
-    const buffer = playback.kind === 'vod' ? vodChat.visible : chatSession?.messages ?? []
+    const buffer = playback.kind === 'vod' ? vodChat.visible : (chatSession?.messages ?? [])
     return singleChatEntries(buffer, channelBadgeOverride)
   })
 
@@ -790,12 +826,7 @@
     // icons, so the click must step from what the user SEES (icons → hidden;
     // hidden → 'full', which shows icons again while narrow — as much sidebar
     // as fits — and the full sidebar once the window grows).
-    sidebarMode =
-      effectiveSidebarMode === 'full'
-        ? 'icons'
-        : effectiveSidebarMode === 'icons'
-          ? 'hidden'
-          : 'full'
+    sidebarMode = effectiveSidebarMode === 'full' ? 'icons' : effectiveSidebarMode === 'icons' ? 'hidden' : 'full'
   }
 
   $effect(() => {
@@ -865,7 +896,7 @@
         showNotifToast(r.error || t('toast_mpvFailed'))
       }
     } catch (err) {
-      const msg = typeof err === 'string' ? err : (err as Error)?.message ?? t('toast_mpvFailed')
+      const msg = typeof err === 'string' ? err : ((err as Error)?.message ?? t('toast_mpvFailed'))
       showNotifToast(msg)
     }
   }
@@ -874,7 +905,12 @@
     return generation === playbackSession.generation && channelJoined === channel && quality === q
   }
 
-  async function attachStream(channel: string, q: string, url: string, generation: number): Promise<{ ok: true } | { ok: false; error: string }> {
+  async function attachStream(
+    channel: string,
+    q: string,
+    url: string,
+    generation: number,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!videoEl) return { ok: false, error: 'no video element' }
     if (!isCurrentStream(generation, channel, q)) return { ok: false, error: 'stale stream request' }
 
@@ -899,9 +935,15 @@
         url: sourceUrl,
         lowLatency: settings.lowLatency,
         isCurrent: current,
-        onManifestParsed: () => { playerStatus = 'loading' },
-        onPlayed: () => { playerStatus = 'playing' },
-        onPlayBlocked: () => { playerStatus = 'paused' },
+        onManifestParsed: () => {
+          playerStatus = 'loading'
+        },
+        onPlayed: () => {
+          playerStatus = 'playing'
+        },
+        onPlayBlocked: () => {
+          playerStatus = 'paused'
+        },
       })
     }
 
@@ -909,7 +951,9 @@
       return await playbackSession.attachNative(videoEl, sourceUrl, {
         isCurrent: current,
         errorPrefix: 'native HLS play failed: ',
-        onPlayed: () => { playerStatus = 'playing' },
+        onPlayed: () => {
+          playerStatus = 'playing'
+        },
       })
     }
 
@@ -1238,7 +1282,8 @@
     const attach = await attachMediaHls(proxyUrl)
     if (attach.ok) {
       playerStatus = 'playing'
-      if (channelJoined) pipController.setStream({ url: proxyUrl, channel: channelJoined, quality: q, isLive: playback.kind === 'live' })
+      if (channelJoined)
+        pipController.setStream({ url: proxyUrl, channel: channelJoined, quality: q, isLive: playback.kind === 'live' })
       vodCtl.restore(videoId)
       return
     }
@@ -1310,7 +1355,14 @@
       // `playback` to the clip variant, so the `playback.kind === 'live'`
       // derivation used at the other call sites is a TS no-overlap error in
       // this scope — the type system proves a clip is never live.
-      if (channelJoined) pipController.setStream({ url: raw.url, channel: channelJoined, quality: 'best', mediaKind: 'mp4', isLive: false })
+      if (channelJoined)
+        pipController.setStream({
+          url: raw.url,
+          channel: channelJoined,
+          quality: 'best',
+          mediaKind: 'mp4',
+          isLive: false,
+        })
       return
     }
     playerStatus = 'error'
@@ -1491,7 +1543,7 @@
     const channel = channelJoined
     const s = activeStatus
     const live = !multiView && playback.kind === 'live'
-    const userId = live && s.state === 'live' ? s.userId ?? null : null
+    const userId = live && s.state === 'live' ? (s.userId ?? null) : null
     pinnedChat.setTarget(live && userId ? channel : null, userId)
   })
   const activePin = $derived(settings.chatPinned ? pinnedChat.visiblePin : null)
@@ -1501,9 +1553,7 @@
   // beside it. (The banner is a fixed-height one-liner — ChatModesPill
   // marquees overflowing labels instead of wrapping — so a constant lift is
   // correct.)
-  const chatModesShown = $derived(
-    settings.chatRoomstate && !!channelJoined && chatModeKeys.length > 0,
-  )
+  const chatModesShown = $derived(settings.chatRoomstate && !!channelJoined && chatModeKeys.length > 0)
 
   onMount(() => () => {
     disconnect()
@@ -1519,20 +1569,63 @@
   onMount(() => {
     const win = currentWin()
     if (win) {
-      void win.isMaximized().then((m) => { isMaximized = m }).catch(() => { /* ignore */ })
-      void win.isFullscreen().then((f) => { isFullscreen = f }).catch(() => { /* ignore */ })
-      void win.onResized(() => {
-        void win.isMaximized().then((m) => { isMaximized = m }).catch(() => { /* ignore */ })
-        void win.isFullscreen().then((f) => { isFullscreen = f }).catch(() => { /* ignore */ })
-      }).then((un) => { if (un) winResizeUnlisteners.push(un) }).catch(() => { /* ignore */ })
+      void win
+        .isMaximized()
+        .then((m) => {
+          isMaximized = m
+        })
+        .catch(() => {
+          /* ignore */
+        })
+      void win
+        .isFullscreen()
+        .then((f) => {
+          isFullscreen = f
+        })
+        .catch(() => {
+          /* ignore */
+        })
+      void win
+        .onResized(() => {
+          void win
+            .isMaximized()
+            .then((m) => {
+              isMaximized = m
+            })
+            .catch(() => {
+              /* ignore */
+            })
+          void win
+            .isFullscreen()
+            .then((f) => {
+              isFullscreen = f
+            })
+            .catch(() => {
+              /* ignore */
+            })
+        })
+        .then((un) => {
+          if (un) winResizeUnlisteners.push(un)
+        })
+        .catch(() => {
+          /* ignore */
+        })
     } else {
       // Non-Tauri fallback (browser/archive): track the HTML5 Fullscreen API.
-      const onFs = () => { isFullscreen = !!document.fullscreenElement }
+      const onFs = () => {
+        isFullscreen = !!document.fullscreenElement
+      }
       document.addEventListener('fullscreenchange', onFs)
       winResizeUnlisteners.push(() => document.removeEventListener('fullscreenchange', onFs))
     }
     return () => {
-      for (const u of winResizeUnlisteners) { try { u() } catch { /* ignore */ } }
+      for (const u of winResizeUnlisteners) {
+        try {
+          u()
+        } catch {
+          /* ignore */
+        }
+      }
       winResizeUnlisteners.length = 0
     }
   })
@@ -1553,12 +1646,26 @@
           event.preventDefault()
           if (multiView) tileStore.exitAll()
           disconnect()
-          void getCurrentWindow().hide().catch(() => { /* ignore */ })
+          void getCurrentWindow()
+            .hide()
+            .catch(() => {
+              /* ignore */
+            })
         }
       })
-      .then((un) => { unlistenClose = un })
-      .catch(() => { /* ignore */ })
-    return () => { try { unlistenClose?.() } catch { /* ignore */ } }
+      .then((un) => {
+        unlistenClose = un
+      })
+      .catch(() => {
+        /* ignore */
+      })
+    return () => {
+      try {
+        unlistenClose?.()
+      } catch {
+        /* ignore */
+      }
+    }
   })
 
   // Check for an app update on startup (non-blocking, silent on failure). On a
@@ -1579,12 +1686,18 @@
   // text re-renders live when the language changes. idle/playing render nothing.
   function playerLabel(ps: PlayerStatus): string {
     switch (ps) {
-      case 'resolving': return t('player_resolving')
-      case 'loading': return t('player_loadingStream')
-      case 'paused': return t('player_paused')
-      case 'offline': return t('player_offline')
-      case 'error': return t('player_streamError')
-      default: return ''
+      case 'resolving':
+        return t('player_resolving')
+      case 'loading':
+        return t('player_loadingStream')
+      case 'paused':
+        return t('player_paused')
+      case 'offline':
+        return t('player_offline')
+      case 'error':
+        return t('player_streamError')
+      default:
+        return ''
     }
   }
 
@@ -1612,8 +1725,15 @@
         // A synthetic ChannelClip: the player only needs the slug (resolve +
         // playback); the empty metadata falls back to the generic clip title.
         void playClip({
-          id: '', slug, title: '', game: '', viewCount: 0, createdAt: '',
-          durationSeconds: 0, thumbnailUrl: '', curator: '',
+          id: '',
+          slug,
+          title: '',
+          game: '',
+          viewCount: 0,
+          createdAt: '',
+          durationSeconds: 0,
+          thumbnailUrl: '',
+          curator: '',
         })
         // The link only carried the slug — fetch the real title/game/views
         // and patch them into the status bar while this clip still plays.
@@ -1708,7 +1828,9 @@
           /* ignore */
         }
       })
-      .catch(() => { /* ignore */ })
+      .catch(() => {
+        /* ignore */
+      })
   }
 
   function escapeRegex(s: string): string {
@@ -1723,7 +1845,12 @@
     if (!re.test(raw)) return
     const channel = channelJoined ? '#' + channelJoined : 'chat'
     const preview = raw.replace(/\s+/g, ' ').trim().slice(0, 120)
-    notifications.record('mention', t('notif_mentioned', { channel }), t('notif_mentionedBody', { user: username, preview }), channelJoined)
+    notifications.record(
+      'mention',
+      t('notif_mentioned', { channel }),
+      t('notif_mentionedBody', { user: username, preview }),
+      channelJoined,
+    )
     sendNotif(t('notif_mentioned', { channel }), {
       body: t('notif_mentionedBody', { user: username, preview }),
       tag: 'mention:' + channelJoined,
@@ -1787,9 +1914,7 @@
     }
   })
 
-  const isPlayerBusy = $derived(
-    playerStatus === 'resolving' || playerStatus === 'loading',
-  )
+  const isPlayerBusy = $derived(playerStatus === 'resolving' || playerStatus === 'loading')
   // The player subtree (video + controls) renders when chat is connected OR a
   // VOD/clip is playing. Declared alongside the other player deriveds (after
   // status has been reassigned in connect()/disconnect(), so it is not
@@ -1805,42 +1930,45 @@
 
 <svelte:window onkeydown={onGlobalKeydown} onresize={onWindowResize} />
 
-<div class="app" class:app--sidebar-icons={effectiveSidebarMode === 'icons'} class:app--sidebar-hidden={effectiveSidebarMode === 'hidden'} class:app--fullscreen={isFullscreen}>
+<div
+  class="app"
+  class:app--sidebar-icons={effectiveSidebarMode === 'icons'}
+  class:app--sidebar-hidden={effectiveSidebarMode === 'hidden'}
+  class:app--fullscreen={isFullscreen}
+>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <!-- Double-click on empty title-bar space toggles maximize (mouse-only
        convenience; the dedicated maximize button is the accessible path). -->
   <header class="bar" data-tauri-drag-region ondblclick={onTitleDblClick}>
     <div class="bar-left" data-tauri-drag-region>
-      <button
-        type="button"
-        class="logo logo-btn"
-        onclick={openAbout}
-        aria-label={t('tb_about')}
-      >
+      <button type="button" class="logo logo-btn" onclick={openAbout} aria-label={t('tb_about')}>
         <img src={kappaUrl} alt="" />
       </button>
       <button
         type="button"
         class="sidebar-toggle"
         onclick={toggleSidebar}
-        aria-label={effectiveSidebarMode === 'full' ? t('tb_minimizeFavorites') : effectiveSidebarMode === 'icons' ? t('tb_hideFavorites') : t('tb_showFavorites')}
-        use:tooltip={effectiveSidebarMode === 'full' ? t('tb_minimizeFavorites') : effectiveSidebarMode === 'icons' ? t('tb_hideFavorites') : t('tb_showFavorites')}
+        aria-label={effectiveSidebarMode === 'full'
+          ? t('tb_minimizeFavorites')
+          : effectiveSidebarMode === 'icons'
+            ? t('tb_hideFavorites')
+            : t('tb_showFavorites')}
+        use:tooltip={effectiveSidebarMode === 'full'
+          ? t('tb_minimizeFavorites')
+          : effectiveSidebarMode === 'icons'
+            ? t('tb_hideFavorites')
+            : t('tb_showFavorites')}
       >
         <!-- Direction-neutral panel icon (same glyph in every state — the
              old Unicode triangles '◀'/'⏵'/'▶' had font-metric side bearings
              that made the button look off-center depending on which way
              they pointed). Tooltip + aria-label carry the state. -->
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <rect x="2" y="2" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/>
-          <rect x="3.7" y="3.7" width="3.4" height="8.6" rx="0.7" fill="currentColor"/>
+          <rect x="2" y="2" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+          <rect x="3.7" y="3.7" width="3.4" height="8.6" rx="0.7" fill="currentColor" />
         </svg>
       </button>
-      <button
-        type="button"
-        class="browse-btn"
-        onclick={() => (browseOpen = true)}
-        aria-label={t('tb_browseChannels')}
-      >
+      <button type="button" class="browse-btn" onclick={() => (browseOpen = true)} aria-label={t('tb_browseChannels')}>
         {t('browse')}
       </button>
     </div>
@@ -1857,31 +1985,41 @@
           use:tooltip={t('tb_sleepTimer', { time: formatSleepRemaining(sleepTimer.remainingMs) })}
           aria-label={t('tb_sleepTimerAria', { time: formatSleepRemaining(sleepTimer.remainingMs) })}
         >
-          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="8" cy="9" r="5"/>
-            <path d="M8 6.5V9l1.6 1.6M6 1h4M8 1v2"/>
+          <svg
+            viewBox="0 0 16 16"
+            width="12"
+            height="12"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="8" cy="9" r="5" />
+            <path d="M8 6.5V9l1.6 1.6M6 1h4M8 1v2" />
           </svg>
           <span class="sleep-chip-time">{formatSleepRemaining(sleepTimer.remainingMs)}</span>
         </button>
       {/if}
       {#if !multiView}
-      <button
-        type="button"
-        class="layout-toggle"
-        onclick={toggleStacked}
-        aria-label={stacked ? t('tb_switchSideBySide') : t('tb_stackChat')}
-        use:tooltip={stacked ? t('tb_switchSideBySide') : t('tb_stackChat')}
-      >
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          {#if stacked}
-            <rect x="2" y="2" width="6" height="12" rx="1" fill="currentColor"/>
-            <rect x="9" y="2" width="5" height="12" rx="1" fill="currentColor" opacity="0.4"/>
-          {:else}
-            <rect x="2" y="2" width="12" height="6" rx="1" fill="currentColor"/>
-            <rect x="2" y="9" width="12" height="5" rx="1" fill="currentColor" opacity="0.4"/>
-          {/if}
-        </svg>
-      </button>
+        <button
+          type="button"
+          class="layout-toggle"
+          onclick={toggleStacked}
+          aria-label={stacked ? t('tb_switchSideBySide') : t('tb_stackChat')}
+          use:tooltip={stacked ? t('tb_switchSideBySide') : t('tb_stackChat')}
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            {#if stacked}
+              <rect x="2" y="2" width="6" height="12" rx="1" fill="currentColor" />
+              <rect x="9" y="2" width="5" height="12" rx="1" fill="currentColor" opacity="0.4" />
+            {:else}
+              <rect x="2" y="2" width="12" height="6" rx="1" fill="currentColor" />
+              <rect x="2" y="9" width="12" height="5" rx="1" fill="currentColor" opacity="0.4" />
+            {/if}
+          </svg>
+        </button>
       {/if}
       <button
         type="button"
@@ -1893,22 +2031,17 @@
         use:tooltip={multiView ? t('mv_exitMultiView') : t('mv_multiView')}
       >
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1" fill="currentColor"/>
-          <rect x="9" y="1.5" width="5.5" height="5.5" rx="1" fill="currentColor"/>
-          <rect x="1.5" y="9" width="5.5" height="5.5" rx="1" fill="currentColor"/>
-          <rect x="9" y="9" width="5.5" height="5.5" rx="1" fill="currentColor"/>
+          <rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1" fill="currentColor" />
+          <rect x="9" y="1.5" width="5.5" height="5.5" rx="1" fill="currentColor" />
+          <rect x="1.5" y="9" width="5.5" height="5.5" rx="1" fill="currentColor" />
+          <rect x="9" y="9" width="5.5" height="5.5" rx="1" fill="currentColor" />
         </svg>
       </button>
       <Settings onarmsleep={armSleep} />
       <div class="win-controls">
-        <button
-          type="button"
-        class="win-btn"
-        onclick={winMinimize}
-        aria-label={t('tb_minimize')}
-      >
+        <button type="button" class="win-btn" onclick={winMinimize} aria-label={t('tb_minimize')}>
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-            <rect x="3" y="7.4" width="10" height="1.6" rx="0.8" fill="currentColor"/>
+            <rect x="3" y="7.4" width="10" height="1.6" rx="0.8" fill="currentColor" />
           </svg>
         </button>
         <button
@@ -1918,25 +2051,45 @@
           aria-label={isMaximized ? t('tb_restore') : t('tb_maximize')}
         >
           {#if isMaximized}
-            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4">
-              <rect x="5.5" y="2.5" width="8" height="8" rx="1.2"/>
-              <rect x="2.5" y="5.5" width="8" height="8" rx="1.2" fill="var(--bg-panel)"/>
-              <rect x="2.5" y="5.5" width="8" height="8" rx="1.2"/>
+            <svg
+              viewBox="0 0 16 16"
+              width="12"
+              height="12"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+            >
+              <rect x="5.5" y="2.5" width="8" height="8" rx="1.2" />
+              <rect x="2.5" y="5.5" width="8" height="8" rx="1.2" fill="var(--bg-panel)" />
+              <rect x="2.5" y="5.5" width="8" height="8" rx="1.2" />
             </svg>
           {:else}
-            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5">
-              <rect x="3" y="3" width="10" height="10" rx="1.5"/>
+            <svg
+              viewBox="0 0 16 16"
+              width="12"
+              height="12"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <rect x="3" y="3" width="10" height="10" rx="1.5" />
             </svg>
           {/if}
         </button>
-        <button
-          type="button"
-          class="win-btn win-btn--close"
-          onclick={winClose}
-          aria-label={t('tb_closeWin')}
-        >
-          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
-            <path d="M4 4 L12 12 M12 4 L4 12"/>
+        <button type="button" class="win-btn win-btn--close" onclick={winClose} aria-label={t('tb_closeWin')}>
+          <svg
+            viewBox="0 0 16 16"
+            width="12"
+            height="12"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            stroke-linecap="round"
+          >
+            <path d="M4 4 L12 12 M12 4 L4 12" />
           </svg>
         </button>
       </div>
@@ -1954,287 +2107,398 @@
 
   <div class="body">
     {#if !settings.theaterMode && effectiveSidebarMode !== 'hidden'}
-      <Sidebar currentChannel={channelJoined} onselect={openChannel} iconsOnly={effectiveSidebarMode === 'icons'} {zoomK} />
+      <Sidebar
+        currentChannel={channelJoined}
+        onselect={openChannel}
+        iconsOnly={effectiveSidebarMode === 'icons'}
+        {zoomK}
+      />
     {/if}
     {#if multiView}
-      <MultiView isWindows={isWindows} chatSize={chatSize} onAuthorityVideo={(el) => { authorityTileVideo = el }} />
+      <MultiView
+        {isWindows}
+        {chatSize}
+        onAuthorityVideo={(el) => {
+          authorityTileVideo = el
+        }}
+      />
     {:else}
-    <div class="main" class:main--stacked={stacked} bind:this={mainEl}>
-    <div class="video-pane">
-    <div class="video-scroll" bind:this={videoScrollEl}>
-    <div class="player-stage">
-    {#if playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)}
-      <div class="playback-banner">
-        <button type="button" class="playback-back" onclick={backToLive}>{t('backToLive')}</button>
-        <span class="playback-title">{playback.title}</span>
-      </div>
-    {/if}
-    <div class="player-fold">
-    <section class="player" class:player--active={playerActive}>
-      {#if playerActive}
-<video
-        bind:this={videoEl}
-        class="video"
-        autoplay
-        muted
-        playsinline
-        onwaiting={onVideoWaiting}
-        onplaying={onVideoPlaying}
-        onpause={onVideoPause}
-        ontimeupdate={onVideoTimeUpdate}
-        onseeking={onVideoSeeking}
-      ></video>
-        <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { playbackSession.userPaused = !p }} oncontrolsvisible={(v) => { controlsVisible = v }} {activeStatus} isFullscreen={isFullscreen} ontogglefullscreen={toggleVideoFullscreen} chapters={vodCtl.chapters} mutedSpans={vodCtl.mutedSpans} storyboard={vodCtl.storyboard} />
-        {#if showPlayerOverlay}
-          <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
-            {#if isPlayerBusy}
-              <div class="spinner" aria-hidden="true"></div>
-              <p class="overlay-text">{playerLabel(playerStatus)}</p>
-            {:else if playerStatus === 'offline'}
-              <p class="overlay-title">{playerLabel('offline')}</p>
-              <p class="overlay-sub">{t('player_waitingLive')}</p>
-            {:else if playerStatus === 'error'}
-              <p class="overlay-title">{playerLabel('error')}</p>
-              <p class="overlay-sub">{playerError}</p>
+      <div class="main" class:main--stacked={stacked} bind:this={mainEl}>
+        <div class="video-pane">
+          <div class="video-scroll" bind:this={videoScrollEl}>
+            <div class="player-stage">
+              {#if playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)}
+                <div class="playback-banner">
+                  <button type="button" class="playback-back" onclick={backToLive}>{t('backToLive')}</button>
+                  <span class="playback-title">{playback.title}</span>
+                </div>
+              {/if}
+              <div class="player-fold">
+                <section class="player" class:player--active={playerActive}>
+                  {#if playerActive}
+                    <video
+                      bind:this={videoEl}
+                      class="video"
+                      autoplay
+                      muted
+                      playsinline
+                      onwaiting={onVideoWaiting}
+                      onplaying={onVideoPlaying}
+                      onpause={onVideoPause}
+                      ontimeupdate={onVideoTimeUpdate}
+                      onseeking={onVideoSeeking}
+                    ></video>
+                    <PlayerControls
+                      video={videoEl}
+                      visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')}
+                      {quality}
+                      onqualitychange={(q) => void changeQuality(q)}
+                      onmpv={onMpvClick}
+                      onstop={onStopClick}
+                      onplayintent={(p) => {
+                        playbackSession.userPaused = !p
+                      }}
+                      oncontrolsvisible={(v) => {
+                        controlsVisible = v
+                      }}
+                      {activeStatus}
+                      {isFullscreen}
+                      ontogglefullscreen={toggleVideoFullscreen}
+                      chapters={vodCtl.chapters}
+                      mutedSpans={vodCtl.mutedSpans}
+                      storyboard={vodCtl.storyboard}
+                    />
+                    {#if showPlayerOverlay}
+                      <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
+                        {#if isPlayerBusy}
+                          <div class="spinner" aria-hidden="true"></div>
+                          <p class="overlay-text">{playerLabel(playerStatus)}</p>
+                        {:else if playerStatus === 'offline'}
+                          <p class="overlay-title">{playerLabel('offline')}</p>
+                          <p class="overlay-sub">{t('player_waitingLive')}</p>
+                        {:else if playerStatus === 'error'}
+                          <p class="overlay-title">{playerLabel('error')}</p>
+                          <p class="overlay-sub">{playerError}</p>
+                        {/if}
+                      </div>
+                    {:else if playerStatus === 'idle' && pipController.isOpen}
+                      <div class="player-overlay">
+                        <p class="overlay-title">{t('player_pipActive')}</p>
+                        <p class="overlay-sub">{t('player_pipActiveSub')}</p>
+                      </div>
+                    {:else if playerStatus === 'idle'}
+                      <div class="player-overlay">
+                        <p class="overlay-title">{t('player_streamStopped')}</p>
+                        <button type="button" class="overlay-action" onclick={resumeStream}
+                          >{t('player_resumeStream')}</button
+                        >
+                      </div>
+                    {/if}
+                    {#if vodCtl.resumeBar}
+                      <div class="resume-bar" role="status">
+                        <span class="resume-bar-text"
+                          >{t('player_resumedFrom', { time: formatVodTime(vodCtl.resumeBar.position) })}</span
+                        >
+                        <button type="button" class="resume-bar-btn" onclick={() => vodCtl.restart(currentVodId())}
+                          >{t('player_restart')}</button
+                        >
+                        <button
+                          type="button"
+                          class="resume-bar-close"
+                          onclick={() => vodCtl.dismissResumeBar()}
+                          aria-label={t('player_dismissResume')}>×</button
+                        >
+                      </div>
+                    {/if}
+                  {:else}
+                    <div class="player-placeholder">{t('player_placeholder')}</div>
+                  {/if}
+                </section>
+              </div>
+              {#if !settings.theaterMode}
+                <div class="stream-info">
+                  {#if playback.kind === 'vod' || playback.kind === 'clip'}
+                    <div class="stream-info-row stream-info-row--main">
+                      {#if (activeStatus.state === 'live' || activeStatus.state === 'offline') && activeStatus.avatarUrl}
+                        {@const collab = activeCollab}
+                        <span class="stream-info-avatar-wrap">
+                          <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
+                          {#if collab}
+                            <span
+                              class="stream-info-avatar-collab"
+                              use:tooltip={t('streamingTogether')}
+                              aria-hidden="true"
+                            >
+                              {#if collab.avatar}
+                                <img src={collab.avatar} alt="" loading="lazy" />
+                              {:else}
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                  <path
+                                    d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"
+                                    fill="currentColor"
+                                  />
+                                </svg>
+                              {/if}
+                            </span>
+                          {/if}
+                        </span>
+                      {/if}
+                      <span class="stream-info-badge"
+                        >{playback.kind === 'vod' ? t('vod_pastBroadcast') : t('vod_clip')}</span
+                      >
+                      <span class="stream-info-title" use:tooltip={playback.title}>{playback.title}</span>
+                    </div>
+                    <div class="stream-info-row stream-info-row--meta">
+                      {#if playback.game}<span class="stream-info-game">{playback.game}</span>{/if}
+                      {#if playback.game && (playback.viewCount > 0 || playback.createdAt)}<span class="stream-info-dot"
+                          >·</span
+                        >{/if}
+                      {#if playback.viewCount > 0}<span class="stream-info-viewers"
+                          >{formatCompact(playback.viewCount)} {t('views')}</span
+                        >{/if}
+                      {#if playback.createdAt && playback.viewCount > 0}<span class="stream-info-dot">·</span>{/if}
+                      {#if playback.createdAt}<span class="stream-info-age">{formatAge(playback.createdAt)}</span>{/if}
+                    </div>
+                  {:else if activeStatus.state === 'live'}
+                    <div class="stream-info-row stream-info-row--main">
+                      {#if activeStatus.avatarUrl}
+                        {@const collab = activeCollab}
+                        <span class="stream-info-avatar-wrap">
+                          <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
+                          {#if collab}
+                            <span
+                              class="stream-info-avatar-collab"
+                              use:tooltip={t('streamingTogether')}
+                              aria-hidden="true"
+                            >
+                              {#if collab.avatar}
+                                <img src={collab.avatar} alt="" loading="lazy" />
+                              {:else}
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                  <path
+                                    d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"
+                                    fill="currentColor"
+                                  />
+                                </svg>
+                              {/if}
+                            </span>
+                          {/if}
+                        </span>
+                      {/if}
+                      <span class="stream-info-live" use:tooltip={t('live')}
+                        ><span class="stream-info-live-dot"></span>{t('liveBadge')}</span
+                      >
+                      <span class="stream-info-title" use:tooltip={activeStatus.title || t('live')}
+                        >{activeStatus.title || t('live')}</span
+                      >
+                    </div>
+                    <div class="stream-info-row stream-info-row--meta">
+                      {#if activeStatus.game}<span class="stream-info-game">{activeStatus.game}</span>{/if}
+                      <span class="stream-info-dot">·</span>
+                      <span class="stream-info-viewers">{formatCompact(activeStatus.viewers)} {t('viewers')}</span>
+                      {#if activeStatus.collabViewers != null}
+                        <span class="stream-info-dot">·</span>
+                        <span class="stream-info-collab-viewers" use:tooltip={t('streamingTogether')}
+                          >{formatCompact(activeStatus.collabViewers)} {t('si_collabViewers')}</span
+                        >
+                      {/if}
+                      {#if activeStatus.uptime}
+                        <span class="stream-info-dot">·</span>
+                        <span class="stream-info-uptime">{t('si_uptime', { uptime: activeStatus.uptime })}</span>
+                      {/if}
+                      {#if activeStatus.followers != null}
+                        <span class="stream-info-dot">·</span>
+                        <span class="stream-info-followers"
+                          >{formatCompact(activeStatus.followers)} {t('si_followers')}</span
+                        >
+                      {/if}
+                    </div>
+                  {:else if activeStatus.state === 'offline' && channelJoined}
+                    <div class="stream-info-row stream-info-row--offline">
+                      {#if activeStatus.avatarUrl}
+                        <img
+                          class="stream-info-avatar stream-info-avatar--offline"
+                          src={activeStatus.avatarUrl}
+                          alt=""
+                        />
+                      {/if}
+                      <span class="stream-info-offline">{t('offline')}</span>
+                      <span class="stream-info-channel">{channelJoined}</span>
+                    </div>
+                  {:else if channelJoined}
+                    <div class="stream-info-row stream-info-row--loading">
+                      <span class="stream-info-channel">{channelJoined}</span>
+                    </div>
+                  {/if}
+                  {#if channelJoined}
+                    <div class="stream-info-actions">
+                      <button
+                        type="button"
+                        class="notif-toggle favorite-toggle"
+                        class:favorite-toggle--on={channelIsFavorite}
+                        aria-pressed={channelIsFavorite}
+                        onclick={toggleChannelFavorite}
+                        use:tooltip={channelIsFavorite
+                          ? t('si_removeFavorite', { channel: channelJoined })
+                          : t('si_addFavoriteTooltip', { channel: channelJoined })}
+                      >
+                        <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                          {#if channelIsFavorite}
+                            <path
+                              d="M8 13.5l-1.2-.95C3.4 9.55 1 7.4 1 4.7 1 2.55 2.74 1 5 1c1.34 0 2.62.6 3.5 1.62A4.62 4.62 0 0 1 11 1c2.26 0 4 1.55 4 3.7 0 2.7-2.4 4.85-5.8 7.85L8 13.5z"
+                              fill="currentColor"
+                            />
+                          {:else}
+                            <path
+                              d="M8 13.5l-1.2-.95C3.4 9.55 1 7.4 1 4.7 1 2.55 2.74 1 5 1c1.34 0 2.62.6 3.5 1.62A4.62 4.62 0 0 1 11 1c2.26 0 4 1.55 4 3.7 0 2.7-2.4 4.85-5.8 7.85L8 13.5zM8 12.3l.45-.36C11.4 9.36 13.5 7.5 13.5 4.7 13.5 3.2 12.4 2.2 11 2.2c-1.06 0-2.06.55-2.65 1.45L8 4.3l-.35-.65C7.06 2.75 6.06 2.2 5 2.2 3.6 2.2 2.5 3.2 2.5 4.7c0 2.8 2.1 4.66 5.05 7.24l.45.36z"
+                              fill="currentColor"
+                            />
+                          {/if}
+                        </svg>
+                        <span class="notif-toggle-label"
+                          >{channelIsFavorite ? t('si_favorite') : t('si_addFavorite')}</span
+                        >
+                      </button>
+                      <button
+                        type="button"
+                        class="notif-toggle"
+                        class:notif-toggle--on={channelNotifOn}
+                        aria-pressed={channelNotifOn}
+                        onclick={toggleChannelNotif}
+                        use:tooltip={notifBlocked
+                          ? t('si_notifBlocked')
+                          : channelNotifOn
+                            ? t('si_disableNotif')
+                            : t('si_enableNotif')}
+                      >
+                        <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                          {#if channelNotifOn}
+                            <path
+                              d="M8 2a4 4 0 0 0-4 4v3.5L2.5 11h11L12 9.5V6a4 4 0 0 0-4-4zm0 12a1.5 1.5 0 0 0 1.5-1.5h-3A1.5 1.5 0 0 0 8 14z"
+                              fill="currentColor"
+                            />
+                          {:else}
+                            <path
+                              d="M8 2a4 4 0 0 0-4 4v3.5L2.5 11h11L12 9.5V6a4 4 0 0 0-4-4zm0 12a1.5 1.5 0 0 0 1.5-1.5h-3A1.5 1.5 0 0 0 8 14zM3 3l10 10"
+                              stroke="currentColor"
+                              stroke-width="1.5"
+                              fill="none"
+                              stroke-linecap="round"
+                            />
+                          {/if}
+                        </svg>
+                        <span class="notif-toggle-label">{channelNotifOn ? t('si_notifyOn') : t('si_notifyOff')}</span>
+                      </button>
+                      {#if !stacked}
+                        {#if sessionOthers.length > 0}
+                          <button
+                            type="button"
+                            class="notif-toggle"
+                            onclick={openSessionInMultiView}
+                            use:tooltip={t('si_watchTogether')}
+                          >
+                            <svg
+                              class="notif-toggle-icon"
+                              viewBox="0 0 16 16"
+                              width="14"
+                              height="14"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="M1 2a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm8 0a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V2zM1 10a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1v-3zm8 0a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-3z"
+                                fill="currentColor"
+                              />
+                            </svg>
+                            <span class="notif-toggle-label">{t('si_watchTogether')}</span>
+                          </button>
+                        {/if}
+                        <button
+                          type="button"
+                          class="notif-toggle"
+                          onclick={scrollToContent}
+                          use:tooltip={t('si_videosClips')}
+                        >
+                          <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                            <path
+                              d="M2 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm1 2h10v8H3V4zm3 1v6l4-3-4-3z"
+                              fill="currentColor"
+                            />
+                          </svg>
+                          <span class="notif-toggle-label">{t('si_videos')}</span>
+                        </button>
+                      {/if}
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+            {#if !settings.theaterMode && !stacked && channelJoined}
+              <div bind:this={contentRef}>
+                <ChannelContent channel={channelJoined} onplayVod={playVod} onplayClip={playClip} />
+              </div>
             {/if}
           </div>
-        {:else if playerStatus === 'idle' && pipController.isOpen}
-          <div class="player-overlay">
-            <p class="overlay-title">{t('player_pipActive')}</p>
-            <p class="overlay-sub">{t('player_pipActiveSub')}</p>
-          </div>
-        {:else if playerStatus === 'idle'}
-          <div class="player-overlay">
-            <p class="overlay-title">{t('player_streamStopped')}</p>
-            <button type="button" class="overlay-action" onclick={resumeStream}>{t('player_resumeStream')}</button>
-          </div>
-        {/if}
-        {#if vodCtl.resumeBar}
-          <div class="resume-bar" role="status">
-            <span class="resume-bar-text">{t('player_resumedFrom', { time: formatVodTime(vodCtl.resumeBar.position) })}</span>
-            <button type="button" class="resume-bar-btn" onclick={() => vodCtl.restart(currentVodId())}>{t('player_restart')}</button>
-            <button type="button" class="resume-bar-close" onclick={() => vodCtl.dismissResumeBar()} aria-label={t('player_dismissResume')}>×</button>
-          </div>
-        {/if}
-      {:else}
-        <div class="player-placeholder">{t('player_placeholder')}</div>
-      {/if}
-    </section>
-    </div>
-    {#if !settings.theaterMode}
-    <div class="stream-info">
-      {#if playback.kind === 'vod' || playback.kind === 'clip'}
-        <div class="stream-info-row stream-info-row--main">
-          {#if (activeStatus.state === 'live' || activeStatus.state === 'offline') && activeStatus.avatarUrl}
-            {@const collab = activeCollab}
-            <span class="stream-info-avatar-wrap">
-              <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
-              {#if collab}
-                <span class="stream-info-avatar-collab" use:tooltip={t('streamingTogether')} aria-hidden="true">
-                  {#if collab.avatar}
-                    <img src={collab.avatar} alt="" loading="lazy" />
-                  {:else}
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" fill="currentColor"/>
-                    </svg>
-                  {/if}
-                </span>
-              {/if}
-            </span>
-          {/if}
-          <span class="stream-info-badge">{playback.kind === 'vod' ? t('vod_pastBroadcast') : t('vod_clip')}</span>
-          <span class="stream-info-title" use:tooltip={playback.title}>{playback.title}</span>
         </div>
-        <div class="stream-info-row stream-info-row--meta">
-          {#if playback.game}<span class="stream-info-game">{playback.game}</span>{/if}
-          {#if playback.game && (playback.viewCount > 0 || playback.createdAt)}<span class="stream-info-dot">·</span>{/if}
-          {#if playback.viewCount > 0}<span class="stream-info-viewers">{formatCompact(playback.viewCount)} {t('views')}</span>{/if}
-          {#if playback.createdAt && playback.viewCount > 0}<span class="stream-info-dot">·</span>{/if}
-          {#if playback.createdAt}<span class="stream-info-age">{formatAge(playback.createdAt)}</span>{/if}
-        </div>
-      {:else if activeStatus.state === 'live'}
-        <div class="stream-info-row stream-info-row--main">
-          {#if activeStatus.avatarUrl}
-            {@const collab = activeCollab}
-            <span class="stream-info-avatar-wrap">
-              <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
-              {#if collab}
-                <span class="stream-info-avatar-collab" use:tooltip={t('streamingTogether')} aria-hidden="true">
-                  {#if collab.avatar}
-                    <img src={collab.avatar} alt="" loading="lazy" />
-                  {:else}
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" fill="currentColor"/>
-                    </svg>
-                  {/if}
-                </span>
-              {/if}
-            </span>
-          {/if}
-          <span class="stream-info-live" use:tooltip={t('live')}><span class="stream-info-live-dot"></span>{t('liveBadge')}</span>
-          <span class="stream-info-title" use:tooltip={activeStatus.title || t('live')}>{activeStatus.title || t('live')}</span>
-        </div>
-        <div class="stream-info-row stream-info-row--meta">
-          {#if activeStatus.game}<span class="stream-info-game">{activeStatus.game}</span>{/if}
-          <span class="stream-info-dot">·</span>
-          <span class="stream-info-viewers">{formatCompact(activeStatus.viewers)} {t('viewers')}</span>
-          {#if activeStatus.collabViewers != null}
-            <span class="stream-info-dot">·</span>
-            <span class="stream-info-collab-viewers" use:tooltip={t('streamingTogether')}>{formatCompact(activeStatus.collabViewers)} {t('si_collabViewers')}</span>
-          {/if}
-          {#if activeStatus.uptime}
-            <span class="stream-info-dot">·</span>
-            <span class="stream-info-uptime">{t('si_uptime', { uptime: activeStatus.uptime })}</span>
-          {/if}
-          {#if activeStatus.followers != null}
-            <span class="stream-info-dot">·</span>
-            <span class="stream-info-followers">{formatCompact(activeStatus.followers)} {t('si_followers')}</span>
-          {/if}
-        </div>
-      {:else if activeStatus.state === 'offline' && channelJoined}
-        <div class="stream-info-row stream-info-row--offline">
-          {#if activeStatus.avatarUrl}
-            <img class="stream-info-avatar stream-info-avatar--offline" src={activeStatus.avatarUrl} alt="" />
-          {/if}
-          <span class="stream-info-offline">{t('offline')}</span>
-          <span class="stream-info-channel">{channelJoined}</span>
-        </div>
-      {:else if channelJoined}
-        <div class="stream-info-row stream-info-row--loading">
-           <span class="stream-info-channel">{channelJoined}</span>
-         </div>
-        {/if}
-        {#if channelJoined}
-          <div class="stream-info-actions">
-            <button
-              type="button"
-              class="notif-toggle favorite-toggle"
-              class:favorite-toggle--on={channelIsFavorite}
-              aria-pressed={channelIsFavorite}
-              onclick={toggleChannelFavorite}
-              use:tooltip={channelIsFavorite ? t('si_removeFavorite', { channel: channelJoined }) : t('si_addFavoriteTooltip', { channel: channelJoined })}
-            >
-              <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                {#if channelIsFavorite}
-                  <path d="M8 13.5l-1.2-.95C3.4 9.55 1 7.4 1 4.7 1 2.55 2.74 1 5 1c1.34 0 2.62.6 3.5 1.62A4.62 4.62 0 0 1 11 1c2.26 0 4 1.55 4 3.7 0 2.7-2.4 4.85-5.8 7.85L8 13.5z" fill="currentColor"/>
-                {:else}
-                  <path d="M8 13.5l-1.2-.95C3.4 9.55 1 7.4 1 4.7 1 2.55 2.74 1 5 1c1.34 0 2.62.6 3.5 1.62A4.62 4.62 0 0 1 11 1c2.26 0 4 1.55 4 3.7 0 2.7-2.4 4.85-5.8 7.85L8 13.5zM8 12.3l.45-.36C11.4 9.36 13.5 7.5 13.5 4.7 13.5 3.2 12.4 2.2 11 2.2c-1.06 0-2.06.55-2.65 1.45L8 4.3l-.35-.65C7.06 2.75 6.06 2.2 5 2.2 3.6 2.2 2.5 3.2 2.5 4.7c0 2.8 2.1 4.66 5.05 7.24l.45.36z" fill="currentColor"/>
-                {/if}
-              </svg>
-              <span class="notif-toggle-label">{channelIsFavorite ? t('si_favorite') : t('si_addFavorite')}</span>
-            </button>
-            <button
-              type="button"
-              class="notif-toggle"
-              class:notif-toggle--on={channelNotifOn}
-              aria-pressed={channelNotifOn}
-              onclick={toggleChannelNotif}
-              use:tooltip={notifBlocked ? t('si_notifBlocked') : channelNotifOn ? t('si_disableNotif') : t('si_enableNotif')}
-            >
-              <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                {#if channelNotifOn}
-                  <path d="M8 2a4 4 0 0 0-4 4v3.5L2.5 11h11L12 9.5V6a4 4 0 0 0-4-4zm0 12a1.5 1.5 0 0 0 1.5-1.5h-3A1.5 1.5 0 0 0 8 14z" fill="currentColor"/>
-                {:else}
-                  <path d="M8 2a4 4 0 0 0-4 4v3.5L2.5 11h11L12 9.5V6a4 4 0 0 0-4-4zm0 12a1.5 1.5 0 0 0 1.5-1.5h-3A1.5 1.5 0 0 0 8 14zM3 3l10 10" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-                {/if}
-              </svg>
-              <span class="notif-toggle-label">{channelNotifOn ? t('si_notifyOn') : t('si_notifyOff')}</span>
-            </button>
-            {#if !stacked}
-              {#if sessionOthers.length > 0}
-                <button
-                  type="button"
-                  class="notif-toggle"
-                  onclick={openSessionInMultiView}
-                  use:tooltip={t('si_watchTogether')}
-                >
-                  <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                    <path d="M1 2a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm8 0a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V2zM1 10a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1v-3zm8 0a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-3z" fill="currentColor"/>
-                  </svg>
-                  <span class="notif-toggle-label">{t('si_watchTogether')}</span>
-                </button>
-              {/if}
-              <button
-                type="button"
-                class="notif-toggle"
-                onclick={scrollToContent}
-                use:tooltip={t('si_videosClips')}
-              >
-                <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                  <path d="M2 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm1 2h10v8H3V4zm3 1v6l4-3-4-3z" fill="currentColor"/>
-                </svg>
-                <span class="notif-toggle-label">{t('si_videos')}</span>
-              </button>
-            {/if}
-          </div>
-        {/if}
-      </div>
-      {/if}
-    </div>
-    {#if !settings.theaterMode && !stacked && channelJoined}
-      <div bind:this={contentRef}>
-        <ChannelContent channel={channelJoined} onplayVod={playVod} onplayClip={playClip} />
-      </div>
-    {/if}
-    </div>
-    </div>
 
-    {#if settings.chatVisible}
-    <div
-      class="chat-resizer"
-      class:chat-resizer--stacked={stacked}
-      class:chat-resizer--dragging={isChatResizing}
-      onpointerdown={onChatResizerPointerDown}
-      role="slider"
-      aria-orientation={stacked ? 'horizontal' : 'vertical'}
-      aria-label={t('chat_resizeChat')}
-      aria-valuenow={chatSize}
-      aria-valuemin={CHAT_SIZE_MIN}
-      aria-valuemax={CHAT_SIZE_MAX}
-      tabindex="0"
-    ></div>
-    <main class="chat" class:chat--hidden={!settings.chatVisible} style:--chat-size={`${chatSize}px`}>
-      {#if activePin}
-        <PinnedMessage
-          pin={activePin}
-          thirdParty={thirdPartyMap}
-          onlink={openChatLink}
-          ondismiss={(pinId) => pinnedChat.dismiss(pinId)}
-        />
-      {/if}
-      <!-- The shared chat renderer (message loop, sticky-bottom discipline,
+        {#if settings.chatVisible}
+          <div
+            class="chat-resizer"
+            class:chat-resizer--stacked={stacked}
+            class:chat-resizer--dragging={isChatResizing}
+            onpointerdown={onChatResizerPointerDown}
+            role="slider"
+            aria-orientation={stacked ? 'horizontal' : 'vertical'}
+            aria-label={t('chat_resizeChat')}
+            aria-valuenow={chatSize}
+            aria-valuemin={CHAT_SIZE_MIN}
+            aria-valuemax={CHAT_SIZE_MAX}
+            tabindex="0"
+          ></div>
+          <main class="chat" class:chat--hidden={!settings.chatVisible} style:--chat-size={`${chatSize}px`}>
+            {#if activePin}
+              <PinnedMessage
+                pin={activePin}
+                thirdParty={thirdPartyMap}
+                onlink={openChatLink}
+                ondismiss={(pinId) => pinnedChat.dismiss(pinId)}
+              />
+            {/if}
+            <!-- The shared chat renderer (message loop, sticky-bottom discipline,
            errored-art tracking, jump pill) — the SAME component multi-view's
            chat pane uses. Entries carry the per-channel badge override. -->
-      <ChatPane
-        entries={chatEntries}
-        placeholder={chatPlaceholder}
-        onlink={openChatLink}
-        resetKey={chatResetKey}
-        liftJump={chatModesShown}
-      />
-      {#if channelJoined}
-        <button
-          type="button"
-          class="float-pill chat-link"
-          onclick={openChatPopout}
-          title={t('chat_openOnTwitch', { channel: channelJoined })}
-          aria-label={t('chat_openOnTwitch', { channel: channelJoined })}
-        >
-          <svg class="chat-link-icon" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
-            <path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7zM19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7z" fill="currentColor"/>
-          </svg>
-        </button>
-      {/if}
-      {#if chatModesShown}
-        <!-- Chat-mode banner (Toggle B) pinned to the BOTTOM of the chat panel
+            <ChatPane
+              entries={chatEntries}
+              placeholder={chatPlaceholder}
+              onlink={openChatLink}
+              resetKey={chatResetKey}
+              liftJump={chatModesShown}
+            />
+            {#if channelJoined}
+              <button
+                type="button"
+                class="float-pill chat-link"
+                onclick={openChatPopout}
+                title={t('chat_openOnTwitch', { channel: channelJoined })}
+                aria-label={t('chat_openOnTwitch', { channel: channelJoined })}
+              >
+                <svg class="chat-link-icon" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+                  <path
+                    d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7zM19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </button>
+            {/if}
+            {#if chatModesShown}
+              <!-- Chat-mode banner (Toggle B) pinned to the BOTTOM of the chat panel
              (shared component — see ChatModesPill.svelte). The tighter
              max-width keeps it clear of the open-on-Twitch pill that shares
              this row at the right edge. -->
-        <ChatModesPill modes={chatModeKeys} label={t('chat_chatModes')} maxWidth="calc(100% - 90px)" />
-      {/if}
-    </main>
-    {/if}
-    </div>
+              <ChatModesPill modes={chatModeKeys} label={t('chat_chatModes')} maxWidth="calc(100% - 90px)" />
+            {/if}
+          </main>
+        {/if}
+      </div>
     {/if}
   </div>
   {#if notifToast}
@@ -2254,7 +2518,9 @@
       role="tooltip"
       style:left="{tooltipPos.left}px"
       style:top="{tooltipPos.top}px"
-    >{tooltipState.text}</div>
+    >
+      {tooltipState.text}
+    </div>
   {/if}
 
   <!-- Hidden probe used to measure the zoom factor (see zoomK). Never visible. -->
@@ -2288,12 +2554,19 @@
 </div>
 
 <style>
-  :global(html), :global(body) {
+  :global(html),
+  :global(body) {
     margin: 0;
     padding: 0;
     background: var(--bg-app);
     color: var(--text-primary);
-    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-family:
+      'Inter',
+      system-ui,
+      -apple-system,
+      'Segoe UI',
+      Roboto,
+      sans-serif;
     font-size: 13px;
     line-height: 1.4;
     height: 100%;
@@ -2370,8 +2643,14 @@
   }
   /* Pin each side to its track and hug the outer edge so the symmetric
      1fr flanking tracks keep the center track optically centered. */
-  .bar-left { grid-column: 1; justify-self: start; }
-  .bar-right { grid-column: 3; justify-self: end; }
+  .bar-left {
+    grid-column: 1;
+    justify-self: start;
+  }
+  .bar-right {
+    grid-column: 3;
+    justify-self: end;
+  }
 
   /* Window controls (minimize / maximize-restore / close) for the borderless
      title bar. Themed via the app's CSS tokens; close uses the conventional
@@ -2395,7 +2674,9 @@
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
-    transition: background 120ms ease, color 120ms ease;
+    transition:
+      background 120ms ease,
+      color 120ms ease;
   }
   .win-btn:hover {
     background: var(--bg-hover);
@@ -2415,14 +2696,62 @@
     position: fixed;
     z-index: 900;
   }
-  .rz-n { top: 0; left: 10px; right: 10px; height: 5px; cursor: ns-resize; }
-  .rz-s { bottom: 0; left: 10px; right: 10px; height: 5px; cursor: ns-resize; }
-  .rz-w { top: 10px; bottom: 10px; left: 0; width: 5px; cursor: ew-resize; }
-  .rz-e { top: 10px; bottom: 10px; right: 0; width: 5px; cursor: ew-resize; }
-  .rz-nw { top: 0; left: 0; width: 11px; height: 11px; cursor: nwse-resize; }
-  .rz-ne { top: 0; right: 0; width: 11px; height: 11px; cursor: nesw-resize; }
-  .rz-sw { bottom: 0; left: 0; width: 11px; height: 11px; cursor: nesw-resize; }
-  .rz-se { bottom: 0; right: 0; width: 11px; height: 11px; cursor: nwse-resize; }
+  .rz-n {
+    top: 0;
+    left: 10px;
+    right: 10px;
+    height: 5px;
+    cursor: ns-resize;
+  }
+  .rz-s {
+    bottom: 0;
+    left: 10px;
+    right: 10px;
+    height: 5px;
+    cursor: ns-resize;
+  }
+  .rz-w {
+    top: 10px;
+    bottom: 10px;
+    left: 0;
+    width: 5px;
+    cursor: ew-resize;
+  }
+  .rz-e {
+    top: 10px;
+    bottom: 10px;
+    right: 0;
+    width: 5px;
+    cursor: ew-resize;
+  }
+  .rz-nw {
+    top: 0;
+    left: 0;
+    width: 11px;
+    height: 11px;
+    cursor: nwse-resize;
+  }
+  .rz-ne {
+    top: 0;
+    right: 0;
+    width: 11px;
+    height: 11px;
+    cursor: nesw-resize;
+  }
+  .rz-sw {
+    bottom: 0;
+    left: 0;
+    width: 11px;
+    height: 11px;
+    cursor: nesw-resize;
+  }
+  .rz-se {
+    bottom: 0;
+    right: 0;
+    width: 11px;
+    height: 11px;
+    cursor: nwse-resize;
+  }
 
   .bar-center {
     display: flex;
@@ -2443,7 +2772,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 150ms, color 150ms;
+    transition:
+      background 150ms,
+      color 150ms;
   }
 
   .sidebar-toggle:hover {
@@ -2472,7 +2803,9 @@
     font-weight: 600;
     cursor: pointer;
     line-height: 1;
-    transition: background 150ms, color 150ms;
+    transition:
+      background 150ms,
+      color 150ms;
   }
 
   .browse-btn:hover {
@@ -2494,7 +2827,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 150ms, color 150ms;
+    transition:
+      background 150ms,
+      color 150ms;
   }
 
   .layout-toggle:hover {
@@ -2525,7 +2860,10 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    transition: background 150ms, border-color 150ms, color 150ms;
+    transition:
+      background 150ms,
+      border-color 150ms,
+      color 150ms;
   }
 
   .sleep-chip:hover {
@@ -2679,8 +3017,12 @@
     animation: playback-banner-in 150ms ease;
   }
   @keyframes playback-banner-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
   .playback-back {
     flex: 0 0 auto;
@@ -2702,7 +3044,7 @@
     white-space: nowrap;
   }
 
-.player {
+  .player {
     position: relative;
     flex: 0 1 auto;
     min-height: 0;
@@ -2716,7 +3058,7 @@
     aspect-ratio: 16 / 9;
   }
 
-.video {
+  .video {
     width: 100%;
     height: 100%;
     object-fit: contain;
@@ -2949,7 +3291,10 @@
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 150ms, color 150ms, border-color 150ms;
+    transition:
+      background 150ms,
+      color 150ms,
+      border-color 150ms;
   }
 
   .notif-toggle:hover {
@@ -3008,8 +3353,14 @@
   }
 
   @keyframes notif-toast-in {
-    from { opacity: 0; transform: translate(-50%, 8px); }
-    to { opacity: 1; transform: translate(-50%, 0); }
+    from {
+      opacity: 0;
+      transform: translate(-50%, 8px);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
   }
 
   /* Global tooltip — driven by `use:tooltip` action (src/lib/tooltip.ts).
@@ -3038,8 +3389,12 @@
     animation: global-tooltip-in 120ms ease-out;
   }
   @keyframes global-tooltip-in {
-    from { opacity: 0; }
-    to   { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 
   /* Hidden probe that measures how position:fixed left/top map to visual
@@ -3116,7 +3471,9 @@
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
-    transition: background 150ms, color 150ms;
+    transition:
+      background 150ms,
+      color 150ms;
   }
 
   .resume-bar-btn:hover {
@@ -3136,7 +3493,9 @@
     font-size: 14px;
     line-height: 1;
     cursor: pointer;
-    transition: background 150ms, color 150ms;
+    transition:
+      background 150ms,
+      color 150ms;
   }
 
   .resume-bar-close:hover {
@@ -3175,7 +3534,9 @@
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
-    transition: background 150ms, color 150ms;
+    transition:
+      background 150ms,
+      color 150ms;
   }
 
   .overlay-action:hover {
@@ -3193,10 +3554,12 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
-.chat {
+  .chat {
     flex: 0 1 var(--chat-size, 300px);
     width: var(--chat-size, 300px);
     min-width: 200px;
@@ -3239,7 +3602,7 @@
      so the resize handle is easy to grab without needing pixel-perfect
      aim. Sized to match the other grab areas in the app. */
   .chat-resizer::before {
-    content: "";
+    content: '';
     position: absolute;
     inset: 0;
     margin: 0 -4px;
@@ -3270,7 +3633,11 @@
     font-family: inherit;
     cursor: pointer;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
-    transition: color 150ms, background 150ms, border-color 150ms, transform 150ms;
+    transition:
+      color 150ms,
+      background 150ms,
+      border-color 150ms,
+      transform 150ms;
     white-space: nowrap;
   }
 
@@ -3342,8 +3709,12 @@
     display: none;
   }
   @media (max-width: 380px) {
-    .notif-toggle-label { display: none; }
-    .notif-toggle { padding: 4px 6px; }
+    .notif-toggle-label {
+      display: none;
+    }
+    .notif-toggle {
+      padding: 4px 6px;
+    }
   }
 
   /* All message-rendering rules (.message/.message-time/.username/.badge/

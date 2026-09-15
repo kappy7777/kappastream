@@ -30,28 +30,33 @@ const NETWORKISH_MEMBERS = [
 
 describe('toKsvodProxyUrl', () => {
   it('rewrites to the ksvod:// custom scheme on non-Windows (WebKit)', () => {
-    expect(toKsvodProxyUrl('https://host.example/path.m3u8', false))
-      .toBe('ksvod://localhost/host.example/path.m3u8')
+    expect(toKsvodProxyUrl('https://host.example/path.m3u8', false)).toBe('ksvod://localhost/host.example/path.m3u8')
   })
 
   it('rewrites to the http://ksvod.localhost origin on Windows (WebView2)', () => {
-    expect(toKsvodProxyUrl('https://host.example/path.m3u8', true))
-      .toBe('http://ksvod.localhost/host.example/path.m3u8')
+    expect(toKsvodProxyUrl('https://host.example/path.m3u8', true)).toBe(
+      'http://ksvod.localhost/host.example/path.m3u8',
+    )
   })
 
-  it('leaves a non-https URL unchanged (documented as-is: the leading-' +
-     'https:// String.replace simply finds no match)', () => {
-    expect(toKsvodProxyUrl('http://host.example/path.m3u8', false))
-      .toBe('http://host.example/path.m3u8')
-    expect(toKsvodProxyUrl('ksvod://localhost/already', true))
-      .toBe('ksvod://localhost/already')
-  })
+  it(
+    'leaves a non-https URL unchanged (documented as-is: the leading-' +
+      'https:// String.replace simply finds no match)',
+    () => {
+      expect(toKsvodProxyUrl('http://host.example/path.m3u8', false)).toBe('http://host.example/path.m3u8')
+      expect(toKsvodProxyUrl('ksvod://localhost/already', true)).toBe('ksvod://localhost/already')
+    },
+  )
 
-  it('replaces only the FIRST https:// (String.replace with a string pattern ' +
-     'replaces one occurrence — existing semantics, kept as-is)', () => {
-    expect(toKsvodProxyUrl('https://a/redirect?to=https://b', false))
-      .toBe('ksvod://localhost/a/redirect?to=https://b')
-  })
+  it(
+    'replaces only the FIRST https:// (String.replace with a string pattern ' +
+      'replaces one occurrence — existing semantics, kept as-is)',
+    () => {
+      expect(toKsvodProxyUrl('https://a/redirect?to=https://b', false)).toBe(
+        'ksvod://localhost/a/redirect?to=https://b',
+      )
+    },
+  )
 })
 
 describe('isFatalNetworkishError', () => {
@@ -63,7 +68,9 @@ describe('isFatalNetworkishError', () => {
 
   it('matches every NETWORKISH member reported via details', () => {
     for (const member of NETWORKISH_MEMBERS) {
-      expect(isFatalNetworkishError({ fatal: true, type: 'otherError', details: member }), `details=${member}`).toBe(true)
+      expect(isFatalNetworkishError({ fatal: true, type: 'otherError', details: member }), `details=${member}`).toBe(
+        true,
+      )
     }
   })
 
@@ -95,11 +102,14 @@ describe('liveEdgeSeekTarget', () => {
     expect(liveEdgeSeekTarget(undefined, undefined)).toBeNull()
   })
 
-  it('returns null for a NaN liveSyncPosition — ?? does not fall through to ' +
-     'seekableEnd (matches the original inline arithmetic)', () => {
-    expect(liveEdgeSeekTarget(NaN, 500)).toBeNull()
-    expect(liveEdgeSeekTarget(undefined, NaN)).toBeNull()
-  })
+  it(
+    'returns null for a NaN liveSyncPosition — ?? does not fall through to ' +
+      'seekableEnd (matches the original inline arithmetic)',
+    () => {
+      expect(liveEdgeSeekTarget(NaN, 500)).toBeNull()
+      expect(liveEdgeSeekTarget(undefined, NaN)).toBeNull()
+    },
+  )
 
   it('clamps to 0 instead of going negative below the 1.5s back-off', () => {
     expect(liveEdgeSeekTarget(1.0, undefined)).toBe(0)

@@ -105,9 +105,7 @@ export const UI_SCALE_MIN = 0.5
 export const UI_SCALE_MAX = 4
 export const UI_SCALE_STEP = 0.05
 export const UI_SCALE_DEFAULT = 1
-export const UI_SCALE_PRESETS: ReadonlyArray<number> = [
-  0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4,
-] as const
+export const UI_SCALE_PRESETS: ReadonlyArray<number> = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4] as const
 
 function safeRead(key: string): string | null {
   try {
@@ -152,7 +150,10 @@ function readChatTimestamps(): boolean {
 function readMentionUsername(): string {
   const v = safeRead(STORAGE_KEYS.mentionUsername)
   if (!v) return ''
-  return v.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 25)
+  return v
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(0, 25)
 }
 
 function readVolume(): number {
@@ -237,7 +238,10 @@ function readMvStatusBarHidden(): boolean {
 // no usable characters (empty / whitespace / punctuation). Mirrors the lenient
 // cleaning used for the mention username so pasting "@Troll!" yields "troll".
 function normalizeMutedName(raw: string): string | null {
-  const cleaned = raw.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 25)
+  const cleaned = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(0, 25)
   return cleaned.length >= 1 ? cleaned : null
 }
 
@@ -313,7 +317,11 @@ class SettingsStore {
   constructor() {
     this.applyTheme(this.theme)
     this.applyUiScale(this.uiScale)
-    try { localStorage.removeItem(STORAGE_KEYS.legacyTheater) } catch { /* ignore */ }
+    try {
+      localStorage.removeItem(STORAGE_KEYS.legacyTheater)
+    } catch {
+      /* ignore */
+    }
   }
 
   /**
@@ -371,7 +379,10 @@ class SettingsStore {
   }
 
   setMentionUsername(v: string): void {
-    const cleaned = v.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 25)
+    const cleaned = v
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '')
+      .slice(0, 25)
     if (cleaned === this.mentionUsername) return
     this.mentionUsername = cleaned
     safeWrite(STORAGE_KEYS.mentionUsername, cleaned)

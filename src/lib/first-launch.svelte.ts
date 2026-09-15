@@ -161,9 +161,6 @@ export interface StreamlinkProbeResult {
  * is only ever rendered for 'missing', so a working setup is never nagged. The
  * platform is passed through so the component can pick the right command.
  */
-export function streamlinkProbeFromResult(r: {
-  present: boolean
-  platform: string
-}): StreamlinkProbeResult {
+export function streamlinkProbeFromResult(r: { present: boolean; platform: string }): StreamlinkProbeResult {
   return { state: r.present ? 'present' : 'missing', platform: r.platform }
 }

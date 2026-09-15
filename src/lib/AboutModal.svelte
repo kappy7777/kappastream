@@ -14,20 +14,10 @@
 </script>
 
 <div class="about-backdrop" onclick={onclose} role="presentation"></div>
-<div
-  class="about-modal"
-  role="dialog"
-  aria-modal="true"
-  aria-labelledby="about-title"
->
-  <button
-    type="button"
-    class="about-close"
-    onclick={onclose}
-    aria-label={t('close')}
-  >
+<div class="about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title">
+  <button type="button" class="about-close" onclick={onclose} aria-label={t('close')}>
     <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-      <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
     </svg>
   </button>
   <div id="about-title" class="about-modal-name">Kappastream</div>
@@ -46,14 +36,8 @@
   <div class="about-modal-donate">
     <span class="about-modal-donate-label">{t('donate')}</span>
     <div class="about-modal-donate-addr-group">
-      <span
-        class="about-modal-btc-symbol"
-        aria-label={t('about_bitcoin')}
-        title={t('about_bitcoin')}>₿</span
-      >
-      <code class="about-modal-donate-addr"
-        >bc1qj9ge9ug4pp5mr3g0lepuyyjh4j6sazhg2hgcrv</code
-      >
+      <span class="about-modal-btc-symbol" aria-label={t('about_bitcoin')} title={t('about_bitcoin')}>₿</span>
+      <code class="about-modal-donate-addr">bc1qj9ge9ug4pp5mr3g0lepuyyjh4j6sazhg2hgcrv</code>
     </div>
   </div>
 </div>

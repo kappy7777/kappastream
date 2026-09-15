@@ -193,7 +193,8 @@ export const de: Record<TKey, string> = {
   pin_dismiss: 'Angepinnte Nachricht ausblenden',
 
   about_tagline: 'Twitch, reduziert auf das Wesentliche: der Stream und der Chat.',
-  about_body: 'Kein Login, keine Telemetrie, kein Analytics, kein vom Projekt betriebener Server. Der Chat verbindet sich anonym — nichts wird mit deiner Identität verknüpft. Netzwerkanfragen gehen nur an die Dienste, die zum Schauen nötig sind: Twitch-Infrastruktur und die offenen Community-APIs (7TV, BTTV, FFZ), die Emotes und Stream-Infos bereitstellen.',
+  about_body:
+    'Kein Login, keine Telemetrie, kein Analytics, kein vom Projekt betriebener Server. Der Chat verbindet sich anonym — nichts wird mit deiner Identität verknüpft. Netzwerkanfragen gehen nur an die Dienste, die zum Schauen nötig sind: Twitch-Infrastruktur und die offenen Community-APIs (7TV, BTTV, FFZ), die Emotes und Stream-Infos bereitstellen.',
   about_streamlink: 'Stream-Auflösung powered by streamlink.',
   about_changelog: 'Changelog',
   about_bitcoin: 'Bitcoin',
@@ -237,7 +238,8 @@ export const de: Record<TKey, string> = {
   settings_bits: 'Bits anzeigen',
   settings_bitsHint: 'Cheer-Beträge auf Nachrichten',
   settings_chatPinned: 'Angepinnte Nachrichten',
-  settings_chatPinnedHint: 'die angepinnte Chat-Nachricht des Kanals über dem Chat anzeigen; wird mit dem Favoriten-Abrufintervall aktualisiert',
+  settings_chatPinnedHint:
+    'die angepinnte Chat-Nachricht des Kanals über dem Chat anzeigen; wird mit dem Favoriten-Abrufintervall aktualisiert',
   settings_mutedUsers: 'Stummgeschaltete Nutzer',
   settings_mutePlaceholder: 'nach Login ausblenden',
   settings_addMuteAria: 'Nutzer zur Stummliste hinzufügen',
@@ -265,7 +267,8 @@ export const de: Record<TKey, string> = {
   settings_sleepCustomAria: 'Eigene Sleep-Timer-Dauer in Minuten',
   settings_sleepCustomError: '{min}–{max} Min. eingeben',
   settings_sleepStopsIn: 'Stoppt Wiedergabe in {time}',
-  settings_sleepHelp: 'Stoppt den aktuellen Stream nach der gewählten Zeit. Bricht automatisch ab, wenn du den Kanal wechselst.',
+  settings_sleepHelp:
+    'Stoppt den aktuellen Stream nach der gewählten Zeit. Bricht automatisch ab, wenn du den Kanal wechselst.',
   settings_favSort: 'Favoriten-Sortierung',
   settings_favSortMode: 'Favoriten-Sortierungsmodus',
   settings_sortAuto: 'Auto (Live zuerst, nach Zuschauern)',
@@ -381,7 +384,8 @@ export const de: Record<TKey, string> = {
   welcome_feat5: 'Bis zu vier Streams gleichzeitig, Bild-in-Bild, Übergabe an mpv',
   welcome_feat6: '34 Designs',
   welcome_privacy: 'Privatsphäre',
-  welcome_privacyBody: 'Kein Konto, kein Tracking, keine Analytics, kein Server, den das Projekt betreibt. Der Chat verbindet sich anonym — nichts wird mit deiner Identität verknüpft. Welche Dienste kappastream kontaktiert, steht im About-Dialog.',
+  welcome_privacyBody:
+    'Kein Konto, kein Tracking, keine Analytics, kein Server, den das Projekt betreibt. Der Chat verbindet sich anonym — nichts wird mit deiner Identität verknüpft. Welche Dienste kappastream kontaktiert, steht im About-Dialog.',
   welcome_streamlinkOk: 'Streamlink erkannt — du kannst loslegen.',
   welcome_streamlinkMissing: 'Streamlink wird zum Abspielen von Streams benötigt.',
   welcome_installLabel: 'Installation',

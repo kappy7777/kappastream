@@ -137,7 +137,12 @@ function gqlStatusHandler(
                 topCostreamers: c.collabAvatar ? [{ profileImageURL: c.collabAvatar }] : [],
               }
             : null,
-          game: { id: 'g', name: c.game ?? 'game-' + login, displayName: c.game ?? 'game-' + login, boxArtURL: 'https://box/' + login + '.jpg' },
+          game: {
+            id: 'g',
+            name: c.game ?? 'game-' + login,
+            displayName: c.game ?? 'game-' + login,
+            boxArtURL: 'https://box/' + login + '.jpg',
+          },
         },
       }
     })
@@ -351,7 +356,9 @@ describe('removed channels are skipped', () => {
     // batch is in flight, then let it resolve.
     seedFavorites(['keep', 'gone'])
     let resolveGql!: (v: string) => void
-    const pending = new Promise<string>((r) => { resolveGql = r })
+    const pending = new Promise<string>((r) => {
+      resolveGql = r
+    })
     gql.handler = async () => pending
     const store = new F.FavoritesStore()
     store.start()
@@ -362,8 +369,36 @@ describe('removed channels are skipped', () => {
       JSON.stringify({
         data: {
           users: [
-            { id: '1', login: 'keep', displayName: 'keep', profileImageURL: '', stream: { id: 's', title: 'K', type: 'live', viewersCount: 1, createdAt: new Date().toISOString(), previewImageURL: '', game: { id: 'g', name: 'gg', displayName: 'gg', boxArtURL: '' } } },
-            { id: '2', login: 'gone', displayName: 'gone', profileImageURL: '', stream: { id: 's2', title: 'G', type: 'live', viewersCount: 2, createdAt: new Date().toISOString(), previewImageURL: '', game: { id: 'g', name: 'gg', displayName: 'gg', boxArtURL: '' } } },
+            {
+              id: '1',
+              login: 'keep',
+              displayName: 'keep',
+              profileImageURL: '',
+              stream: {
+                id: 's',
+                title: 'K',
+                type: 'live',
+                viewersCount: 1,
+                createdAt: new Date().toISOString(),
+                previewImageURL: '',
+                game: { id: 'g', name: 'gg', displayName: 'gg', boxArtURL: '' },
+              },
+            },
+            {
+              id: '2',
+              login: 'gone',
+              displayName: 'gone',
+              profileImageURL: '',
+              stream: {
+                id: 's2',
+                title: 'G',
+                type: 'live',
+                viewersCount: 2,
+                createdAt: new Date().toISOString(),
+                previewImageURL: '',
+                game: { id: 'g', name: 'gg', displayName: 'gg', boxArtURL: '' },
+              },
+            },
           ],
         },
       }),
@@ -489,7 +524,9 @@ describe('stale-response guard', () => {
     // the live result rather than a stale offline one.
     seedFavorites(['stale'])
     let firstResolve!: (v: string) => void
-    const firstPending = new Promise<string>((r) => { firstResolve = r })
+    const firstPending = new Promise<string>((r) => {
+      firstResolve = r
+    })
     let first = true
     gql.handler = async (body) => {
       if (first) {
@@ -507,14 +544,15 @@ describe('stale-response guard', () => {
     await delay(1200)
     firstResolve(
       // ...now the OLD (pre-remove) response finally lands, reporting offline.
-      JSON.stringify({ data: { users: [{ id: '1', login: 'stale', displayName: 'stale', profileImageURL: '', stream: null }] } }),
+      JSON.stringify({
+        data: { users: [{ id: '1', login: 'stale', displayName: 'stale', profileImageURL: '', stream: null }] },
+      }),
     )
     await delay(1200)
     const s = store.getStatus('stale')!.status
     expect(s.state).toBe('live') // newer result wins; the stale offline was skipped
   })
 })
-
 
 describe('collabBadge (LiveStatus → badge data)', () => {
   it('returns null unless live and in a session', async () => {
@@ -532,8 +570,15 @@ describe('collabBadge (LiveStatus → badge data)', () => {
     const { collabBadge } = await import('./favorites.svelte')
     expect(
       collabBadge({
-        state: 'live', title: '', viewers: 1, uptime: '', game: '', avatarUrl: '',
-        collabViewers: 14986, collabOthers: 5, collabAvatar: 'https://img/c1.png',
+        state: 'live',
+        title: '',
+        viewers: 1,
+        uptime: '',
+        game: '',
+        avatarUrl: '',
+        collabViewers: 14986,
+        collabOthers: 5,
+        collabAvatar: 'https://img/c1.png',
       }),
     ).toEqual({ others: 5, avatar: 'https://img/c1.png' })
     expect(
@@ -556,7 +601,13 @@ describe('auto-sort uses the combined session viewership', () => {
       gql.handler = gqlStatusHandler({
         // costreamer's OWN viewers are the lowest of the live channels, but
         // its session total is the highest number in the list.
-        costreamer: { live: true, viewers: 500, collabViewers: 40_000, collabOthers: 3, collabAvatar: 'https://img/other.png' },
+        costreamer: {
+          live: true,
+          viewers: 500,
+          collabViewers: 40_000,
+          collabOthers: 3,
+          collabAvatar: 'https://img/other.png',
+        },
         solo: { live: true, viewers: 5_000 },
         offline1: { live: false },
       })

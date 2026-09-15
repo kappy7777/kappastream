@@ -96,8 +96,7 @@ export class VodPositionsStore {
   // A position past the completion threshold DROPS any prior entry (finished).
   save(vodId: string, position: number, duration: number): boolean {
     if (!vodId) return false
-    const finished =
-      Number.isFinite(duration) && duration > 0 && position / duration > VOD_RESUME_COMPLETE_FRACTION
+    const finished = Number.isFinite(duration) && duration > 0 && position / duration > VOD_RESUME_COMPLETE_FRACTION
     if (!shouldSavePosition(position, duration)) {
       if (finished) this.clear(vodId)
       return false

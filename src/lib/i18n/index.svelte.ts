@@ -46,7 +46,6 @@ export const LOCALES: ReadonlyArray<LocaleMeta> = [
   { id: 'pt', label: 'Português' },
 ]
 
-
 function safeReadLocale(): string | null {
   try {
     return localStorage.getItem(STORAGE_KEYS.locale)

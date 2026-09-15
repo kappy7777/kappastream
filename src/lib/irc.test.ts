@@ -228,9 +228,7 @@ describe('parseIrcEvent ROOMSTATE + mergeRoomState', () => {
   }
 
   it('the JOIN message carries ALL tags', () => {
-    const ev = parseIrcEvent(
-      roomstate('emote-only=0;followers-only=-1;subs-only=1;slow=0;r9k=0;room-id=1'),
-    )
+    const ev = parseIrcEvent(roomstate('emote-only=0;followers-only=-1;subs-only=1;slow=0;r9k=0;room-id=1'))
     if (ev?.type === 'ROOMSTATE') {
       expect(ev.emoteOnly).toBe(false)
       expect(ev.followersOnly).toBe(-1)
@@ -314,17 +312,31 @@ describe('activeRoomModes (chat-mode pill)', () => {
   it('a subset renders in the same fixed order regardless of merge history', () => {
     // r9k arrived first, emote-only later — display order stays subs → …
     let rs: RoomState = { r9k: true }
-    rs = mergeRoomState(rs, { type: 'ROOMSTATE', channel: 'c', emoteOnly: true, followersOnly: null, subsOnly: null, slow: null, r9k: null })
-    rs = mergeRoomState(rs, { type: 'ROOMSTATE', channel: 'c', emoteOnly: null, followersOnly: null, subsOnly: true, slow: null, r9k: null })
+    rs = mergeRoomState(rs, {
+      type: 'ROOMSTATE',
+      channel: 'c',
+      emoteOnly: true,
+      followersOnly: null,
+      subsOnly: null,
+      slow: null,
+      r9k: null,
+    })
+    rs = mergeRoomState(rs, {
+      type: 'ROOMSTATE',
+      channel: 'c',
+      emoteOnly: null,
+      followersOnly: null,
+      subsOnly: true,
+      slow: null,
+      r9k: null,
+    })
     expect(activeRoomModes(rs)).toEqual(['subsOnly', 'emoteOnly', 'r9k'])
   })
 })
 
 describe('parseIrcEvent CLEARMSG (single-message delete)', () => {
   it('exposes target-msg-id + login', () => {
-    const ev = parseIrcEvent(
-      '@target-msg-id=abc-123;login=mod :tmi.twitch.tv CLEARMSG #channel :original text here',
-    )
+    const ev = parseIrcEvent('@target-msg-id=abc-123;login=mod :tmi.twitch.tv CLEARMSG #channel :original text here')
     if (ev?.type === 'CLEARMSG') {
       expect(ev.targetMsgId).toBe('abc-123')
       expect(ev.login).toBe('mod')
@@ -342,9 +354,7 @@ describe('parseIrcEvent CLEARMSG (single-message delete)', () => {
 
 describe('parseIrcEvent CLEARCHAT (timeout / ban / room-wide)', () => {
   it('timeout: target user-id + ban-duration', () => {
-    const ev = parseIrcEvent(
-      '@ban-duration=600;target-user-id=42 :tmi.twitch.tv CLEARCHAT #channel :bob',
-    )
+    const ev = parseIrcEvent('@ban-duration=600;target-user-id=42 :tmi.twitch.tv CLEARCHAT #channel :bob')
     if (ev?.type === 'CLEARCHAT') {
       expect(ev.targetUserId).toBe('42')
       expect(ev.banDuration).toBe(600)
@@ -423,9 +433,7 @@ describe('moderation presentation predicate (Toggle C, retroactive)', () => {
  */
 describe('parseBadges (global chat badges via PRIVMSG badges tag)', () => {
   function badgesOf(badgesTag: string) {
-    const msg = parseIrcLine(
-      `@badges=${badgesTag};display-name=X;id=b;tmi-sent-ts=0 :x!x@x PRIVMSG #c :hi`,
-    )
+    const msg = parseIrcLine(`@badges=${badgesTag};display-name=X;id=b;tmi-sent-ts=0 :x!x@x PRIVMSG #c :hi`)
     return msg!.badges
   }
 
@@ -435,27 +443,21 @@ describe('parseBadges (global chat badges via PRIVMSG badges tag)', () => {
     expect(b[0].id).toBe('lead_moderator')
     expect(b[0].version).toBe('1')
     expect(b[0].label).toBe('Lead Moderator')
-    expect(b[0].imageUrl).toBe(
-      'https://static-cdn.jtvnw.net/badges/v1/0822047b-65e0-46f2-94a9-d1091d685d33/1',
-    )
+    expect(b[0].imageUrl).toBe('https://static-cdn.jtvnw.net/badges/v1/0822047b-65e0-46f2-94a9-d1091d685d33/1')
   })
 
   it('picks the correct per-version UUID for a versioned badge (numeric version)', () => {
     const b = badgesOf('moments/5')
     expect(b).toHaveLength(1)
     // version 5 carries its own UUID, distinct from the tier-1 default
-    expect(b[0].imageUrl).toBe(
-      'https://static-cdn.jtvnw.net/badges/v1/c8a0d95a-856e-4097-9fc0-7765300a4f58/1',
-    )
+    expect(b[0].imageUrl).toBe('https://static-cdn.jtvnw.net/badges/v1/c8a0d95a-856e-4097-9fc0-7765300a4f58/1')
     expect(b[0].label).toBe('Moments Badge - Tier 5')
   })
 
   it('picks the correct per-version UUID for a versioned badge (color-version key)', () => {
     const b = badgesOf('predictions/blue-3')
     expect(b).toHaveLength(1)
-    expect(b[0].imageUrl).toBe(
-      'https://static-cdn.jtvnw.net/badges/v1/f2ab9a19-8ef7-4f9f-bd5d-9cf4e603f845/1',
-    )
+    expect(b[0].imageUrl).toBe('https://static-cdn.jtvnw.net/badges/v1/f2ab9a19-8ef7-4f9f-bd5d-9cf4e603f845/1')
     expect(b[0].label).toBe('Predicted Blue (3)')
   })
 
@@ -469,17 +471,13 @@ describe('parseBadges (global chat badges via PRIVMSG badges tag)', () => {
   it('a version absent from perVersion falls back to the default UUID + base label', () => {
     const b = badgesOf('moments/999')
     expect(b).toHaveLength(1)
-    expect(b[0].imageUrl).toBe(
-      'https://static-cdn.jtvnw.net/badges/v1/bf370830-d79a-497b-81c6-a365b2b60dda/1',
-    )
+    expect(b[0].imageUrl).toBe('https://static-cdn.jtvnw.net/badges/v1/bf370830-d79a-497b-81c6-a365b2b60dda/1')
     expect(b[0].label).toBe('Moments')
   })
 
   it('keeps an existing version-1 badge URL byte-identical (behavior-preserving)', () => {
     const b = badgesOf('broadcaster/1')
-    expect(b[0].imageUrl).toBe(
-      'https://static-cdn.jtvnw.net/badges/v1/5527c58c-fb7d-422d-b71b-f309dcb85cc1/1',
-    )
+    expect(b[0].imageUrl).toBe('https://static-cdn.jtvnw.net/badges/v1/5527c58c-fb7d-422d-b71b-f309dcb85cc1/1')
   })
 
   it('resolves an existing versioned badge to a valid size-1 URL (bits/100 fix)', () => {
@@ -487,9 +485,7 @@ describe('parseBadges (global chat badges via PRIVMSG badges tag)', () => {
     expect(b).toHaveLength(1)
     // The per-version UUID is selected; the trailing segment is the size (1),
     // not the IRC version (100) — which previously produced a 404.
-    expect(b[0].imageUrl).toBe(
-      'https://static-cdn.jtvnw.net/badges/v1/09d93036-e7ce-431c-9a9e-7044297133f2/1',
-    )
+    expect(b[0].imageUrl).toBe('https://static-cdn.jtvnw.net/badges/v1/09d93036-e7ce-431c-9a9e-7044297133f2/1')
     expect(b[0].label).toBe('100 bits')
   })
 })
@@ -502,9 +498,7 @@ describe('parseBadges (global chat badges via PRIVMSG badges tag)', () => {
  */
 describe('global badge map swap (cached map beats baseline)', () => {
   function badgesOf(badgesTag: string) {
-    const msg = parseIrcLine(
-      `@badges=${badgesTag};display-name=X;id=b;tmi-sent-ts=0 :x!x@x PRIVMSG #c :hi`,
-    )
+    const msg = parseIrcLine(`@badges=${badgesTag};display-name=X;id=b;tmi-sent-ts=0 :x!x@x PRIVMSG #c :hi`)
     return msg!.badges
   }
   afterEach(() => {
@@ -517,9 +511,7 @@ describe('global badge map swap (cached map beats baseline)', () => {
     })
     const b = badgesOf('broadcaster/1')
     expect(b).toHaveLength(1)
-    expect(b[0].imageUrl).toBe(
-      'https://static-cdn.jtvnw.net/badges/v1/11111111-1111-1111-1111-111111111111/1',
-    )
+    expect(b[0].imageUrl).toBe('https://static-cdn.jtvnw.net/badges/v1/11111111-1111-1111-1111-111111111111/1')
   })
 
   it('an empty cached map drops every badge (degrades gracefully, no throw)', () => {
@@ -536,9 +528,7 @@ describe('global badge map swap (cached map beats baseline)', () => {
       },
     })
     const b = badgesOf('bits/100')
-    expect(b[0].imageUrl).toBe(
-      'https://static-cdn.jtvnw.net/badges/v1/22222222-2222-2222-2222-222222222222/1',
-    )
+    expect(b[0].imageUrl).toBe('https://static-cdn.jtvnw.net/badges/v1/22222222-2222-2222-2222-222222222222/1')
   })
 })
 
@@ -551,8 +541,16 @@ describe('global badge map swap (cached map beats baseline)', () => {
  */
 describe('per-channel badge override (resolveBadgeImageUrl)', () => {
   // A message parsed against the global map carries the global default art.
-  const subBadge = { id: 'subscriber', version: '12', imageUrl: 'https://static-cdn.jtvnw.net/badges/v1/GLOBAL-SUB-UUID/1' }
-  const founderBadge = { id: 'founder', version: '0', imageUrl: 'https://static-cdn.jtvnw.net/badges/v1/GLOBAL-FOUNDER-UUID/1' }
+  const subBadge = {
+    id: 'subscriber',
+    version: '12',
+    imageUrl: 'https://static-cdn.jtvnw.net/badges/v1/GLOBAL-SUB-UUID/1',
+  }
+  const founderBadge = {
+    id: 'founder',
+    version: '0',
+    imageUrl: 'https://static-cdn.jtvnw.net/badges/v1/GLOBAL-FOUNDER-UUID/1',
+  }
   // A channel's custom art (from User.broadcastBadges).
   const channelOverride = {
     subscriber: { '12': 'cccccccc-cccc-cccc-cccc-cccccccccccc' },

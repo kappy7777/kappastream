@@ -63,7 +63,9 @@ function makeVideo(): HTMLVideoElement {
   let time = 0
   Object.defineProperty(el, 'currentTime', {
     get: () => time,
-    set: (v: number) => { time = v },
+    set: (v: number) => {
+      time = v
+    },
     configurable: true,
   })
   // A single-entry seekable window ending at 600s (the live-edge fallback).
@@ -97,10 +99,12 @@ describe('PlaybackSession.attachHls', () => {
     const video = makeVideo()
     const session = new PlaybackSession()
     const events: string[] = []
-    const p = session.attachHls(baseOpts(video, {
-      onManifestParsed: () => events.push('manifest'),
-      onPlayed: () => events.push('played'),
-    }))
+    const p = session.attachHls(
+      baseOpts(video, {
+        onManifestParsed: () => events.push('manifest'),
+        onPlayed: () => events.push('played'),
+      }),
+    )
     const inst = lastInstance()
     emit(inst, 'hlsManifestParsed', {})
     const r = await p
@@ -115,9 +119,11 @@ describe('PlaybackSession.attachHls', () => {
     const video = makeVideo()
     const session = new PlaybackSession()
     const gen = session.nextGeneration()
-    const p = session.attachHls(baseOpts(video, {
-      isCurrent: () => gen === session.generation,
-    }))
+    const p = session.attachHls(
+      baseOpts(video, {
+        isCurrent: () => gen === session.generation,
+      }),
+    )
     session.nextGeneration() // supersede the in-flight attach
     emit(lastInstance(), 'hlsManifestParsed', {})
     const r = await p
@@ -158,9 +164,11 @@ describe('PlaybackSession.attachHls', () => {
   it('lets the VOD call site keep its own error taxonomy via formatFatalError', async () => {
     const video = makeVideo()
     const session = new PlaybackSession()
-    const p = session.attachHls(baseOpts(video, {
-      formatFatalError: (d) => 'media error: ' + d.type,
-    }))
+    const p = session.attachHls(
+      baseOpts(video, {
+        formatFatalError: (d) => 'media error: ' + d.type,
+      }),
+    )
     emit(lastInstance(), 'hlsError', { fatal: true, type: 'mediaError', details: 'bufferStalledError' })
     expect(await p).toEqual({ ok: false, error: 'media error: mediaError' })
   })
@@ -276,7 +284,11 @@ describe('PlaybackSession stall recovery', () => {
     vi.mocked(video.play).mockRejectedValue(new Error('NotAllowedError'))
     const session = new PlaybackSession()
     let blocked = false
-    session.scheduleStallRecover(video, { onPlayBlocked: () => { blocked = true } })
+    session.scheduleStallRecover(video, {
+      onPlayBlocked: () => {
+        blocked = true
+      },
+    })
     await vi.advanceTimersByTimeAsync(1_000)
     expect(blocked).toBe(true)
     expect(video.currentTime).toBe(598.5) // the seek still happened before the resume attempt
@@ -286,7 +298,11 @@ describe('PlaybackSession stall recovery', () => {
     const video = makeVideo()
     const session = new PlaybackSession()
     let blocked = false
-    session.scheduleStallRecover(video, { onPlayBlocked: () => { blocked = true } })
+    session.scheduleStallRecover(video, {
+      onPlayBlocked: () => {
+        blocked = true
+      },
+    })
     await vi.advanceTimersByTimeAsync(1_000)
     expect(blocked).toBe(false)
   })
@@ -310,7 +326,9 @@ describe('PlaybackSession.attachNative', () => {
     let played = false
     const r = await session.attachNative(video, 'https://example.test/x.m3u8', {
       errorPrefix: 'native HLS play failed: ',
-      onPlayed: () => { played = true },
+      onPlayed: () => {
+        played = true
+      },
     })
     expect(r).toEqual({ ok: true })
     expect(played).toBe(true)

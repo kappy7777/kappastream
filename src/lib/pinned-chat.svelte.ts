@@ -34,11 +34,7 @@
 // lifetime, failures retried at most once per USER_ID_RETRY_MS window —
 // never per poll.
 
-import {
-  fetchPinnedChatMessages,
-  GQL_REFRESH_INTERVAL_MS,
-  type PinnedChatMessageData,
-} from './gql'
+import { fetchPinnedChatMessages, GQL_REFRESH_INTERVAL_MS, type PinnedChatMessageData } from './gql'
 import { parseBadges, normalizeColor, type BadgeInfo } from './irc'
 import { getTwitchUserId, type EmoteRange } from './emotes'
 import { settings } from './settings.svelte.ts'

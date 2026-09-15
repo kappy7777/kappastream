@@ -220,9 +220,7 @@ describe('getters', () => {
 })
 
 describe('apply() — the explicit-click path', () => {
-  async function makeAvailable(
-    downloadAndInstall: FakeUpdateOpts['downloadAndInstall'],
-  ): Promise<void> {
+  async function makeAvailable(downloadAndInstall: FakeUpdateOpts['downloadAndInstall']): Promise<void> {
     updater.checkImpl = async () => fakeUpdate({ downloadAndInstall })
     await store.check()
   }

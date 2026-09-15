@@ -81,28 +81,39 @@
     // by the live stall recovery.
     if (mediaKind === 'mp4') {
       videoEl.src = url
-      videoEl.play().then(() => { loading = false }).catch(() => {
-        needsGesture = true
-        loading = false
-      })
+      videoEl
+        .play()
+        .then(() => {
+          loading = false
+        })
+        .catch(() => {
+          needsGesture = true
+          loading = false
+        })
       return
     }
 
     if (Hls.isSupported()) {
-      void playback.attachHls({
-        video: videoEl,
-        url,
-        lowLatency: settings.lowLatency,
-        isCurrent: () => gen === playback.generation,
-        onManifestParsed: () => { loading = false },
-        onPlayBlocked: () => { needsGesture = true },
-      }).then((r) => {
-        if (gen !== playback.generation) return // superseded by a newer loadSource
-        if (!r.ok) {
-          errorMsg = t('pip_streamError')
-          loading = false
-        }
-      })
+      void playback
+        .attachHls({
+          video: videoEl,
+          url,
+          lowLatency: settings.lowLatency,
+          isCurrent: () => gen === playback.generation,
+          onManifestParsed: () => {
+            loading = false
+          },
+          onPlayBlocked: () => {
+            needsGesture = true
+          },
+        })
+        .then((r) => {
+          if (gen !== playback.generation) return // superseded by a newer loadSource
+          if (!r.ok) {
+            errorMsg = t('pip_streamError')
+            loading = false
+          }
+        })
       return
     }
     if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
@@ -154,7 +165,11 @@
     needsGesture = false
     // Explicit play intent (also cleared by the onplaying handler).
     playback.userPaused = false
-    try { await videoEl.play() } catch { needsGesture = true }
+    try {
+      await videoEl.play()
+    } catch {
+      needsGesture = true
+    }
   }
 
   // ---- live stall recovery (mirrors App.svelte; live-only) ----
@@ -167,7 +182,12 @@
     // A blocked recovery resume must surface as the tap-for-sound prompt —
     // PiP has no control-bar fallback, and a silently dead window is the
     // one failure mode this surface cannot afford.
-    if (isLive && videoEl) playback.scheduleStallRecover(videoEl, { onPlayBlocked: () => { needsGesture = true } })
+    if (isLive && videoEl)
+      playback.scheduleStallRecover(videoEl, {
+        onPlayBlocked: () => {
+          needsGesture = true
+        },
+      })
   }
 
   function onVideoPlaying(): void {
@@ -177,7 +197,11 @@
 
   function onPipPause(): void {
     if (shouldRecoverStallAfterPause(isLive, playback.userPaused) && videoEl) {
-      playback.scheduleStallRecover(videoEl, { onPlayBlocked: () => { needsGesture = true } })
+      playback.scheduleStallRecover(videoEl, {
+        onPlayBlocked: () => {
+          needsGesture = true
+        },
+      })
     }
   }
 
@@ -192,7 +216,11 @@
     } catch {
       /* ignore — send closed without rect */
     }
-    try { await emit(EV_CLOSED, { rect }) } catch { /* ignore */ }
+    try {
+      await emit(EV_CLOSED, { rect })
+    } catch {
+      /* ignore */
+    }
   }
 
   async function requestClose(): Promise<void> {
@@ -201,7 +229,11 @@
     // destroy. Calling close() (not destroy()) keeps the close path uniform
     // whether the user hits our close button, Escape, or the WM shortcut.
     if (!isTauri()) return
-    try { await getCurrentWindow().close() } catch { /* ignore */ }
+    try {
+      await getCurrentWindow().close()
+    } catch {
+      /* ignore */
+    }
   }
 
   // The PiP window is borderless (decorations:false), so KWin/others give it
@@ -220,7 +252,10 @@
   function bumpControls(): void {
     controlsVisible = true
     if (hideTimer) clearTimeout(hideTimer)
-    hideTimer = setTimeout(() => { hideTimer = null; controlsVisible = false }, 2_500)
+    hideTimer = setTimeout(() => {
+      hideTimer = null
+      controlsVisible = false
+    }, 2_500)
   }
 
   function onKeydown(e: KeyboardEvent): void {
@@ -233,7 +268,11 @@
   }
 
   onMount(async () => {
-    if (!isTauri()) { errorMsg = t('pip_notInTauri'); loading = false; return }
+    if (!isTauri()) {
+      errorMsg = t('pip_notInTauri')
+      loading = false
+      return
+    }
     const win = getCurrentWindow()
 
     // Re-assert always-on-top once the window is mapped. tao applies the
@@ -241,13 +280,20 @@
     // a no-op (xdg-shell has no always-on-top), so this mainly solidifies the
     // state on X11. On KWin Wayland the only reliable fix is a Window Rule
     // (see README/AGENTS notes); nothing the app can do there.
-    try { await win.setAlwaysOnTop(true) } catch { /* ignore */ }
+    try {
+      await win.setAlwaysOnTop(true)
+    } catch {
+      /* ignore */
+    }
 
     const uInit = await listen<InitPayload>(EV_INIT, (e) => {
       const p = e.payload
       volume = typeof p.volume === 'number' ? Math.max(0, Math.min(1, p.volume)) : 1
       muted = !!p.muted
-      if (videoEl) { videoEl.volume = volume; videoEl.muted = muted }
+      if (videoEl) {
+        videoEl.volume = volume
+        videoEl.muted = muted
+      }
       loadSource(p.url, p.mediaKind ?? 'hls', p.isLive)
     })
     unlisteners.push(uInit)
@@ -257,7 +303,9 @@
     })
     unlisteners.push(uStream)
 
-    const uDoClose = await listen(EV_DO_CLOSE, () => { void requestClose() })
+    const uDoClose = await listen(EV_DO_CLOSE, () => {
+      void requestClose()
+    })
     unlisteners.push(uDoClose)
 
     // Snap the window to exact 16:9 after a resize settles. setSize keeps the
@@ -275,7 +323,9 @@
           const targetH = Math.round((width * 9) / 16)
           if (Math.abs(height - targetH) <= 1) return
           suppressSnapUntil = Date.now() + 500
-          void win.setSize(new PhysicalSize(width, targetH)).catch(() => { /* ignore */ })
+          void win.setSize(new PhysicalSize(width, targetH)).catch(() => {
+            /* ignore */
+          })
         }, 250)
       })
       unlisteners.push(uResize)
@@ -294,7 +344,9 @@
 
     // Fallback: if the webview is torn down without a close-requested event
     // (e.g. process exit), best-effort signal closed first.
-    window.addEventListener('pagehide', () => { void emitClosedWithRect() })
+    window.addEventListener('pagehide', () => {
+      void emitClosedWithRect()
+    })
 
     bumpControls()
     void emit(EV_READY)
@@ -304,26 +356,35 @@
     playback.dispose(videoEl)
     if (hideTimer) clearTimeout(hideTimer)
     if (snapTimer) clearTimeout(snapTimer)
-    for (const u of unlisteners) { try { u() } catch { /* ignore */ } }
+    for (const u of unlisteners) {
+      try {
+        u()
+      } catch {
+        /* ignore */
+      }
+    }
     unlisteners.length = 0
   })
 </script>
 
 <svelte:window onkeydown={onKeydown} onmousemove={bumpControls} />
 
-<div
-  class="pip-root"
-  data-tauri-drag-region
-  class:controls-visible={controlsVisible}
->
+<div class="pip-root" data-tauri-drag-region class:controls-visible={controlsVisible}>
   <video
     bind:this={videoEl}
     class="pip-video"
     playsinline
     data-tauri-drag-region
     onclick={gesturePlay}
-    onplay={() => { paused = false; bumpControls() }}
-    onpause={() => { paused = true; bumpControls(); onPipPause() }}
+    onplay={() => {
+      paused = false
+      bumpControls()
+    }}
+    onpause={() => {
+      paused = true
+      bumpControls()
+      onPipPause()
+    }}
     onwaiting={onVideoWaiting}
     onplaying={onVideoPlaying}
   ></video>
@@ -358,12 +419,12 @@
     >
       {#if paused}
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path d="M8 5v14l11-7z" fill="currentColor"/>
+          <path d="M8 5v14l11-7z" fill="currentColor" />
         </svg>
       {:else}
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <rect x="6" y="5" width="4" height="14" fill="currentColor"/>
-          <rect x="14" y="5" width="4" height="14" fill="currentColor"/>
+          <rect x="6" y="5" width="4" height="14" fill="currentColor" />
+          <rect x="14" y="5" width="4" height="14" fill="currentColor" />
         </svg>
       {/if}
     </button>
@@ -377,11 +438,17 @@
     >
       {#if muted}
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z" fill="currentColor"/>
+          <path
+            d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z"
+            fill="currentColor"
+          />
         </svg>
       {:else}
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" fill="currentColor"/>
+          <path
+            d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"
+            fill="currentColor"
+          />
         </svg>
       {/if}
     </button>
@@ -399,21 +466,20 @@
 
     <div class="pip-spacer" aria-hidden="true"></div>
 
-    <button
-      type="button"
-      class="pip-btn"
-      onclick={requestClose}
-      aria-label={t('pip_close')}
-    >
+    <button type="button" class="pip-btn" onclick={requestClose} aria-label={t('pip_close')}>
       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-        <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" fill="currentColor"/>
+        <path
+          d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
+          fill="currentColor"
+        />
       </svg>
     </button>
   </div>
 </div>
 
 <style>
-  :global(html), :global(body) {
+  :global(html),
+  :global(body) {
     margin: 0;
     padding: 0;
     height: 100%;
@@ -447,7 +513,9 @@
     left: 50%;
     transform: translate(-50%, -50%);
     color: #fff;
-    font: 600 13px/1 system-ui, sans-serif;
+    font:
+      600 13px/1 system-ui,
+      sans-serif;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
     pointer-events: none;
     z-index: 30;
@@ -465,7 +533,9 @@
     border-radius: 6px;
     background: rgba(0, 0, 0, 0.6);
     color: #fff;
-    font: 600 13px/1 system-ui, sans-serif;
+    font:
+      600 13px/1 system-ui,
+      sans-serif;
     cursor: pointer;
     z-index: 30;
   }
@@ -503,10 +573,34 @@
     position: absolute;
     z-index: 20;
   }
-  .rz-left { top: 8px; bottom: 8px; left: 0; width: 6px; cursor: ew-resize; }
-  .rz-right { top: 8px; bottom: 8px; right: 0; width: 6px; cursor: ew-resize; }
-  .rz-bl { bottom: 0; left: 0; width: 12px; height: 12px; cursor: nesw-resize; }
-  .rz-br { bottom: 0; right: 0; width: 12px; height: 12px; cursor: nwse-resize; }
+  .rz-left {
+    top: 8px;
+    bottom: 8px;
+    left: 0;
+    width: 6px;
+    cursor: ew-resize;
+  }
+  .rz-right {
+    top: 8px;
+    bottom: 8px;
+    right: 0;
+    width: 6px;
+    cursor: ew-resize;
+  }
+  .rz-bl {
+    bottom: 0;
+    left: 0;
+    width: 12px;
+    height: 12px;
+    cursor: nesw-resize;
+  }
+  .rz-br {
+    bottom: 0;
+    right: 0;
+    width: 12px;
+    height: 12px;
+    cursor: nwse-resize;
+  }
   .pip-btn {
     flex: 0 0 auto;
     display: inline-flex;

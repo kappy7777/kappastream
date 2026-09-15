@@ -99,12 +99,7 @@
     aria-modal="true"
     aria-labelledby="welcome-title"
   >
-    <button
-      type="button"
-      class="welcome-close"
-      onclick={dismiss}
-      aria-label={t('close')}
-    >×</button>
+    <button type="button" class="welcome-close" onclick={dismiss} aria-label={t('close')}>×</button>
 
     {#if mode === 'welcome'}
       <h2 id="welcome-title" class="welcome-title">{t('welcome_title')}</h2>
@@ -151,7 +146,9 @@
            every recorded release, newest first, scrollable — the running
            version leads with the accent header. Sections (Added / Changed /
            Fixed) mirror the CHANGELOG's headings per version. -->
-      <h2 id="welcome-title" class="welcome-title">{mode === 'changelog' ? t('about_changelog') : t('whatsnew_title')}</h2>
+      <h2 id="welcome-title" class="welcome-title">
+        {mode === 'changelog' ? t('about_changelog') : t('whatsnew_title')}
+      </h2>
       <p class="welcome-version">v{__APP_VERSION__}</p>
       <div class="welcome-log">
         {#if noteVersions.length === 0}
@@ -160,7 +157,9 @@
           {#each noteVersions as version, idx (version)}
             {@const vn = releaseNotesFor(version)}
             <section class="welcome-version-block" class:welcome-version-block--first={idx === 0}>
-              <h3 class="welcome-version-h" class:welcome-version-h--latest={version === __APP_VERSION__}>v{version}</h3>
+              <h3 class="welcome-version-h" class:welcome-version-h--latest={version === __APP_VERSION__}>
+                v{version}
+              </h3>
               {#if vn.added && vn.added.length > 0}
                 <p class="welcome-section-h">{t('whatsnew_added')}</p>
                 <ul class="welcome-list">
@@ -192,11 +191,13 @@
     {/if}
 
     <div class="welcome-actions">
-      <button
-        type="button"
-        class="welcome-primary"
-        onclick={dismiss}
-      >{mode === 'welcome' ? t('welcome_getStarted') : mode === 'changelog' ? t('close') : t('whatsnew_continue')}</button>
+      <button type="button" class="welcome-primary" onclick={dismiss}
+        >{mode === 'welcome'
+          ? t('welcome_getStarted')
+          : mode === 'changelog'
+            ? t('close')
+            : t('whatsnew_continue')}</button
+      >
     </div>
   </div>
 {/if}

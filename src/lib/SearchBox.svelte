@@ -239,13 +239,7 @@
             onclick={() => choose(r)}
             onmouseenter={() => (activeIndex = i)}
           >
-            <img
-              class="search-opt-avatar"
-              src={r.avatarUrl || ''}
-              alt=""
-              loading="lazy"
-              onerror={onAvatarError}
-            />
+            <img class="search-opt-avatar" src={r.avatarUrl || ''} alt="" loading="lazy" onerror={onAvatarError} />
             <div class="search-opt-main">
               <span class="search-opt-name">{r.displayName}</span>
               {#if r.displayName.toLowerCase() !== r.login}
@@ -288,7 +282,9 @@
     color: var(--text-primary);
     font-size: 13px;
     outline: none;
-    transition: border-color 150ms, box-shadow 150ms;
+    transition:
+      border-color 150ms,
+      box-shadow 150ms;
   }
 
   .channel-input::placeholder {
@@ -323,8 +319,14 @@
   }
 
   @keyframes search-in {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .search-status {

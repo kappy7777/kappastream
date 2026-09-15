@@ -54,7 +54,18 @@ function validFile(name = 'My Theme'): string {
 
 describe('colour validation (strict allowlist — CSS injection impossible)', () => {
   it('accepts hex 3/4/6/8 and in-range rgb()/rgba()', () => {
-    for (const v of ['#fff', '#ffff', '#EFEFF1', '#EFEFF1FF', 'rgb(14, 14, 16)', 'rgb(0,0,0)', 'rgba(239, 239, 241, 0.25)', 'rgba(0,0,0,1)', 'rgba(0,0,0,0.5)', 'rgba(0,0,0,0)']) {
+    for (const v of [
+      '#fff',
+      '#ffff',
+      '#EFEFF1',
+      '#EFEFF1FF',
+      'rgb(14, 14, 16)',
+      'rgb(0,0,0)',
+      'rgba(239, 239, 241, 0.25)',
+      'rgba(0,0,0,1)',
+      'rgba(0,0,0,0.5)',
+      'rgba(0,0,0,0)',
+    ]) {
       expect(S.isValidColorValue(v)).toBe(true)
     }
   })
@@ -124,7 +135,11 @@ describe('storage — malformed data never throws, never partially applies', () 
     const good = { id: 'custom-good', label: 'Good', values: validValues() }
     const badColor = { id: 'custom-bad', label: 'Bad', values: { ...validValues(), '--bg-app': 'red; url(x)' } }
     const unknownProp = { id: 'custom-extra', label: 'Extra', values: { ...validValues(), '--evil-prop': '#fff' } }
-    const missingProp = { id: 'custom-missing', label: 'Missing', values: { ...validValues(), ['--bg-app' as const]: undefined } }
+    const missingProp = {
+      id: 'custom-missing',
+      label: 'Missing',
+      values: { ...validValues(), ['--bg-app' as const]: undefined },
+    }
     localStorage.setItem(
       'app-custom-themes-v1',
       JSON.stringify({ v: 1, themes: [good, badColor, unknownProp, missingProp] }),
@@ -202,8 +217,13 @@ describe('import / export round-trip', () => {
 
   it('rejects non-JSON, wrong marker, unknown properties, missing properties, bad colours', () => {
     expect(S.importAndStoreThemeJson('not json at all')).toMatchObject({ ok: false, reason: 'malformed' })
-    expect(S.importAndStoreThemeJson(JSON.stringify({ name: 'x', values: validValues() }))).toMatchObject({ ok: false, reason: 'malformed' })
-    expect(S.importAndStoreThemeJson(JSON.stringify({ kappastreamTheme: 2, name: 'x', values: validValues() }))).toMatchObject({ ok: false, reason: 'malformed' })
+    expect(S.importAndStoreThemeJson(JSON.stringify({ name: 'x', values: validValues() }))).toMatchObject({
+      ok: false,
+      reason: 'malformed',
+    })
+    expect(
+      S.importAndStoreThemeJson(JSON.stringify({ kappastreamTheme: 2, name: 'x', values: validValues() })),
+    ).toMatchObject({ ok: false, reason: 'malformed' })
     const extra = { ...JSON.parse(validFile()), values: { ...validValues(), '--hax': '#fff' } }
     expect(S.importAndStoreThemeJson(JSON.stringify(extra))).toMatchObject({ ok: false, reason: 'malformed' })
     const missing = { ...JSON.parse(validFile()), values: { ...validValues() } }
@@ -216,7 +236,10 @@ describe('import / export round-trip', () => {
   })
 
   it('enforces the file-size cap before parsing', () => {
-    expect(S.importAndStoreThemeJson('x'.repeat(S.MAX_THEME_FILE_BYTES + 1))).toMatchObject({ ok: false, reason: 'too-large' })
+    expect(S.importAndStoreThemeJson('x'.repeat(S.MAX_THEME_FILE_BYTES + 1))).toMatchObject({
+      ok: false,
+      reason: 'too-large',
+    })
     expect(S.listCustomThemes()).toHaveLength(0)
   })
 
@@ -280,9 +303,17 @@ describe('editor surface — only properties that actually change something', ()
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = `${dir}/${entry.name}`
-        if (entry.isDirectory()) { walk(full); continue }
+        if (entry.isDirectory()) {
+          walk(full)
+          continue
+        }
         if (!/\.(svelte|ts|js)$/.test(entry.name) || entry.name.includes('.test.')) continue
-        if (full.includes('src/lib/custom-themes') || full.includes('src/lib/settings.svelte') || full.includes('src/lib/themes.test')) continue
+        if (
+          full.includes('src/lib/custom-themes') ||
+          full.includes('src/lib/settings.svelte') ||
+          full.includes('src/lib/themes.test')
+        )
+          continue
         const src = readFileSync(full, 'utf8')
         if (src.includes('var(--bg-chat') || src.includes('var(--bg-deep')) offenders.push(full)
       }

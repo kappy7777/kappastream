@@ -212,7 +212,8 @@ export const en = {
 
   // ---- App.svelte: About modal --------------------------------------------
   about_tagline: 'Twitch, stripped down to what matters: the stream and the chat.',
-  about_body: 'No login, project telemetry, analytics, or project-operated backend. Chat connects anonymously — nothing tied to who you are. Network calls go only to the services needed to watch: Twitch infrastructure and the open community APIs (7TV, BTTV, FFZ) that power emotes and stream info.',
+  about_body:
+    'No login, project telemetry, analytics, or project-operated backend. Chat connects anonymously — nothing tied to who you are. Network calls go only to the services needed to watch: Twitch infrastructure and the open community APIs (7TV, BTTV, FFZ) that power emotes and stream info.',
   about_streamlink: 'Stream resolution powered by streamlink.',
   about_changelog: 'Changelog',
   about_bitcoin: 'Bitcoin',
@@ -410,7 +411,8 @@ export const en = {
   welcome_feat5: 'Up to four streams at once, picture-in-picture, handoff to mpv',
   welcome_feat6: '34 themes',
   welcome_privacy: 'Privacy',
-  welcome_privacyBody: 'No account, no tracking, no analytics, no server run by the project. Chat connects anonymously — nothing is tied to your identity. The services kappastream contacts are listed in the About dialog.',
+  welcome_privacyBody:
+    'No account, no tracking, no analytics, no server run by the project. Chat connects anonymously — nothing is tied to your identity. The services kappastream contacts are listed in the About dialog.',
   welcome_streamlinkOk: "Streamlink detected — you're good to go.",
   welcome_streamlinkMissing: 'Streamlink is required to play streams.',
   welcome_installLabel: 'Installation',
@@ -448,7 +450,8 @@ export const en = {
   settings_ctExportFailed: 'Export failed',
 
   // ---- Custom theme editor: help tooltips ---------------------------------
-  settings_ctInfoBackgrounds: 'Colours of the surfaces behind everything — the app base, panels, inputs and hover states.',
+  settings_ctInfoBackgrounds:
+    'Colours of the surfaces behind everything — the app base, panels, inputs and hover states.',
   settings_ctInfoText: 'The three text tones: messages and titles, descriptions, and dim hints.',
   settings_ctInfoAccent: 'The highlight colour for buttons and active states, plus the LIVE/error colour.',
   settings_ctInfoChrome: 'Borders, slider tracks and menu shadows — the finishing touches.',

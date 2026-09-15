@@ -1,13 +1,26 @@
 <script lang="ts">
   import { slide } from 'svelte/transition'
   import { onMount } from 'svelte'
-  import { settings, THEMES, UI_SCALE_PRESETS, UI_SCALE_MIN, UI_SCALE_MAX, UI_SCALE_DEFAULT, MAX_MUTED_USERS, type ThemeId } from './settings.svelte.ts'
+  import {
+    settings,
+    THEMES,
+    UI_SCALE_PRESETS,
+    UI_SCALE_MIN,
+    UI_SCALE_MAX,
+    UI_SCALE_DEFAULT,
+    MAX_MUTED_USERS,
+    type ThemeId,
+  } from './settings.svelte.ts'
   import { favoritesStore, type FavoriteStatus } from './favorites.svelte'
   import { sleepTimer, formatSleepRemaining, SLEEP_PRESETS } from './sleep-timer.svelte'
   import { t, getLocale, setLocale, LOCALES } from './i18n/index.svelte'
   import {
-    listCustomThemes, getCustomTheme, importAndStoreThemeJson,
-    MAX_CUSTOM_THEMES, MAX_THEME_FILE_BYTES, type CustomTheme,
+    listCustomThemes,
+    getCustomTheme,
+    importAndStoreThemeJson,
+    MAX_CUSTOM_THEMES,
+    MAX_THEME_FILE_BYTES,
+    type CustomTheme,
   } from './custom-themes.svelte'
   import CustomThemeEditor from './CustomThemeEditor.svelte'
 
@@ -33,9 +46,7 @@
     return THEMES.find((tmeta) => tmeta.id === settings.theme)?.label ?? t('theme')
   })
 
-  let currentLangLabel = $derived(
-    LOCALES.find((loc) => loc.id === getLocale())?.label ?? t('settings_language'),
-  )
+  let currentLangLabel = $derived(LOCALES.find((loc) => loc.id === getLocale())?.label ?? t('settings_language'))
 
   // Compact state shown on the Chat disclosure row. Surfaces the headline
   // (chat visible or hidden) so the panel is scannable without expanding it.
@@ -100,9 +111,7 @@
     }
   }
 
-  let sleepSummary = $derived(
-    sleepTimer.armed ? formatSleepRemaining(sleepTimer.remainingMs) : t('off'),
-  )
+  let sleepSummary = $derived(sleepTimer.armed ? formatSleepRemaining(sleepTimer.remainingMs) : t('off'))
 
   function pickTheme(id: ThemeId): void {
     settings.setTheme(id)
@@ -121,7 +130,9 @@
     themeImportStatus = msg
     themeImportError = error
     if (themeImportTimer) clearTimeout(themeImportTimer)
-    themeImportTimer = setTimeout(() => { themeImportStatus = '' }, 6000)
+    themeImportTimer = setTimeout(() => {
+      themeImportStatus = ''
+    }, 6000)
   }
 
   function triggerThemeImport(): void {
@@ -179,7 +190,9 @@
   function setMuteStatus(msg: string): void {
     muteStatus = msg
     if (muteStatusTimer) clearTimeout(muteStatusTimer)
-    muteStatusTimer = setTimeout(() => { muteStatus = '' }, 3000)
+    muteStatusTimer = setTimeout(() => {
+      muteStatus = ''
+    }, 3000)
   }
   function addMuted(): void {
     const raw = muteInput
@@ -187,9 +200,7 @@
     if (!raw.trim()) return
     const added = settings.addMutedUser(raw)
     if (!added) {
-      setMuteStatus(
-        settings.mutedUsers.length >= MAX_MUTED_USERS ? t('settings_muteFull') : t('settings_muteInvalid'),
-      )
+      setMuteStatus(settings.mutedUsers.length >= MAX_MUTED_USERS ? t('settings_muteFull') : t('settings_muteInvalid'))
     }
   }
   function removeMuted(name: string): void {
@@ -209,7 +220,7 @@
     return () => unsubscribe()
   })
 
-async function exportFavorites(): Promise<void> {
+  async function exportFavorites(): Promise<void> {
     if (favoritesCount === 0) return
     const json = favoritesStore.exportJson()
     const d = new Date()
@@ -217,9 +228,11 @@ async function exportFavorites(): Promise<void> {
     const stamp = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
     const filename = 'twitch-favorites-' + stamp + '.json'
     try {
-      await (window as unknown as {
-        __TAURI_INTERNALS__: { invoke(cmd: string, args?: unknown): Promise<unknown> }
-      }).__TAURI_INTERNALS__.invoke('save_favorites_export', { content: json, suggestedFilename: filename })
+      await (
+        window as unknown as {
+          __TAURI_INTERNALS__: { invoke(cmd: string, args?: unknown): Promise<unknown> }
+        }
+      ).__TAURI_INTERNALS__.invoke('save_favorites_export', { content: json, suggestedFilename: filename })
     } catch (err) {
       if (import.meta.env.DEV) console.error('favorites export failed', err)
     }
@@ -265,7 +278,9 @@ async function exportFavorites(): Promise<void> {
       if (result.invalid > 0) parts.push(t('settings_importInvalid', { n: result.invalid }))
       importStatus = t('settings_importSummary', { summary: parts.join(', ') })
     }
-    setTimeout(() => { importStatus = '' }, 6000)
+    setTimeout(() => {
+      importStatus = ''
+    }, 6000)
   }
 
   $effect(() => {
@@ -309,7 +324,10 @@ async function exportFavorites(): Promise<void> {
     aria-expanded={open}
   >
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-      <path d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.31-.09.63-.09.94s.02.63.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" fill="currentColor"/>
+      <path
+        d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.31-.09.63-.09.94s.02.63.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"
+        fill="currentColor"
+      />
     </svg>
   </button>
 
@@ -326,7 +344,14 @@ async function exportFavorites(): Promise<void> {
           <span class="disclosure-label">{t('theme')}</span>
           <span class="disclosure-value">{currentThemeLabel}</span>
           <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-            <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            <path
+              d="M3 5 L6 8 L9 5"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         </button>
         {#if themeOpen}
@@ -363,10 +388,17 @@ async function exportFavorites(): Promise<void> {
                 <button
                   type="button"
                   class="ct-list-edit"
-                  onclick={() => { themeEditorFor = ct }}
+                  onclick={() => {
+                    themeEditorFor = ct
+                  }}
                   aria-label={t('settings_ctEdit') + ' — ' + ct.label}
                 >
-                  <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" fill="currentColor"/></svg>
+                  <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"
+                    ><path
+                      d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
+                      fill="currentColor"
+                    /></svg
+                  >
                 </button>
               </div>
             {/each}
@@ -374,12 +406,23 @@ async function exportFavorites(): Promise<void> {
               <p class="ct-empty-hint">{t('settings_ctEmpty')}</p>
             {/if}
             <div class="seg" role="group" aria-label={t('settings_customThemes')}>
-              <button type="button" class="seg-btn" onclick={() => { themeEditorFor = null }} aria-label={t('settings_ctNew')}>
-                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" fill="currentColor"/></svg>
+              <button
+                type="button"
+                class="seg-btn"
+                onclick={() => {
+                  themeEditorFor = null
+                }}
+                aria-label={t('settings_ctNew')}
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"
+                  ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" fill="currentColor" /></svg
+                >
                 <span style="margin-left: 6px;">{t('settings_ctNew')}</span>
               </button>
               <button type="button" class="seg-btn" onclick={triggerThemeImport} aria-label={t('settings_ctImport')}>
-                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z" fill="currentColor"/></svg>
+                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"
+                  ><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z" fill="currentColor" /></svg
+                >
                 <span style="margin-left: 6px;">{t('settings_ctImport')}</span>
               </button>
             </div>
@@ -408,7 +451,14 @@ async function exportFavorites(): Promise<void> {
           <span class="disclosure-label">{t('settings_chat')}</span>
           <span class="disclosure-value">{chatSummary}</span>
           <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-            <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            <path
+              d="M3 5 L6 8 L9 5"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         </button>
         {#if chatOpen}
@@ -423,7 +473,12 @@ async function exportFavorites(): Promise<void> {
                 aria-checked={settings.chatVisible}
                 aria-labelledby="show-chat-label"
                 onclick={() => settings.toggleChatVisible()}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatVisible() } }}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    settings.toggleChatVisible()
+                  }
+                }}
               >
                 <span class="toggle-knob"></span>
               </span>
@@ -438,7 +493,12 @@ async function exportFavorites(): Promise<void> {
                 aria-checked={settings.chatTimestamps}
                 aria-labelledby="chat-timestamps-label"
                 onclick={() => settings.toggleChatTimestamps()}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatTimestamps() } }}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    settings.toggleChatTimestamps()
+                  }
+                }}
               >
                 <span class="toggle-knob"></span>
               </span>
@@ -457,7 +517,12 @@ async function exportFavorites(): Promise<void> {
                 aria-checked={settings.chatNoticesSub}
                 aria-labelledby="chat-notices-sub-label"
                 onclick={() => settings.toggleChatNoticesSub()}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatNoticesSub() } }}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    settings.toggleChatNoticesSub()
+                  }
+                }}
               >
                 <span class="toggle-knob"></span>
               </span>
@@ -475,7 +540,12 @@ async function exportFavorites(): Promise<void> {
                 aria-checked={settings.chatNoticesGift}
                 aria-labelledby="chat-notices-gift-label"
                 onclick={() => settings.toggleChatNoticesGift()}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatNoticesGift() } }}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    settings.toggleChatNoticesGift()
+                  }
+                }}
               >
                 <span class="toggle-knob"></span>
               </span>
@@ -493,7 +563,12 @@ async function exportFavorites(): Promise<void> {
                 aria-checked={settings.chatNoticesRaid}
                 aria-labelledby="chat-notices-raid-label"
                 onclick={() => settings.toggleChatNoticesRaid()}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatNoticesRaid() } }}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    settings.toggleChatNoticesRaid()
+                  }
+                }}
               >
                 <span class="toggle-knob"></span>
               </span>
@@ -511,7 +586,12 @@ async function exportFavorites(): Promise<void> {
                 aria-checked={settings.chatNoticesAnnouncement}
                 aria-labelledby="chat-notices-announcement-label"
                 onclick={() => settings.toggleChatNoticesAnnouncement()}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatNoticesAnnouncement() } }}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    settings.toggleChatNoticesAnnouncement()
+                  }
+                }}
               >
                 <span class="toggle-knob"></span>
               </span>
@@ -529,7 +609,12 @@ async function exportFavorites(): Promise<void> {
                 aria-checked={settings.chatRoomstate}
                 aria-labelledby="chat-roomstate-label"
                 onclick={() => settings.toggleChatRoomstate()}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatRoomstate() } }}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    settings.toggleChatRoomstate()
+                  }
+                }}
               >
                 <span class="toggle-knob"></span>
               </span>
@@ -547,7 +632,12 @@ async function exportFavorites(): Promise<void> {
                 aria-checked={settings.chatModeration}
                 aria-labelledby="chat-moderation-label"
                 onclick={() => settings.toggleChatModeration()}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatModeration() } }}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    settings.toggleChatModeration()
+                  }
+                }}
               >
                 <span class="toggle-knob"></span>
               </span>
@@ -565,7 +655,12 @@ async function exportFavorites(): Promise<void> {
                 aria-checked={settings.chatBits}
                 aria-labelledby="chat-bits-label"
                 onclick={() => settings.toggleChatBits()}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatBits() } }}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    settings.toggleChatBits()
+                  }
+                }}
               >
                 <span class="toggle-knob"></span>
               </span>
@@ -583,12 +678,19 @@ async function exportFavorites(): Promise<void> {
                 aria-checked={settings.chatPinned}
                 aria-labelledby="chat-pinned-label"
                 onclick={() => settings.toggleChatPinned()}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleChatPinned() } }}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    settings.toggleChatPinned()
+                  }
+                }}
               >
                 <span class="toggle-knob"></span>
               </span>
             </div>
-            <div class="chat-subgroup-label">{t('settings_mutedUsers')} <span class="mute-count">{settings.mutedUsers.length || ''}</span></div>
+            <div class="chat-subgroup-label">
+              {t('settings_mutedUsers')} <span class="mute-count">{settings.mutedUsers.length || ''}</span>
+            </div>
             <div class="mute-input-row">
               <span class="mention-prefix" aria-hidden="true">@</span>
               <input
@@ -596,7 +698,9 @@ async function exportFavorites(): Promise<void> {
                 class="mention-input mute-input"
                 placeholder={t('settings_mutePlaceholder')}
                 value={muteInput}
-                oninput={(e) => { muteInput = (e.currentTarget as HTMLInputElement).value }}
+                oninput={(e) => {
+                  muteInput = (e.currentTarget as HTMLInputElement).value
+                }}
                 onkeydown={onMuteInputKeydown}
                 autocomplete="off"
                 autocapitalize="off"
@@ -618,8 +722,8 @@ async function exportFavorites(): Promise<void> {
                       type="button"
                       class="mute-remove"
                       onclick={() => removeMuted(name)}
-                      aria-label={t('settings_unmute', { name })}
-                    >×</button>
+                      aria-label={t('settings_unmute', { name })}>×</button
+                    >
                   </li>
                 {/each}
               </ul>
@@ -665,7 +769,14 @@ async function exportFavorites(): Promise<void> {
           <span class="disclosure-label">{t('settings_uiScale')}</span>
           <span class="disclosure-value">{Math.round(settings.uiScale * 100)}%</span>
           <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-            <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            <path
+              d="M3 5 L6 8 L9 5"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         </button>
         {#if scaleOpen}
@@ -678,8 +789,8 @@ async function exportFavorites(): Promise<void> {
                   class:scale-btn--active={Math.abs(settings.uiScale - preset) < 0.001}
                   role="radio"
                   aria-checked={Math.abs(settings.uiScale - preset) < 0.001}
-                  onclick={() => onUiScalePick(preset)}
-                >{preset}×</button>
+                  onclick={() => onUiScalePick(preset)}>{preset}×</button
+                >
               {/each}
             </div>
             <div class="scale-foot">
@@ -689,7 +800,8 @@ async function exportFavorites(): Promise<void> {
                 class="scale-reset"
                 onclick={resetUiScale}
                 disabled={settings.uiScale === UI_SCALE_DEFAULT}
-              >{t('settings_resetTo', { n: UI_SCALE_DEFAULT })}</button>
+                >{t('settings_resetTo', { n: UI_SCALE_DEFAULT })}</button
+              >
               <span class="scale-foot-label">{t('settings_uiScaleMax', { n: UI_SCALE_MAX })}</span>
             </div>
           </div>
@@ -707,7 +819,14 @@ async function exportFavorites(): Promise<void> {
           <span class="disclosure-label">{t('settings_language')}</span>
           <span class="disclosure-value">{currentLangLabel}</span>
           <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-            <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            <path
+              d="M3 5 L6 8 L9 5"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         </button>
         {#if langOpen}
@@ -720,8 +839,8 @@ async function exportFavorites(): Promise<void> {
                   class:lang-btn--active={getLocale() === loc.id}
                   role="radio"
                   aria-checked={getLocale() === loc.id}
-                  onclick={() => setLocale(loc.id)}
-                >{loc.label}</button>
+                  onclick={() => setLocale(loc.id)}>{loc.label}</button
+                >
               {/each}
             </div>
           </div>
@@ -742,7 +861,12 @@ async function exportFavorites(): Promise<void> {
             aria-checked={settings.lowLatency}
             aria-labelledby="low-latency-label"
             onclick={() => settings.toggleLowLatency()}
-            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleLowLatency() } }}
+            onkeydown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                settings.toggleLowLatency()
+              }
+            }}
           >
             <span class="toggle-knob"></span>
           </span>
@@ -760,7 +884,12 @@ async function exportFavorites(): Promise<void> {
             aria-checked={settings.closeToTray}
             aria-labelledby="close-to-tray-label"
             onclick={() => settings.toggleCloseToTray()}
-            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleCloseToTray() } }}
+            onkeydown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                settings.toggleCloseToTray()
+              }
+            }}
           >
             <span class="toggle-knob"></span>
           </span>
@@ -778,7 +907,12 @@ async function exportFavorites(): Promise<void> {
             aria-checked={settings.checkUpdates}
             aria-labelledby="check-updates-label"
             onclick={() => settings.toggleCheckUpdates()}
-            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.toggleCheckUpdates() } }}
+            onkeydown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                settings.toggleCheckUpdates()
+              }
+            }}
           >
             <span class="toggle-knob"></span>
           </span>
@@ -793,7 +927,14 @@ async function exportFavorites(): Promise<void> {
           <span class="disclosure-label">{t('settings_sleepTimer')}</span>
           <span class="disclosure-value">{sleepSummary}</span>
           <svg class="disclosure-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-            <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            <path
+              d="M3 5 L6 8 L9 5"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         </button>
         {#if sleepOpen}
@@ -804,16 +945,16 @@ async function exportFavorites(): Promise<void> {
                 class="seg-btn"
                 class:seg-btn--active={!sleepTimer.armed}
                 aria-pressed={!sleepTimer.armed}
-                onclick={cancelSleep}
-              >{t('off')}</button>
+                onclick={cancelSleep}>{t('off')}</button
+              >
               {#each SLEEP_PRESETS as preset (preset)}
                 <button
                   type="button"
                   class="seg-btn"
                   class:seg-btn--active={sleepTimer.armed && sleepTimer.armedMinutes === preset}
                   aria-pressed={sleepTimer.armed && sleepTimer.armedMinutes === preset}
-                  onclick={() => armSleep(preset)}
-                >{preset}m</button>
+                  onclick={() => armSleep(preset)}>{preset}m</button
+                >
               {/each}
             </div>
             <div class="sleep-custom-row">
@@ -825,17 +966,17 @@ async function exportFavorites(): Promise<void> {
                 max={SLEEP_CUSTOM_MAX}
                 step="1"
                 value={sleepCustom}
-                oninput={(e) => { sleepCustom = (e.currentTarget as HTMLInputElement).value; sleepCustomError = '' }}
+                oninput={(e) => {
+                  sleepCustom = (e.currentTarget as HTMLInputElement).value
+                  sleepCustomError = ''
+                }}
                 onkeydown={onSleepCustomKeydown}
                 aria-label={t('settings_sleepCustomAria')}
               />
               <span class="sleep-custom-unit">{t('settings_sleepCustomUnit')}</span>
-              <button
-                type="button"
-                class="mute-add"
-                onclick={armCustomSleep}
-                disabled={parsedCustomMinutes() === null}
-              >{t('set')}</button>
+              <button type="button" class="mute-add" onclick={armCustomSleep} disabled={parsedCustomMinutes() === null}
+                >{t('set')}</button
+              >
             </div>
             {#if sleepCustomError}
               <p class="sleep-custom-error" role="status">{sleepCustomError}</p>
@@ -863,30 +1004,25 @@ async function exportFavorites(): Promise<void> {
             class:seg-btn--active={settings.sortMode === 'auto'}
             role="radio"
             aria-checked={settings.sortMode === 'auto'}
-            onclick={() => settings.setSortMode('auto')}
-          >{t('settings_sortAuto')}</button>
+            onclick={() => settings.setSortMode('auto')}>{t('settings_sortAuto')}</button
+          >
           <button
             type="button"
             class="seg-btn"
             class:seg-btn--active={settings.sortMode === 'manual'}
             role="radio"
             aria-checked={settings.sortMode === 'manual'}
-            onclick={() => settings.setSortMode('manual')}
-          >{t('settings_sortManual')}</button>
+            onclick={() => settings.setSortMode('manual')}>{t('settings_sortManual')}</button
+          >
         </div>
       </section>
 
       <section class="panel-section">
         <div class="panel-label">{t('settings_favBackup')}</div>
         <div class="seg" role="group" aria-label={t('settings_backupGroup')}>
-          <button
-            type="button"
-            class="seg-btn"
-            onclick={triggerImport}
-            aria-label={t('settings_importAria')}
-          >
+          <button type="button" class="seg-btn" onclick={triggerImport} aria-label={t('settings_importAria')}>
             <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
-              <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z" fill="currentColor"/>
+              <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z" fill="currentColor" />
             </svg>
             <span style="margin-left: 6px;">{t('import')}</span>
           </button>
@@ -895,10 +1031,12 @@ async function exportFavorites(): Promise<void> {
             class="seg-btn"
             onclick={exportFavorites}
             disabled={favoritesCount === 0}
-            aria-label={t(favoritesCount === 1 ? 'settings_exportAriaOne' : 'settings_exportAriaMany', { n: favoritesCount })}
+            aria-label={t(favoritesCount === 1 ? 'settings_exportAriaOne' : 'settings_exportAriaMany', {
+              n: favoritesCount,
+            })}
           >
             <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
-              <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" fill="currentColor"/>
+              <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" fill="currentColor" />
             </svg>
             <span style="margin-left: 6px;">{t('exportLabel')}{favoritesCount > 0 ? ` (${favoritesCount})` : ''}</span>
           </button>
@@ -919,15 +1057,25 @@ async function exportFavorites(): Promise<void> {
 
       <section class="panel-section">
         <p class="shortcut-hint">
-          {t('shortcuts_hintPrefix')} <kbd>Space</kbd> {t('shortcuts_hintPlay')}, <kbd>M</kbd> {t('shortcuts_hintMute')}, <kbd>F</kbd> {t('shortcuts_hintFullscreen')}, <kbd>T</kbd> {t('shortcuts_hintTheater')}, {t('shortcuts_hintArrows')} {t('shortcuts_hintPress')} <kbd>?</kbd> {t('shortcuts_hintFullList')}
+          {t('shortcuts_hintPrefix')} <kbd>Space</kbd>
+          {t('shortcuts_hintPlay')}, <kbd>M</kbd>
+          {t('shortcuts_hintMute')}, <kbd>F</kbd>
+          {t('shortcuts_hintFullscreen')}, <kbd>T</kbd>
+          {t('shortcuts_hintTheater')}, {t('shortcuts_hintArrows')}
+          {t('shortcuts_hintPress')} <kbd>?</kbd>
+          {t('shortcuts_hintFullList')}
         </p>
       </section>
-
     </div>
   {/if}
 
   {#if themeEditorFor !== undefined}
-    <CustomThemeEditor theme={themeEditorFor} onclose={() => { themeEditorFor = undefined }} />
+    <CustomThemeEditor
+      theme={themeEditorFor}
+      onclose={() => {
+        themeEditorFor = undefined
+      }}
+    />
   {/if}
 </div>
 
@@ -949,7 +1097,9 @@ async function exportFavorites(): Promise<void> {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 150ms, color 150ms;
+    transition:
+      background 150ms,
+      color 150ms;
   }
 
   .settings-btn:hover {
@@ -1029,7 +1179,9 @@ async function exportFavorites(): Promise<void> {
     align-items: center;
     gap: 4px;
     cursor: pointer;
-    transition: border-color 150ms, background 150ms;
+    transition:
+      border-color 150ms,
+      background 150ms;
   }
 
   .swatch:hover {
@@ -1073,7 +1225,9 @@ async function exportFavorites(): Promise<void> {
     font-size: 13px;
     text-align: left;
     cursor: pointer;
-    transition: background 150ms, border-color 150ms;
+    transition:
+      background 150ms,
+      border-color 150ms;
   }
 
   .disclosure:hover {
@@ -1213,7 +1367,9 @@ async function exportFavorites(): Promise<void> {
     color: var(--text-primary);
     font-size: 13px;
     font-family: inherit;
-    transition: border-color 150ms, background 150ms;
+    transition:
+      border-color 150ms,
+      background 150ms;
   }
 
   .mention-input::placeholder {
@@ -1269,7 +1425,10 @@ async function exportFavorites(): Promise<void> {
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
-    transition: background 150ms, color 150ms, border-color 150ms;
+    transition:
+      background 150ms,
+      color 150ms,
+      border-color 150ms;
   }
 
   .mute-add:hover:not(:disabled) {
@@ -1337,7 +1496,9 @@ async function exportFavorites(): Promise<void> {
     font-size: 14px;
     line-height: 1;
     cursor: pointer;
-    transition: background 150ms, color 150ms;
+    transition:
+      background 150ms,
+      color 150ms;
   }
 
   .mute-remove:hover {
@@ -1368,7 +1529,10 @@ async function exportFavorites(): Promise<void> {
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
-    transition: background 150ms, color 150ms, border-color 150ms;
+    transition:
+      background 150ms,
+      color 150ms,
+      border-color 150ms;
   }
 
   .sleep-cancel:hover {
@@ -1401,7 +1565,9 @@ async function exportFavorites(): Promise<void> {
     font-size: 13px;
     font-family: inherit;
     font-variant-numeric: tabular-nums;
-    transition: border-color 150ms, background 150ms;
+    transition:
+      border-color 150ms,
+      background 150ms;
   }
 
   .sleep-custom-input:hover {
@@ -1464,7 +1630,9 @@ async function exportFavorites(): Promise<void> {
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 150ms, color 150ms;
+    transition:
+      background 150ms,
+      color 150ms;
   }
 
   .seg-btn:last-child {
@@ -1525,7 +1693,10 @@ async function exportFavorites(): Promise<void> {
     font-variant-numeric: tabular-nums;
     padding: 6px 4px;
     cursor: pointer;
-    transition: background 150ms, color 150ms, border-color 150ms;
+    transition:
+      background 150ms,
+      color 150ms,
+      border-color 150ms;
   }
 
   .scale-btn:hover:not(.scale-btn--active) {
@@ -1563,7 +1734,9 @@ async function exportFavorites(): Promise<void> {
     cursor: pointer;
     padding: 2px 6px;
     border-radius: 3px;
-    transition: background 150ms, color 150ms;
+    transition:
+      background 150ms,
+      color 150ms;
   }
 
   .scale-reset:hover:not(:disabled) {
@@ -1594,7 +1767,10 @@ async function exportFavorites(): Promise<void> {
     font-weight: 600;
     padding: 6px 8px;
     cursor: pointer;
-    transition: background 150ms, color 150ms, border-color 150ms;
+    transition:
+      background 150ms,
+      color 150ms,
+      border-color 150ms;
   }
 
   .lang-btn:hover:not(.lang-btn--active) {
@@ -1634,7 +1810,9 @@ async function exportFavorites(): Promise<void> {
     cursor: pointer;
     text-align: left;
   }
-  .ct-list-apply:hover { background: var(--bg-hover-faint); }
+  .ct-list-apply:hover {
+    background: var(--bg-hover-faint);
+  }
   .ct-list-label {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1654,7 +1832,10 @@ async function exportFavorites(): Promise<void> {
     justify-content: center;
     padding: 0;
   }
-  .ct-list-edit:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .ct-list-edit:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
   .ct-empty-hint {
     margin: 0;
     font-size: 11px;

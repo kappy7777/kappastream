@@ -192,7 +192,8 @@ export const es: Record<TKey, string> = {
   pin_dismiss: 'Descartar el mensaje fijado',
 
   about_tagline: 'Twitch, reducido a lo que importa: el stream y el chat.',
-  about_body: 'Sin inicio de sesión, telemetría, analítica ni servidor propio. El chat se conecta de forma anónima — nada te identifica. Las conexiones de red van solo a los servicios necesarios para ver: infraestructura de Twitch y las APIs comunitarias abiertas (7TV, BTTV, FFZ) que proporcionan emotes e información del stream.',
+  about_body:
+    'Sin inicio de sesión, telemetría, analítica ni servidor propio. El chat se conecta de forma anónima — nada te identifica. Las conexiones de red van solo a los servicios necesarios para ver: infraestructura de Twitch y las APIs comunitarias abiertas (7TV, BTTV, FFZ) que proporcionan emotes e información del stream.',
   about_streamlink: 'Resolución del stream gracias a streamlink.',
   about_changelog: 'Novedades',
   about_bitcoin: 'Bitcoin',
@@ -264,7 +265,8 @@ export const es: Record<TKey, string> = {
   settings_sleepCustomAria: 'Duración personalizada del temporizador en minutos',
   settings_sleepCustomError: 'Introduce entre {min} y {max} min',
   settings_sleepStopsIn: 'Detiene la reproducción en {time}',
-  settings_sleepHelp: 'Detiene el stream actual tras el tiempo elegido. Se cancela automáticamente si cambias de canal.',
+  settings_sleepHelp:
+    'Detiene el stream actual tras el tiempo elegido. Se cancela automáticamente si cambias de canal.',
   settings_favSort: 'Orden de favoritos',
   settings_favSortMode: 'Modo de orden de favoritos',
   settings_sortAuto: 'Auto (directo primero, por espectadores)',
@@ -380,7 +382,8 @@ export const es: Record<TKey, string> = {
   welcome_feat5: 'Hasta cuatro streams a la vez, imagen sobre imagen, pasar a mpv',
   welcome_feat6: '34 temas',
   welcome_privacy: 'Privacidad',
-  welcome_privacyBody: 'Sin cuenta, sin rastreo, sin analítica, sin servidor gestionado por el proyecto. El chat se conecta de forma anónima — nada se asocia a tu identidad. Los servicios a los que contacta kappastream aparecen en el diálogo Acerca de.',
+  welcome_privacyBody:
+    'Sin cuenta, sin rastreo, sin analítica, sin servidor gestionado por el proyecto. El chat se conecta de forma anónima — nada se asocia a tu identidad. Los servicios a los que contacta kappastream aparecen en el diálogo Acerca de.',
   welcome_streamlinkOk: 'Streamlink detectado — listo para empezar.',
   welcome_streamlinkMissing: 'Se requiere Streamlink para reproducir streams.',
   welcome_installLabel: 'Instalación',
@@ -418,7 +421,8 @@ export const es: Record<TKey, string> = {
   settings_ctExportFailed: 'Error al exportar',
 
   // ---- Editor de temas personalizados: ayudas ------------------------------
-  settings_ctInfoBackgrounds: 'Colores de las superficies detrás de todo: base de la app, paneles, campos y estados al pasar el ratón.',
+  settings_ctInfoBackgrounds:
+    'Colores de las superficies detrás de todo: base de la app, paneles, campos y estados al pasar el ratón.',
   settings_ctInfoText: 'Los tres tonos de texto: mensajes y títulos, descripciones y avisos tenues.',
   settings_ctInfoAccent: 'El color destacado de botones y estados activos, más el color de EN VIVO/errores.',
   settings_ctInfoChrome: 'Bordes, pistas de deslizadores y sombras de menús: los acabados.',

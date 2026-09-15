@@ -193,7 +193,8 @@ export const pt: Record<TKey, string> = {
   pin_dismiss: 'Descartar a mensagem fixada',
 
   about_tagline: 'Twitch, reduzido ao que importa: o stream e o chat.',
-  about_body: 'Sem login, telemetria, analítica nem servidor gerido pelo projeto. O chat liga-se anonimamente — nada fica associado à tua identidade. Os pedidos de rede vão apenas para os serviços necessários para ver: infraestrutura da Twitch e as APIs comunitárias abertas (7TV, BTTV, FFZ) que fornecem emotes e informações do stream.',
+  about_body:
+    'Sem login, telemetria, analítica nem servidor gerido pelo projeto. O chat liga-se anonimamente — nada fica associado à tua identidade. Os pedidos de rede vão apenas para os serviços necessários para ver: infraestrutura da Twitch e as APIs comunitárias abertas (7TV, BTTV, FFZ) que fornecem emotes e informações do stream.',
   about_streamlink: 'Resolução do stream com o streamlink.',
   about_changelog: 'Novidades',
   about_bitcoin: 'Bitcoin',
@@ -381,7 +382,8 @@ export const pt: Record<TKey, string> = {
   welcome_feat5: 'Até quatro streams ao mesmo tempo, picture-in-picture, passar para o mpv',
   welcome_feat6: '34 temas',
   welcome_privacy: 'Privacidade',
-  welcome_privacyBody: 'Sem conta, sem rastreamento, sem analítica, sem servidor gerido pelo projeto. O chat liga-se anonimamente — nada fica associado à tua identidade. Os serviços que o kappastream contacta estão listados no diálogo Sobre.',
+  welcome_privacyBody:
+    'Sem conta, sem rastreamento, sem analítica, sem servidor gerido pelo projeto. O chat liga-se anonimamente — nada fica associado à tua identidade. Os serviços que o kappastream contacta estão listados no diálogo Sobre.',
   welcome_streamlinkOk: 'Streamlink detetado — está tudo pronto.',
   welcome_streamlinkMissing: 'O Streamlink é necessário para reproduzir streams.',
   welcome_installLabel: 'Instalação',

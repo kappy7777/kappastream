@@ -45,6 +45,11 @@
     text-overflow: ellipsis;
     vertical-align: bottom;
   }
-  .chat-link:hover { color: var(--accent-hover, var(--accent)); }
-  .chat-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .chat-link:hover {
+    color: var(--accent-hover, var(--accent));
+  }
+  .chat-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
 </style>

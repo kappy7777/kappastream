@@ -14,20 +14,31 @@
 
 <div class="about-backdrop" onclick={onclose} role="presentation"></div>
 <div class="about-modal shortcuts-modal" role="dialog" aria-label={t('shortcuts_title')}>
-  <button
-    type="button"
-    class="about-close"
-    onclick={onclose}
-    aria-label={t('shortcuts_close')}
-  >×</button>
+  <button type="button" class="about-close" onclick={onclose} aria-label={t('shortcuts_close')}>×</button>
   <h2 id="shortcuts-title" class="shortcuts-title">{t('shortcuts_title')}</h2>
   <ul class="shortcuts-list" aria-labelledby="shortcuts-title">
-    <li><span class="shortcut-keys"><kbd>Space</kbd> <span class="shortcut-or">/</span> <kbd>K</kbd></span><span class="shortcut-desc">{t('shortcuts_playPause')}</span></li>
-    <li><span class="shortcut-keys"><kbd>M</kbd></span><span class="shortcut-desc">{t('shortcuts_muteUnmute')}</span></li>
-    <li><span class="shortcut-keys"><kbd>F</kbd></span><span class="shortcut-desc">{t('shortcuts_fullscreen')}</span></li>
+    <li>
+      <span class="shortcut-keys"><kbd>Space</kbd> <span class="shortcut-or">/</span> <kbd>K</kbd></span><span
+        class="shortcut-desc">{t('shortcuts_playPause')}</span
+      >
+    </li>
+    <li>
+      <span class="shortcut-keys"><kbd>M</kbd></span><span class="shortcut-desc">{t('shortcuts_muteUnmute')}</span>
+    </li>
+    <li>
+      <span class="shortcut-keys"><kbd>F</kbd></span><span class="shortcut-desc">{t('shortcuts_fullscreen')}</span>
+    </li>
     <li><span class="shortcut-keys"><kbd>T</kbd></span><span class="shortcut-desc">{t('shortcuts_theater')}</span></li>
-    <li><span class="shortcut-keys"><kbd>←</kbd> <span class="shortcut-or">/</span> <kbd>→</kbd></span><span class="shortcut-desc">{t('shortcuts_seek')}</span></li>
-    <li><span class="shortcut-keys"><kbd>↑</kbd> <span class="shortcut-or">/</span> <kbd>↓</kbd></span><span class="shortcut-desc">{t('shortcuts_volume')}</span></li>
+    <li>
+      <span class="shortcut-keys"><kbd>←</kbd> <span class="shortcut-or">/</span> <kbd>→</kbd></span><span
+        class="shortcut-desc">{t('shortcuts_seek')}</span
+      >
+    </li>
+    <li>
+      <span class="shortcut-keys"><kbd>↑</kbd> <span class="shortcut-or">/</span> <kbd>↓</kbd></span><span
+        class="shortcut-desc">{t('shortcuts_volume')}</span
+      >
+    </li>
     <li><span class="shortcut-keys"><kbd>?</kbd></span><span class="shortcut-desc">{t('shortcuts_showHelp')}</span></li>
   </ul>
   <p class="shortcuts-note">{t('shortcuts_note')}</p>

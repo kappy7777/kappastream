@@ -40,11 +40,7 @@ const ACTION_PREFIX = '\u0001ACTION '
 // ---------------------------------------------------------------------------
 
 export type IrcEvent =
-  | (ParsedMessage & { type: 'PRIVMSG' })
-  | UsernoticeEvent
-  | RoomstateEvent
-  | ClearmsgEvent
-  | ClearchatEvent
+  (ParsedMessage & { type: 'PRIVMSG' }) | UsernoticeEvent | RoomstateEvent | ClearmsgEvent | ClearchatEvent
 
 export interface UsernoticeEvent {
   type: 'USERNOTICE'
@@ -456,8 +452,10 @@ function decodeTagValue(v: string): string {
   // `a\\sb` mis-decoded to `a\ b` instead of `a\sb`. Mapping the escape
   // char in one regex pass over the input fixes the ordering and drops
   // the backslash for any unknown escape (per the IRCv3 spec).
-  return v.replace(/\\(.)/g, (_, c) =>
-    ({ s: ' ', n: '\n', r: '\r', ':': ';', '\\': '\\' } as Record<string, string>)[c] ?? c)
+  return v.replace(
+    /\\(.)/g,
+    (_, c) => (({ s: ' ', n: '\n', r: '\r', ':': ';', '\\': '\\' }) as Record<string, string>)[c] ?? c,
+  )
 }
 
 export function normalizeColor(c: string | undefined): string {

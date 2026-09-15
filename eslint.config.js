@@ -1,9 +1,9 @@
-import js from '@eslint/js';
-import { defineConfig } from 'eslint/config';
-import tseslint from 'typescript-eslint';
-import svelte from 'eslint-plugin-svelte';
-import globals from 'globals';
-import prettier from 'eslint-config-prettier';
+import js from '@eslint/js'
+import { defineConfig } from 'eslint/config'
+import tseslint from 'typescript-eslint'
+import svelte from 'eslint-plugin-svelte'
+import globals from 'globals'
+import prettier from 'eslint-config-prettier'
 
 // ESLint flat config. Lints both .ts/.js and .svelte (including .svelte.ts /
 // .svelte.js) under src/ and the root Vite configs. Type-aware rules
@@ -20,13 +20,7 @@ export default defineConfig([
   // repo (packaging/aur/src/kappastream/) staged for AUR submission — linting
   // that duplicate would double every violation.
   {
-    ignores: [
-      'dist/',
-      'node_modules/',
-      'src-tauri/target/',
-      'src-tauri/gen/',
-      'packaging/',
-    ],
+    ignores: ['dist/', 'node_modules/', 'src-tauri/target/', 'src-tauri/gen/', 'packaging/'],
   },
 
   // Global language options. This block has no `files` filter, so its
@@ -47,11 +41,7 @@ export default defineConfig([
           // lint with TypeScript's default project options instead of erroring.
           // The badge-baseline generator is a plain-Node dev script (scripts/),
           // not part of the app's TS project, so it lints standalone too.
-          allowDefaultProject: [
-            'eslint.config.js',
-            'svelte.config.js',
-            'scripts/generate-badges.mjs',
-          ],
+          allowDefaultProject: ['eslint.config.js', 'svelte.config.js', 'scripts/generate-badges.mjs'],
         },
         extraFileExtensions: ['.svelte'],
         tsconfigRootDir: import.meta.dirname,
@@ -125,4 +115,4 @@ export default defineConfig([
   // eslint-config-prettier MUST stay the LAST entry: it only turns rules OFF,
   // so anything appended after it could re-enable a formatting conflict.
   prettier,
-]);
+])

@@ -34,12 +34,16 @@ vi.mock('@tauri-apps/api/event', () => ({
   },
   listen: (event: string, handler: (e: { payload: unknown }) => void) => {
     tauri.listeners.set(event, handler)
-    return Promise.resolve(() => { tauri.listeners.delete(event) })
+    return Promise.resolve(() => {
+      tauri.listeners.delete(event)
+    })
   },
 }))
 vi.mock('@tauri-apps/api/webviewWindow', () => ({
   WebviewWindow: class {
-    once(_event: string, _cb: () => void): void { /* pip tests never trigger it */ }
+    once(_event: string, _cb: () => void): void {
+      /* pip tests never trigger it */
+    }
     constructor(_label: string, _opts: unknown) {
       tauri.windowsCreated++
     }
@@ -92,25 +96,19 @@ describe('pip-controller: setStream → ks://pip-stream normalization', () => {
   it('emits isLive: true when the stream info says live', async () => {
     await openPip()
     P.pipController.setStream({ url: 'https://x/2.m3u8', channel: 'chan1', quality: 'best', isLive: true })
-    expect(payloadsOf(EV_STREAM)).toEqual([
-      { url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: true },
-    ])
+    expect(payloadsOf(EV_STREAM)).toEqual([{ url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: true }])
   })
 
   it('emits isLive: false for an explicit false', async () => {
     await openPip()
     P.pipController.setStream({ url: 'https://x/2.m3u8', channel: 'chan1', quality: 'best', isLive: false })
-    expect(payloadsOf(EV_STREAM)).toEqual([
-      { url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: false },
-    ])
+    expect(payloadsOf(EV_STREAM)).toEqual([{ url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: false }])
   })
 
   it('emits isLive: false when the field is ABSENT (the VOD-in-PiP safety default)', async () => {
     await openPip()
     P.pipController.setStream({ url: 'https://x/2.m3u8', channel: 'chan1', quality: 'best' })
-    expect(payloadsOf(EV_STREAM)).toEqual([
-      { url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: false },
-    ])
+    expect(payloadsOf(EV_STREAM)).toEqual([{ url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: false }])
   })
 
   it('defaults mediaKind to hls and passes mp4 through', async () => {
@@ -128,9 +126,7 @@ describe('pip-controller: sendInit → ks://pip-init normalization', () => {
   // The init payload is built from the STORED currentStream — this is the
   // path taken when PiP opens against an already-playing stream, and it
   // must normalize exactly like setStream's emit or the two paths drift.
-  function initPayloadAfter(
-    info: Parameters<typeof P.pipController.setStream>[0],
-  ): Record<string, unknown> {
+  function initPayloadAfter(info: Parameters<typeof P.pipController.setStream>[0]): Record<string, unknown> {
     P.pipController.setStream(info) // stored; PiP is closed so nothing emits
     expect(payloadsOf(EV_STREAM)).toEqual([])
     deliver(EV_READY)

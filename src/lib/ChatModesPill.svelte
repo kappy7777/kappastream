@@ -64,9 +64,9 @@
 <div class="chat-modes" role="status" aria-label={label || undefined} style:max-width={maxWidth}>
   <span class="chat-modes-icon" use:tooltip={label}>
     <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-      <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"/>
-      <path d="M8 7.4v3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-      <circle cx="8" cy="4.9" r="0.95" fill="currentColor"/>
+      <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+      <path d="M8 7.4v3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+      <circle cx="8" cy="4.9" r="0.95" fill="currentColor" />
     </svg>
   </span>
   <span class="chat-modes-window" bind:this={windowEl}>
@@ -78,7 +78,9 @@
       bind:this={trackEl}
     >
       {#each modes as mode, i (mode)}
-        <span class="mode-pill">{t(ROOM_MODE_LABEL_KEYS[mode])}{#if i < modes.length - 1},{/if}</span>
+        <span class="mode-pill"
+          >{t(ROOM_MODE_LABEL_KEYS[mode])}{#if i < modes.length - 1},{/if}</span
+        >
       {/each}
     </span>
   </span>
@@ -138,11 +140,19 @@
      `alternate` then plays the same journey backwards, so the label list is
      stationary and readable at BOTH extremes. */
   @keyframes chat-modes-marquee {
-    0%, 10% { transform: translateX(0); }
-    90%, 100% { transform: translateX(var(--marquee-shift, 0px)); }
+    0%,
+    10% {
+      transform: translateX(0);
+    }
+    90%,
+    100% {
+      transform: translateX(var(--marquee-shift, 0px));
+    }
   }
   @media (prefers-reduced-motion: reduce) {
-    .chat-modes-track--marquee { animation: none; }
+    .chat-modes-track--marquee {
+      animation: none;
+    }
   }
 
   /* Plain text labels — no per-mode chip background/border; the floating

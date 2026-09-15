@@ -192,7 +192,8 @@ export const fr: Record<TKey, string> = {
   pin_dismiss: 'Masquer le message épinglé',
 
   about_tagline: 'Twitch, réduit à l’essentiel : le stream et le chat.',
-  about_body: 'Pas de connexion, télémétrie, analytique ni serveur géré par le projet. Le chat se connecte anonymement — rien n’est lié à votre identité. Les appels réseau ne vont qu’aux services nécessaires pour regarder : l’infrastructure de Twitch et les API communautaires ouvertes (7TV, BTTV, FFZ) qui fournissent les emotes et les infos du stream.',
+  about_body:
+    'Pas de connexion, télémétrie, analytique ni serveur géré par le projet. Le chat se connecte anonymement — rien n’est lié à votre identité. Les appels réseau ne vont qu’aux services nécessaires pour regarder : l’infrastructure de Twitch et les API communautaires ouvertes (7TV, BTTV, FFZ) qui fournissent les emotes et les infos du stream.',
   about_streamlink: 'Résolution du stream propulsée par streamlink.',
   about_changelog: 'Nouveautés',
   about_bitcoin: 'Bitcoin',
@@ -236,7 +237,8 @@ export const fr: Record<TKey, string> = {
   settings_bits: 'Afficher les bits',
   settings_bitsHint: 'montants des cheers sur les messages',
   settings_chatPinned: 'Messages épinglés',
-  settings_chatPinnedHint: "afficher le message épinglé du canal au-dessus du tchat ; actualisé avec le cycle des favoris",
+  settings_chatPinnedHint:
+    'afficher le message épinglé du canal au-dessus du tchat ; actualisé avec le cycle des favoris',
   settings_mutedUsers: 'Utilisateurs masqués',
   settings_mutePlaceholder: 'masquer par login',
   settings_addMuteAria: 'Ajouter un utilisateur à la liste des masqués',
@@ -264,7 +266,8 @@ export const fr: Record<TKey, string> = {
   settings_sleepCustomAria: 'Durée personnalisée du minuteur en minutes',
   settings_sleepCustomError: 'Saisir entre {min} et {max} min',
   settings_sleepStopsIn: 'Arrête la lecture dans {time}',
-  settings_sleepHelp: 'Arrête le stream actuel après le délai choisi. S’annule automatiquement si vous changez de chaîne.',
+  settings_sleepHelp:
+    'Arrête le stream actuel après le délai choisi. S’annule automatiquement si vous changez de chaîne.',
   settings_favSort: 'Tri des favoris',
   settings_favSortMode: 'Mode de tri des favoris',
   settings_sortAuto: 'Auto (direct d’abord, par spectateurs)',
@@ -380,7 +383,8 @@ export const fr: Record<TKey, string> = {
   welcome_feat5: "Jusqu'à quatre streams à la fois, picture-in-picture, passage à mpv",
   welcome_feat6: '34 thèmes',
   welcome_privacy: 'Confidentialité',
-  welcome_privacyBody: "Pas de compte, pas de suivi, pas d'analytique, pas de serveur géré par le projet. Le chat se connecte anonymement — rien n'est lié à votre identité. Les services contactés par kappastream sont listés dans le dialogue À propos.",
+  welcome_privacyBody:
+    "Pas de compte, pas de suivi, pas d'analytique, pas de serveur géré par le projet. Le chat se connecte anonymement — rien n'est lié à votre identité. Les services contactés par kappastream sont listés dans le dialogue À propos.",
   welcome_streamlinkOk: 'Streamlink détecté — tout est prêt.',
   welcome_streamlinkMissing: 'Streamlink est requis pour lire les streams.',
   welcome_installLabel: 'Installation :',

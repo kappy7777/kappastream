@@ -22,8 +22,23 @@
 // reading `settings` — the session always stores every event so flipping a
 // toggle retroactively re-evaluates already-buffered messages.
 
-import { parseIrcEvent, mergeRoomState, composeUsernoticeFallback, type BadgeInfo, type IrcEvent, type RoomState } from './irc'
-import { loadChannelEmotes, loadGlobalEmotes, buildEmoteMap, renderMessage, parseTwitchEmoteTag, type Emote, type RenderedMessagePart } from './emotes'
+import {
+  parseIrcEvent,
+  mergeRoomState,
+  composeUsernoticeFallback,
+  type BadgeInfo,
+  type IrcEvent,
+  type RoomState,
+} from './irc'
+import {
+  loadChannelEmotes,
+  loadGlobalEmotes,
+  buildEmoteMap,
+  renderMessage,
+  parseTwitchEmoteTag,
+  type Emote,
+  type RenderedMessagePart,
+} from './emotes'
 import { fetchChannelBadges } from './gql'
 import { t } from './i18n/index.svelte'
 
@@ -73,7 +88,12 @@ const RECONNECT_BASE_MS = 1_000
 const RECONNECT_MAX_MS = 30_000
 
 function randomUsername(): string {
-  return 'justinfan' + Math.floor(Math.random() * 1_000_000).toString().padStart(6, '0')
+  return (
+    'justinfan' +
+    Math.floor(Math.random() * 1_000_000)
+      .toString()
+      .padStart(6, '0')
+  )
 }
 
 export class ChatSession {
@@ -133,7 +153,11 @@ export class ChatSession {
       this.socket.onerror = null
       this.socket.onmessage = null
       this.socket.onopen = null
-      try { this.socket.close() } catch { /* ignore */ }
+      try {
+        this.socket.close()
+      } catch {
+        /* ignore */
+      }
       this.socket = null
     }
     this.status = 'idle'
@@ -170,7 +194,11 @@ export class ChatSession {
 
     ws.onopen = () => {
       if (gen !== this.generation || this.socket !== ws || this.disposed) {
-        try { ws.close() } catch { /* ignore */ }
+        try {
+          ws.close()
+        } catch {
+          /* ignore */
+        }
         return
       }
       ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands')
@@ -185,7 +213,9 @@ export class ChatSession {
         this.handleRaw(ev.data as string, ws)
       }
     }
-    ws.onerror = () => { /* let onclose drive reconnect */ }
+    ws.onerror = () => {
+      /* let onclose drive reconnect */
+    }
     ws.onclose = () => {
       if (gen !== this.generation || this.socket !== ws || this.disposed) return
       this.socket = null
@@ -228,25 +258,40 @@ export class ChatSession {
       const line = rawLine.trim()
       if (!line) continue
       if (line.startsWith('PING ')) {
-        try { ws.send('PONG ' + line.slice(5)) } catch { /* ignore */ }
+        try {
+          ws.send('PONG ' + line.slice(5))
+        } catch {
+          /* ignore */
+        }
         continue
       }
       const ev: IrcEvent | null = parseIrcEvent(line)
       if (!ev) continue
       if (ev.channel !== this.channel) continue
       switch (ev.type) {
-        case 'PRIVMSG': this.onPrivmsg(ev); break
-        case 'USERNOTICE': this.onUsernotice(ev); break
-        case 'ROOMSTATE': this.roomState = mergeRoomState(this.roomState, ev); break
-        case 'CLEARMSG': this.markDeleted(ev.targetMsgId, t('mod_messageDeleted')); break
-        case 'CLEARCHAT': this.onClearchat(ev); break
+        case 'PRIVMSG':
+          this.onPrivmsg(ev)
+          break
+        case 'USERNOTICE':
+          this.onUsernotice(ev)
+          break
+        case 'ROOMSTATE':
+          this.roomState = mergeRoomState(this.roomState, ev)
+          break
+        case 'CLEARMSG':
+          this.markDeleted(ev.targetMsgId, t('mod_messageDeleted'))
+          break
+        case 'CLEARCHAT':
+          this.onClearchat(ev)
+          break
       }
     }
   }
 
   private onPrivmsg(ev: Extract<IrcEvent, { type: 'PRIVMSG' }>): void {
     const parts = renderMessage({ message: ev.message, thirdParty: this.thirdParty, twitchRanges: ev.twitchEmotes })
-    const emoteOnly = parts.some((p) => p.type === 'emote') && parts.every((p) => p.type === 'emote' || p.text.trim() === '')
+    const emoteOnly =
+      parts.some((p) => p.type === 'emote') && parts.every((p) => p.type === 'emote' || p.text.trim() === '')
     this.push({
       kind: 'message',
       id: ev.id || crypto.randomUUID(),
@@ -306,7 +351,8 @@ export class ChatSession {
       return
     }
     const reason = ev.banDuration !== null ? t('mod_timedOut', { n: ev.banDuration }) : t('mod_banned')
-    for (const m of this.messages) if (m.kind === 'message' && m.userId === ev.targetUserId) this.markEntryDeleted(m, reason)
+    for (const m of this.messages)
+      if (m.kind === 'message' && m.userId === ev.targetUserId) this.markEntryDeleted(m, reason)
   }
 
   private markDeleted(targetMsgId: string, reason: string): void {

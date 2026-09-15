@@ -105,7 +105,10 @@
 
   /** Properties whose colour carries translucency (get an alpha slider). */
   const TRANSLUCENT_PROPS: ReadonlySet<ThemePropName> = new Set([
-    '--bg-overlay', '--bg-overlay-strong', '--bg-hover-faint', '--track-buffered',
+    '--bg-overlay',
+    '--bg-overlay-strong',
+    '--bg-hover-faint',
+    '--track-buffered',
   ])
 
   let {
@@ -137,7 +140,7 @@
 
   const seed = editing
     ? { ...editing.values }
-    : readThemeValuesFor(initialBase) ?? readThemeValuesFor('amethyst') ?? fallbackValues()
+    : (readThemeValuesFor(initialBase) ?? readThemeValuesFor('amethyst') ?? fallbackValues())
 
   function fallbackValues(): ThemeValues {
     // Last-resort seed (no computed styles available): the app.css :root
@@ -145,13 +148,24 @@
     // downstream exactly like any other seed.
     const out = {} as Record<string, string>
     const defaults: Record<string, string> = {
-      '--bg-app': '#0E0E10', '--bg-panel': '#18181B', '--bg-chat': '#18181B',
-      '--bg-input': '#1F1F23', '--bg-hover': '#26262C', '--bg-deep': '#050505',
-      '--text-primary': '#EFEFF1', '--text-secondary': '#ADADB8', '--text-dim': '#848494',
-      '--accent': '#6D5DD3', '--accent-hover': '#5A4AB8', '--live': '#EB0400',
-      '--border': '#2A2A2D', '--track': '#3A3A3D', '--track-hover': '#4A4A4F',
+      '--bg-app': '#0E0E10',
+      '--bg-panel': '#18181B',
+      '--bg-chat': '#18181B',
+      '--bg-input': '#1F1F23',
+      '--bg-hover': '#26262C',
+      '--bg-deep': '#050505',
+      '--text-primary': '#EFEFF1',
+      '--text-secondary': '#ADADB8',
+      '--text-dim': '#848494',
+      '--accent': '#6D5DD3',
+      '--accent-hover': '#5A4AB8',
+      '--live': '#EB0400',
+      '--border': '#2A2A2D',
+      '--track': '#3A3A3D',
+      '--track-hover': '#4A4A4F',
       '--track-buffered': 'rgba(239, 239, 241, 0.25)',
-      '--bg-overlay': 'rgba(14, 14, 16, 0.85)', '--bg-overlay-strong': 'rgba(14, 14, 16, 0.92)',
+      '--bg-overlay': 'rgba(14, 14, 16, 0.85)',
+      '--bg-overlay-strong': 'rgba(14, 14, 16, 0.92)',
       '--bg-hover-faint': 'rgba(239, 239, 241, 0.12)',
       '--shadow-menu': '0 8px 24px rgba(0, 0, 0, 0.5)',
     }
@@ -170,9 +184,7 @@
     return isValidThemeValue(p, v)
   }
 
-  const invalidProps = $derived(
-    THEME_PROP_GROUPS.flatMap((g) => g.props).filter((p) => !valid(p, values[p])),
-  )
+  const invalidProps = $derived(THEME_PROP_GROUPS.flatMap((g) => g.props).filter((p) => !valid(p, values[p])))
   const allValuesValid = $derived(invalidProps.length === 0)
   const labelValid = $derived(isValidThemeLabel(label))
   const canSave = $derived(allValuesValid && labelValid)
@@ -222,7 +234,9 @@
   /** Set RGB (keeps any existing alpha; handles the shadow's fixed offsets). */
   function setRgb(p: ThemePropName, hex: string): void {
     const a = alphaOf(p)
-    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16)
+    const r = parseInt(hex.slice(1, 3), 16),
+      g = parseInt(hex.slice(3, 5), 16),
+      b = parseInt(hex.slice(5, 7), 16)
     if (p === '--shadow-menu') {
       const blur = shadowParts(values[p])?.blur ?? 24
       setValue(p, `0 8px ${Math.round(blur)}px rgba(${r}, ${g}, ${b}, ${fmtA(a)})`)
@@ -241,7 +255,8 @@
       setValue(p, `0 8px ${Math.round(blur)}px rgba(${rgb}, ${fmtA(a)})`)
       return
     }
-    if (a >= 1) setValue(p, hslToHex(colorToHsl(values[p])?.h ?? 0, colorToHsl(values[p])?.s ?? 0, colorToHsl(values[p])?.l ?? 0))
+    if (a >= 1)
+      setValue(p, hslToHex(colorToHsl(values[p])?.h ?? 0, colorToHsl(values[p])?.s ?? 0, colorToHsl(values[p])?.l ?? 0))
     else setValue(p, `rgba(${rgb}, ${fmtA(a)})`)
   }
 
@@ -249,7 +264,10 @@
     const parts = shadowParts(values['--shadow-menu'])
     if (!parts) return
     const c = parts.color
-    setValue('--shadow-menu', `0 8px ${Math.round(px)}px rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${fmtA(c.a)})`)
+    setValue(
+      '--shadow-menu',
+      `0 8px ${Math.round(px)}px rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${fmtA(c.a)})`,
+    )
   }
 
   function hslOf(p: ThemePropName): { h: number; s: number; l: number } | null {
@@ -322,12 +340,21 @@
   async function exportTheme(): Promise<void> {
     if (isNew) return
     exportError = ''
-    const json = exportThemeJson(getCustomTheme(editing.id) ?? { ...editing, label: label.trim(), values: values as ThemeValues })
-    const slug = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'theme'
+    const json = exportThemeJson(
+      getCustomTheme(editing.id) ?? { ...editing, label: label.trim(), values: values as ThemeValues },
+    )
+    const slug =
+      label
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'theme'
     try {
-      await (window as unknown as {
-        __TAURI_INTERNALS__: { invoke(cmd: string, args?: unknown): Promise<unknown> }
-      }).__TAURI_INTERNALS__.invoke('save_theme_export', {
+      await (
+        window as unknown as {
+          __TAURI_INTERNALS__: { invoke(cmd: string, args?: unknown): Promise<unknown> }
+        }
+      ).__TAURI_INTERNALS__.invoke('save_theme_export', {
         content: json,
         suggestedFilename: 'kappastream-theme-' + slug + '.json',
       })
@@ -367,7 +394,13 @@
   })
 </script>
 
-<div class="ct-backdrop" role="presentation" onpointerdown={(e) => { if (e.target === e.currentTarget) close() }}>
+<div
+  class="ct-backdrop"
+  role="presentation"
+  onpointerdown={(e) => {
+    if (e.target === e.currentTarget) close()
+  }}
+>
   <div class="ct-panel" role="dialog" aria-modal="true" aria-label={t('settings_customThemes')}>
     <header class="ct-head">
       <h2 class="ct-title">{isNew ? t('settings_ctNew') : t('settings_ctEdit') + ' — ' + editing.label}</h2>
@@ -379,15 +412,48 @@
         <div class="ct-field">
           <span class="ct-field-label">{t('settings_ctDuplicateFrom')}</span>
           <div class="ct-base-wrap">
-            <button type="button" class="ct-base-btn" aria-haspopup="listbox" aria-expanded={baseOpen} onclick={() => { baseOpen = !baseOpen }}>
+            <button
+              type="button"
+              class="ct-base-btn"
+              aria-haspopup="listbox"
+              aria-expanded={baseOpen}
+              onclick={() => {
+                baseOpen = !baseOpen
+              }}
+            >
               <span class="ct-base-dot" style="background: {THEMES.find((tm) => tm.id === baseId)?.swatch}"></span>
               <span class="ct-base-label">{THEMES.find((tm) => tm.id === baseId)?.label}</span>
-              <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true" class="ct-base-chevron" class:ct-base-chevron--open={baseOpen}><path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg
+                viewBox="0 0 12 12"
+                width="10"
+                height="10"
+                aria-hidden="true"
+                class="ct-base-chevron"
+                class:ct-base-chevron--open={baseOpen}
+                ><path
+                  d="M3 5 L6 8 L9 5"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  fill="none"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                /></svg
+              >
             </button>
             {#if baseOpen}
               <div class="ct-base-menu" role="listbox">
                 {#each THEMES as tm (tm.id)}
-                  <button type="button" class="ct-base-item" role="option" aria-selected={tm.id === baseId} class:ct-base-item--active={tm.id === baseId} onclick={() => { baseOpen = false; onBaseChange(tm.id) }}>
+                  <button
+                    type="button"
+                    class="ct-base-item"
+                    role="option"
+                    aria-selected={tm.id === baseId}
+                    class:ct-base-item--active={tm.id === baseId}
+                    onclick={() => {
+                      baseOpen = false
+                      onBaseChange(tm.id)
+                    }}
+                  >
                     <span class="ct-base-dot" style="background: {tm.swatch}"></span>
                     <span>{tm.label}</span>
                   </button>
@@ -405,7 +471,9 @@
           type="text"
           maxlength="40"
           value={label}
-          oninput={(e) => { label = (e.currentTarget as HTMLInputElement).value }}
+          oninput={(e) => {
+            label = (e.currentTarget as HTMLInputElement).value
+          }}
           aria-invalid={!labelValid}
         />
       </label>
@@ -414,10 +482,13 @@
         <section class="ct-group">
           <h3 class="ct-group-label">
             <span class="ct-group-name">
-              {group.id === 'backgrounds' ? t('settings_ctGroupBackgrounds')
-                : group.id === 'text' ? t('settings_ctGroupText')
-                : group.id === 'accent' ? t('settings_ctGroupAccent')
-                : t('settings_ctGroupChrome')}
+              {group.id === 'backgrounds'
+                ? t('settings_ctGroupBackgrounds')
+                : group.id === 'text'
+                  ? t('settings_ctGroupText')
+                  : group.id === 'accent'
+                    ? t('settings_ctGroupAccent')
+                    : t('settings_ctGroupChrome')}
             </span>
             <button
               type="button"
@@ -425,7 +496,12 @@
               use:tooltip={t(GROUP_HELP[group.id])}
               aria-label={t(GROUP_HELP[group.id])}
             >
-              <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 7a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5zM10.8 13h2.4v5h-2.4z" fill="currentColor"/></svg>
+              <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"
+                ><path
+                  d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 7a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5zM10.8 13h2.4v5h-2.4z"
+                  fill="currentColor"
+                /></svg
+              >
             </button>
           </h3>
           {#each group.props as p (p)}
@@ -436,12 +512,36 @@
                 type="button"
                 class="ct-row"
                 aria-expanded={expanded === p}
-                onclick={() => { expanded = expanded === p ? null : p }}
+                onclick={() => {
+                  expanded = expanded === p ? null : p
+                }}
               >
                 <span class="ct-prop" use:tooltip={help}>{PROP_LABEL[p] ? t(PROP_LABEL[p]!) : p}</span>
-                <span class="ct-chip" style="background: {p === '--shadow-menu' ? (shadowParts(values[p]) ? hexOfShadow(values[p]) : 'transparent') : values[p]}"></span>
+                <span
+                  class="ct-chip"
+                  style="background: {p === '--shadow-menu'
+                    ? shadowParts(values[p])
+                      ? hexOfShadow(values[p])
+                      : 'transparent'
+                    : values[p]}"
+                ></span>
                 <span class="ct-value">{values[p]}</span>
-                <svg viewBox="0 0 12 12" width="9" height="9" aria-hidden="true" class="ct-row-chevron" class:ct-row-chevron--open={expanded === p}><path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg
+                  viewBox="0 0 12 12"
+                  width="9"
+                  height="9"
+                  aria-hidden="true"
+                  class="ct-row-chevron"
+                  class:ct-row-chevron--open={expanded === p}
+                  ><path
+                    d="M3 5 L6 8 L9 5"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    fill="none"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  /></svg
+                >
               </button>
               {#if expanded === p && hsl}
                 <div class="ct-picker">
@@ -460,31 +560,66 @@
                   <div class="ct-sliders">
                     <label class="ct-slider">
                       <span class="ct-slider-tag" style="background: {hslGradient('h', hsl)}">H</span>
-                      <input type="range" min="0" max="360" step="1" value={hsl.h}
-                        oninput={(e) => setRgb(p, hslToHex(Number((e.currentTarget as HTMLInputElement).value), hsl.s, hsl.l))} />
+                      <input
+                        type="range"
+                        min="0"
+                        max="360"
+                        step="1"
+                        value={hsl.h}
+                        oninput={(e) =>
+                          setRgb(p, hslToHex(Number((e.currentTarget as HTMLInputElement).value), hsl.s, hsl.l))}
+                      />
                     </label>
                     <label class="ct-slider">
                       <span class="ct-slider-tag" style="background: {hslGradient('s', hsl)}">S</span>
-                      <input type="range" min="0" max="100" step="1" value={hsl.s}
-                        oninput={(e) => setRgb(p, hslToHex(hsl.h, Number((e.currentTarget as HTMLInputElement).value), hsl.l))} />
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={hsl.s}
+                        oninput={(e) =>
+                          setRgb(p, hslToHex(hsl.h, Number((e.currentTarget as HTMLInputElement).value), hsl.l))}
+                      />
                     </label>
                     <label class="ct-slider">
                       <span class="ct-slider-tag" style="background: {hslGradient('l', hsl)}">L</span>
-                      <input type="range" min="0" max="100" step="1" value={hsl.l}
-                        oninput={(e) => setRgb(p, hslToHex(hsl.h, hsl.s, Number((e.currentTarget as HTMLInputElement).value)))} />
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={hsl.l}
+                        oninput={(e) =>
+                          setRgb(p, hslToHex(hsl.h, hsl.s, Number((e.currentTarget as HTMLInputElement).value)))}
+                      />
                     </label>
                     {#if p === '--shadow-menu' || TRANSLUCENT_PROPS.has(p)}
                       <label class="ct-slider">
                         <span class="ct-slider-tag ct-slider-tag--alpha">A</span>
-                        <input type="range" min="0" max="1" step="0.01" value={alphaOf(p)}
-                          oninput={(e) => setAlpha(p, Number((e.currentTarget as HTMLInputElement).value))} />
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={alphaOf(p)}
+                          oninput={(e) => setAlpha(p, Number((e.currentTarget as HTMLInputElement).value))}
+                        />
                       </label>
                     {/if}
                     {#if p === '--shadow-menu'}
                       <label class="ct-slider">
-                        <span class="ct-slider-tag ct-slider-tag--blur">B {Math.round(shadowParts(values[p])?.blur ?? 24)}px</span>
-                        <input type="range" min="0" max="64" step="1" value={shadowParts(values[p])?.blur ?? 24}
-                          oninput={(e) => setBlur(Number((e.currentTarget as HTMLInputElement).value))} />
+                        <span class="ct-slider-tag ct-slider-tag--blur"
+                          >B {Math.round(shadowParts(values[p])?.blur ?? 24)}px</span
+                        >
+                        <input
+                          type="range"
+                          min="0"
+                          max="64"
+                          step="1"
+                          value={shadowParts(values[p])?.blur ?? 24}
+                          oninput={(e) => setBlur(Number((e.currentTarget as HTMLInputElement).value))}
+                        />
                       </label>
                     {/if}
                   </div>
@@ -509,12 +644,12 @@
         <button type="button" class="ct-btn ct-btn--danger" onclick={remove}>{t('settings_ctDelete')}</button>
       {/if}
       <button type="button" class="ct-btn" onclick={close}>{t('cancel')}</button>
-      <button type="button" class="ct-btn ct-btn--primary" onclick={save} disabled={!canSave}>{t('settings_ctSave')}</button>
+      <button type="button" class="ct-btn ct-btn--primary" onclick={save} disabled={!canSave}
+        >{t('settings_ctSave')}</button
+      >
     </footer>
   </div>
 </div>
-
-
 
 <style>
   .ct-backdrop {
@@ -564,7 +699,10 @@
     padding: 2px 6px;
     border-radius: 4px;
   }
-  .ct-x:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .ct-x:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
   .ct-body {
     flex: 1 1 auto;
     overflow-y: auto;
@@ -594,12 +732,19 @@
     font-family: inherit;
     padding: 6px 8px;
   }
-  .ct-name:focus { outline: none; border-color: var(--accent); }
-  .ct-name[aria-invalid='true'] { border-color: var(--live); }
+  .ct-name:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .ct-name[aria-invalid='true'] {
+    border-color: var(--live);
+  }
 
   /* Base picker — a plain in-document dropdown (zoom-safe; NO native select,
      whose popup WebKitGTK renders unscaled under documentElement zoom). */
-  .ct-base-wrap { position: relative; }
+  .ct-base-wrap {
+    position: relative;
+  }
   .ct-base-btn {
     display: flex;
     align-items: center;
@@ -615,10 +760,24 @@
     cursor: pointer;
     text-align: left;
   }
-  .ct-base-btn:hover { border-color: var(--accent); }
-  .ct-base-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ct-base-chevron { flex: 0 0 auto; color: var(--text-secondary); transition: transform 150ms; }
-  .ct-base-chevron--open { transform: rotate(180deg); }
+  .ct-base-btn:hover {
+    border-color: var(--accent);
+  }
+  .ct-base-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ct-base-chevron {
+    flex: 0 0 auto;
+    color: var(--text-secondary);
+    transition: transform 150ms;
+  }
+  .ct-base-chevron--open {
+    transform: rotate(180deg);
+  }
   .ct-base-menu {
     position: absolute;
     top: calc(100% + 4px);
@@ -648,8 +807,13 @@
     cursor: pointer;
     text-align: left;
   }
-  .ct-base-item:hover { background: var(--bg-hover); }
-  .ct-base-item--active { color: var(--accent); font-weight: 700; }
+  .ct-base-item:hover {
+    background: var(--bg-hover);
+  }
+  .ct-base-item--active {
+    color: var(--accent);
+    font-weight: 700;
+  }
   .ct-base-dot {
     flex: 0 0 auto;
     width: 14px;
@@ -658,7 +822,11 @@
     border: 1px solid var(--border);
   }
 
-  .ct-group { display: flex; flex-direction: column; gap: 3px; }
+  .ct-group {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
   .ct-group-label {
     margin: 4px 0 2px;
     font-size: 10px;
@@ -672,7 +840,9 @@
     align-items: center;
     gap: 5px;
   }
-  .ct-group-name { flex: 0 0 auto; }
+  .ct-group-name {
+    flex: 0 0 auto;
+  }
   .ct-info {
     flex: 0 0 auto;
     width: 16px;
@@ -687,14 +857,19 @@
     align-items: center;
     justify-content: center;
   }
-  .ct-info:hover { color: var(--text-primary); background: var(--bg-hover-faint); }
+  .ct-info:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover-faint);
+  }
 
   .ct-item {
     border-radius: 5px;
     display: flex;
     flex-direction: column;
   }
-  .ct-item--invalid { box-shadow: inset 2px 0 0 var(--live); }
+  .ct-item--invalid {
+    box-shadow: inset 2px 0 0 var(--live);
+  }
   .ct-row {
     display: flex;
     align-items: center;
@@ -710,7 +885,9 @@
     text-align: left;
     border-radius: 5px;
   }
-  .ct-row:hover { background: var(--bg-hover-faint); }
+  .ct-row:hover {
+    background: var(--bg-hover-faint);
+  }
   .ct-prop {
     flex: 0 0 auto;
     max-width: 46%;
@@ -737,8 +914,14 @@
     white-space: nowrap;
     text-align: right;
   }
-  .ct-row-chevron { flex: 0 0 auto; color: var(--text-dim); transition: transform 150ms; }
-  .ct-row-chevron--open { transform: rotate(180deg); }
+  .ct-row-chevron {
+    flex: 0 0 auto;
+    color: var(--text-dim);
+    transition: transform 150ms;
+  }
+  .ct-row-chevron--open {
+    transform: rotate(180deg);
+  }
 
   /* Picker: swatch grid + sliders. */
   .ct-picker {
@@ -763,10 +946,23 @@
     padding: 0;
     cursor: pointer;
   }
-  .ct-swatch:hover { transform: scale(1.15); border-color: var(--text-primary); }
-  .ct-swatch--active { border: 2px solid var(--accent); }
-  .ct-sliders { display: flex; flex-direction: column; gap: 5px; }
-  .ct-slider { display: flex; align-items: center; gap: 7px; }
+  .ct-swatch:hover {
+    transform: scale(1.15);
+    border-color: var(--text-primary);
+  }
+  .ct-swatch--active {
+    border: 2px solid var(--accent);
+  }
+  .ct-sliders {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .ct-slider {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
   .ct-slider-tag {
     flex: 0 0 auto;
     width: 34px;
@@ -782,8 +978,16 @@
     overflow: hidden;
     white-space: nowrap;
   }
-  .ct-slider-tag--alpha { width: 34px; background: linear-gradient(to right, #000, var(--text-secondary)); }
-  .ct-slider-tag--blur { width: 52px; background: var(--track); text-shadow: none; color: var(--text-primary); }
+  .ct-slider-tag--alpha {
+    width: 34px;
+    background: linear-gradient(to right, #000, var(--text-secondary));
+  }
+  .ct-slider-tag--blur {
+    width: 52px;
+    background: var(--track);
+    text-shadow: none;
+    color: var(--text-primary);
+  }
   .ct-slider input[type='range'] {
     flex: 1 1 auto;
     height: 4px;
@@ -829,7 +1033,9 @@
     max-width: 100%;
     word-break: break-word;
   }
-  .ct-spacer { flex: 1 1 auto; }
+  .ct-spacer {
+    flex: 1 1 auto;
+  }
   .ct-btn {
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -840,7 +1046,10 @@
     font-family: inherit;
     padding: 6px 10px;
     cursor: pointer;
-    transition: background 150ms, color 150ms, border-color 150ms;
+    transition:
+      background 150ms,
+      color 150ms,
+      border-color 150ms;
   }
   .ct-btn:hover:not(:disabled) {
     background: var(--bg-hover);

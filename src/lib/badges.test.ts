@@ -46,7 +46,12 @@ function hostUrl(): string | null {
 describe('mergeRefreshedBadges', () => {
   it('inherits the baseline label and refreshes UUIDs', () => {
     const rows: GlobalBadgeRow[] = [
-      { setID: 'broadcaster', version: '1', title: 'Broadcaster', imageURL: 'https://static-cdn.jtvnw.net/badges/v1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/1' },
+      {
+        setID: 'broadcaster',
+        version: '1',
+        title: 'Broadcaster',
+        imageURL: 'https://static-cdn.jtvnw.net/badges/v1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/1',
+      },
     ]
     const merged = mergeRefreshedBadges(BASELINE_BADGES, rows)
     expect(merged.broadcaster.label).toBe('Host') // baseline label preserved
@@ -55,7 +60,12 @@ describe('mergeRefreshedBadges', () => {
 
   it('adds a brand-new set not in the baseline', () => {
     const rows: GlobalBadgeRow[] = [
-      { setID: 'brand-new-badge', version: '1', title: 'Brand New', imageURL: 'https://static-cdn.jtvnw.net/badges/v1/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/1' },
+      {
+        setID: 'brand-new-badge',
+        version: '1',
+        title: 'Brand New',
+        imageURL: 'https://static-cdn.jtvnw.net/badges/v1/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/1',
+      },
     ]
     const merged = mergeRefreshedBadges(BASELINE_BADGES, rows)
     expect(merged['brand-new-badge'].uuid).toBe('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')
@@ -70,8 +80,18 @@ describe('mergeRefreshedBadges', () => {
 
   it('builds perVersion for multi-version sets and preserves curated labels', () => {
     const rows: GlobalBadgeRow[] = [
-      { setID: 'bits', version: '1', title: 'cheer 1', imageURL: 'https://static-cdn.jtvnw.net/badges/v1/11111111-1111-1111-1111-111111111111/1' },
-      { setID: 'bits', version: '100', title: 'cheer 100', imageURL: 'https://static-cdn.jtvnw.net/badges/v1/22222222-2222-2222-2222-222222222222/1' },
+      {
+        setID: 'bits',
+        version: '1',
+        title: 'cheer 1',
+        imageURL: 'https://static-cdn.jtvnw.net/badges/v1/11111111-1111-1111-1111-111111111111/1',
+      },
+      {
+        setID: 'bits',
+        version: '100',
+        title: 'cheer 100',
+        imageURL: 'https://static-cdn.jtvnw.net/badges/v1/22222222-2222-2222-2222-222222222222/1',
+      },
     ]
     const merged = mergeRefreshedBadges(BASELINE_BADGES, rows)
     expect(merged.bits.label).toBe('Bits')
@@ -136,7 +156,12 @@ describe('initBadgeRefresh (cache + background refresh)', () => {
   it('a stale cache triggers a background refresh', async () => {
     writeCache({ ageDays: 8 }) // > 7 days
     mockedFetch.mockResolvedValue([
-      { setID: 'broadcaster', version: '1', title: 'Broadcaster', imageURL: 'https://static-cdn.jtvnw.net/badges/v1/11111111-1111-1111-1111-111111111111/1' },
+      {
+        setID: 'broadcaster',
+        version: '1',
+        title: 'Broadcaster',
+        imageURL: 'https://static-cdn.jtvnw.net/badges/v1/11111111-1111-1111-1111-111111111111/1',
+      },
     ])
     initBadgeRefresh()
     // Stale cache is installed immediately (beats baseline)...
@@ -164,9 +189,7 @@ describe('initBadgeRefresh (cache + background refresh)', () => {
     mockedFetch.mockResolvedValue([])
     expect(() => initBadgeRefresh()).not.toThrow()
     // Corrupt cache -> baseline active (not the cached sentinel).
-    expect(hostUrl()).toBe(
-      'https://static-cdn.jtvnw.net/badges/v1/' + BASELINE_BADGES.broadcaster.uuid + '/1',
-    )
+    expect(hostUrl()).toBe('https://static-cdn.jtvnw.net/badges/v1/' + BASELINE_BADGES.broadcaster.uuid + '/1')
     await vi.waitFor(() => expect(mockedFetch).toHaveBeenCalled())
   })
 
@@ -176,8 +199,6 @@ describe('initBadgeRefresh (cache + background refresh)', () => {
     initBadgeRefresh()
     expect(mockedFetch).toHaveBeenCalledTimes(1) // discarded -> refresh despite fresh age
     // Baseline active (old cache discarded).
-    expect(hostUrl()).toBe(
-      'https://static-cdn.jtvnw.net/badges/v1/' + BASELINE_BADGES.broadcaster.uuid + '/1',
-    )
+    expect(hostUrl()).toBe('https://static-cdn.jtvnw.net/badges/v1/' + BASELINE_BADGES.broadcaster.uuid + '/1')
   })
 })

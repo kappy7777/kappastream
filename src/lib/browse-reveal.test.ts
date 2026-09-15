@@ -9,13 +9,7 @@ import { describe, it, expect } from 'vitest'
  * stays a thin shell over it.
  */
 
-import {
-  REVEAL_INITIAL,
-  REVEAL_STEP,
-  initialVisible,
-  revealMore,
-  hasMoreToShow,
-} from './browse-reveal'
+import { REVEAL_INITIAL, REVEAL_STEP, initialVisible, revealMore, hasMoreToShow } from './browse-reveal'
 
 describe('browse reveal policy', () => {
   it('starts at 30 and steps by 30', () => {

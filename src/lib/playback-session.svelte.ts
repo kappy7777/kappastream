@@ -44,8 +44,7 @@ export function formatFatalHlsError(data: HlsErrorData): string {
 export type PlaybackAttachResult = { ok: true } | { ok: false; error: string }
 
 export type ResolveLiveResult =
-  | { ok: true; url: string }
-  | { ok: false; offline: boolean; unavailable?: boolean; error?: string }
+  { ok: true; url: string } | { ok: false; offline: boolean; unavailable?: boolean; error?: string }
 
 /**
  * resolve_stream invoke wrapper + payload normalization — the transport half
@@ -54,7 +53,14 @@ export type ResolveLiveResult =
  * stays at the call sites.
  */
 export async function resolveLiveStream(channel: string, q: string, lowLatency: boolean): Promise<ResolveLiveResult> {
-  type ResolveRaw = { ok?: boolean; url?: string | null; offline?: boolean; error?: string | null; unavailable?: boolean; quality?: string | null }
+  type ResolveRaw = {
+    ok?: boolean
+    url?: string | null
+    offline?: boolean
+    error?: string | null
+    unavailable?: boolean
+    quality?: string | null
+  }
   let raw: ResolveRaw
   try {
     raw = (await invoke('resolve_stream', { channel, quality: q, lowLatency })) as ResolveRaw
@@ -64,7 +70,12 @@ export async function resolveLiveStream(channel: string, q: string, lowLatency: 
   }
   if (raw.offline) return { ok: false, offline: true }
   if (!raw.ok || !raw.url) {
-    return { ok: false, offline: false, unavailable: raw.unavailable === true, error: raw.error ?? 'unknown resolve error' }
+    return {
+      ok: false,
+      offline: false,
+      unavailable: raw.unavailable === true,
+      error: raw.error ?? 'unknown resolve error',
+    }
   }
   return { ok: true, url: raw.url }
 }
@@ -154,7 +165,11 @@ export class PlaybackSession {
     // Defensive destroy of a previous instance (a no-op when the call site
     // tore down first, as the VOD path does).
     if (this.hls) {
-      try { this.hls.destroy() } catch { /* ignore */ }
+      try {
+        this.hls.destroy()
+      } catch {
+        /* ignore */
+      }
       this.hls = null
     }
     const instance = new Hls(buildHlsConfig(opts.lowLatency))
@@ -186,15 +201,24 @@ export class PlaybackSession {
           return
         }
         opts.onManifestParsed?.()
-        void opts.video.play()
-          .then(() => { if (opts.isCurrent()) opts.onPlayed?.() })
-          .catch(() => { if (opts.isCurrent()) opts.onPlayBlocked?.() })
+        void opts.video
+          .play()
+          .then(() => {
+            if (opts.isCurrent()) opts.onPlayed?.()
+          })
+          .catch(() => {
+            if (opts.isCurrent()) opts.onPlayBlocked?.()
+          })
         finish({ ok: true })
       })
 
       instance.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return
-        try { instance.destroy() } catch { /* ignore */ }
+        try {
+          instance.destroy()
+        } catch {
+          /* ignore */
+        }
         if (!opts.isCurrent()) {
           finish({ ok: false, error: STALE_STREAM_REQUEST })
           return
@@ -208,7 +232,11 @@ export class PlaybackSession {
       to = setTimeout(() => {
         to = null
         if (!done) {
-          try { instance.destroy() } catch { /* ignore */ }
+          try {
+            instance.destroy()
+          } catch {
+            /* ignore */
+          }
           finish({ ok: false, error: 'timeout waiting for manifest' })
         }
       }, MANIFEST_TIMEOUT_MS)
@@ -248,9 +276,15 @@ export class PlaybackSession {
       // "absent" here.)
       const target = liveEdgeSeekTarget(this.hls?.liveSyncPosition ?? undefined, seekableEnd)
       if (target !== null) {
-        try { video.currentTime = target } catch { /* ignore */ }
+        try {
+          video.currentTime = target
+        } catch {
+          /* ignore */
+        }
       }
-      void video.play().catch(() => { opts?.onPlayBlocked?.() })
+      void video.play().catch(() => {
+        opts?.onPlayBlocked?.()
+      })
     }, STALL_RECOVER_GRACE_MS)
   }
 
@@ -274,7 +308,11 @@ export class PlaybackSession {
     this.cancelPendingAttach = null
     this.clearStallRecover()
     if (this.hls) {
-      try { this.hls.destroy() } catch { /* ignore */ }
+      try {
+        this.hls.destroy()
+      } catch {
+        /* ignore */
+      }
       this.hls = null
     }
     if (video) {
@@ -282,7 +320,9 @@ export class PlaybackSession {
         video.pause()
         video.removeAttribute('src')
         video.load()
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   }
 

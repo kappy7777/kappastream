@@ -54,9 +54,12 @@ function readRect(): PipRect | null {
     if (!raw) return null
     const v = JSON.parse(raw) as Partial<PipRect>
     if (
-      typeof v.x !== 'number' || typeof v.y !== 'number' ||
-      typeof v.width !== 'number' || typeof v.height !== 'number'
-    ) return null
+      typeof v.x !== 'number' ||
+      typeof v.y !== 'number' ||
+      typeof v.width !== 'number' ||
+      typeof v.height !== 'number'
+    )
+      return null
     if (v.width < 160 || v.height < 90) return null
     return { x: v.x, y: v.y, width: v.width, height: v.height }
   } catch {
@@ -91,18 +94,25 @@ class PipController {
 
   constructor() {
     if (!isTauri()) return
-    void listen(EV_READY, () => { void this.sendInit() })
-      .then((u) => { this.unlistenReady = u })
+    void listen(EV_READY, () => {
+      void this.sendInit()
+    }).then((u) => {
+      this.unlistenReady = u
+    })
     void listen<{ volume: number; muted: boolean }>(EV_VOLUME, (e) => {
       const { volume, muted } = e.payload
       // PiP is the audio authority; its volume/mute ARE the persisted truth.
       settings.setVolume(volume)
       settings.setMuted(muted)
-    }).then((u) => { this.unlistenVolume = u })
+    }).then((u) => {
+      this.unlistenVolume = u
+    })
     void listen<{ rect?: PipRect }>(EV_CLOSED, (e) => {
       if (e.payload?.rect) writeRect(e.payload.rect)
       void this.onPipClosed()
-    }).then((u) => { this.unlistenClosed = u })
+    }).then((u) => {
+      this.unlistenClosed = u
+    })
   }
 
   /** App.svelte calls this (reactively) so the controller can mute/unmute it. */
@@ -158,7 +168,9 @@ class PipController {
       shadow: true,
       ...(saved ? { x: saved.x, y: saved.y } : {}),
     })
-    void wv.once('tauri://error', () => { void this.onPipClosed() })
+    void wv.once('tauri://error', () => {
+      void this.onPipClosed()
+    })
 
     // Flip optimistically so the button reflects state immediately. Corrected
     // (to false) by onPipClosed if creation failed.

@@ -145,11 +145,7 @@ export interface VodChatPage<M> {
   comments: VodChatPageEntry<M>[]
   maxOffset: number
 }
-export type VodChatFetcher<M> = (
-  videoId: string,
-  offset: number,
-  signal: AbortSignal,
-) => Promise<VodChatPage<M>>
+export type VodChatFetcher<M> = (videoId: string, offset: number, signal: AbortSignal) => Promise<VodChatPage<M>>
 
 export interface VodChatDeps<M> {
   fetchPage: VodChatFetcher<M>

@@ -27,7 +27,13 @@
   import { tick } from 'svelte'
   import type { Snippet } from 'svelte'
   import LinkifiedText from './LinkifiedText.svelte'
-  import { resolveBadgeImageUrl, isMessageStricken, usernoticeCategory, isNoticeVisible, DELETED_MESSAGE_CLASS } from './irc'
+  import {
+    resolveBadgeImageUrl,
+    isMessageStricken,
+    usernoticeCategory,
+    isNoticeVisible,
+    DELETED_MESSAGE_CLASS,
+  } from './irc'
   import type { ChatEntry } from './merged-chat'
   import { settings } from './settings.svelte.ts'
   import { formatCompact, formatChatTime } from './format'
@@ -158,19 +164,27 @@
       {#if msg.kind === 'notice'}
         {#if noticeShown(msg.noticeMsgId) && !settings.isMuted(msg.login)}
           <div class="message message--notice">
-            {#if settings.chatTimestamps}<span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span>{/if}
+            {#if settings.chatTimestamps}<span
+                class="message-time"
+                use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span
+              >{/if}
             {#if attribution}{@render attribution(e)}{/if}
             <span class="notice-system">{msg.systemText}</span>
             {#if msg.parts.length > 0}
-              <span class="notice-msg">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} {onlink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img
-                class="emote"
-                class:emote--twitch={part.provider === 'twitch'}
-                src={part.url}
-                alt={part.name}
-                title={part.name}
-                loading="lazy"
-                onerror={() => markEmoteErrored(part.url)}
-              />{/if}{/each}</span>
+              <span class="notice-msg"
+                >{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText
+                      text={part.text}
+                      {onlink}
+                    />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img
+                      class="emote"
+                      class:emote--twitch={part.provider === 'twitch'}
+                      src={part.url}
+                      alt={part.name}
+                      title={part.name}
+                      loading="lazy"
+                      onerror={() => markEmoteErrored(part.url)}
+                    />{/if}{/each}</span
+              >
             {/if}
           </div>
         {/if}
@@ -182,7 +196,9 @@
           title={isMessageStricken(settings.chatModeration, msg.deleted) ? (msg.deletedReason ?? '') : ''}
         >
           {#if settings.chatTimestamps}
-            <span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}>{formatChatTime(msg.timestamp)}</span>
+            <span class="message-time" use:tooltip={new Date(msg.timestamp).toLocaleString()}
+              >{formatChatTime(msg.timestamp)}</span
+            >
           {/if}
           {#if attribution}{@render attribution(e)}{/if}
           {#each msg.badges as b (b.id + b.version)}
@@ -198,22 +214,35 @@
               />
             {/if}
           {/each}
-          <span class="username" style="color: {msg.color}">{msg.username}</span>{#if !msg.isAction}<span class="username-sep">:</span>{/if}
+          <span class="username" style="color: {msg.color}">{msg.username}</span>{#if !msg.isAction}<span
+              class="username-sep">:</span
+            >{/if}
           {#if msg.isAction}<span class="action-mark"> </span>{/if}
-          <span class="text">{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText text={part.text} {onlink} />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img
-            class="emote"
-            class:emote--twitch={part.provider === 'twitch'}
-            src={part.url}
-            alt={part.name}
-            title={part.name}
-            loading="lazy"
-            onerror={() => markEmoteErrored(part.url)}
-          />{/if}{/each}</span>
+          <span class="text"
+            >{#each msg.parts as part}{#if part.type === 'text'}<LinkifiedText
+                  text={part.text}
+                  {onlink}
+                />{:else if erroredEmotes.has(part.url)}<span class="emote-fallback">{part.name}</span>{:else}<img
+                  class="emote"
+                  class:emote--twitch={part.provider === 'twitch'}
+                  src={part.url}
+                  alt={part.name}
+                  title={part.name}
+                  loading="lazy"
+                  onerror={() => markEmoteErrored(part.url)}
+                />{/if}{/each}</span
+          >
           {#if settings.chatBits && msg.bits}
             <span class="bits-badge" use:tooltip={t('mod_bits', { n: msg.bits })}>
               <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-                <path d="M8 1l5 5-5 9-5-9z" fill="currentColor"/>
-                <path d="M3 6h10M8 1l3 5-3 9-3-9z" fill="none" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round"/>
+                <path d="M8 1l5 5-5 9-5-9z" fill="currentColor" />
+                <path
+                  d="M3 6h10M8 1l3 5-3 9-3-9z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="0.8"
+                  stroke-linejoin="round"
+                />
               </svg>
               {formatCompact(msg.bits)}
             </span>
@@ -232,8 +261,19 @@
     onclick={jumpToPresent}
     title={t('chat_jumpToLatest')}
   >
-    <svg class="chat-pane-jump-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M8 3v9M4 8l4 4 4-4"/>
+    <svg
+      class="chat-pane-jump-icon"
+      viewBox="0 0 16 16"
+      width="12"
+      height="12"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      <path d="M8 3v9M4 8l4 4 4-4" />
     </svg>
     {t('chat_backToBottom')}
     {#if newMessageCount > 0}
@@ -281,7 +321,11 @@
     font-family: inherit;
     cursor: pointer;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
-    transition: color 150ms, background 150ms, border-color 150ms, transform 150ms;
+    transition:
+      color 150ms,
+      background 150ms,
+      border-color 150ms,
+      transform 150ms;
     white-space: nowrap;
   }
 

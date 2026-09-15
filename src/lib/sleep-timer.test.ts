@@ -17,7 +17,9 @@ beforeEach(() => {
   vi.useFakeTimers()
   fired = 0
   store = new SleepTimerStore()
-  store.setOnFire(() => { fired++ })
+  store.setOnFire(() => {
+    fired++
+  })
 })
 
 afterEach(() => {

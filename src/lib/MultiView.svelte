@@ -28,7 +28,14 @@
   import { pinnedChat } from './pinned-chat.svelte'
   import { activeRoomModes } from './irc'
   import ChatModesPill from './ChatModesPill.svelte'
-  import { singleChatEntries, mergedChatEntries, toggleMergedId, reconcileMergedIds, type ChatEntry, type MergeSource } from './merged-chat'
+  import {
+    singleChatEntries,
+    mergedChatEntries,
+    toggleMergedId,
+    reconcileMergedIds,
+    type ChatEntry,
+    type MergeSource,
+  } from './merged-chat'
   import { formatCompact } from './format'
   import { tooltip } from './tooltip.ts'
   import { t } from './i18n/index.svelte'
@@ -58,7 +65,10 @@
     const tiles = tileStore.tiles
     const ids = new Set(tiles.map((tile) => tile.id))
     for (const [id, s] of sessions) {
-      if (!ids.has(id)) { s.dispose(); sessions.delete(id) }
+      if (!ids.has(id)) {
+        s.dispose()
+        sessions.delete(id)
+      }
     }
     for (const tile of tiles) {
       const existing = sessions.get(tile.id)
@@ -91,7 +101,7 @@
   // The active chat tab follows tileStore.activeChat (moved by chat-tab clicks
   // AND tile clicks — NOT by anything audio-related).
   const activeChatId = $derived(tileStore.activeChat?.id ?? null)
-  const activeSession = $derived(activeChatId ? sessions.get(activeChatId) ?? null : null)
+  const activeSession = $derived(activeChatId ? (sessions.get(activeChatId) ?? null) : null)
 
   // ---- merged chats ---------------------------------------------------------
   // Any subset of the open tiles' chats can be MERGED into one interleaved
@@ -116,7 +126,10 @@
   // smaller than two (reconcileMergedIds returns the same reference when
   // nothing changed, so this never writes redundant state).
   $effect(() => {
-    const next = reconcileMergedIds(mergedIds, tileStore.tiles.map((tile) => tile.id))
+    const next = reconcileMergedIds(
+      mergedIds,
+      tileStore.tiles.map((tile) => tile.id),
+    )
     if (next !== mergedIds) mergedIds = next
     if (mergedIds.length < 2 && mergedView) mergedView = false
   })
@@ -276,7 +289,11 @@
     if (draggingId === null) {
       // Threshold gate: only become an active drag after a small movement, so a
       // handle click (e.g. to focus the tile) doesn't spuriously reorder.
-      if (Math.abs(e.clientX - dragStart.x) < DRAG_THRESHOLD_PX && Math.abs(e.clientY - dragStart.y) < DRAG_THRESHOLD_PX) return
+      if (
+        Math.abs(e.clientX - dragStart.x) < DRAG_THRESHOLD_PX &&
+        Math.abs(e.clientY - dragStart.y) < DRAG_THRESHOLD_PX
+      )
+        return
       draggingId = dragStart.id
     }
     const over = tileIdAtPoint(e.clientX, e.clientY)
@@ -389,7 +406,15 @@
     {#if count === 0}
       <div class="mv-empty">{t('mv_addStreamHint')}</div>
     {:else}
-      <div class="mv-grid" class:mv-grid--1={count === 1} class:mv-grid--2={count === 2} class:mv-grid--3={count === 3} class:mv-grid--4={count === 4} bind:this={gridEl} style={gridStyle}>
+      <div
+        class="mv-grid"
+        class:mv-grid--1={count === 1}
+        class:mv-grid--2={count === 2}
+        class:mv-grid--3={count === 3}
+        class:mv-grid--4={count === 4}
+        bind:this={gridEl}
+        style={gridStyle}
+      >
         {#each tileStore.tiles as tile, i (tile.id)}
           <Tile
             {tile}
@@ -409,11 +434,15 @@
           <div
             class="mv-splitter mv-splitter--col"
             class:mv-splitter--active={splitDrag?.axis === 'x'}
-            style={count === 3 ? `left:${(splitX * 100).toFixed(2)}%;top:0;height:${(splitY * 100).toFixed(2)}%;` : `left:${(splitX * 100).toFixed(2)}%;top:0;bottom:0;`}
+            style={count === 3
+              ? `left:${(splitX * 100).toFixed(2)}%;top:0;height:${(splitY * 100).toFixed(2)}%;`
+              : `left:${(splitX * 100).toFixed(2)}%;top:0;bottom:0;`}
             role="separator"
             aria-orientation="vertical"
             onpointerdown={(e) => startSplitDrag('x', e)}
-            ondblclick={() => { splitX = 0.5 }}
+            ondblclick={() => {
+              splitX = 0.5
+            }}
           ></div>
         {/if}
         {#if count >= 3}
@@ -425,7 +454,9 @@
             role="separator"
             aria-orientation="horizontal"
             onpointerdown={(e) => startSplitDrag('y', e)}
-            ondblclick={() => { splitY = 0.5 }}
+            ondblclick={() => {
+              splitY = 0.5
+            }}
           ></div>
         {/if}
       </div>
@@ -452,30 +483,52 @@
           aria-label={t('mv_hideStatusBar')}
           use:tooltip={t('mv_hideStatusBar')}
         >
-          <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 6l5 5 5-5"/></svg>
+          <svg
+            viewBox="0 0 16 16"
+            width="11"
+            height="11"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"><path d="M3 6l5 5 5-5" /></svg
+          >
         </button>
         {#each tileStore.tiles as tile (tile.id)}
           {@const s = tile.liveStatus}
           {@const authority = tileStore.isAuthority(tile.id)}
-          <button type="button" class="mv-status-row" class:mv-status-row--active={authority} onclick={() => activateTile(tile.id)} aria-label={t('mv_focusTile') + ' — ' + tile.channel} aria-current={authority ? 'true' : 'false'}>
+          <button
+            type="button"
+            class="mv-status-row"
+            class:mv-status-row--active={authority}
+            onclick={() => activateTile(tile.id)}
+            aria-label={t('mv_focusTile') + ' — ' + tile.channel}
+            aria-current={authority ? 'true' : 'false'}
+          >
             {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
-              <img class="mv-status-avatar" class:mv-status-avatar--off={s.state === 'offline'} src={s.avatarUrl} alt="" />
-          {/if}
-          <span class="mv-status-channel">{tile.channel}</span>
-          {#if s.state === 'live'}
-            <span class="mv-status-live"><span class="mv-status-dot"></span>{t('liveBadge')}</span>
-            <span class="mv-status-title" title={s.title}>{s.title}</span>
-            <span class="mv-status-meta">
-              {#if s.game}<span class="mv-status-game">{s.game}</span><span class="mv-status-sep">·</span>{/if}
-              <span>{formatCompact(s.viewers)} {t('viewers')}</span>
-              {#if s.uptime}<span class="mv-status-sep">·</span><span>{t('si_uptime', { uptime: s.uptime })}</span>{/if}
-            </span>
-          {:else if s.state === 'offline'}
-            <span class="mv-status-offline">{t('offline')}</span>
-          {:else}
-            <span class="mv-status-loading">{tile.status === 'loading' ? t('player_loadingStream') : t('live')}</span>
-          {/if}
-        </button>
+              <img
+                class="mv-status-avatar"
+                class:mv-status-avatar--off={s.state === 'offline'}
+                src={s.avatarUrl}
+                alt=""
+              />
+            {/if}
+            <span class="mv-status-channel">{tile.channel}</span>
+            {#if s.state === 'live'}
+              <span class="mv-status-live"><span class="mv-status-dot"></span>{t('liveBadge')}</span>
+              <span class="mv-status-title" title={s.title}>{s.title}</span>
+              <span class="mv-status-meta">
+                {#if s.game}<span class="mv-status-game">{s.game}</span><span class="mv-status-sep">·</span>{/if}
+                <span>{formatCompact(s.viewers)} {t('viewers')}</span>
+                {#if s.uptime}<span class="mv-status-sep">·</span><span>{t('si_uptime', { uptime: s.uptime })}</span
+                  >{/if}
+              </span>
+            {:else if s.state === 'offline'}
+              <span class="mv-status-offline">{t('offline')}</span>
+            {:else}
+              <span class="mv-status-loading">{tile.status === 'loading' ? t('player_loadingStream') : t('live')}</span>
+            {/if}
+          </button>
         {/each}
       </div>
     {:else}
@@ -483,11 +536,7 @@
            reveal button (a real <button>, so Tab reaches it). The strip is its
            own flex row beneath the grid → it cannot steal clicks from tiles or
            their controls. -->
-      <div
-        class="mv-statusbar-hoverzone"
-        role="region"
-        aria-label={t('mv_statusBar')}
-      >
+      <div class="mv-statusbar-hoverzone" role="region" aria-label={t('mv_statusBar')}>
         <button
           type="button"
           class="mv-statusbar-reveal"
@@ -495,7 +544,16 @@
           aria-label={t('mv_showStatusBar')}
           aria-expanded={false}
         >
-          <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 10l5-5 5 5"/></svg>
+          <svg
+            viewBox="0 0 16 16"
+            width="11"
+            height="11"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"><path d="M3 10l5-5 5 5" /></svg
+          >
           <span class="mv-statusbar-reveal-label">{t('mv_showStatusBar')}</span>
         </button>
       </div>
@@ -514,7 +572,9 @@
             {#if av}
               <img class="mv-mini-avatar" src={av} alt="" loading="lazy" />
             {:else}
-              <span class="mv-mini-avatar mv-mini-avatar--fallback" aria-hidden="true">{e.channel.charAt(0).toUpperCase()}</span>
+              <span class="mv-mini-avatar mv-mini-avatar--fallback" aria-hidden="true"
+                >{e.channel.charAt(0).toUpperCase()}</span
+              >
             {/if}
           </span>
         {/if}
@@ -536,9 +596,19 @@
               aria-label={t('mv_mergeChats')}
               aria-expanded={mergePickerOpen}
             >
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M2 4.5h7M6.5 2l3 2.5-3 2.5"/>
-                <path d="M14 11.5H7M9.5 9l-3 2.5 3 2.5"/>
+              <svg
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M2 4.5h7M6.5 2l3 2.5-3 2.5" />
+                <path d="M14 11.5H7M9.5 9l-3 2.5 3 2.5" />
               </svg>
             </button>
             {#if mergePickerOpen}
@@ -559,9 +629,16 @@
                   >
                     <span class="mv-tab-avatar-wrap">
                       {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
-                        <img class="mv-tab-avatar" class:mv-tab-avatar--off={s.state === 'offline'} src={s.avatarUrl} alt="" />
+                        <img
+                          class="mv-tab-avatar"
+                          class:mv-tab-avatar--off={s.state === 'offline'}
+                          src={s.avatarUrl}
+                          alt=""
+                        />
                       {:else}
-                        <span class="mv-tab-avatar mv-tab-avatar--fallback" aria-hidden="true">{tile.channel.charAt(0).toUpperCase()}</span>
+                        <span class="mv-tab-avatar mv-tab-avatar--fallback" aria-hidden="true"
+                          >{tile.channel.charAt(0).toUpperCase()}</span
+                        >
                       {/if}
                     </span>
                     <span class="mv-merge-name">{tile.channel}</span>
@@ -604,7 +681,9 @@
                     {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
                       <img class="mv-tab-avatar mv-tab-avatar--stack" src={s.avatarUrl} alt="" />
                     {:else}
-                      <span class="mv-tab-avatar mv-tab-avatar--stack mv-tab-avatar--fallback" aria-hidden="true">{tile.channel.charAt(0).toUpperCase()}</span>
+                      <span class="mv-tab-avatar mv-tab-avatar--stack mv-tab-avatar--fallback" aria-hidden="true"
+                        >{tile.channel.charAt(0).toUpperCase()}</span
+                      >
                     {/if}
                   </span>
                 {/each}
@@ -620,15 +699,25 @@
                 class:mv-chat-tab--active={!mergedView && tileStore.isActiveChat(tile.id)}
                 role="tab"
                 aria-selected={!mergedView && tileStore.isActiveChat(tile.id)}
-                onclick={() => { mergedView = false; tileStore.selectChat(tile.id) }}
+                onclick={() => {
+                  mergedView = false
+                  tileStore.selectChat(tile.id)
+                }}
                 title={tile.channel}
                 aria-label={tile.channel}
               >
                 <span class="mv-tab-avatar-wrap">
                   {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
-                    <img class="mv-tab-avatar" class:mv-tab-avatar--off={s.state === 'offline'} src={s.avatarUrl} alt="" />
+                    <img
+                      class="mv-tab-avatar"
+                      class:mv-tab-avatar--off={s.state === 'offline'}
+                      src={s.avatarUrl}
+                      alt=""
+                    />
                   {:else}
-                    <span class="mv-tab-avatar mv-tab-avatar--fallback" aria-hidden="true">{tile.channel.charAt(0).toUpperCase()}</span>
+                    <span class="mv-tab-avatar mv-tab-avatar--fallback" aria-hidden="true"
+                      >{tile.channel.charAt(0).toUpperCase()}</span
+                    >
                   {/if}
                   {#if s.state === 'live'}<span class="mv-tab-live-dot" aria-hidden="true"></span>{/if}
                 </span>
@@ -671,8 +760,23 @@
 </div>
 
 <style>
-  .mv-main { display: flex; flex-direction: row; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
-  .mv-stage { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #000; overflow: hidden; }
+  .mv-main {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .mv-stage {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: #000;
+    overflow: hidden;
+  }
   .mv-empty {
     flex: 1;
     display: flex;
@@ -692,14 +796,26 @@
     background: #000;
     position: relative;
   }
-  .mv-grid--1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
-  .mv-grid--2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
+  .mv-grid--1 {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
+  }
+  .mv-grid--2 {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr;
+  }
   /* 3: TWO equal tiles on top, ONE tile CENTERED below them (same width as each
      top tile). Uses a 4-column grid; tile placement is set via inline grid-area
      on each Tile (see tileGridArea), NOT nth-child — deterministic at every
      split ratio. At the default 50/50 split tile3 is perfectly centered. */
-  .mv-grid--3 { grid-template-columns: 1fr 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
-  .mv-grid--4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  .mv-grid--3 {
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+  .mv-grid--4 {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
 
   /* Resizable splitter handles. They are absolutely-positioned children of the
      grid (position:absolute removes them from grid flow so they don't affect
@@ -763,7 +879,11 @@
     padding: 0;
     opacity: 0.7;
   }
-  .mv-statusbar-hide:hover { opacity: 1; background: var(--bg-hover-faint); color: var(--text-primary); }
+  .mv-statusbar-hide:hover {
+    opacity: 1;
+    background: var(--bg-hover-faint);
+    color: var(--text-primary);
+  }
   /* Hidden-state strip: a thin strip beneath the grid. Never overlaps
      tiles/controls, so it cannot steal their clicks. The reveal button inside
      is a real focusable <button> (Tab surfaces it for keyboard users) and is
@@ -804,7 +924,9 @@
     outline: 2px solid var(--accent);
     outline-offset: -2px;
   }
-  .mv-statusbar-reveal-label { line-height: 1; }
+  .mv-statusbar-reveal-label {
+    line-height: 1;
+  }
   .mv-status-row {
     display: flex;
     align-items: center;
@@ -821,24 +943,87 @@
     color: inherit;
     cursor: pointer;
   }
-  .mv-status-row:hover { background: var(--bg-hover); opacity: 0.85; }
-  .mv-status-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .mv-status-row:hover {
+    background: var(--bg-hover);
+    opacity: 0.85;
+  }
+  .mv-status-row:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
   .mv-status-row--active {
     opacity: 1;
     border-left-color: var(--accent);
     background: var(--bg-hover-faint);
   }
-  .mv-status-avatar { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
-  .mv-status-avatar--off { filter: grayscale(1); opacity: 0.6; }
-  .mv-status-channel { font-weight: 700; flex: 0 0 auto; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mv-status-live { display: inline-flex; align-items: center; gap: 4px; color: var(--live); font-size: 11px; font-weight: 700; flex: 0 0 auto; }
-  .mv-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--live); }
-  .mv-status-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; color: var(--text-primary); }
-  .mv-status-meta { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; color: var(--text-secondary); font-size: 12px; }
-  .mv-status-game { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mv-status-sep { opacity: 0.5; }
-  .mv-status-offline { color: var(--text-secondary); font-size: 12px; font-style: italic; }
-  .mv-status-loading { color: var(--text-secondary); font-size: 12px; }
+  .mv-status-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex: 0 0 auto;
+  }
+  .mv-status-avatar--off {
+    filter: grayscale(1);
+    opacity: 0.6;
+  }
+  .mv-status-channel {
+    font-weight: 700;
+    flex: 0 0 auto;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mv-status-live {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--live);
+    font-size: 11px;
+    font-weight: 700;
+    flex: 0 0 auto;
+  }
+  .mv-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--live);
+  }
+  .mv-status-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1 1 auto;
+    color: var(--text-primary);
+  }
+  .mv-status-meta {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+  .mv-status-game {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mv-status-sep {
+    opacity: 0.5;
+  }
+  .mv-status-offline {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-style: italic;
+  }
+  .mv-status-loading {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
 
   /* Chat pane. */
   .mv-chat {
@@ -867,13 +1052,18 @@
     overflow-x: auto;
     scrollbar-width: none;
   }
-  .mv-chat-tabs::-webkit-scrollbar { display: none; }
+  .mv-chat-tabs::-webkit-scrollbar {
+    display: none;
+  }
 
   /* Merge button + picker. The TABS ROW is the picker's positioning context
      (the wrap is only 36px wide — the panel's percentage max-width must
      resolve against the full pane width so it can never reach past the
      window's right border). */
-  .mv-merge-wrap { flex: 0 0 auto; display: inline-flex; }
+  .mv-merge-wrap {
+    flex: 0 0 auto;
+    display: inline-flex;
+  }
   .mv-merge-btn {
     width: 36px;
     height: 31px;
@@ -887,9 +1077,19 @@
     justify-content: center;
     padding: 0;
   }
-  .mv-merge-btn:hover { background: var(--bg-hover-faint); color: var(--text-primary); }
-  .mv-merge-btn--on { color: var(--accent); border-bottom-color: var(--accent); }
-  .mv-merge-backdrop { position: fixed; inset: 0; z-index: 40; }
+  .mv-merge-btn:hover {
+    background: var(--bg-hover-faint);
+    color: var(--text-primary);
+  }
+  .mv-merge-btn--on {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .mv-merge-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
   .mv-merge-panel {
     position: absolute;
     top: calc(100% + 4px);
@@ -935,8 +1135,13 @@
     border-radius: 4px;
     text-align: left;
   }
-  .mv-merge-row:hover { background: var(--bg-hover-faint); color: var(--text-primary); }
-  .mv-merge-row--checked { color: var(--text-primary); }
+  .mv-merge-row:hover {
+    background: var(--bg-hover-faint);
+    color: var(--text-primary);
+  }
+  .mv-merge-row--checked {
+    color: var(--text-primary);
+  }
   .mv-merge-name {
     flex: 1 1 auto;
     min-width: 0;
@@ -944,19 +1149,46 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .mv-merge-check { flex: 0 0 auto; width: 14px; color: var(--accent); font-weight: 700; }
+  .mv-merge-check {
+    flex: 0 0 auto;
+    width: 14px;
+    color: var(--accent);
+    font-weight: 700;
+  }
 
   /* Stacked avatar cluster for the merged tab (up to 4 tiles): overlapping
      circles, each ringed in the strip background so they read separately. */
-  .mv-tab-avatar-stack { display: inline-flex; align-items: center; }
-  .mv-tab-stack-item { display: inline-flex; line-height: 0; }
-  .mv-tab-stack-item + .mv-tab-stack-item { margin-left: -7px; }
-  .mv-tab-avatar--stack { width: 18px; height: 18px; box-shadow: 0 0 0 1.5px var(--bg-app); }
+  .mv-tab-avatar-stack {
+    display: inline-flex;
+    align-items: center;
+  }
+  .mv-tab-stack-item {
+    display: inline-flex;
+    line-height: 0;
+  }
+  .mv-tab-stack-item + .mv-tab-stack-item {
+    margin-left: -7px;
+  }
+  .mv-tab-avatar--stack {
+    width: 18px;
+    height: 18px;
+    box-shadow: 0 0 0 1.5px var(--bg-app);
+  }
 
   /* Per-message source mark in the merged stream: the origin channel's
      avatar (or initial) before the username. */
-  .mv-merge-src { display: inline-flex; margin-right: 4px; vertical-align: -3px; }
-  .mv-mini-avatar { width: 14px; height: 14px; border-radius: 50%; object-fit: cover; display: block; }
+  .mv-merge-src {
+    display: inline-flex;
+    margin-right: 4px;
+    vertical-align: -3px;
+  }
+  .mv-mini-avatar {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
+  }
   .mv-mini-avatar--fallback {
     display: inline-flex;
     align-items: center;
@@ -986,9 +1218,16 @@
        chat pane below must not shift by a pixel. */
     height: 31px;
   }
-  .mv-chat-tab:hover { background: var(--bg-hover-faint); }
-  .mv-chat-tab--active { border-bottom-color: var(--accent); }
-  .mv-tab-avatar-wrap { position: relative; display: inline-flex; }
+  .mv-chat-tab:hover {
+    background: var(--bg-hover-faint);
+  }
+  .mv-chat-tab--active {
+    border-bottom-color: var(--accent);
+  }
+  .mv-tab-avatar-wrap {
+    position: relative;
+    display: inline-flex;
+  }
   .mv-tab-avatar {
     width: 22px;
     height: 22px;
@@ -1007,7 +1246,10 @@
     font-size: 11px;
     font-weight: 700;
   }
-  .mv-tab-avatar--off { filter: grayscale(1); opacity: 0.6; }
+  .mv-tab-avatar--off {
+    filter: grayscale(1);
+    opacity: 0.6;
+  }
   /* Live marker replacing the old text tabs' "●" prefix: a small dot on the
      avatar's corner, ringed in the strip background so it reads as a badge. */
   .mv-tab-live-dot {
@@ -1034,5 +1276,4 @@
   /* The message list / jump pill styles live in the shared ChatPane component
      (chat rendering was deduplicated there — no local copies to keep in
      sync). */
-
 </style>

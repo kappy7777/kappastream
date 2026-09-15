@@ -54,8 +54,13 @@
 <section class="pin-banner" aria-label={t('pin_aria')}>
   <div class="pin-head">
     <svg class="pin-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-      <path d="M9.5 1L15 6.5l-2 .5-2.5 3 .5 3-2-1.5L4 14l-1-1 2.5-5-1.5-2 3-1L9.5 1z" fill="currentColor" opacity="0.9" transform="rotate(8 8 8)"/>
-      <circle cx="10.5" cy="5.5" r="1" fill="currentColor"/>
+      <path
+        d="M9.5 1L15 6.5l-2 .5-2.5 3 .5 3-2-1.5L4 14l-1-1 2.5-5-1.5-2 3-1L9.5 1z"
+        fill="currentColor"
+        opacity="0.9"
+        transform="rotate(8 8 8)"
+      />
+      <circle cx="10.5" cy="5.5" r="1" fill="currentColor" />
     </svg>
     <span class="pin-by">{t('pin_pinnedBy', { name: pin.pinnedBy.displayName || pin.pinnedBy.login })}</span>
     <span class="pin-actions">
@@ -67,11 +72,21 @@
         aria-label={expanded ? t('pin_collapse') : t('pin_expand')}
         use:tooltip={expanded ? t('pin_collapse') : t('pin_expand')}
       >
-        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           {#if expanded}
-            <path d="M3 10l5-5 5 5"/>
+            <path d="M3 10l5-5 5 5" />
           {:else}
-            <path d="M3 6l5 5 5-5"/>
+            <path d="M3 6l5 5 5-5" />
           {/if}
         </svg>
       </button>
@@ -82,8 +97,17 @@
         aria-label={t('pin_dismiss')}
         use:tooltip={t('pin_dismiss')}
       >
-        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-          <path d="M4 4l8 8M12 4l-8 8"/>
+        <svg
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+        >
+          <path d="M4 4l8 8M12 4l-8 8" />
         </svg>
       </button>
     </span>
@@ -95,7 +119,15 @@
       {:else if erroredEmotes.has(part.url)}
         <span class="emote-fallback">{part.name}</span>
       {:else}
-        <img class="emote" class:emote--twitch={part.provider === 'twitch'} src={part.url} alt={part.name} title={part.name} loading="lazy" onerror={() => markEmoteErrored(part.url)} />
+        <img
+          class="emote"
+          class:emote--twitch={part.provider === 'twitch'}
+          src={part.url}
+          alt={part.name}
+          title={part.name}
+          loading="lazy"
+          onerror={() => markEmoteErrored(part.url)}
+        />
       {/if}
     {/each}
   </div>
@@ -131,7 +163,10 @@
     gap: 5px;
     min-width: 0;
   }
-  .pin-icon { flex: 0 0 auto; color: var(--accent); }
+  .pin-icon {
+    flex: 0 0 auto;
+    color: var(--accent);
+  }
   .pin-by {
     flex: 1 1 auto;
     min-width: 0;
@@ -142,7 +177,11 @@
     font-size: 11px;
     font-weight: 600;
   }
-  .pin-actions { display: inline-flex; gap: 2px; flex: 0 0 auto; }
+  .pin-actions {
+    display: inline-flex;
+    gap: 2px;
+    flex: 0 0 auto;
+  }
   .pin-btn {
     width: 20px;
     height: 20px;
@@ -155,10 +194,18 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: background 120ms ease, color 120ms ease;
+    transition:
+      background 120ms ease,
+      color 120ms ease;
   }
-  .pin-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .pin-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .pin-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .pin-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
 
   .pin-body {
     display: block;
@@ -181,6 +228,10 @@
     overflow-y: auto;
   }
 
-  .emote { vertical-align: middle; }
-  .emote-fallback { color: var(--text-primary); }
+  .emote {
+    vertical-align: middle;
+  }
+  .emote-fallback {
+    color: var(--text-primary);
+  }
 </style>

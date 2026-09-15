@@ -33,7 +33,10 @@ describe('chat links: allowlist', () => {
       expect(u.hostname === 'twitch.tv' || u.hostname.endsWith('.twitch.tv')).toBe(true)
     }
     // The dangerous tokens survive as plain text, never as links.
-    const plain = chunks.filter((c) => !c.url).map((c) => c.text).join(' ')
+    const plain = chunks
+      .filter((c) => !c.url)
+      .map((c) => c.text)
+      .join(' ')
     expect(plain).toMatch(/javascript:alert\(1\)/)
     expect(plain).toMatch(/data:text\/html,x/)
     expect(plain).toMatch(/https:\/\/bit\.ly\/x/)

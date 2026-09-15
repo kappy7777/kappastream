@@ -199,56 +199,56 @@
 
 <aside class="sidebar" class:sidebar--icons={iconsOnly}>
   {#if !iconsOnly}
-  <div class="sidebar-header">
-    <div class="header-row">
-      <h2 class="sidebar-title">{t('favorites')}</h2>
-      <button
-        type="button"
-        class="add-fav-btn"
-        onclick={addMenuOpen ? closeAddMenu : openAddMenu}
-        aria-label={addMenuOpen ? t('sidebar_closeAddFavorite') : t('sidebar_addFavorite')}
-        aria-expanded={addMenuOpen}
-        use:tooltip={addMenuOpen ? t('close') : t('sidebar_addFavorite')}
-      >
-        {#if addMenuOpen}
-          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-            <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        {:else}
-          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-            <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        {/if}
-      </button>
-    </div>
-    {#if addMenuOpen}
-      <form class="add-fav-form" onsubmit={submitAdd}>
-        <input
-          bind:this={addInputEl}
-          bind:value={addInput}
-          type="text"
-          class="add-fav-input"
-          placeholder={t('sidebar_channelNamePlaceholder')}
-          spellcheck="false"
-          autocomplete="off"
-          aria-label={t('sidebar_channelName')}
-          aria-invalid={!!addError}
-          onkeydown={onAddInputKeydown}
-        />
-        <button type="submit" class="add-fav-submit" disabled={!addInput.trim()}>
-          {t('add')}
+    <div class="sidebar-header">
+      <div class="header-row">
+        <h2 class="sidebar-title">{t('favorites')}</h2>
+        <button
+          type="button"
+          class="add-fav-btn"
+          onclick={addMenuOpen ? closeAddMenu : openAddMenu}
+          aria-label={addMenuOpen ? t('sidebar_closeAddFavorite') : t('sidebar_addFavorite')}
+          aria-expanded={addMenuOpen}
+          use:tooltip={addMenuOpen ? t('close') : t('sidebar_addFavorite')}
+        >
+          {#if addMenuOpen}
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          {:else}
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          {/if}
         </button>
-      </form>
-      {#if addError}
-        <div class="add-fav-error" role="alert">{addError}</div>
-      {/if}
-    {/if}
-    {#if store.rateLimited}
-      <div class="rate-limit-banner" role="status">
-        {t('sidebar_rateLimited')}
       </div>
-    {/if}
-  </div>
+      {#if addMenuOpen}
+        <form class="add-fav-form" onsubmit={submitAdd}>
+          <input
+            bind:this={addInputEl}
+            bind:value={addInput}
+            type="text"
+            class="add-fav-input"
+            placeholder={t('sidebar_channelNamePlaceholder')}
+            spellcheck="false"
+            autocomplete="off"
+            aria-label={t('sidebar_channelName')}
+            aria-invalid={!!addError}
+            onkeydown={onAddInputKeydown}
+          />
+          <button type="submit" class="add-fav-submit" disabled={!addInput.trim()}>
+            {t('add')}
+          </button>
+        </form>
+        {#if addError}
+          <div class="add-fav-error" role="alert">{addError}</div>
+        {/if}
+      {/if}
+      {#if store.rateLimited}
+        <div class="rate-limit-banner" role="status">
+          {t('sidebar_rateLimited')}
+        </div>
+      {/if}
+    </div>
   {/if}
 
   <div class="sidebar-list">
@@ -299,97 +299,122 @@
                   <img src={collab.avatar} alt="" loading="lazy" />
                 {:else}
                   <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" fill="currentColor"/>
+                    <path
+                      d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"
+                      fill="currentColor"
+                    />
                   </svg>
                 {/if}
               </span>
             {/if}
           </span>
           {#if !iconsOnly}
-          <span class="fav-body">
-            <span class="fav-name">
-              <span class="fav-name-text">{fav.name}</span>
-              {#if collab && collab.others > 0}
-                <span class="fav-collab-count" aria-label={t('streamingTogether')}>+{collab.others}</span>
-              {/if}
-              {#if hoveredName === fav.name}
-                <span
-                  class="fav-remove"
-                  role="button"
-                  tabindex="-1"
-                  aria-label={t('sidebar_remove')}
-                  onclick={(e) => removeFav(fav.name, e)}
-                  onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') removeFav(fav.name, e) }}
-                >×</span>
-              {/if}
-              {#if fav.updateDelayed}
-                <span
-                  class="fav-stale-dot"
-                  aria-label={t('sidebar_staleDot')}
-                  title={t('sidebar_staleDot')}
-                  aria-hidden="false"
-                ></span>
-              {/if}
-            </span>
-            {#if info}
-              {#snippet favMeta()}
-                <span class="fav-meta">
-                  <span class="live-dot" aria-hidden="true"></span>
-                  <!-- twitch.tv shows the COMBINED session viewership on shared-
+            <span class="fav-body">
+              <span class="fav-name">
+                <span class="fav-name-text">{fav.name}</span>
+                {#if collab && collab.others > 0}
+                  <span class="fav-collab-count" aria-label={t('streamingTogether')}>+{collab.others}</span>
+                {/if}
+                {#if hoveredName === fav.name}
+                  <span
+                    class="fav-remove"
+                    role="button"
+                    tabindex="-1"
+                    aria-label={t('sidebar_remove')}
+                    onclick={(e) => removeFav(fav.name, e)}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') removeFav(fav.name, e)
+                    }}>×</span
+                  >
+                {/if}
+                {#if fav.updateDelayed}
+                  <span
+                    class="fav-stale-dot"
+                    aria-label={t('sidebar_staleDot')}
+                    title={t('sidebar_staleDot')}
+                    aria-hidden="false"
+                  ></span>
+                {/if}
+              </span>
+              {#if info}
+                {#snippet favMeta()}
+                  <span class="fav-meta">
+                    <span class="live-dot" aria-hidden="true"></span>
+                    <!-- twitch.tv shows the COMBINED session viewership on shared-
                        session cards; the tooltip flags why the number is bigger
                        than the channel's own viewers. -->
-                  <span class="fav-viewers" use:tooltip={info.collabViewers != null ? t('streamingTogether') : undefined}>
-                    {formatViewers(info.collabViewers != null ? info.collabViewers : info.viewers)}
+                    <span
+                      class="fav-viewers"
+                      use:tooltip={info.collabViewers != null ? t('streamingTogether') : undefined}
+                    >
+                      {formatViewers(info.collabViewers != null ? info.collabViewers : info.viewers)}
+                    </span>
                   </span>
-                </span>
-              {/snippet}
-              {#if info.title}
-                <span class="fav-line">
-                  <span class="fav-title" use:tooltip={{ text: info.title, delay: 1500 }}>{info.title}</span>
-                  {@render favMeta()}
-                </span>
-                {#if info.game}
-                  <span class="fav-game" use:tooltip={{ text: info.game, delay: 1500 }}>{info.game}</span>
+                {/snippet}
+                {#if info.title}
+                  <span class="fav-line">
+                    <span class="fav-title" use:tooltip={{ text: info.title, delay: 1500 }}>{info.title}</span>
+                    {@render favMeta()}
+                  </span>
+                  {#if info.game}
+                    <span class="fav-game" use:tooltip={{ text: info.game, delay: 1500 }}>{info.game}</span>
+                  {/if}
+                {:else if info.game}
+                  <span class="fav-line">
+                    <span class="fav-game" use:tooltip={{ text: info.game, delay: 1500 }}>{info.game}</span>
+                    {@render favMeta()}
+                  </span>
+                {:else}
+                  <span class="fav-line">
+                    <span class="fav-title fav-title--muted">{t('live')}</span>
+                    {@render favMeta()}
+                  </span>
                 {/if}
-              {:else if info.game}
-                <span class="fav-line">
-                  <span class="fav-game" use:tooltip={{ text: info.game, delay: 1500 }}>{info.game}</span>
-                  {@render favMeta()}
+              {:else if isOff}
+                <span class="fav-title fav-title--muted">{t('offline')}</span>
+              {:else if isErr}
+                <span class="fav-title fav-title--muted">
+                  {t('sidebar_couldntLoad')}{#if fav.lastFetched}
+                    · {timeAgo(fav.lastFetched)}{/if}
+                </span>
+                <span
+                  class="fav-retry"
+                  role="button"
+                  tabindex="0"
+                  aria-label={t('retry')}
+                  onclick={(e) => {
+                    e.stopPropagation()
+                    store.retryFetch(fav.name)
+                  }}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      store.retryFetch(fav.name)
+                    }
+                  }}
+                  use:tooltip={{ text: t('retryNow'), delay: 1500 }}
+                >
+                  <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                    <path
+                      d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 3v3h-3"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
                 </span>
               {:else}
-                <span class="fav-line">
-                  <span class="fav-title fav-title--muted">{t('live')}</span>
-                  {@render favMeta()}
-                </span>
+                <span class="fav-title fav-title--muted">{t('loading')}</span>
               {/if}
-            {:else if isOff}
-              <span class="fav-title fav-title--muted">{t('offline')}</span>
-            {:else if isErr}
-              <span class="fav-title fav-title--muted">
-                {t('sidebar_couldntLoad')}{#if fav.lastFetched} · {timeAgo(fav.lastFetched)}{/if}
-              </span>
-              <span
-                class="fav-retry"
-                role="button"
-                tabindex="0"
-                aria-label={t('retry')}
-                onclick={(e) => { e.stopPropagation(); store.retryFetch(fav.name) }}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); store.retryFetch(fav.name) } }}
-                use:tooltip={{ text: t('retryNow'), delay: 1500 }}
-              >
-                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-                  <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 3v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </span>
-            {:else}
-              <span class="fav-title fav-title--muted">{t('loading')}</span>
-            {/if}
-          </span>
-         {/if}
-         </button>
-       {/each}
-     {/if}
-   </div>
+            </span>
+          {/if}
+        </button>
+      {/each}
+    {/if}
+  </div>
 
   <!-- Hover tooltip — rendered at the sidebar level (not inside .sidebar-list
        which would clip it via overflow: auto). Positioned with position: fixed
@@ -498,7 +523,7 @@
     background: var(--bg-input);
     color: var(--text);
   }
-  .add-fav-btn[aria-expanded="true"] {
+  .add-fav-btn[aria-expanded='true'] {
     background: var(--bg-input);
     color: var(--text);
   }
@@ -523,7 +548,7 @@
     outline: none;
     border-color: var(--accent);
   }
-  .add-fav-input[aria-invalid="true"] {
+  .add-fav-input[aria-invalid='true'] {
     border-color: var(--live, #c0392b);
   }
   .add-fav-submit {
@@ -585,7 +610,9 @@
     cursor: pointer;
     box-sizing: border-box;
     font-family: inherit;
-    transition: background 150ms, border-color 150ms;
+    transition:
+      background 150ms,
+      border-color 150ms;
     min-height: 42px;
     position: relative;
   }
@@ -826,12 +853,16 @@
     visibility: hidden;
     pointer-events: none;
     transform: translateY(-50%);
-    transition: opacity 120ms ease, visibility 0s linear 120ms;
+    transition:
+      opacity 120ms ease,
+      visibility 0s linear 120ms;
   }
   .fav-tooltip--visible {
     opacity: 1;
     visibility: visible;
-    transition: opacity 120ms ease, visibility 0s linear 0s;
+    transition:
+      opacity 120ms ease,
+      visibility 0s linear 0s;
   }
   .fav-tooltip-name {
     font-weight: 700;
@@ -889,8 +920,13 @@
   }
 
   @keyframes fav-stale-pulse {
-    0%, 100% { opacity: 0.45; }
-    50%      { opacity: 0.9; }
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 0.9;
+    }
   }
 
   .fav-retry {

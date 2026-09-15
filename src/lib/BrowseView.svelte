@@ -1,12 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import {
-    fetchTopStreams,
-    fetchTopCategories,
-    fetchGameStreams,
-    type BrowseStream,
-    type BrowseCategory,
-  } from './gql'
+  import { fetchTopStreams, fetchTopCategories, fetchGameStreams, type BrowseStream, type BrowseCategory } from './gql'
   import { initialVisible, revealMore, hasMoreToShow } from './browse-reveal'
   import { t } from './i18n/index.svelte'
   import { formatCompact } from './format'
@@ -397,7 +391,9 @@
     align-items: center;
     justify-content: center;
     font-size: 16px;
-    transition: background 120ms, color 120ms;
+    transition:
+      background 120ms,
+      color 120ms;
   }
 
   .browse-back {

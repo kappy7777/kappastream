@@ -81,11 +81,7 @@ export function parseTwitchClipUrl(url: string): string | null {
     return isValidClipSlug(slug) ? slug : null
   }
   // twitch.tv/<channel>/clip/<slug>
-  if (
-    segments.length === 3 &&
-    segments[1] === 'clip' &&
-    /^[a-zA-Z0-9_]{1,25}$/.test(decodeURIComponent(segments[0]))
-  ) {
+  if (segments.length === 3 && segments[1] === 'clip' && /^[a-zA-Z0-9_]{1,25}$/.test(decodeURIComponent(segments[0]))) {
     const slug = decodeURIComponent(segments[2])
     return isValidClipSlug(slug) ? slug : null
   }

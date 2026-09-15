@@ -415,12 +415,24 @@ describe('applyTileAudio — element and store state agree; re-runs never clobbe
   it('unmuting a non-authority tile results in an audible element', () => {
     // Tile A is authority (audible), tile B is a muted non-authority.
     const elB = stubEl()
-    S.applyTileAudio(elB, { isAuthority: false, manualUnmute: false, globalMuted: false, globalVolume: 0.8, tileVolume: 1 })
+    S.applyTileAudio(elB, {
+      isAuthority: false,
+      manualUnmute: false,
+      globalMuted: false,
+      globalVolume: 0.8,
+      tileVolume: 1,
+    })
     expect(elB.muted).toBe(true)
     // The store half of the unmute action (planTileMuteToggle applied):
     const plan = S.planTileMuteToggle(false, false, false)
     expect(plan).toEqual({ manualUnmute: true }) // store: manualUnmute := true
-    S.applyTileAudio(elB, { isAuthority: false, manualUnmute: true, globalMuted: false, globalVolume: 0.8, tileVolume: 1 })
+    S.applyTileAudio(elB, {
+      isAuthority: false,
+      manualUnmute: true,
+      globalMuted: false,
+      globalVolume: 0.8,
+      tileVolume: 1,
+    })
     expect(elB.muted).toBe(false)
     expect(elB.volume).toBe(1) // non-authority uses its own per-tile volume
   })
@@ -428,17 +440,35 @@ describe('applyTileAudio — element and store state agree; re-runs never clobbe
   it('the unmute survives the audio-authority effect re-running afterwards', () => {
     const el = stubEl()
     // The unmute landed...
-    S.applyTileAudio(el, { isAuthority: false, manualUnmute: true, globalMuted: false, globalVolume: 0.6, tileVolume: 0.5 })
+    S.applyTileAudio(el, {
+      isAuthority: false,
+      manualUnmute: true,
+      globalMuted: false,
+      globalVolume: 0.6,
+      tileVolume: 0.5,
+    })
     expect(el.muted).toBe(false)
     // ...then ANY effect re-run (e.g. settings.volume changed elsewhere) writes
     // the same audibility — a forced mute can never clobber the manual unmute
     // because the write is derived from the SAME store flags.
-    S.applyTileAudio(el, { isAuthority: false, manualUnmute: true, globalMuted: false, globalVolume: 0.9, tileVolume: 0.5 })
+    S.applyTileAudio(el, {
+      isAuthority: false,
+      manualUnmute: true,
+      globalMuted: false,
+      globalVolume: 0.9,
+      tileVolume: 0.5,
+    })
     expect(el.muted).toBe(false)
     expect(el.volume).toBe(0.5)
     // ...and a re-run while globally muted still respects the master mute
     // (the toggle, not the effect, is what clears the global mute).
-    S.applyTileAudio(el, { isAuthority: false, manualUnmute: true, globalMuted: true, globalVolume: 0.9, tileVolume: 0.5 })
+    S.applyTileAudio(el, {
+      isAuthority: false,
+      manualUnmute: true,
+      globalMuted: true,
+      globalVolume: 0.9,
+      tileVolume: 0.5,
+    })
     expect(el.muted).toBe(true)
   })
 
@@ -447,17 +477,35 @@ describe('applyTileAudio — element and store state agree; re-runs never clobbe
     // B is still a non-authority tile with manualUnmute=true → still audible.
     const elB = stubEl()
     const bManualUnmute = true // never reset by authority moves (store-tested above)
-    S.applyTileAudio(elB, { isAuthority: false, manualUnmute: bManualUnmute, globalMuted: false, globalVolume: 0.7, tileVolume: 0.4 })
+    S.applyTileAudio(elB, {
+      isAuthority: false,
+      manualUnmute: bManualUnmute,
+      globalMuted: false,
+      globalVolume: 0.7,
+      tileVolume: 0.4,
+    })
     expect(elB.muted).toBe(false)
     expect(S.tileAudible(false, bManualUnmute, false)).toBe(true)
   })
 
   it('the authority element mirrors the global mute + global volume', () => {
     const elA = stubEl()
-    S.applyTileAudio(elA, { isAuthority: true, manualUnmute: false, globalMuted: false, globalVolume: 0.35, tileVolume: 0.9 })
+    S.applyTileAudio(elA, {
+      isAuthority: true,
+      manualUnmute: false,
+      globalMuted: false,
+      globalVolume: 0.35,
+      tileVolume: 0.9,
+    })
     expect(elA.muted).toBe(false)
     expect(elA.volume).toBe(0.35)
-    S.applyTileAudio(elA, { isAuthority: true, manualUnmute: false, globalMuted: true, globalVolume: 0.35, tileVolume: 0.9 })
+    S.applyTileAudio(elA, {
+      isAuthority: true,
+      manualUnmute: false,
+      globalMuted: true,
+      globalVolume: 0.35,
+      tileVolume: 0.9,
+    })
     expect(elA.muted).toBe(true)
   })
 
@@ -466,7 +514,13 @@ describe('applyTileAudio — element and store state agree; re-runs never clobbe
     // guarantee that it cannot persist anything is the import/call-check test
     // above (no settings import, no settings.set* calls in the source).
     const el = stubEl()
-    S.applyTileAudio(el, { isAuthority: false, manualUnmute: true, globalMuted: false, globalVolume: 0.5, tileVolume: 0.25 })
+    S.applyTileAudio(el, {
+      isAuthority: false,
+      manualUnmute: true,
+      globalMuted: false,
+      globalVolume: 0.5,
+      tileVolume: 0.25,
+    })
     expect(el).toEqual({ muted: false, volume: 0.25 })
   })
 })
@@ -493,7 +547,8 @@ describe('stable tile identity survives add / remove / reorder (no reload cause)
   it('adding a tile does NOT mutate or recreate any existing tile (ids stable)', () => {
     const a = store.addOrReplace('chan1').tile
     const b = store.addOrReplace('chan2').tile
-    const aId = a.id, bId = b.id
+    const aId = a.id,
+      bId = b.id
     const aStatus = a.status
     // Add a 3rd + 4th tile.
     store.addOrReplace('chan3')

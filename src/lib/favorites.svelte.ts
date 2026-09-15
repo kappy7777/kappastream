@@ -90,7 +90,8 @@ function loadFromStorage(): FavoriteEntry[] {
     const seen = new Set<string>()
     for (const item of parsed) {
       if (
-        item && typeof item === 'object' &&
+        item &&
+        typeof item === 'object' &&
         typeof (item as FavoriteEntry).name === 'string' &&
         typeof (item as FavoriteEntry).addedAt === 'number' &&
         isValidChannelName((item as FavoriteEntry).name)
@@ -101,7 +102,10 @@ function loadFromStorage(): FavoriteEntry[] {
         out.push({
           name,
           addedAt: (item as FavoriteEntry).addedAt,
-          order: typeof (item as FavoriteEntry).order === 'number' ? (item as FavoriteEntry).order : (item as FavoriteEntry).addedAt,
+          order:
+            typeof (item as FavoriteEntry).order === 'number'
+              ? (item as FavoriteEntry).order
+              : (item as FavoriteEntry).addedAt,
         })
         if (out.length >= MAX_FAVORITES) break
       }
@@ -368,7 +372,9 @@ export class FavoritesStore {
     const next = [...this.entries]
     const [moved] = next.splice(from, 1)
     next.splice(to, 0, moved)
-    next.forEach((e, i) => { e.order = i + 1 })
+    next.forEach((e, i) => {
+      e.order = i + 1
+    })
     this.entries = next
     saveToStorage(this.entries)
     this.notify()
@@ -430,19 +436,34 @@ export class FavoritesStore {
     const now = Date.now()
     let importIndex = 0
     for (const item of list as unknown[]) {
-      if (!item || typeof item !== 'object') { invalid++; continue }
+      if (!item || typeof item !== 'object') {
+        invalid++
+        continue
+      }
       const name = (item as { name?: unknown }).name
-      if (typeof name !== 'string') { invalid++; continue }
+      if (typeof name !== 'string') {
+        invalid++
+        continue
+      }
       const n = normalizeChannelName(name)
-      if (!isValidChannelName(n)) { invalid++; continue }
-      if (existing.has(n)) { skipped++; continue }
-      if (this.entries.length + newEntries.length >= MAX_FAVORITES) { skipped++; continue }
-      const addedAt = typeof (item as { addedAt?: unknown }).addedAt === 'number'
-        ? (item as { addedAt: number }).addedAt
-        : now
-      const order = typeof (item as { order?: unknown }).order === 'number'
-        ? (item as { order: number }).order
-        : now + importIndex++
+      if (!isValidChannelName(n)) {
+        invalid++
+        continue
+      }
+      if (existing.has(n)) {
+        skipped++
+        continue
+      }
+      if (this.entries.length + newEntries.length >= MAX_FAVORITES) {
+        skipped++
+        continue
+      }
+      const addedAt =
+        typeof (item as { addedAt?: unknown }).addedAt === 'number' ? (item as { addedAt: number }).addedAt : now
+      const order =
+        typeof (item as { order?: unknown }).order === 'number'
+          ? (item as { order: number }).order
+          : now + importIndex++
       newEntries.push({ name: n, addedAt, order })
       existing.add(n)
       this.entryVersions.set(n, (this.entryVersions.get(n) ?? 0) + 1)
@@ -614,7 +635,7 @@ export class FavoritesStore {
             avatarUrl: cs.avatarUrl,
             userId: cs.userId,
             collabViewers: cs.collabViewers,
-            collabOthers: cs.collabOthers > 0 ? cs.collabOthers : roster?.collabOthers ?? 0,
+            collabOthers: cs.collabOthers > 0 ? cs.collabOthers : (roster?.collabOthers ?? 0),
             collabAvatar: cs.collabAvatar || roster?.collabAvatar || '',
             collabMembers: roster?.collabMembers,
             followers: cs.followers,
@@ -657,10 +678,7 @@ export class FavoritesStore {
   // leaves the last-applied roster values in place (applyGqlStatuses carries
   // them over) and must NEVER trip the circuit breaker (the main batch
   // succeeded).
-  private async fetchSessionRosters(
-    statuses: ChannelStatus[],
-    versions: Map<string, number>,
-  ): Promise<void> {
+  private async fetchSessionRosters(statuses: ChannelStatus[], versions: Map<string, number>): Promise<void> {
     if (this.disposed) return
     const sessionIds = statuses
       .filter((s) => s.live && s.collabViewers != null && s.userId && this.has(s.login))

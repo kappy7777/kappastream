@@ -30,9 +30,7 @@ export const tooltip: Action<HTMLElement, string | TooltipOptions | undefined> =
 
   function onEnter(): void {
     clearTimer()
-    const { text, delay = 0 } = typeof params === 'string'
-      ? { text: params }
-      : params ?? { text: '' }
+    const { text, delay = 0 } = typeof params === 'string' ? { text: params } : (params ?? { text: '' })
     if (!text) return
     const show = () => {
       const rect = node.getBoundingClientRect()
