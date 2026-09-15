@@ -99,6 +99,16 @@ export interface AttachHlsOptions {
   onPlayBlocked?: () => void
 }
 
+/** Options for scheduleStallRecover — mirrors the attach API's callback names. */
+export interface StallRecoverOptions {
+  /**
+   * Fires when the recovery play() is REJECTED. App and Tile pass nothing
+   * (their visible control bar lets the user just press play); PiP routes it
+   * to its tap-for-sound prompt, like every other rejected play there.
+   */
+  onPlayBlocked?: () => void
+}
+
 export interface AttachNativeOptions {
   /** Optional staleness check applied AFTER play() resolves (live paths). */
   isCurrent?: () => boolean
@@ -222,9 +232,12 @@ export class PlaybackSession {
   /**
    * Arm the live stall self-recovery: after the grace period, snap to the
    * live edge (hls.js's liveSyncPosition, else the seekable end) and resume.
-   * Cleared by clearStallRecover() on `playing` and by teardown.
+   * Cleared by clearStallRecover() on `playing` and by teardown. A rejected
+   * resume play() is swallowed unless onPlayBlocked surfaces it — surfaces
+   * with a visible control bar don't need it, but a surface whose whole
+   * autoplay story is a gesture prompt (PiP) must not go silently dead.
    */
-  scheduleStallRecover(video: HTMLVideoElement): void {
+  scheduleStallRecover(video: HTMLVideoElement, opts?: StallRecoverOptions): void {
     if (this.disposed) return
     this.clearStallRecover()
     this.stallTimer = setTimeout(() => {
@@ -237,7 +250,7 @@ export class PlaybackSession {
       if (target !== null) {
         try { video.currentTime = target } catch { /* ignore */ }
       }
-      void video.play().catch(() => { /* ignore — user can still press play */ })
+      void video.play().catch(() => { opts?.onPlayBlocked?.() })
     }, STALL_RECOVER_GRACE_MS)
   }
 

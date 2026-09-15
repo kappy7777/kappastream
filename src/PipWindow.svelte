@@ -164,7 +164,10 @@
   // a paused VOD/clip must never be force-seeked (its seekable end is the
   // END of the video).
   function onVideoWaiting(): void {
-    if (isLive && videoEl) playback.scheduleStallRecover(videoEl)
+    // A blocked recovery resume must surface as the tap-for-sound prompt —
+    // PiP has no control-bar fallback, and a silently dead window is the
+    // one failure mode this surface cannot afford.
+    if (isLive && videoEl) playback.scheduleStallRecover(videoEl, { onPlayBlocked: () => { needsGesture = true } })
   }
 
   function onVideoPlaying(): void {
@@ -174,7 +177,7 @@
 
   function onPipPause(): void {
     if (shouldRecoverStallAfterPause(isLive, playback.userPaused) && videoEl) {
-      playback.scheduleStallRecover(videoEl)
+      playback.scheduleStallRecover(videoEl, { onPlayBlocked: () => { needsGesture = true } })
     }
   }
 

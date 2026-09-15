@@ -264,11 +264,42 @@ describe('PlaybackSession stall recovery', () => {
     const video = makeVideo()
     const session = new PlaybackSession()
     video.currentTime = 40
-    session.scheduleStallRecover(video)
+    session.scheduleStallRecover(video) // no hls instance attached
     session.clearStallRecover()
     await vi.advanceTimersByTimeAsync(2_000)
     expect(video.currentTime).toBe(40)
     expect(vi.mocked(video.play)).not.toHaveBeenCalled()
+  })
+
+  it('a recovery whose play() is REJECTED fires onPlayBlocked (PiP gesture prompt)', async () => {
+    const video = makeVideo()
+    vi.mocked(video.play).mockRejectedValue(new Error('NotAllowedError'))
+    const session = new PlaybackSession()
+    let blocked = false
+    session.scheduleStallRecover(video, { onPlayBlocked: () => { blocked = true } })
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(blocked).toBe(true)
+    expect(video.currentTime).toBe(598.5) // the seek still happened before the resume attempt
+  })
+
+  it('a recovery whose play() RESOLVES does not fire onPlayBlocked', async () => {
+    const video = makeVideo()
+    const session = new PlaybackSession()
+    let blocked = false
+    session.scheduleStallRecover(video, { onPlayBlocked: () => { blocked = true } })
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(blocked).toBe(false)
+  })
+
+  it('a REJECTED resume with no onPlayBlocked callback is swallowed without throwing (App/Tile path)', async () => {
+    const video = makeVideo()
+    vi.mocked(video.play).mockRejectedValue(new Error('NotAllowedError'))
+    const session = new PlaybackSession()
+    session.scheduleStallRecover(video)
+    await vi.advanceTimersByTimeAsync(1_000)
+    // No assertion beyond "did not throw": the rejection is handled, the
+    // user can still press play on a surface with a visible control bar.
+    expect(video.currentTime).toBe(598.5)
   })
 })
 
