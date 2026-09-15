@@ -24,7 +24,8 @@
   import WelcomeOverlay from './lib/WelcomeOverlay.svelte'
   import { updateStore } from './lib/update.svelte.ts'
   import { settings } from './lib/settings.svelte.ts'
-  import { buildHlsConfig } from './lib/hls-config'
+  import { toKsvodProxyUrl, shouldRecoverStallAfterPause } from './lib/playback'
+  import { PlaybackSession, resolveLiveStream } from './lib/playback-session.svelte'
   import { pipController } from './lib/pip-controller.svelte.ts'
   import { sleepTimer, formatSleepRemaining } from './lib/sleep-timer.svelte.ts'
   import { vodPositions } from './lib/vod-positions.svelte.ts'
@@ -186,7 +187,9 @@
   // (it rewrites storyboard JSON reads through the ksvod proxy and reads the
   // <video> element's position at call time).
   const vodCtl = new VodPlaybackController({
-    proxyUrl: toKsvodProxyUrl,
+    // Reads isWindows at call time (the shared helper is pure and takes the
+    // flag as an argument) — same reactivity as the old local function.
+    proxyUrl: (httpsUrl: string) => toKsvodProxyUrl(httpsUrl, isWindows),
     getVideo: () => videoEl,
   })
   function currentVodId(): string | null {
@@ -351,12 +354,12 @@
     const el = activeVideoEl()
     if (!el) return
     if (el.paused) {
-      userPaused = false
+      playbackSession.userPaused = false
       void el.play().catch(() => { /* ignore */ })
     } else {
       // Flag the user pause BEFORE pausing so the live stall-recovery watcher
       // doesn't treat it as a stall and auto-resume.
-      userPaused = true
+      playbackSession.userPaused = true
       el.pause()
     }
   }
@@ -511,7 +514,7 @@
   // change / VOD switch / teardown cancels it (see the $effect below).
   function armSleep(minutes: number): void {
     sleepTimer.arm(
-      { channel: channelJoined, playbackKind: playback.kind, streamGen: streamGeneration },
+      { channel: channelJoined, playbackKind: playback.kind, streamGen: playbackSession.generation },
       minutes,
     )
   }
@@ -527,7 +530,7 @@
     if (playerStatus === 'idle' || playerStatus === 'offline' || playerStatus === 'error') {
       sleepTimer.cancel()
     } else {
-      sleepTimer.cancelIfStale(channelJoined, playback.kind, streamGeneration)
+      sleepTimer.cancelIfStale(channelJoined, playback.kind, playbackSession.generation)
     }
   })
 
@@ -552,67 +555,44 @@
     if (videoScrollEl) videoScrollEl.scrollTop = 0
   })
 
-  let hls: Hls | null = null
-  let streamGeneration = 0
-  let manifestTimeout: ReturnType<typeof setTimeout> | null = null
+  // The playback engine — hls.js attach / manifest timeout / stall recovery /
+  // teardown / the resolve_stream transport — lives in the shared
+  // PlaybackSession (lib/playback-session.svelte.ts), the same class every
+  // multi-view tile runs on. App keeps only POLICY: which URL to load (the
+  // Windows ksvod routing), the playerStatus transitions, VOD callbacks and
+  // the PiP handoff.
+  const playbackSession = new PlaybackSession()
+
   // Stall self-recovery for live playback (esp. low-latency, whose tiny
   // buffer underruns on any hiccup). Because the live edge keeps advancing
   // while stalled, currentTime falls behind the live window and the element
   // hangs — in webkit2gtk it actually goes to `paused`, so we watch BOTH
-  // `waiting` (underrun) and a non-user `pause`. After a short grace we jump
-  // to the live edge and resume. Cleared on `playing` and on teardown.
-  let stallRecoverTimer: ReturnType<typeof setTimeout> | null = null
-  let userPaused = false
-  const STALL_RECOVER_GRACE_MS = 1_000
-
-  function clearStallRecover(): void {
-    if (stallRecoverTimer) {
-      clearTimeout(stallRecoverTimer)
-      stallRecoverTimer = null
-    }
-  }
-
-  function scheduleStallRecover(): void {
-    clearStallRecover()
-    stallRecoverTimer = setTimeout(() => {
-      stallRecoverTimer = null
-      const el = videoEl
-      if (!el) return
-      // Snap to the live edge where buffer exists (the app only plays live
-      // Twitch). Prefer hls.js's computed liveSyncPosition; fall back to the
-      // end of the seekable window.
-      const liveEdge = hls?.liveSyncPosition
-        ?? (el.seekable.length > 0 ? el.seekable.end(el.seekable.length - 1) : NaN)
-      if (Number.isFinite(liveEdge)) {
-        try { el.currentTime = Math.max(liveEdge - 1.5, 0) } catch { /* ignore */ }
-      }
-      void el.play().catch(() => { /* ignore — user can still press play */ })
-    }, STALL_RECOVER_GRACE_MS)
-  }
-
+  // `waiting` (underrun) and a non-user `pause`. After a short grace the
+  // session snaps to the live edge and resumes. Cleared on `playing` and on
+  // teardown.
   function onVideoWaiting(): void {
     // Stall recovery is live-only — VOD/clip buffering resumes natively.
     if (playback.kind !== 'live') return
     // Buffer underrun — schedule recovery (a momentary blip refills and
     // fires `playing`, cancelling this).
-    scheduleStallRecover()
+    if (videoEl) playbackSession.scheduleStallRecover(videoEl)
   }
 
   function onVideoPause(): void {
     // Flush the VOD resume checkpoint on any pause (works for every kind).
     vodCtl.save(currentVodId(), true)
-    // Stall recovery is live-only — never force-seek a paused VOD/clip.
-    if (playback.kind !== 'live') return
-    // Ignore user-initiated pauses (togglePlay sets userPaused first). A
-    // stall-induced pause in webkit2gtk lands here with userPaused still
-    // false — recover it.
-    if (userPaused) return
-    scheduleStallRecover()
+    // Stall recovery is live-only (never force-seek a paused VOD/clip) and
+    // skips user-initiated pauses (togglePlay sets userPaused BEFORE
+    // pausing). A stall-induced pause in webkit2gtk lands here with
+    // userPaused still false — recover it.
+    if (shouldRecoverStallAfterPause(playback.kind === 'live', playbackSession.userPaused) && videoEl) {
+      playbackSession.scheduleStallRecover(videoEl)
+    }
   }
 
   function onVideoPlaying(): void {
-    clearStallRecover()
-    userPaused = false
+    playbackSession.clearStallRecover()
+    playbackSession.userPaused = false
   }
 
   function onVideoTimeUpdate(): void {
@@ -630,7 +610,6 @@
     if (!el) return
     vodChat.seek(el.currentTime)
   }
-  let cancelPendingAttach: (() => void) | null = null
   // ---- VOD chat replay ----------------------------------------------------
   // Past-broadcast chat, synced to the playhead. Each replay comment is
   // normalized to the same ChatMessage shape the live renderer uses, so there
@@ -829,29 +808,13 @@
   })
 
   function teardownPlayer(keepPip = false): void {
-    streamGeneration++
     // No stream anymore; close the floating PiP window if it is open (unless
     // we are stopping the main player *because* PiP just took over — then the
     // PiP stream must keep playing).
     if (!keepPip) pipController.clearStream()
-    if (manifestTimeout) {
-      clearTimeout(manifestTimeout)
-      manifestTimeout = null
-    }
-    cancelPendingAttach?.()
-    cancelPendingAttach = null
-    clearStallRecover()
-    if (hls) {
-      try { hls.destroy() } catch (_e) { /* ignore */ }
-      hls = null
-    }
-    if (videoEl) {
-      try {
-        videoEl.pause()
-        videoEl.removeAttribute('src')
-        videoEl.load()
-      } catch (_e) { /* ignore */ }
-    }
+    // Generation bump, timer cancels, pending-attach cancel, hls destroy and
+    // the <video> reset all live in the shared session now.
+    playbackSession.teardown(videoEl)
   }
 
   // Centralized video-only disconnect: tears down HLS + the <video> element and
@@ -867,23 +830,8 @@
     playerError = ''
   }
 
-  async function resolveStream(channel: string, q: string): Promise<{ ok: true; url: string } | { ok: false; offline: boolean; unavailable?: boolean; error?: string }> {
-    type ResolveRaw = { ok?: boolean; url?: string | null; offline?: boolean; error?: string | null; unavailable?: boolean; quality?: string | null }
-    let raw: ResolveRaw
-    try {
-      raw = (await invoke('resolve_stream', { channel, quality: q, lowLatency: settings.lowLatency })) as ResolveRaw
-    } catch (err) {
-      const msg = typeof err === 'string'
-        ? err
-        : err instanceof Error ? err.message : JSON.stringify(err)
-      return { ok: false, offline: false, error: 'invoke failed: ' + msg }
-    }
-    if (raw.offline) return { ok: false, offline: true }
-    if (!raw.ok || !raw.url) {
-      return { ok: false, offline: false, unavailable: raw.unavailable === true, error: raw.error ?? 'unknown resolve error' }
-    }
-    return { ok: true, url: raw.url }
-  }
+  // (The resolve_stream transport is the shared resolveLiveStream in
+  // lib/playback-session.svelte.ts — same class module the tiles use.)
 
   async function handoffToPlayer(): Promise<void> {
     try {
@@ -923,25 +871,8 @@
     }
   }
 
-  function isFatalNetworkishError(data: { fatal: boolean; type: string; details?: string }): boolean {
-    if (!data.fatal) return false
-    const NETWORKISH = new Set([
-      'manifestLoadError',
-      'manifestLoadTimeOut',
-      'manifestParsingError',
-      'levelLoadError',
-      'levelLoadTimeOut',
-      'audioTrackLoadError',
-      'audioPlaylistLoadError',
-      'fragmentLoadError',
-      'fragLoadError',
-      'fragLoadTimeOut',
-    ])
-    return NETWORKISH.has(data.type) || NETWORKISH.has(data.details ?? '')
-  }
-
   function isCurrentStream(generation: number, channel: string, q: string): boolean {
-    return generation === streamGeneration && channelJoined === channel && quality === q
+    return generation === playbackSession.generation && channelJoined === channel && quality === q
   }
 
   async function attachStream(channel: string, q: string, url: string, generation: number): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -960,82 +891,27 @@
     // `(isWindows || os === 'macos')` here and at the PiP mirror below. The
     // ksvod scheme FORM is unaffected (macOS already uses `ksvod://localhost/`,
     // same as Linux — see toKsvodProxyUrl). See isWindows.
-    const sourceUrl = isWindows ? toKsvodProxyUrl(url) : url
+    const sourceUrl = isWindows ? toKsvodProxyUrl(url, isWindows) : url
 
+    const current = () => isCurrentStream(generation, channel, q)
     if (Hls.isSupported()) {
-      if (hls) {
-        clearStallRecover()
-        try { hls.destroy() } catch (_e) { /* ignore */ }
-      }
-      const instance = new Hls(buildHlsConfig(settings.lowLatency))
-      hls = instance
-
-      return await new Promise((resolve) => {
-        let resolvedFlag = false
-        const finish = (r: { ok: true } | { ok: false; error: string }) => {
-          if (resolvedFlag) return
-          resolvedFlag = true
-          if (manifestTimeout) {
-            clearTimeout(manifestTimeout)
-            manifestTimeout = null
-          }
-          if (cancelPendingAttach === cancel) cancelPendingAttach = null
-          resolve(r)
-        }
-        const cancel = () => finish({ ok: false, error: 'stale stream request' })
-        cancelPendingAttach = cancel
-
-        instance.on(Hls.Events.MANIFEST_PARSED, () => {
-          if (!isCurrentStream(generation, channel, q)) {
-            finish({ ok: false, error: 'stale stream request' })
-            return
-          }
-          playerStatus = 'loading'
-          videoEl?.play().then(() => {
-            if (isCurrentStream(generation, channel, q)) playerStatus = 'playing'
-          }).catch(() => {
-            if (isCurrentStream(generation, channel, q)) playerStatus = 'paused'
-          })
-          finish({ ok: true })
-        })
-
-        instance.on(Hls.Events.ERROR, (_event, data) => {
-          if (!data.fatal) return
-          try { instance.destroy() } catch (_e) { /* ignore */ }
-          if (!isCurrentStream(generation, channel, q)) {
-            finish({ ok: false, error: 'stale stream request' })
-            return
-          }
-          if (isFatalNetworkishError(data)) {
-            finish({ ok: false, error: 'network/manifest error: ' + data.type + ' (' + (data.details ?? '') + ')' })
-          } else {
-            finish({ ok: false, error: 'hls error: ' + data.type + ' (' + (data.details ?? '') + ')' })
-          }
-        })
-
-        instance.loadSource(sourceUrl)
-        instance.attachMedia(videoEl!)
-
-        manifestTimeout = setTimeout(() => {
-          manifestTimeout = null
-          if (!resolvedFlag) {
-          try { instance.destroy() } catch (_e) { /* ignore */ }
-            finish({ ok: false, error: 'timeout waiting for manifest' })
-          }
-        }, 20_000)
+      return await playbackSession.attachHls({
+        video: videoEl,
+        url: sourceUrl,
+        lowLatency: settings.lowLatency,
+        isCurrent: current,
+        onManifestParsed: () => { playerStatus = 'loading' },
+        onPlayed: () => { playerStatus = 'playing' },
+        onPlayBlocked: () => { playerStatus = 'paused' },
       })
     }
 
     if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-      videoEl.src = sourceUrl
-      try {
-        await videoEl.play()
-        if (!isCurrentStream(generation, channel, q)) return { ok: false, error: 'stale stream request' }
-        playerStatus = 'playing'
-        return { ok: true }
-      } catch (err) {
-        return { ok: false, error: 'native HLS play failed: ' + (err as Error).message }
-      }
+      return await playbackSession.attachNative(videoEl, sourceUrl, {
+        isCurrent: current,
+        errorPrefix: 'native HLS play failed: ',
+        onPlayed: () => { playerStatus = 'playing' },
+      })
     }
 
     return { ok: false, error: 'HLS playback is not supported' }
@@ -1049,15 +925,15 @@
   }
 
   async function loadStream(channel: string, q: string): Promise<void> {
-    const generation = ++streamGeneration
+    const generation = playbackSession.nextGeneration()
     playerError = ''
     playerStatus = 'resolving'
-    clearStallRecover()
+    playbackSession.clearStallRecover()
     // A new stream load implies the user wants playback; clear any stale
     // pause-intent from the previous channel so stalls on the new one recover.
-    userPaused = false
+    playbackSession.userPaused = false
 
-    const resolved = await resolveStream(channel, q)
+    const resolved = await resolveLiveStream(channel, q, settings.lowLatency)
     if (!isCurrentStream(generation, channel, q)) return
     if (!resolved.ok) {
       if (resolved.offline) {
@@ -1095,7 +971,7 @@
       // window is open it reloads; otherwise it is ready for the next open.
       // Mirror attachStream: route through the ksvod proxy on Windows so the
       // PiP WebView2 can load the manifest (it would hit the same CORS block).
-      const pipUrl = isWindows ? toKsvodProxyUrl(resolved.url) : resolved.url
+      const pipUrl = isWindows ? toKsvodProxyUrl(resolved.url, isWindows) : resolved.url
       pipController.setStream({ url: pipUrl, channel, quality: q })
       return
     }
@@ -1296,41 +1172,26 @@
   async function attachMediaHls(url: string): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!videoEl) return { ok: false, error: 'no video element' }
     teardownPlayer()
-    clearStallRecover()
     if (Hls.isSupported()) {
-      const instance = new Hls(buildHlsConfig(false))
-      hls = instance
-      return await new Promise((resolve) => {
-        let done = false
-        let to: ReturnType<typeof setTimeout> | null = null
-        const finish = (r: { ok: true } | { ok: false; error: string }) => {
-          if (done) return
-          done = true
-          if (to) clearTimeout(to)
-          resolve(r)
-        }
-        instance.on(Hls.Events.MANIFEST_PARSED, () => {
-          videoEl?.play().catch(() => { /* autoplay can be blocked; user presses play */ })
-          finish({ ok: true })
-        })
-        instance.on(Hls.Events.ERROR, (_e, data) => {
-          if (!data.fatal) return
-          try { instance.destroy() } catch (_destroyErr) { /* ignore */ }
-          finish({ ok: false, error: 'media error: ' + data.type })
-        })
-        instance.loadSource(url)
-        instance.attachMedia(videoEl!)
-        to = setTimeout(() => finish({ ok: false, error: 'timeout waiting for manifest' }), 20_000)
+      return await playbackSession.attachHls({
+        video: videoEl,
+        url,
+        lowLatency: false,
+        isCurrent: () => true,
+        // The VOD error taxonomy predates the shared engine and stays: a
+        // plain 'media error: <type>', no networkish split, no details
+        // suffix. The two false flags preserve the old VOD timeout
+        // discipline (no teardown cancel, no destroy on timeout) until the
+        // follow-up fix unifies it.
+        formatFatalError: (d) => 'media error: ' + d.type,
+        cancelPendingOnTeardown: false,
+        destroyOnTimeout: false,
       })
     }
     if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-      videoEl.src = url
-      try {
-        await videoEl.play()
-        return { ok: true }
-      } catch (err) {
-        return { ok: false, error: 'playback failed: ' + (err as Error).message }
-      }
+      return await playbackSession.attachNative(videoEl, url, {
+        errorPrefix: 'playback failed: ',
+      })
     }
     return { ok: false, error: 'HLS playback is not supported' }
   }
@@ -1339,7 +1200,6 @@
   async function attachClipMp4(url: string): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!videoEl) return { ok: false, error: 'no video element' }
     teardownPlayer()
-    clearStallRecover()
     try {
       videoEl.src = url
       await videoEl.play()
@@ -1349,20 +1209,8 @@
     }
   }
 
-  // Rewrite an https URL to its ksvod-proxy form. Tauri v2 fronts a custom
-  // URI scheme differently per webview engine:
-  //   Linux/macOS (WebKit)  -> ksvod://localhost/host/path
-  //   Windows   (WebView2)  -> http://ksvod.localhost/host/path
-  // The Rust proxy (vod_proxy.rs) accepts BOTH forms; the frontend must emit
-  // the one its engine actually routes, or the request never reaches the
-  // handler. Used for VOD playback (always) and live playback (Windows only —
-  // see isWindows).
-  function toKsvodProxyUrl(httpsUrl: string): string {
-    const prefix = isWindows ? 'http://ksvod.localhost/' : 'ksvod://localhost/'
-    return httpsUrl.replace('https://', prefix)
-  }
-
-  // (VOD resume / save / restore / extras all live in vodCtl — the
+  // (The ksvod URL rewrite is the shared toKsvodProxyUrl in lib/playback.ts;
+  // VOD resume / save / restore / extras all live in vodCtl — the
   // VodPlaybackController near the top of this file.)
 
   async function loadVod(videoId: string, q: string): Promise<void> {
@@ -1390,7 +1238,7 @@
     // reqwest and adds Access-Control-Allow-Origin. Relative segment URLs in
     // the manifest resolve against the ksvod base URL automatically. The exact
     // scheme form differs per platform (see toKsvodProxyUrl).
-    const proxyUrl = toKsvodProxyUrl(raw.url)
+    const proxyUrl = toKsvodProxyUrl(raw.url, isWindows)
     const attach = await attachMediaHls(proxyUrl)
     if (attach.ok) {
       playerStatus = 'playing'
@@ -1414,7 +1262,7 @@
       createdAt: video.createdAt,
     }
     stopChatOnly()
-    userPaused = false
+    playbackSession.userPaused = false
     if (videoScrollEl) videoScrollEl.scrollTop = 0
     await loadVod(video.id, quality)
     void vodCtl.loadExtras(video.id)
@@ -1439,7 +1287,7 @@
       createdAt: clip.createdAt,
     }
     stopChatOnly()
-    userPaused = false
+    playbackSession.userPaused = false
     if (videoScrollEl) videoScrollEl.scrollTop = 0
     playerError = ''
     playerStatus = 'resolving'
@@ -2136,7 +1984,7 @@
         ontimeupdate={onVideoTimeUpdate}
         onseeking={onVideoSeeking}
       ></video>
-        <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { userPaused = !p }} oncontrolsvisible={(v) => { controlsVisible = v }} {activeStatus} isFullscreen={isFullscreen} ontogglefullscreen={toggleVideoFullscreen} chapters={vodCtl.chapters} mutedSpans={vodCtl.mutedSpans} storyboard={vodCtl.storyboard} />
+        <PlayerControls video={videoEl} visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')} {quality} onqualitychange={(q) => void changeQuality(q)} onmpv={onMpvClick} onstop={onStopClick} onplayintent={(p) => { playbackSession.userPaused = !p }} oncontrolsvisible={(v) => { controlsVisible = v }} {activeStatus} isFullscreen={isFullscreen} ontogglefullscreen={toggleVideoFullscreen} chapters={vodCtl.chapters} mutedSpans={vodCtl.mutedSpans} storyboard={vodCtl.storyboard} />
         {#if showPlayerOverlay}
           <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
             {#if isPlayerBusy}

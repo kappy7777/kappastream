@@ -32,9 +32,9 @@
 
   import { onDestroy } from 'svelte'
   import Hls from 'hls.js'
-  import { invoke } from '@tauri-apps/api/core'
   import { settings } from './settings.svelte.ts'
-  import { buildHlsConfig } from './hls-config'
+  import { toKsvodProxyUrl, shouldRecoverStallAfterPause } from './playback'
+  import { PlaybackSession, resolveLiveStream } from './playback-session.svelte'
   import { GQL_REFRESH_INTERVAL_MS } from './gql'
   import { fetchLiveStatus } from './favorites.svelte'
   import { tileStore, tileAudible, planTileMuteToggle, planTileVolumeInput, applyTileAudio, type TileState } from './tile-store.svelte'
@@ -70,11 +70,11 @@
 
   let videoEl = $state<HTMLVideoElement | undefined>(undefined)
   let tileEl = $state<HTMLElement | undefined>(undefined)
-  let hls: Hls | null = null
-  let generation = 0
-  let manifestTimeout: ReturnType<typeof setTimeout> | null = null
-  let stallTimer: ReturnType<typeof setTimeout> | null = null
-  let userPaused = false
+  // The playback engine (hls.js attach/manifest-timeout/stall-recovery/
+  // teardown) lives in the shared PlaybackSession — one per tile. This
+  // component keeps only tile POLICY: which quality, offline-close, the
+  // status overlay and the audio authority.
+  const playback = new PlaybackSession()
   let menuOpen = $state(false)
 
   // Audibility (audio authority — see tileAudible): the authority tile follows
@@ -82,113 +82,46 @@
   // unmuted it. Global mute silences all.
   const audible = $derived(tileAudible(isAuthority, tile.manualUnmute, settings.muted))
 
-  function ksvod(httpsUrl: string): string {
-    const prefix = isWindows ? 'http://ksvod.localhost/' : 'ksvod://localhost/'
-    return httpsUrl.replace('https://', prefix)
-  }
-
-  function isFatalNetworkish(data: { fatal: boolean; type: string; details?: string }): boolean {
-    if (!data.fatal) return false
-    const NETWORKISH = new Set([
-      'manifestLoadError', 'manifestLoadTimeOut', 'manifestParsingError',
-      'levelLoadError', 'levelLoadTimeOut', 'audioTrackLoadError',
-      'audioPlaylistLoadError', 'fragmentLoadError', 'fragLoadError', 'fragLoadTimeOut',
-    ])
-    return NETWORKISH.has(data.type) || NETWORKISH.has(data.details ?? '')
-  }
-
   function isCurrent(gen: number, q: string): boolean {
-    return gen === generation && tile.quality === q
-  }
-
-  function clearStall(): void {
-    if (stallTimer) { clearTimeout(stallTimer); stallTimer = null }
-  }
-  function scheduleStall(): void {
-    clearStall()
-    stallTimer = setTimeout(() => {
-      stallTimer = null
-      const el = videoEl
-      if (!el) return
-      const liveEdge = hls?.liveSyncPosition ?? (el.seekable.length > 0 ? el.seekable.end(el.seekable.length - 1) : NaN)
-      if (Number.isFinite(liveEdge)) { try { el.currentTime = Math.max(liveEdge - 1.5, 0) } catch { /* ignore */ } }
-      void el.play().catch(() => { /* ignore */ })
-    }, 1_000)
-  }
-
-  function teardownHls(): void {
-    generation++
-    if (manifestTimeout) { clearTimeout(manifestTimeout); manifestTimeout = null }
-    clearStall()
-    if (hls) { try { hls.destroy() } catch { /* ignore */ } hls = null }
-    const el = videoEl
-    if (el) { try { el.pause(); el.removeAttribute('src'); el.load() } catch { /* ignore */ } }
-  }
-
-  async function resolveStream(channel: string, q: string): Promise<{ ok: true; url: string } | { ok: false; offline: boolean; unavailable?: boolean; error?: string }> {
-    type Raw = { ok?: boolean; url?: string | null; offline?: boolean; error?: string | null; unavailable?: boolean }
-    let raw: Raw
-    try {
-      raw = (await invoke('resolve_stream', { channel, quality: q, lowLatency: settings.lowLatency })) as Raw
-    } catch (err) {
-      const msg = typeof err === 'string' ? err : err instanceof Error ? err.message : JSON.stringify(err)
-      return { ok: false, offline: false, error: 'invoke failed: ' + msg }
-    }
-    if (raw.offline) return { ok: false, offline: true }
-    if (!raw.ok || !raw.url) return { ok: false, offline: false, unavailable: raw.unavailable === true, error: raw.error ?? 'unknown resolve error' }
-    return { ok: true, url: raw.url }
+    return gen === playback.generation && tile.quality === q
   }
 
   async function attach(channel: string, q: string, url: string, gen: number): Promise<{ ok: true } | { ok: false; error: string }> {
     const el = videoEl
     if (!el) return { ok: false, error: 'no video element' }
-    if (!isCurrent(gen, q)) return { ok: false, error: 'stale' }
-    const sourceUrl = isWindows ? ksvod(url) : url
+    const current = () => isCurrent(gen, q)
+    if (!current()) return { ok: false, error: 'stale' }
+    const sourceUrl = isWindows ? toKsvodProxyUrl(url, isWindows) : url
     if (Hls.isSupported()) {
-      if (hls) { clearStall(); try { hls.destroy() } catch { /* ignore */ } }
-      const instance = new Hls(buildHlsConfig(settings.lowLatency))
-      hls = instance
-      return await new Promise((resolve) => {
-        let done = false
-        const finish = (r: { ok: true } | { ok: false; error: string }): void => {
-          if (done) return
-          done = true
-          if (manifestTimeout) { clearTimeout(manifestTimeout); manifestTimeout = null }
-          resolve(r)
-        }
-        instance.on(Hls.Events.MANIFEST_PARSED, () => {
-          if (!isCurrent(gen, q)) { finish({ ok: false, error: 'stale' }); return }
-          tileStore.setStatus(tile.id, 'loading')
-          el.play().then(() => { if (isCurrent(gen, q)) tileStore.setStatus(tile.id, 'playing') })
-            .catch(() => { if (isCurrent(gen, q)) tileStore.setStatus(tile.id, 'playing') })
-          finish({ ok: true })
-        })
-        instance.on(Hls.Events.ERROR, (_e, data) => {
-          if (!data.fatal) return
-          try { instance.destroy() } catch { /* ignore */ }
-          if (!isCurrent(gen, q)) { finish({ ok: false, error: 'stale' }); return }
-          const detail = isFatalNetworkish(data) ? 'network/manifest error: ' + data.type : 'hls error: ' + data.type
-          finish({ ok: false, error: detail })
-        })
-        instance.loadSource(sourceUrl)
-        instance.attachMedia(el)
-        manifestTimeout = setTimeout(() => { if (!done) { try { instance.destroy() } catch { /* ignore */ } finish({ ok: false, error: 'timeout waiting for manifest' }) } }, 20_000)
+      return await playback.attachHls({
+        video: el,
+        url: sourceUrl,
+        lowLatency: settings.lowLatency,
+        isCurrent: current,
+        onManifestParsed: () => tileStore.setStatus(tile.id, 'loading'),
+        onPlayed: () => tileStore.setStatus(tile.id, 'playing'),
+        // A blocked autoplay still counts as "playing" for a tile (the tile
+        // <video> is autoplay+muted; the overlay only covers
+        // loading/offline/error) — the old local copy did the same.
+        onPlayBlocked: () => tileStore.setStatus(tile.id, 'playing'),
       })
     }
     if (el.canPlayType('application/vnd.apple.mpegurl')) {
-      el.src = sourceUrl
-      try { await el.play(); if (!isCurrent(gen, q)) return { ok: false, error: 'stale' }; tileStore.setStatus(tile.id, 'playing'); return { ok: true } }
-      catch (err) { return { ok: false, error: 'native HLS play failed: ' + (err as Error).message } }
+      return await playback.attachNative(el, sourceUrl, {
+        isCurrent: current,
+        errorPrefix: 'native HLS play failed: ',
+        onPlayed: () => tileStore.setStatus(tile.id, 'playing'),
+      })
     }
     return { ok: false, error: 'HLS playback is not supported' }
   }
 
   async function load(q: string): Promise<void> {
-    const gen = ++generation
+    const gen = playback.nextGeneration()
     tileStore.setStatus(tile.id, 'loading')
-    clearStall()
-    userPaused = false
-    const resolved = await resolveStream(tile.channel, q)
+    playback.clearStallRecover()
+    playback.userPaused = false
+    const resolved = await resolveLiveStream(tile.channel, q, settings.lowLatency)
     if (!isCurrent(gen, q)) return
     if (!resolved.ok) {
       if (resolved.offline) { tileStore.setStatus(tile.id, 'offline'); return }
@@ -209,15 +142,15 @@
     menuOpen = false
     if (q === tile.quality) return
     tileStore.setQuality(tile.id, q)
-    teardownHls()
+    playback.teardown(videoEl)
     void load(q)
   }
 
   function togglePlay(): void {
     const el = videoEl
     if (!el) return
-    if (el.paused) { userPaused = false; void el.play().catch(() => { /* ignore */ }) }
-    else { userPaused = true; el.pause() }
+    if (el.paused) { playback.userPaused = false; void el.play().catch(() => { /* ignore */ }) }
+    else { playback.userPaused = true; el.pause() }
   }
 
   // Per-tile mute. The toggle direction comes from planTileMuteToggle, which
@@ -254,14 +187,17 @@
   }
 
   function closeTile(): void {
-    teardownHls()
+    playback.teardown(videoEl)
     tileStore.close(tile.id)
   }
 
   // ---- video event handlers (live stall recovery) ----
-  function onWaiting(): void { scheduleStall() }
-  function onPlaying(): void { clearStall(); userPaused = false }
-  function onPause(): void { if (!userPaused) scheduleStall() }
+  function onWaiting(): void { if (videoEl) playback.scheduleStallRecover(videoEl) }
+  function onPlaying(): void { playback.clearStallRecover(); playback.userPaused = false }
+  // A tile is always live, hence the literal true.
+  function onPause(): void {
+    if (shouldRecoverStallAfterPause(true, playback.userPaused) && videoEl) playback.scheduleStallRecover(videoEl)
+  }
 
   // ---- (re)load ONLY on a genuine channel/quality/low-latency change ----
   // This effect is the fix for "opening a new channel reloads all tiles": it
@@ -288,7 +224,7 @@
     prevQuality = q
     prevLowLatency = ll
     if (!changed) return // idempotent guard — never reload on an unchanged re-run
-    teardownHls()
+    playback.teardown(el)
     if (channelChanged && !firstRun) tileStore.setStatus(tile.id, 'loading')
     void load(q)
   })
@@ -379,7 +315,7 @@
   })
 
   onDestroy(() => {
-    teardownHls()
+    playback.dispose(videoEl)
     if (pollTimer) clearInterval(pollTimer)
     onAuthorityVideo(null)
   })
