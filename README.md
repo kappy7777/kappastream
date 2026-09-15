@@ -49,17 +49,21 @@ Chat is read anonymously through Twitch IRC. Stream playback is resolved locally
 | | |
 |---|---|
 | 📺 **Live playback** | HLS playback with quality selection, fullscreen, theater mode, per-channel quality preferences, an optional low-latency mode, player keyboard shortcuts, and a sleep timer. |
-| 🗂️ **Multi-stream view** | Watch up to four live streams at once in a draggable, resizable tile grid. Each tile has its own chat tab, quality, and volume. |
-| 🎬 **VODs and clips** | Browse a channel's past broadcasts, highlights, recent and popular clips, and play them in the main player — with mpv handoff and Picture-in-Picture support. A Back-to-live control returns to the stream. Past broadcasts resume from where you left off, with a one-click restart. |
-| 💬 **Anonymous chat** | Read-only Twitch IRC chat with native Twitch emotes, 7TV, BTTV and FFZ emotes, badges, colored usernames, timestamps, mention highlighting, and a client-side mute list. |
+| 🗂️ **Multi-stream view** | Watch up to four live streams at once in a draggable, resizable tile grid. Each tile has its own chat tab, quality, and volume, and any subset of the chats can be merged into one interleaved stream. |
+| 🎬 **VODs and clips** | Browse a channel's past broadcasts, highlights, recent and popular clips, and play them in the main player — with mpv handoff and Picture-in-Picture support. A Back-to-live control returns to the stream. Past broadcasts resume from where you left off, with a one-click restart, and the scrub bar shows chapters, muted segments, and storyboard seek previews. |
+| 💬 **Anonymous chat** | Read-only Twitch IRC chat with native Twitch emotes, 7TV, BTTV and FFZ emotes, badges, colored usernames, timestamps, mention highlighting, and a client-side mute list. Twitch links in chat are clickable, and clip links play in-app. |
+| 🎛️ **Chat-event filters** | Individually toggle sub, gift, raid and announcement notices, the chat-mode indicator, moderation actions, and bits. All are on by default. |
+| 📍 **Pinned chat messages** | Show the channel's pinned message above chat. Off by default; while off, no pinned-message request is made. |
 | ⭐ **Favorites** | Save channels locally, drag to reorder them, and see live status, viewer count, game, and stream title at a glance. |
+| 👥 **Stream Together** | Channels in a Stream Together session show stacked co-streamer avatars, a member count, and combined viewership in the sidebar; one click opens the whole session in the multi-stream grid. |
 | 🔍 **Channel discovery** | Search for live channels and browse top streams and categories, all anonymously via Twitch GQL. Selecting a result joins the channel. |
 | 🔔 **Notifications** | Opt in per channel for go-live notifications and receive desktop alerts for chat mentions. |
 | 🖼️ **Picture-in-Picture** | A borderless floating player that maintains a 16:9 aspect ratio and remembers its position. |
 | 📽️ **mpv handoff** | Open the current stream in a standalone `mpv` player through streamlink. |
 | 📌 **System tray** | Show, hide, or quit from the tray, with optional close-to-tray behavior. |
 | 🎨 **Customization** | 34 themes with a custom theme editor — duplicate a built-in, adjust its colors with a live preview, and import or export themes as JSON — plus interface scaling from 0.5× to 4×. |
-| 💾 **Import and export** | Back up and restore favorites and settings as local JSON files. |
+| 💾 **Import and export** | Back up and restore favorites and custom themes as local JSON files. |
+| 🌍 **Languages** | Interface in English, German, Spanish, French, or Portuguese. |
 | 🔄 **Resilient status checks** | When a status request fails, each channel keeps its last-known status and the request is retried with backoff, so a temporary Twitch outage doesn't clear your favorites or disrupt playback or chat. |
 
 ## 📥 Installation
@@ -317,10 +321,14 @@ The first Rust build can take considerably longer than subsequent builds.
 .
 ├── src/                    # Svelte application
 │   ├── App.svelte          # Top-level application orchestration
+│   ├── PipWindow.svelte    # Floating Picture-in-Picture webview (second window)
 │   └── lib/                # UI components, state, IRC and emote logic
 ├── src-tauri/
 │   └── src/                # Rust commands and native integrations
 ├── packaging/              # AUR, Debian and Fedora packaging
+├── scripts/                # Version checks, badge baseline, build measurement
+├── public/                 # Static assets served as-is
+├── assets-raw/             # Unprocessed source art, not part of the build
 ├── docs/screenshots/       # README screenshots
 ├── .github/workflows/      # CI and release automation
 ├── CHANGELOG.md
