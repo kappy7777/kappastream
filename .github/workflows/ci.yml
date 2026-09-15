@@ -89,6 +89,13 @@ jobs:
       - name: Lint (ESLint)
         run: npm run lint
 
+      - name: Format check (Prettier)
+        # The frontend's counterpart to the cargo fmt gate below: the repo is
+        # formatted with Prettier (.prettierrc.json + .prettierignore), so a
+        # file drifting from the canonical layout fails here — cheap, and it
+        # keeps later diffs free of formatting noise.
+        run: npm run format:check
+
       - name: Frontend tests (Vitest)
         run: npm test
 
