@@ -3,14 +3,16 @@ import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
+import prettier from 'eslint-config-prettier';
 
 // ESLint flat config. Lints both .ts/.js and .svelte (including .svelte.ts /
 // .svelte.js) under src/ and the root Vite configs. Type-aware rules
 // (e.g. @typescript-eslint/no-floating-promises) are enabled via the parser's
 // project service, which reads the existing tsconfig.app.json / tsconfig.node.json
 // (tsconfig.app.json already includes src/**/*.svelte, so .svelte files get
-// type info too). No stylistic/formatting rules are enabled — there is no
-// Prettier in this repo and that is intentional.
+// type info too). No stylistic/formatting rules are enabled — layout is
+// Prettier's job (.prettierrc.json), and eslint-config-prettier is appended
+// LAST so the two never argue about it.
 
 export default defineConfig([
   // Build output, dependencies, generated files, and packaging material are
@@ -119,4 +121,8 @@ export default defineConfig([
       'svelte/require-each-key': 'off',
     },
   },
+
+  // eslint-config-prettier MUST stay the LAST entry: it only turns rules OFF,
+  // so anything appended after it could re-enable a formatting conflict.
+  prettier,
 ]);
