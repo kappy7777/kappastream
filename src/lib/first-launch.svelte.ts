@@ -20,11 +20,9 @@
 // features; the owner is the only rc audience.
 
 import { isVersionNewer } from './version'
+import { STORAGE_KEYS } from './storage-keys'
 
 declare const __APP_VERSION__: string
-
-// Follows the settings-store `app-*-v1` key convention (settings.svelte.ts).
-const LAST_SEEN_VERSION_KEY = 'app-last-seen-version-v1'
 
 export type LaunchScreen = 'welcome' | 'whats-new' | null
 
@@ -46,12 +44,12 @@ function safeWrite(key: string, value: string): void {
 
 /** Read the last version the user dismissed a launch screen for (or null). */
 export function readLastSeenVersion(): string | null {
-  return safeRead(LAST_SEEN_VERSION_KEY)
+  return safeRead(STORAGE_KEYS.lastSeenVersion)
 }
 
 /** Record `version` as seen. Called on dismissal, never on show. */
 export function writeLastSeenVersion(version: string): void {
-  safeWrite(LAST_SEEN_VERSION_KEY, version)
+  safeWrite(STORAGE_KEYS.lastSeenVersion, version)
 }
 
 // A parseable SemVer-core prefix — mirrors `parseCore` in version.ts so the

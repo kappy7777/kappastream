@@ -22,6 +22,7 @@
 import { BASELINE_BADGES, BASELINE_GENERATED_AT } from './badges.generated'
 import { setGlobalBadges, type BadgeMeta } from './irc'
 import { fetchGlobalBadgeSets, type GlobalBadgeRow } from './gql'
+import { STORAGE_KEYS } from './storage-keys'
 
 // localStorage cache key + schema version. The cache also stores the
 // BASELINE_GENERATED_AT it was built against: if the app ships a newer
@@ -30,7 +31,6 @@ import { fetchGlobalBadgeSets, type GlobalBadgeRow } from './gql'
 // Bump BADGE_CACHE_VERSION on any cache SHAPE change; the version + baseline
 // checks together mean stale or shape-mismatched data is discarded, never
 // crashes the parse.
-const BADGE_CACHE_KEY = 'app-badge-cache-v1'
 const BADGE_CACHE_VERSION = 1
 
 // Weekly refresh cadence. Global badge art changes rarely; a week balances
@@ -117,7 +117,7 @@ function isValidCache(c: unknown): c is BadgeCache {
 
 function readCache(): BadgeCache | null {
   try {
-    const raw = localStorage.getItem(BADGE_CACHE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.badgeCache)
     if (!raw) return null
     const parsed = JSON.parse(raw)
     return isValidCache(parsed) ? parsed : null
@@ -134,7 +134,7 @@ function writeCache(badges: Record<string, BadgeMeta>): void {
       baselineAt: BASELINE_GENERATED_AT,
       badges,
     }
-    localStorage.setItem(BADGE_CACHE_KEY, JSON.stringify(cache))
+    localStorage.setItem(STORAGE_KEYS.badgeCache, JSON.stringify(cache))
   } catch {
     // Quota / serialization failure — ignore; the in-memory map is still set.
   }
@@ -183,4 +183,4 @@ export function initBadgeRefresh(): void {
 }
 
 // Exported for tests that need to reset module-level state between cases.
-export const __test = { BADGE_CACHE_KEY, BADGE_CACHE_VERSION, isValidCache }
+export const __test = { BADGE_CACHE_KEY: STORAGE_KEYS.badgeCache, BADGE_CACHE_VERSION, isValidCache }

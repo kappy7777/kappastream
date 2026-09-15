@@ -24,6 +24,7 @@
   import WelcomeOverlay from './lib/WelcomeOverlay.svelte'
   import { updateStore } from './lib/update.svelte.ts'
   import { settings } from './lib/settings.svelte.ts'
+  import { STORAGE_KEYS } from './lib/storage-keys'
   import { toKsvodProxyUrl, shouldRecoverStallAfterPause } from './lib/playback'
   import { PlaybackSession, resolveLiveStream } from './lib/playback-session.svelte'
   import { pipController } from './lib/pip-controller.svelte.ts'
@@ -196,10 +197,9 @@
     return playback.kind === 'vod' ? playback.id : null
   }
 
-  const SIDEBAR_VIS_KEY = 'twitch-sidebar-visible-v3'
   function loadSidebarMode(): 'full' | 'icons' | 'hidden' {
     try {
-      const v = localStorage.getItem(SIDEBAR_VIS_KEY)
+      const v = localStorage.getItem(STORAGE_KEYS.sidebarVisible)
       if (v === 'false') return 'hidden'
       if (v === 'icons') return 'icons'
       if (v === 'true') return 'full'
@@ -724,13 +724,12 @@
   // Chat box size — user-resizable in both layout modes. Persists across
   // sessions/streams via localStorage. The current value is used as the
   // default when opening a new stream.
-  const CHAT_SIZE_KEY = 'app-chat-size-v1'
   const CHAT_SIZE_MIN = 200
   const CHAT_SIZE_MAX = 1500
 
   function loadChatSize(): number {
     try {
-      const v = localStorage.getItem(CHAT_SIZE_KEY)
+      const v = localStorage.getItem(STORAGE_KEYS.chatSize)
       if (v) {
         const n = parseInt(v, 10)
         if (Number.isFinite(n) && n >= CHAT_SIZE_MIN && n <= CHAT_SIZE_MAX) return n
@@ -742,7 +741,7 @@
   }
   function saveChatSize(v: number): void {
     try {
-      localStorage.setItem(CHAT_SIZE_KEY, String(v))
+      localStorage.setItem(STORAGE_KEYS.chatSize, String(v))
     } catch {
       /* ignore */
     }
@@ -801,7 +800,7 @@
 
   $effect(() => {
     try {
-      localStorage.setItem(SIDEBAR_VIS_KEY, sidebarMode)
+      localStorage.setItem(STORAGE_KEYS.sidebarVisible, sidebarMode)
     } catch {
       /* ignore */
     }

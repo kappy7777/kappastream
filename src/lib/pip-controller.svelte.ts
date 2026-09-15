@@ -2,6 +2,7 @@ import { emit, listen } from '@tauri-apps/api/event'
 import { isTauri } from '@tauri-apps/api/core'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { settings } from './settings.svelte.ts'
+import { STORAGE_KEYS } from './storage-keys'
 
 // Picture-in-Picture for this app is implemented as a SECOND, borderless,
 // always-on-top Tauri window (the native HTML5 `requestPictureInPicture` API
@@ -23,7 +24,6 @@ import { settings } from './settings.svelte.ts'
 // setStream call site.
 
 const PIP_LABEL = 'pip'
-const RECT_KEY = 'pip-window-rect-v1'
 
 const EV_READY = 'ks://pip-ready'
 const EV_INIT = 'ks://pip-init'
@@ -50,7 +50,7 @@ interface StreamInfo {
 
 function readRect(): PipRect | null {
   try {
-    const raw = localStorage.getItem(RECT_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.pipWindowRect)
     if (!raw) return null
     const v = JSON.parse(raw) as Partial<PipRect>
     if (
@@ -66,7 +66,7 @@ function readRect(): PipRect | null {
 
 function writeRect(rect: PipRect): void {
   try {
-    localStorage.setItem(RECT_KEY, JSON.stringify(rect))
+    localStorage.setItem(STORAGE_KEYS.pipWindowRect, JSON.stringify(rect))
   } catch {
     /* ignore */
   }

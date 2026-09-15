@@ -9,6 +9,7 @@ import {
   type Collaborator,
 } from './gql'
 import { t } from './i18n/index.svelte'
+import { STORAGE_KEYS } from './storage-keys'
 
 export interface FavoriteEntry {
   name: string
@@ -52,8 +53,6 @@ export interface FavoriteStatus {
   updateDelayed: boolean
 }
 
-const STORAGE_KEY = 'twitch-favorites-v1'
-const NOTIF_CHANNELS_KEY = 'fav-notif-channels-v1'
 export const MAX_FAVORITES = 1000
 
 // Favorites resolve from ONE source: Twitch's anonymous GQL endpoint, polled as
@@ -84,7 +83,7 @@ export function isValidChannelName(name: string): boolean {
 
 function loadFromStorage(): FavoriteEntry[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.favorites)
     if (!raw) return []
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
@@ -116,7 +115,7 @@ function loadFromStorage(): FavoriteEntry[] {
 
 function saveToStorage(favorites: FavoriteEntry[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(favorites))
+    localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify(favorites))
   } catch {
     /* quota or disabled */
   }
@@ -125,7 +124,7 @@ function saveToStorage(favorites: FavoriteEntry[]): void {
 function loadNotifChannels(): Set<string> {
   const set = new Set<string>()
   try {
-    const raw = localStorage.getItem(NOTIF_CHANNELS_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.favNotifChannels)
     if (!raw) return set
     const parsed = JSON.parse(raw) as unknown
     if (Array.isArray(parsed)) {
@@ -143,7 +142,7 @@ function loadNotifChannels(): Set<string> {
 
 function saveNotifChannels(set: Set<string>): void {
   try {
-    localStorage.setItem(NOTIF_CHANNELS_KEY, JSON.stringify([...set]))
+    localStorage.setItem(STORAGE_KEYS.favNotifChannels, JSON.stringify([...set]))
   } catch {
     /* quota or disabled */
   }

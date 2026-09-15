@@ -49,6 +49,7 @@ import {
   clearThemeProperties,
   type CustomThemeId,
 } from './custom-themes.svelte'
+import { STORAGE_KEYS } from './storage-keys'
 
 export type SortMode = 'auto' | 'manual'
 
@@ -95,48 +96,9 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
   { id: 'amethyst', label: 'Amethyst', swatch: '#6D5DD3' },
 ]
 
-const THEME_KEY = 'app-theme-v1'
-const CHAT_VISIBLE_KEY = 'app-chat-visible-v1'
-const CHAT_TIMESTAMPS_KEY = 'app-chat-timestamps-v1'
-const MENTION_USERNAME_KEY = 'app-mention-username-v1'
-const VOLUME_KEY = 'app-volume-v1'
-const MUTED_KEY = 'app-muted-v1'
-const QUALITY_PREFIX = 'app-quality:'
-const UI_SCALE_KEY = 'app-ui-scale-v1'
-const LOW_LATENCY_KEY = 'app-low-latency-v1'
-const CLOSE_TO_TRAY_KEY = 'app-close-to-tray-v1'
-// In-app update check on startup. Default ON (the updater has checked on every
-// launch since v0.2.6); users who want a fully silent launch opt out here. On
-// an AUR build the updater plugins are unregistered, so `check()` is a no-op
-// regardless of this setting — the toggle is simply inert there.
-const CHECK_UPDATES_KEY = 'app-check-updates-v1'
-// Tier 2 chat-feature toggles (sections 1–6). All default OFF — the baseline
-// chat is byte-identical with every one of these false. The old single
-// sub/raid toggle was SPLIT into four individually togglable notice groups;
-// each new key falls back to the legacy key while unset (a legacy 'true'
-// keeps the user's notices on until they flip a group themselves).
-const CHAT_NOTICES_SUB_KEY = 'app-chat-notices-sub-v1'
-const CHAT_NOTICES_GIFT_KEY = 'app-chat-notices-gift-v1'
-const CHAT_NOTICES_RAID_KEY = 'app-chat-notices-raid-v1'
-const CHAT_NOTICES_ANNOUNCEMENT_KEY = 'app-chat-notices-announcement-v1'
-const LEGACY_CHAT_SUBNOTICES_KEY = 'app-chat-subnotices-v1'
-const CHAT_ROOMSTATE_KEY = 'app-chat-roomstate-v1'
-const CHAT_MODERATION_KEY = 'app-chat-moderation-v1'
-const CHAT_BITS_KEY = 'app-chat-bits-v1'
-// Pinned chat messages. Unlike the Tier 2 toggles above (parse always,
-// gate only rendering), this one gates the FETCH itself: with it off, no
-// pinned-message GQL query is issued at all.
-const CHAT_PINNED_KEY = 'app-chat-pinned-v1'
-// Multi-view status bar visibility (persisted). Default shown. Hidden by the
-// user to reclaim vertical space; revealed by hovering the bottom edge.
-const MV_STATUSBAR_HIDDEN_KEY = 'app-mv-statusbar-hidden-v1'
-// Client-side chat mute list. Login names the user never wants to see in chat.
-// Matching is done on the STABLE `login` field (parsed & lowercased from the
-// IRC nick prefix), never on display-name (user-settable capitalization — the
-// same trap CLEARCHAT avoids) and never on userId (the user types a name, and
-// resolving a name → userId would need a network call the read-only/no-network
-// posture forbids). Cap keeps localStorage bounded.
-const MUTED_USERS_KEY = 'app-chat-muted-v1'
+// Every persistence key lives in ./storage-keys — the single registry; see
+// its header for the never-rename rule. Behavioral notes sit with the
+// reader/writer functions below.
 export const MAX_MUTED_USERS = 100
 
 export const UI_SCALE_MIN = 0.5
@@ -164,7 +126,7 @@ function safeWrite(key: string, value: string): void {
 }
 
 function readTheme(): ThemeId {
-  const v = safeRead(THEME_KEY)
+  const v = safeRead(STORAGE_KEYS.theme)
   if (v) {
     // Custom ids are validated against the runtime registry (they are stored
     // data, not compile-time CSS); an unknown id of either kind falls back.
@@ -178,85 +140,93 @@ function readTheme(): ThemeId {
 }
 
 function readChatVisible(): boolean {
-  const v = safeRead(CHAT_VISIBLE_KEY)
+  const v = safeRead(STORAGE_KEYS.chatVisible)
   if (v === 'false') return false
   return true
 }
 
 function readChatTimestamps(): boolean {
-  return safeRead(CHAT_TIMESTAMPS_KEY) === 'true'
+  return safeRead(STORAGE_KEYS.chatTimestamps) === 'true'
 }
 
 function readMentionUsername(): string {
-  const v = safeRead(MENTION_USERNAME_KEY)
+  const v = safeRead(STORAGE_KEYS.mentionUsername)
   if (!v) return ''
   return v.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 25)
 }
 
 function readVolume(): number {
-  const v = safeRead(VOLUME_KEY)
+  const v = safeRead(STORAGE_KEYS.volume)
   if (!v) return 1
   const n = parseFloat(v)
   return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 1
 }
 
 function readMuted(): boolean {
-  const v = safeRead(MUTED_KEY)
+  const v = safeRead(STORAGE_KEYS.muted)
   return v === 'true'
 }
 
 function readLowLatency(): boolean {
-  return safeRead(LOW_LATENCY_KEY) === 'true'
+  return safeRead(STORAGE_KEYS.lowLatency) === 'true'
 }
 
 function readCloseToTray(): boolean {
   // Default ON: the whole point of the tray is background notifications,
   // so close-to-tray is the expected behavior out of the box. Users who
   // want close-to-quit disable it in Settings.
-  return safeRead(CLOSE_TO_TRAY_KEY) !== 'false'
+  return safeRead(STORAGE_KEYS.closeToTray) !== 'false'
 }
 
 function readCheckUpdates(): boolean {
   // Default ON: the updater check has run on every launch since v0.2.6. Only
   // an explicit 'false' opts out — this is the one outbound request that is
   // not a direct consequence of a user action, so it's the one worth gating.
-  return safeRead(CHECK_UPDATES_KEY) !== 'false'
+  // On an AUR build the updater plugins are unregistered, so `check()` is a
+  // no-op regardless of this setting — the toggle is simply inert there.
+  return safeRead(STORAGE_KEYS.checkUpdates) !== 'false'
 }
 
-// All Tier 2 chat-feature toggles default OFF. The four notice groups fall
-// back to the legacy single-toggle key while their own key is unset.
+// All Tier 2 chat-feature toggles default OFF — the baseline chat is
+// byte-identical with every one of these false. The old single sub/raid
+// toggle was SPLIT into four individually togglable notice groups; each new
+// key falls back to the legacy key while unset (a legacy 'true' keeps the
+// user's notices on until they flip a group themselves).
 function readChatNoticeGroup(key: string): boolean {
   const own = safeRead(key)
   if (own !== null) return own === 'true'
-  return safeRead(LEGACY_CHAT_SUBNOTICES_KEY) === 'true'
+  return safeRead(STORAGE_KEYS.legacyChatSubnotices) === 'true'
 }
 function readChatNoticesSub(): boolean {
-  return readChatNoticeGroup(CHAT_NOTICES_SUB_KEY)
+  return readChatNoticeGroup(STORAGE_KEYS.chatNoticesSub)
 }
 function readChatNoticesGift(): boolean {
-  return readChatNoticeGroup(CHAT_NOTICES_GIFT_KEY)
+  return readChatNoticeGroup(STORAGE_KEYS.chatNoticesGift)
 }
 function readChatNoticesRaid(): boolean {
-  return readChatNoticeGroup(CHAT_NOTICES_RAID_KEY)
+  return readChatNoticeGroup(STORAGE_KEYS.chatNoticesRaid)
 }
 function readChatNoticesAnnouncement(): boolean {
-  return readChatNoticeGroup(CHAT_NOTICES_ANNOUNCEMENT_KEY)
+  return readChatNoticeGroup(STORAGE_KEYS.chatNoticesAnnouncement)
 }
 function readChatRoomstate(): boolean {
-  return safeRead(CHAT_ROOMSTATE_KEY) === 'true'
+  return safeRead(STORAGE_KEYS.chatRoomstate) === 'true'
 }
 function readChatModeration(): boolean {
-  return safeRead(CHAT_MODERATION_KEY) === 'true'
+  return safeRead(STORAGE_KEYS.chatModeration) === 'true'
 }
 function readChatBits(): boolean {
-  return safeRead(CHAT_BITS_KEY) === 'true'
+  return safeRead(STORAGE_KEYS.chatBits) === 'true'
 }
 function readChatPinned(): boolean {
-  return safeRead(CHAT_PINNED_KEY) === 'true'
+  // Unlike the Tier 2 toggles above (parse always, gate only rendering), this
+  // one gates the FETCH itself: with it off, no pinned-message GQL query is
+  // issued at all.
+  return safeRead(STORAGE_KEYS.chatPinned) === 'true'
 }
 
 function readMvStatusBarHidden(): boolean {
-  return safeRead(MV_STATUSBAR_HIDDEN_KEY) === 'true'
+  return safeRead(STORAGE_KEYS.mvStatusBarHidden) === 'true'
 }
 
 // Normalize a user-entered mute entry to a lowercase login, or null if it has
@@ -268,8 +238,12 @@ function normalizeMutedName(raw: string): string | null {
 }
 
 function readMutedUsers(): string[] {
+  // Client-side chat mute list. Matching is done on the STABLE `login` field
+  // (never display-name — user-settable capitalization, the same trap
+  // CLEARCHAT avoids — and never userId, which would need a network call the
+  // read-only posture forbids). Cap keeps localStorage bounded.
   try {
-    const raw = localStorage.getItem(MUTED_USERS_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.chatMutedUsers)
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
@@ -289,10 +263,8 @@ function readMutedUsers(): string[] {
   }
 }
 
-const SORT_MODE_KEY = 'app-fav-sort-v1'
-
 function readSortMode(): SortMode {
-  const v = safeRead(SORT_MODE_KEY)
+  const v = safeRead(STORAGE_KEYS.favSortMode)
   return v === 'manual' ? 'manual' : 'auto'
 }
 
@@ -302,7 +274,7 @@ function clampUiScale(n: number): number {
 }
 
 function readUiScale(): number {
-  const v = safeRead(UI_SCALE_KEY)
+  const v = safeRead(STORAGE_KEYS.uiScale)
   if (!v) return UI_SCALE_DEFAULT
   return clampUiScale(parseFloat(v))
 }
@@ -337,7 +309,7 @@ class SettingsStore {
   constructor() {
     this.applyTheme(this.theme)
     this.applyUiScale(this.uiScale)
-    try { localStorage.removeItem('app-theater-v1') } catch { /* ignore */ }
+    try { localStorage.removeItem(STORAGE_KEYS.legacyTheater) } catch { /* ignore */ }
   }
 
   /**
@@ -372,13 +344,13 @@ class SettingsStore {
 
   setTheme(id: ThemeId): void {
     this.theme = id
-    safeWrite(THEME_KEY, id)
+    safeWrite(STORAGE_KEYS.theme, id)
     this.applyTheme(id)
   }
 
   setChatVisible(v: boolean): void {
     this.chatVisible = v
-    safeWrite(CHAT_VISIBLE_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.chatVisible, v ? 'true' : 'false')
   }
 
   toggleChatVisible(): void {
@@ -387,7 +359,7 @@ class SettingsStore {
 
   setChatTimestamps(v: boolean): void {
     this.chatTimestamps = v
-    safeWrite(CHAT_TIMESTAMPS_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.chatTimestamps, v ? 'true' : 'false')
   }
 
   toggleChatTimestamps(): void {
@@ -398,22 +370,22 @@ class SettingsStore {
     const cleaned = v.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 25)
     if (cleaned === this.mentionUsername) return
     this.mentionUsername = cleaned
-    safeWrite(MENTION_USERNAME_KEY, cleaned)
+    safeWrite(STORAGE_KEYS.mentionUsername, cleaned)
   }
 
   setVolume(v: number): void {
     const clamped = Math.max(0, Math.min(1, v))
     this.volume = clamped
-    safeWrite(VOLUME_KEY, String(clamped))
+    safeWrite(STORAGE_KEYS.volume, String(clamped))
     if (clamped > 0 && this.muted) {
       this.muted = false
-      safeWrite(MUTED_KEY, 'false')
+      safeWrite(STORAGE_KEYS.muted, 'false')
     }
   }
 
   setMuted(m: boolean): void {
     this.muted = m
-    safeWrite(MUTED_KEY, m ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.muted, m ? 'true' : 'false')
   }
 
   toggleMuted(): void {
@@ -422,7 +394,7 @@ class SettingsStore {
 
   setLowLatency(v: boolean): void {
     this.lowLatency = v
-    safeWrite(LOW_LATENCY_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.lowLatency, v ? 'true' : 'false')
   }
 
   toggleLowLatency(): void {
@@ -431,7 +403,7 @@ class SettingsStore {
 
   setCloseToTray(v: boolean): void {
     this.closeToTray = v
-    safeWrite(CLOSE_TO_TRAY_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.closeToTray, v ? 'true' : 'false')
   }
 
   toggleCloseToTray(): void {
@@ -440,7 +412,7 @@ class SettingsStore {
 
   setCheckUpdates(v: boolean): void {
     this.checkUpdates = v
-    safeWrite(CHECK_UPDATES_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.checkUpdates, v ? 'true' : 'false')
   }
 
   toggleCheckUpdates(): void {
@@ -449,7 +421,7 @@ class SettingsStore {
 
   setChatNoticesSub(v: boolean): void {
     this.chatNoticesSub = v
-    safeWrite(CHAT_NOTICES_SUB_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.chatNoticesSub, v ? 'true' : 'false')
   }
 
   toggleChatNoticesSub(): void {
@@ -458,7 +430,7 @@ class SettingsStore {
 
   setChatNoticesGift(v: boolean): void {
     this.chatNoticesGift = v
-    safeWrite(CHAT_NOTICES_GIFT_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.chatNoticesGift, v ? 'true' : 'false')
   }
 
   toggleChatNoticesGift(): void {
@@ -467,7 +439,7 @@ class SettingsStore {
 
   setChatNoticesRaid(v: boolean): void {
     this.chatNoticesRaid = v
-    safeWrite(CHAT_NOTICES_RAID_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.chatNoticesRaid, v ? 'true' : 'false')
   }
 
   toggleChatNoticesRaid(): void {
@@ -476,7 +448,7 @@ class SettingsStore {
 
   setChatNoticesAnnouncement(v: boolean): void {
     this.chatNoticesAnnouncement = v
-    safeWrite(CHAT_NOTICES_ANNOUNCEMENT_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.chatNoticesAnnouncement, v ? 'true' : 'false')
   }
 
   toggleChatNoticesAnnouncement(): void {
@@ -485,7 +457,7 @@ class SettingsStore {
 
   setChatRoomstate(v: boolean): void {
     this.chatRoomstate = v
-    safeWrite(CHAT_ROOMSTATE_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.chatRoomstate, v ? 'true' : 'false')
   }
 
   toggleChatRoomstate(): void {
@@ -494,7 +466,7 @@ class SettingsStore {
 
   setChatModeration(v: boolean): void {
     this.chatModeration = v
-    safeWrite(CHAT_MODERATION_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.chatModeration, v ? 'true' : 'false')
   }
 
   toggleChatModeration(): void {
@@ -503,7 +475,7 @@ class SettingsStore {
 
   setChatBits(v: boolean): void {
     this.chatBits = v
-    safeWrite(CHAT_BITS_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.chatBits, v ? 'true' : 'false')
   }
 
   toggleChatBits(): void {
@@ -512,7 +484,7 @@ class SettingsStore {
 
   setChatPinned(v: boolean): void {
     this.chatPinned = v
-    safeWrite(CHAT_PINNED_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.chatPinned, v ? 'true' : 'false')
   }
 
   toggleChatPinned(): void {
@@ -521,7 +493,7 @@ class SettingsStore {
 
   setMvStatusBarHidden(v: boolean): void {
     this.mvStatusBarHidden = v
-    safeWrite(MV_STATUSBAR_HIDDEN_KEY, v ? 'true' : 'false')
+    safeWrite(STORAGE_KEYS.mvStatusBarHidden, v ? 'true' : 'false')
   }
 
   toggleMvStatusBarHidden(): void {
@@ -538,7 +510,7 @@ class SettingsStore {
     if (this.mutedUsers.includes(n)) return null
     if (this.mutedUsers.length >= MAX_MUTED_USERS) return null
     this.mutedUsers = [...this.mutedUsers, n]
-    safeWrite(MUTED_USERS_KEY, JSON.stringify(this.mutedUsers))
+    safeWrite(STORAGE_KEYS.chatMutedUsers, JSON.stringify(this.mutedUsers))
     return n
   }
 
@@ -547,7 +519,7 @@ class SettingsStore {
     if (!n) return
     if (!this.mutedUsers.includes(n)) return
     this.mutedUsers = this.mutedUsers.filter((u) => u !== n)
-    safeWrite(MUTED_USERS_KEY, JSON.stringify(this.mutedUsers))
+    safeWrite(STORAGE_KEYS.chatMutedUsers, JSON.stringify(this.mutedUsers))
   }
 
   // True if `login` is in the mute list. `login` is the PRIVMSG sender's login
@@ -563,7 +535,7 @@ class SettingsStore {
 
   setSortMode(m: SortMode): void {
     this.sortMode = m
-    safeWrite(SORT_MODE_KEY, m)
+    safeWrite(STORAGE_KEYS.favSortMode, m)
   }
 
   toggleSortMode(): void {
@@ -578,7 +550,7 @@ class SettingsStore {
     const clamped = clampUiScale(v)
     if (clamped === this.uiScale) return
     this.uiScale = clamped
-    safeWrite(UI_SCALE_KEY, String(clamped))
+    safeWrite(STORAGE_KEYS.uiScale, String(clamped))
     this.applyUiScale(clamped)
   }
 
@@ -591,12 +563,12 @@ class SettingsStore {
   }
 
   getQualityFor(channel: string): string | null {
-    const v = safeRead(QUALITY_PREFIX + channel.toLowerCase())
+    const v = safeRead(STORAGE_KEYS.qualityPrefix + channel.toLowerCase())
     return v
   }
 
   setQualityFor(channel: string, quality: string): void {
-    safeWrite(QUALITY_PREFIX + channel.toLowerCase(), quality)
+    safeWrite(STORAGE_KEYS.qualityPrefix + channel.toLowerCase(), quality)
   }
 }
 

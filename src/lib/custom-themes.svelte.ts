@@ -22,6 +22,8 @@
 // theme, imported via the hidden <input type="file"> flow, exported via the
 // rfd-based Rust save dialog (`save_theme_export`).
 
+import { STORAGE_KEYS } from './storage-keys'
+
 export const CUSTOM_THEME_PROPS = [
   '--bg-app',
   '--bg-panel',
@@ -162,7 +164,6 @@ export interface CustomTheme {
 }
 
 /** Storage key follows the settings-store `app-*-v1` convention. */
-const STORAGE_KEY = 'app-custom-themes-v1'
 const STORAGE_VERSION = 1
 
 export const MAX_CUSTOM_THEMES = 16
@@ -321,7 +322,7 @@ function isValidValues(values: unknown): values is ThemeValues {
 
 function safeRead(): string | null {
   try {
-    return localStorage.getItem(STORAGE_KEY)
+    return localStorage.getItem(STORAGE_KEYS.customThemes)
   } catch {
     return null
   }
@@ -329,7 +330,7 @@ function safeRead(): string | null {
 
 function safeWrite(value: string): void {
   try {
-    localStorage.setItem(STORAGE_KEY, value)
+    localStorage.setItem(STORAGE_KEYS.customThemes, value)
   } catch {
     /* ignore */
   }

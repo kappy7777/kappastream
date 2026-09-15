@@ -23,6 +23,7 @@ import { de } from './locales/de'
 import { es } from './locales/es'
 import { fr } from './locales/fr'
 import { pt } from './locales/pt'
+import { STORAGE_KEYS } from '../storage-keys'
 
 export type Locale = 'en' | 'de' | 'es' | 'fr' | 'pt'
 export type { TKey } from './locales/en'
@@ -45,11 +46,10 @@ export const LOCALES: ReadonlyArray<LocaleMeta> = [
   { id: 'pt', label: 'Português' },
 ]
 
-const LOCALE_KEY = 'app-locale-v1'
 
 function safeReadLocale(): string | null {
   try {
-    return localStorage.getItem(LOCALE_KEY)
+    return localStorage.getItem(STORAGE_KEYS.locale)
   } catch {
     return null
   }
@@ -57,7 +57,7 @@ function safeReadLocale(): string | null {
 
 function safeWriteLocale(value: string): void {
   try {
-    localStorage.setItem(LOCALE_KEY, value)
+    localStorage.setItem(STORAGE_KEYS.locale, value)
   } catch {
     /* ignore */
   }

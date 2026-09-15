@@ -14,13 +14,14 @@
  * offset. Clips are deliberately out of scope (too short to be worth resuming).
  */
 
+import { STORAGE_KEYS } from './storage-keys'
+
 export interface VodPosition {
   position: number
   duration: number
   updatedAt: number
 }
 
-const STORAGE_KEY = 'app-vod-positions-v1'
 export const MAX_VOD_POSITIONS = 50
 export const VOD_RESUME_MIN_S = 30
 export const VOD_RESUME_COMPLETE_FRACTION = 0.95
@@ -47,7 +48,7 @@ function isVodPosition(v: unknown): v is VodPosition {
 
 function loadMap(): Record<string, VodPosition> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.vodPositions)
     if (!raw) return {}
     const parsed = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
@@ -63,7 +64,7 @@ function loadMap(): Record<string, VodPosition> {
 
 function persist(map: Record<string, VodPosition>): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(map))
+    localStorage.setItem(STORAGE_KEYS.vodPositions, JSON.stringify(map))
   } catch {
     /* ignore quota / serialization errors */
   }

@@ -42,6 +42,7 @@ import {
 import { parseBadges, normalizeColor, type BadgeInfo } from './irc'
 import { getTwitchUserId, type EmoteRange } from './emotes'
 import { settings } from './settings.svelte.ts'
+import { STORAGE_KEYS } from './storage-keys'
 
 export interface PinnedChatPin {
   /** PIN id (node.id) — the identity/dismissal key. Distinct from messageId. */
@@ -113,12 +114,11 @@ export function isPinExpired(pin: PinnedChatPin, nowMs: number): boolean {
 // Dismissal store — pin-id keyed, persisted, bounded.
 // ---------------------------------------------------------------------------
 
-const DISMISSED_KEY = 'app-chat-pinned-dismissed-v1'
 export const MAX_DISMISSED_PINS = 20
 
 function loadDismissed(): string[] {
   try {
-    const raw = localStorage.getItem(DISMISSED_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.chatPinnedDismissed)
     if (!raw) return []
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
@@ -254,7 +254,7 @@ export class PinnedChatStore {
       this.dismissed = this.dismissed.slice(this.dismissed.length - MAX_DISMISSED_PINS)
     }
     try {
-      localStorage.setItem(DISMISSED_KEY, JSON.stringify(this.dismissed))
+      localStorage.setItem(STORAGE_KEYS.chatPinnedDismissed, JSON.stringify(this.dismissed))
     } catch {
       /* quota or disabled */
     }
