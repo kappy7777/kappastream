@@ -105,9 +105,11 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-
+      # MUST run before "Install Rust stable": the bare debian:12 container
+      # ships neither rustup NOR curl, and dtolnay/rust-toolchain bootstraps
+      # rustup via `curl https://sh.rustup.rs` — with curl not yet installed
+      # that step dies with exit 127 (first exercised by the 2026-09-17
+      # smoke dispatch). Nothing before this step needs the apt set.
       - name: Install Tauri system dependencies
         # Tauri v2 (linux) build requirements. The GStreamer codec packages
         # are deliberately NOT installed here: .deb/.rpm do not bundle media
@@ -142,6 +144,9 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             libmpv-dev
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       # Separate cache key from the AppImage job: the container's
       # Debian-12 toolchain and 24.04's produce glibc-incompatible
