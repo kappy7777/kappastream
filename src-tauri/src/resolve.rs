@@ -417,14 +417,7 @@ pub async fn resolve_stream(
                     && parsed.username().is_empty()
                     && parsed.password().is_none()
                     && parsed.port_or_known_default() == Some(443)
-                    && parsed.host_str().is_some_and(|host| {
-                        host == "twitch.tv"
-                            || host.ends_with(".twitch.tv")
-                            || host == "ttvnw.net"
-                            || host.ends_with(".ttvnw.net")
-                            || host == "ttv-clips.net"
-                            || host.ends_with(".ttv-clips.net")
-                    })
+                    && parsed.host_str().is_some_and(is_allowed_live_host)
             });
             if parsed.is_none() || url.lines().count() != 1 {
                 let err = if include_detail() {
@@ -582,7 +575,7 @@ pub async fn stream_qualities(
 
 // VOD/clip media (resolved HLS playlists and clip MP4s) are served from
 // Twitch's CloudFront distribution (e.g. d2nvs31859zcd8.cloudfront.net), which
-// the live `resolve_stream` allowlist below intentionally does NOT include.
+// the live host list above intentionally does NOT include.
 // The VOD path gets its own broader host set so the live path stays untouched.
 // Shared (pub(crate)) with vod_proxy.rs so the proxy validates fetches against
 // the SAME single list — two copies would silently drift (a security-relevant
@@ -596,6 +589,60 @@ pub(crate) fn is_allowed_vod_host(host: &str) -> bool {
         || host.ends_with(".ttv-clips.net")
         || host == "cloudfront.net"
         || host.ends_with(".cloudfront.net")
+}
+
+/// Host families the LIVE path may resolve to: the twitch.tv page itself
+/// (rare redirects), Twitch's live video CDN (`ttvnw.net` — usher /
+/// video-edge hosts), and the clip CDN (`ttv-clips.net`). Extracted from
+/// resolve_stream's inline closure so `validate_media_url` (the mpv_load
+/// trust boundary) enforces the SAME set — a second copy of a host list is
+/// exactly how one quietly drifts open.
+pub(crate) fn is_allowed_live_host(host: &str) -> bool {
+    host == "twitch.tv"
+        || host.ends_with(".twitch.tv")
+        || host == "ttvnw.net"
+        || host.ends_with(".ttvnw.net")
+        || host == "ttv-clips.net"
+        || host.ends_with(".ttv-clips.net")
+}
+
+/// Validate a media URL before it reaches mpv's `loadfile` (mpv_load).
+/// The webview is the caller, so this is a trust boundary: handed an
+/// attacker-chosen string, mpv will open `file://`, `edl://`, `memory://`,
+/// `lavf://`, `smb://` and local playlist files just as readily as https.
+/// Same predicate shape the resolvers apply to streamlink's output —
+/// https, no userinfo, default port, single line — with the host set
+/// chosen by media kind: live resolves inside `is_allowed_live_host`;
+/// VOD playlists AND clip MP4s inside `is_allowed_vod_host` (streamlink
+/// signs both onto CloudFront). Debug builds may name the offending host;
+/// release builds get a stable generic message (include_detail()).
+pub(crate) fn validate_media_url(url: &str, kind: &str) -> Result<(), String> {
+    let host_ok: fn(&str) -> bool = match kind {
+        "live" => is_allowed_live_host,
+        "vod" | "clip" => is_allowed_vod_host,
+        other => return Err(format!("unknown media kind: {other}")),
+    };
+    let parsed = url::Url::parse(url).ok().filter(|parsed| {
+        parsed.scheme() == "https"
+            && parsed.username().is_empty()
+            && parsed.password().is_none()
+            && parsed.port_or_known_default() == Some(443)
+            && parsed.host_str().is_some_and(host_ok)
+    });
+    if parsed.is_some() && url.lines().count() == 1 {
+        return Ok(());
+    }
+    if include_detail() {
+        let host = url::Url::parse(url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_string))
+            .unwrap_or_else(|| "<unparseable>".to_string());
+        Err(format!(
+            "rejected media url for kind '{kind}' (host '{host}')"
+        ))
+    } else {
+        Err("invalid media url".to_string())
+    }
 }
 
 // Sub-only / paywalled VODs are not playable anonymously: streamlink gets a
@@ -1209,5 +1256,61 @@ mod tests {
         assert!(!is_clip_slug_valid("../../../etc"));
         // Over 100 chars
         assert!(!is_clip_slug_valid(&"a".repeat(101)));
+    }
+
+    #[test]
+    fn validate_media_url_rejects_local_and_offsite_sources() {
+        // mpv would open every one of these if it were handed them raw.
+        let rejected = [
+            "file:///etc/passwd",
+            "edl://media",
+            "memory://1024",
+            "lavf://whatever",
+            "smb://nas/share/video",
+            "http://video-edge-cdn.ttvnw.net/live.m3u8",
+            "https://user:pass@video-edge-cdn.ttvnw.net/live.m3u8",
+            "https://video-edge-cdn.ttvnw.net:8443/live.m3u8",
+            "https://evil.example.net/live.m3u8",
+            "https://d2nvs31859zcd8.cloudfront.net.evil.com/v/playlist.m3u8",
+        ];
+        for url in rejected {
+            for kind in ["live", "vod", "clip"] {
+                assert!(
+                    validate_media_url(url, kind).is_err(),
+                    "expected rejection: {url} (kind {kind})"
+                );
+            }
+        }
+        // A CloudFront VOD host is fine for vod/clip but NOT part of the
+        // live families — cross-kind leakage must not pass either.
+        assert!(validate_media_url(
+            "https://d2nvs31859zcd8.cloudfront.net/v/playlist.m3u8",
+            "live"
+        )
+        .is_err());
+        // Unknown kind never validates anything.
+        assert!(validate_media_url("https://video-edge-cdn.ttvnw.net/x.m3u8", "weird").is_err());
+    }
+
+    #[test]
+    fn validate_media_url_accepts_real_resolved_urls() {
+        // The shapes streamlink really returns: a signed usher playlist for
+        // live, a signed CloudFront playlist for VOD, a signed CloudFront
+        // MP4 for a clip.
+        assert!(validate_media_url(
+            "https://usher.ttvnw.net/api/channel/hls/somechannel.m3u8?sig=abc&token=def",
+            "live"
+        )
+        .is_ok());
+        assert!(validate_media_url(
+            "https://d2nvs31859zcd8.cloudfront.net/abc/playlist.m3u8?sig=abc&token=def",
+            "vod"
+        )
+        .is_ok());
+        assert!(validate_media_url(
+            "https://d2nvs31859zcd8.cloudfront.net/AT-cm%7Cclip.mp4?sig=abc&token=def",
+            "clip"
+        )
+        .is_ok());
     }
 }

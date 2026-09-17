@@ -939,6 +939,11 @@ pub fn mpv_load(
     if !matches!(kind.as_str(), "live" | "vod" | "clip") {
         return Err(format!("unknown media kind: {kind}"));
     }
+    // The webview is the caller — a TRUST BOUNDARY. mpv opens file://,
+    // edl://, memory://, lavf://, smb:// and local playlists if handed
+    // them, so nothing reaches loadfile without passing the same https +
+    // host-family predicate the resolvers apply to streamlink's output.
+    crate::resolve::validate_media_url(&url, &kind)?;
     // The engine (and the surface) must be up; a lazy first call is fine —
     // the frontend probes mpv_available at startup, which normally already
     // built engine 0, but a first-ever load (or a tile's first stream) must
