@@ -43,4 +43,4 @@ codesign --force --sign - "$BIN"
 find "$STAGING" -name '*.dylib' -print0 | xargs -0 -n1 codesign --force --sign -
 
 du -sh "$STAGING" | tee /tmp/ks-mac-mpv-libs-size.txt
-echo "bundled $(find "$STAGING" -name '*.dylib' | wc -l | tr -d ' ') libmpv dependency dylibs"
+echo "bundled $(find "$STAGING" -name '*.dylib' | wc -l | tr -d ' ') libmpv dependency dylibs" | tee -a /tmp/ks-mac-mpv-libs-size.txt

@@ -487,6 +487,35 @@ jobs:
           RUSTFLAGS: "-L native=${{ github.workspace }}\\mpv-dev"
         run: npm run tauri -- build --bundles nsis
 
+      # libmpv-2.dll rides the installer via tauri.windows.conf.json's
+      # `resources` entry. The resources table is the ONLY thing that puts it
+      # there (a path typo would ship an installer that dies at launch like a
+      # bad .def import would), so inspect the actual NSIS payload: 7z lists
+      # the install tree inside the setup exe; the job fails unless
+      # libmpv-2.dll is in it. The bundled streamlink tree is counted as
+      # informational output.
+      - name: Verify libmpv-2.dll ships in the NSIS install tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="$(find src-tauri/target/release/bundle/nsis -name '*-setup.exe' | head -n1)"
+          test -n "$exe"
+          seven_zip="$(command -v 7z || true)"
+          [ -n "$seven_zip" ] || seven_zip="/c/Program Files/7-Zip/7z.exe"
+          [ -x "$seven_zip" ] || { echo "7z not found" >&2; exit 1; }
+          "$seven_zip" l "$exe" > nsis-tree.txt
+          size_mb=$(( $(stat -c %s "$exe") / 1048576 ))
+          {
+            echo "## Windows NSIS install tree"
+            echo '```'
+            echo "$exe (${size_mb} MB) — key entries:"
+            grep -E 'kappastream\.exe|libmpv-2\.dll|streamlink\\streamlink\.exe' nsis-tree.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -q 'libmpv-2\.dll' nsis-tree.txt \
+            || { echo "ERROR: libmpv-2.dll missing from the NSIS install tree" >&2; exit 1; }
+          echo "OK: libmpv-2.dll present in the NSIS install tree"
+
       - name: Stage artifacts
         shell: bash
         run: |
@@ -625,8 +654,8 @@ jobs:
           find staging -maxdepth 1 -type f -exec basename {} \; | sort
 
       # beforeBundleCommand (during the build step above) recorded the size
-      # of the bundled libmpv closure; surface it in the run summary so the
-      # .app growth from the dylibs is visible per build.
+      # AND dylib count of the bundled libmpv closure; surface both in the
+      # run summary so the .app growth from the dylibs is visible per build.
       - name: Report bundled libmpv size
         if: always()
         run: |
@@ -638,6 +667,37 @@ jobs:
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      # The bundling claim that matters: the shipped .app must run on a
+      # machine with NO Homebrew install. dylibbundler rewrote every load
+      # command of the main binary and the bundled dylibs to
+      # @executable_path/../Resources/mpv-libs/ — if ANY /opt/homebrew path
+      # survives in an image's dependency list, the .app breaks off-brew.
+      # Checked on the shipped binary and the bundled libmpv dylib (the
+      # rewrite is per-image uniform, so these two represent the set).
+      - name: Verify .app runtime deps (otool -L, no Homebrew paths)
+        run: |
+          set -euo pipefail
+          app="src-tauri/target/release/bundle/macos/kappastream.app"
+          bin="$app/Contents/MacOS/kappastream"
+          test -x "$bin"
+          mpvlib="$(find "$app/Contents/Resources/mpv-libs" -name 'libmpv*.dylib' | head -n1)"
+          test -n "$mpvlib"
+          {
+            echo "## macOS .app runtime deps (otool -L)"
+            echo '```'
+            echo "--- kappastream (binary)"
+            otool -L "$bin"
+            echo
+            echo "--- $(basename "$mpvlib") (bundled)"
+            otool -L "$mpvlib"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if { otool -L "$bin"; otool -L "$mpvlib"; } | grep -q '/opt/homebrew'; then
+            echo "ERROR: /opt/homebrew load paths remain in the bundled images" >&2
+            exit 1
+          fi
+          echo "OK: no /opt/homebrew load paths in the binary or bundled libmpv dylib"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v7
