@@ -32,9 +32,13 @@ const MAX_REQUEST_BYTES: usize = 64 * 1024;
 //
 // Do NOT add Sec-CH-UA / sec-ch-ua-* client-hint headers. reqwest sending a
 // Chrome UA with no client hints is unremarkable; hints that disagree with the
-// UA string are a *worse* fingerprint than none (a real Chrome always sends
+// UA string is a *worse* fingerprint than none (a real Chrome always sends
 // matching hints, so the mismatch flags us as an impostor).
-const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) \
+//
+// pub(crate): the app-wide browser UA — the mpv engine sends the SAME const
+// for its media fetches (see mpv/mod.rs), so there is exactly one copy and
+// the two transports cannot present different identities.
+pub(crate) const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) \
     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
 
 pub struct GqlClient(reqwest::Client);

@@ -84,10 +84,14 @@ mod macos;
 #[cfg(target_os = "macos")]
 use macos as platform;
 
-/// The UA streamlink itself sends when resolving (its session default
-/// `streamlink/<version>`) — mpv fetches the SAME resolved URLs, so it should
-/// present the same way. Bump the version if it ever matters.
-const MPV_USER_AGENT: &str = "streamlink/7.2.0";
+/// The UA mpv presents when fetching the resolved media URLs: THE SAME
+/// shared browser const the GQL proxy sends (gql::USER_AGENT) — an alias,
+/// not a second copy. The previous "streamlink/7.2.0" was never streamlink's
+/// session default (its http session sends a Firefox UA), nobody else sent
+/// that exact string, and it fingerprinted every kappastream install at
+/// Twitch's CDN. The alias exists so the drift test has two names to
+/// compare.
+const MPV_USER_AGENT: &str = crate::gql::USER_AGENT;
 
 /// Kappastream's in-video control OSD (replaces mpv's stock OSC). Lua,
 /// drawn through the same render context as the video; data flows in via
@@ -1343,6 +1347,17 @@ pub fn mpv_set_bitmap(
 #[cfg(all(test, feature = "mpv-embed"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mpv_user_agent_is_the_shared_browser_const() {
+        // The engine must present the SAME UA as the GQL proxy — a second,
+        // app-specific string (the old "streamlink/7.2.0") would be sent by
+        // nobody else and fingerprint every install at Twitch's CDN.
+        assert_eq!(MPV_USER_AGENT, crate::gql::USER_AGENT);
+        assert!(crate::gql::USER_AGENT.starts_with("Mozilla/5.0"));
+        assert!(!crate::gql::USER_AGENT.to_lowercase().contains("streamlink"));
+        assert!(!crate::gql::USER_AGENT.contains("Kappastream"));
+    }
 
     #[test]
     #[cfg(target_os = "linux")]
