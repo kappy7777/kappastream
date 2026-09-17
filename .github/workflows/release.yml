@@ -688,7 +688,7 @@ jobs:
       # survives in an image's dependency list, the .app breaks off-brew.
       # Checked on the shipped binary and the bundled libmpv dylib (the
       # rewrite is per-image uniform, so these two represent the set).
-      - name: Verify .app runtime deps (otool -L, no Homebrew paths)
+      - name: Verify .app runtime deps (otool -L + LC_RPATH, no Homebrew paths)
         run: |
           set -euo pipefail
           app="src-tauri/target/release/bundle/macos/kappastream.app"
@@ -697,7 +697,7 @@ jobs:
           mpvlib="$(find "$app/Contents/Resources/mpv-libs" -name 'libmpv*.dylib' | head -n1)"
           test -n "$mpvlib"
           {
-            echo "## macOS .app runtime deps (otool -L)"
+            echo "## macOS .app runtime deps (otool -L + LC_RPATH)"
             echo '```'
             echo "--- kappastream (binary)"
             otool -L "$bin"
@@ -705,12 +705,34 @@ jobs:
             echo "--- $(basename "$mpvlib") (bundled)"
             otool -L "$mpvlib"
             echo '```'
+            echo "LC_RPATH entries per bundled image (dyld on macOS 26 rejects duplicates at launch):"
+            echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
+          # Walk EVERY bundled image + the binary: fail on any duplicate
+          # LC_RPATH value, and print each image's rpath count (the shipped
+          # counterpart of bundle-libmpv.sh's staging gate).
+          rpaths_of() { otool -l "$1" | sed -n 's/^ *path \(.*\) (offset .*)$/\1/p'; }
+          dups=0
+          for img in "$bin" $(find "$app/Contents/Resources/mpv-libs" -name '*.dylib' | sort); do
+            n=$(rpaths_of "$img" | grep -c . || true)
+            if [ "$n" -gt 0 ]; then
+              echo "$(basename "$img"): $n LC_RPATH" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+            if [ -n "$(rpaths_of "$img" | sort | uniq -d)" ]; then
+              echo "ERROR: duplicate LC_RPATH in $img" >&2
+              dups=$((dups + 1))
+            fi
+          done
+          echo '```' | tee -a "$GITHUB_STEP_SUMMARY"
           if { otool -L "$bin"; otool -L "$mpvlib"; } | grep -q '/opt/homebrew'; then
             echo "ERROR: /opt/homebrew load paths remain in the bundled images" >&2
             exit 1
           fi
-          echo "OK: no /opt/homebrew load paths in the binary or bundled libmpv dylib"
+          if [ "$dups" -gt 0 ]; then
+            echo "ERROR: $dups image(s) in the shipped .app carry duplicate LC_RPATH entries" >&2
+            exit 1
+          fi
+          echo "OK: no /opt/homebrew load paths; no duplicate LC_RPATH in the shipped .app"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v7
