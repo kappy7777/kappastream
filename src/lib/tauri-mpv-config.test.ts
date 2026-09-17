@@ -4,17 +4,22 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 // Drift guard for the embedded-libmpv engine's window/transparency posture
-// (feature `mpv-embed`, see src-tauri/src/mpv/). Windows/macOS place the
-// native video surface BELOW a TRANSPARENT webview (Linux instead draws video
-// ABOVE a fully opaque page — no transparency anywhere), so the two
-// below-webview platforms override the window config in their per-platform
-// overlays with `transparent: true`.
+// (feature `mpv-embed`, see src-tauri/src/mpv/).
 //
 // THE RULE: the BASE tauri.conf.json stays platform-neutral — no
-// `transparent: true`, no `macOSPrivateApi`. Platform overrides live ONLY in
-// the overlays, each of which carries the COMPLETE `app.windows` entry
-// (Tauri merges overlays with RFC 7396, which REPLACES arrays wholesale — a
-// delta windows array would drop every base window key).
+// `transparent: true`, no `macOSPrivateApi`. Per-platform overrides live
+// ONLY in the overlays. An overlay that overrides `app.windows` must carry
+// the COMPLETE entry (Tauri merges overlays with RFC 7396, which REPLACES
+// arrays wholesale — a delta windows array would drop every base window
+// key); `transparent: true` is only for below-webview platforms.
+//
+// PLATFORM POSTURE (2026-09-18): Windows draws video ABOVE a fully OPAQUE
+// page (win32.rs — the below-webview design cannot work: WebView2
+// composites through DirectComposition, so a sibling HWND beneath it is
+// unrevealable), so tauri.windows.conf.json carries NO windows override at
+// all — it inherits the base opaque window. macOS is still the
+// below-webview design (never launched; its surface redesign is a pending
+// task), so its overlay keeps the FULL transparent window entry.
 //
 // WHY macOSPrivateApi SITS IN ALL THREE OVERLAYS, not just the macOS one:
 // tauri-build's allowlist check (tauri-build src/manifest.rs) requires the
@@ -38,7 +43,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const readConfig = (name: string): unknown => JSON.parse(readFileSync(join(here, '../../src-tauri', name), 'utf8'))
 
 type Conf = {
-  app: { macOSPrivateApi?: boolean; windows: Array<Record<string, unknown>> }
+  app: { macOSPrivateApi?: boolean; windows?: Array<Record<string, unknown>> }
 }
 const base = readConfig('tauri.conf.json') as Conf
 const linux = readConfig('tauri.linux.conf.json') as Conf
@@ -48,20 +53,26 @@ const macos = readConfig('tauri.macos.conf.json') as Conf
 describe('tauri.conf.json window opacity (mpv-embed posture)', () => {
   it('the BASE config is platform-neutral: no transparent window, no macOSPrivateApi', () => {
     expect(base.app.windows).toHaveLength(1)
-    expect(base.app.windows[0].transparent ?? false).toBe(false)
+    expect(base.app.windows![0].transparent ?? false).toBe(false)
     expect(base.app.macOSPrivateApi ?? false).toBe(false)
   })
 
-  it('the below-webview platforms (windows/macos overlays) make the window transparent — each with the FULL windows entry (RFC 7396 replaces arrays)', () => {
-    for (const conf of [windows, macos]) {
-      expect(conf.app.windows).toHaveLength(1)
-      // The overlay entry must be complete, not a delta — every base window
-      // key repeated — or the merged config would silently lose the rest.
-      for (const key of Object.keys(base.app.windows[0])) {
-        expect(conf.app.windows[0]).toHaveProperty(key)
-      }
-      expect(conf.app.windows[0].transparent).toBe(true)
+  it('the Windows overlay overrides NO window keys — it inherits the base OPAQUE window (video sits above the page)', () => {
+    // The old below-webview design needed a transparent window; Windows
+    // now mirrors Linux (opaque page, video above). An `app.windows` array
+    // here would silently reintroduce a transparent-or-stale window via
+    // the RFC 7396 wholesale array replace.
+    expect(windows.app.windows).toBeUndefined()
+  })
+
+  it('the macOS overlay (still below-webview) overrides the window with the FULL transparent entry (RFC 7396 replaces arrays)', () => {
+    expect(macos.app.windows).toHaveLength(1)
+    // The overlay entry must be complete, not a delta — every base window
+    // key repeated — or the merged config would silently lose the rest.
+    for (const key of Object.keys(base.app.windows![0])) {
+      expect(macos.app.windows![0]).toHaveProperty(key)
     }
+    expect(macos.app.windows![0].transparent).toBe(true)
   })
 
   it('macOSPrivateApi is carried by ALL THREE overlays (tauri-build allowlist coupling — see header)', () => {

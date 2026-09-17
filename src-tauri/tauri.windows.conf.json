@@ -1,20 +1,6 @@
 {
   "app": {
-    "macOSPrivateApi": true,
-    "windows": [
-      {
-        "title": "kappastream",
-        "width": 1280,
-        "height": 800,
-        "center": true,
-        "resizable": true,
-        "visible": false,
-        "fullscreen": false,
-        "devtools": true,
-        "decorations": false,
-        "transparent": true
-      }
-    ]
+    "macOSPrivateApi": true
   },
   "bundle": {
     "resources": {
