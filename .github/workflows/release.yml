@@ -433,6 +433,18 @@ jobs:
           if (-not (Test-Path "mpv-dev/mpv.lib")) { throw "mpv.lib not produced" }
           "libmpv staged: $((Get-Item mpv-dev/libmpv-2.dll).Length) bytes dll + mpv.lib"
 
+      # lib.exe /def: builds mpv.lib from the .def ALONE — the DLL is never
+      # opened. A symbol listed in the .def but not exported by the pinned
+      # DLL therefore links cleanly and kills the app at PROCESS LOAD (before
+      # main(), no window, no message). Gate the .def against the DLL's real
+      # export table (stdlib-only PE parser, same script runs on any host).
+      # Fails the job on any .def name absent from the DLL; DLL-only names
+      # are fine (we import a subset). Against the pinned 20260903 archive
+      # this is an exact 206/206 match.
+      - name: Verify mpv.def against the pinned DLL's exports
+        shell: pwsh
+        run: python scripts/check-mpv-def.py mpv-dev/libmpv-2.dll packaging/windows/mpv.def
+
       # Bundle streamlink (the URL resolver this app spawns) so a fresh
       # Windows install needs ZERO external tools: streamlink's own portable
       # build (embedded Python + deps) from the streamlink/windows-builds
