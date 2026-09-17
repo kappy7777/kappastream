@@ -865,6 +865,21 @@ fn crop_tile_bgra(
 // ---------------------------------------------------------------------------
 // Commands
 
+/// The registry is BOUNDED: id 0 is the single-view player, 1..=4 the
+/// multi-view tiles (the frontend's free-list ids). Every id-taking command
+/// funnels through `engine_id` — a stray large id must be REJECTED, never
+/// mint a fresh leaked mpv core + native surface.
+const MAX_ENGINE_ID: u32 = 4;
+
+fn engine_id(id: Option<u32>) -> Result<u32, String> {
+    let id = id.unwrap_or(0);
+    if id > MAX_ENGINE_ID {
+        Err(format!("engine id {id} out of range (0..={MAX_ENGINE_ID})"))
+    } else {
+        Ok(id)
+    }
+}
+
 fn with_engine<R>(id: u32, f: impl FnOnce(&mut Engine) -> Result<R, String>) -> Result<R, String> {
     let mut engines = engines().lock().expect("mpv engines lock poisoned");
     let engine = engines
@@ -948,7 +963,7 @@ pub fn mpv_load(
     // the frontend probes mpv_available at startup, which normally already
     // built engine 0, but a first-ever load (or a tile's first stream) must
     // also work.
-    let id = id.unwrap_or(0);
+    let id = engine_id(id)?;
     ensure_engine(&app, id)?;
     with_engine(id, |e| {
         e.mpv
@@ -983,7 +998,7 @@ pub fn mpv_load(
 /// frontend calls this on every teardown.
 #[tauri::command]
 pub fn mpv_stop(id: Option<u32>) -> Result<(), String> {
-    let id = id.unwrap_or(0);
+    let id = engine_id(id)?;
     if let Some(engine) = engines()
         .lock()
         .expect("mpv engines lock poisoned")
@@ -998,7 +1013,7 @@ pub fn mpv_stop(id: Option<u32>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn mpv_set_paused(id: Option<u32>, paused: bool) -> Result<(), String> {
-    with_engine(id.unwrap_or(0), |e| {
+    with_engine(engine_id(id)?, |e| {
         e.mpv
             .set_property("pause", paused)
             .map_err(|err| format!("set pause: {err}"))
@@ -1009,7 +1024,7 @@ pub fn mpv_set_paused(id: Option<u32>, paused: bool) -> Result<(), String> {
 #[tauri::command]
 pub fn mpv_seek(id: Option<u32>, seconds: f64) -> Result<(), String> {
     let target = format!("{:.3}", seconds.max(0.0));
-    with_engine(id.unwrap_or(0), |e| {
+    with_engine(engine_id(id)?, |e| {
         e.mpv
             .command("seek", &[target.as_str(), "absolute"])
             .map_err(|err| format!("seek: {err}"))
@@ -1020,7 +1035,7 @@ pub fn mpv_seek(id: Option<u32>, seconds: f64) -> Result<(), String> {
 #[tauri::command]
 pub fn mpv_set_volume(id: Option<u32>, volume: f64) -> Result<(), String> {
     let v = volume.clamp(0.0, 1.0) * 100.0;
-    with_engine(id.unwrap_or(0), |e| {
+    with_engine(engine_id(id)?, |e| {
         e.mpv
             .set_property("volume", v)
             .map_err(|err| format!("set volume: {err}"))
@@ -1029,7 +1044,7 @@ pub fn mpv_set_volume(id: Option<u32>, volume: f64) -> Result<(), String> {
 
 #[tauri::command]
 pub fn mpv_set_muted(id: Option<u32>, muted: bool) -> Result<(), String> {
-    with_engine(id.unwrap_or(0), |e| {
+    with_engine(engine_id(id)?, |e| {
         e.mpv
             .set_property("mute", muted)
             .map_err(|err| format!("set mute: {err}"))
@@ -1041,7 +1056,7 @@ pub fn mpv_set_muted(id: Option<u32>, muted: bool) -> Result<(), String> {
 /// never blocks the caller.
 #[tauri::command]
 pub fn mpv_set_rect(id: Option<u32>, x: i32, y: i32, w: i32, h: i32) -> Result<(), String> {
-    with_engine(id.unwrap_or(0), |e| {
+    with_engine(engine_id(id)?, |e| {
         e.surface.set_rect(x, y, w, h);
         Ok(())
     })
@@ -1056,7 +1071,7 @@ pub fn mpv_set_rect(id: Option<u32>, x: i32, y: i32, w: i32, h: i32) -> Result<(
 /// `kind`: "move" | "click" (button 0) | "wheel-up" | "wheel-down".
 #[tauri::command]
 pub fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Result<(), String> {
-    with_engine(id.unwrap_or(0), |e| {
+    with_engine(engine_id(id)?, |e| {
         // 0 until the first render configured the OSD size — nothing to
         // hit-test yet, drop the event.
         let osd_w = e.mpv.get_property::<i64>("osd-width").unwrap_or(0);
@@ -1124,7 +1139,7 @@ pub fn mpv_script_msg(id: Option<u32>, args: Vec<String>) -> Result<(), String> 
     if args.is_empty() {
         return Err("empty script message".to_string());
     }
-    with_engine(id.unwrap_or(0), |e| {
+    with_engine(engine_id(id)?, |e| {
         let argv: Vec<&str> = args.iter().map(String::as_str).collect();
         e.mpv
             .command("script-message", &argv)
@@ -1171,7 +1186,7 @@ pub fn mpv_page_snapshot(
     }
     #[cfg(target_os = "linux")]
     {
-        linux::page_snapshot(&app, id.unwrap_or(0), x, y, w, h, keep.unwrap_or_default())
+        linux::page_snapshot(&app, engine_id(id)?, x, y, w, h, keep.unwrap_or_default())
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -1211,7 +1226,7 @@ pub fn mpv_set_bitmap(
             bgra.len()
         ));
     }
-    with_engine(id.unwrap_or(0), |e| {
+    with_engine(engine_id(id)?, |e| {
         e.bitmap_gen += 1;
         e.bitmaps.insert(key, CachedBitmap { bgra, w, h, grid });
         Ok(())
@@ -1221,6 +1236,25 @@ pub fn mpv_set_bitmap(
 #[cfg(all(test, feature = "mpv-embed"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn engine_ids_are_bounded_to_the_registry_range() {
+        assert_eq!(engine_id(None), Ok(0));
+        for id in 0..=MAX_ENGINE_ID {
+            assert_eq!(engine_id(Some(id)), Ok(id));
+        }
+        for id in [5u32, 6, 1000, u32::MAX] {
+            assert!(engine_id(Some(id)).is_err(), "id {id} must be rejected");
+        }
+        // The commands run the bound BEFORE any registry access — an
+        // out-of-range id is an error even on the quiet-teardown command
+        // (mpv_stop), and never mints an engine; a valid-but-absent id
+        // keeps its existing quiet no-op contract.
+        assert!(mpv_stop(Some(u32::MAX)).is_err());
+        assert!(mpv_stop(Some(5)).is_err());
+        assert!(mpv_stop(Some(MAX_ENGINE_ID)).is_ok());
+        assert!(mpv_stop(None).is_ok());
+    }
 
     #[test]
     fn commands_fail_cleanly_without_an_engine() {
