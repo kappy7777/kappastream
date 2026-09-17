@@ -103,7 +103,7 @@
         "depends": ["streamlink", "libmpv2"]
       },
       "rpm": {
-        "depends": ["streamlink", "mpv-libs"]
+        "depends": ["streamlink", "libmpv.so.2()(64bit)"]
       }
     },
     "macOS": {
