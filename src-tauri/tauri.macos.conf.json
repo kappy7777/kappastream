@@ -1,5 +1,6 @@
 {
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "kappastream",
