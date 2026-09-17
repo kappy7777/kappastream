@@ -602,6 +602,14 @@ jobs:
         run: |
           brew install mpv dylibbundler
           echo "RUSTFLAGS=-L /opt/homebrew/lib" >> $GITHUB_ENV
+          # tauri-build validates tauri.macos.conf.json's resources paths
+          # DURING the cargo build — before beforeBundleCommand ever runs —
+          # so mac-mpv-libs/ (gitignored; populated by
+          # packaging/macos/bundle-libmpv.sh between build and bundling)
+          # must exist as an empty dir on a fresh checkout (first exercised
+          # by the 2026-09-17 smoke dispatch). The script rm -rf's and
+          # repopulates it, so the placeholder never ships.
+          mkdir -p mac-mpv-libs
 
       # Separate cache key from the Linux/Windows jobs (aarch64-apple-darwin).
       - name: Cache Cargo (~/.cargo + src-tauri/target)
