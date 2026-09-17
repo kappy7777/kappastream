@@ -59,13 +59,14 @@
 //     (GDK) pixels, already zoom-adjusted by the frontend.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use libmpv2::events::{Event, PropertyData};
 use libmpv2::Mpv;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -234,17 +235,118 @@ fn ensure_engine(app: &AppHandle, id: u32) -> Result<(), String> {
     }
 }
 
+/// The engine's private per-user runtime dir — where the materialized
+/// ks-osc.lua script lives. NEVER the shared temp dir: mpv Lua has
+/// os.execute, a PREDICTABLE name in /tmp is a pre-create/symlink race on
+/// multi-user Linux, and fs.protected_regular makes poisoning trivial
+/// anyway. Linux prefers $XDG_RUNTIME_DIR/kappastream (0700 by systemd
+/// convention) when it is set, absolute and exists; everything else falls
+/// back to the per-user cache dir.
+#[cfg(target_os = "linux")]
+fn select_runtime_base(xdg: Option<&str>, cache: PathBuf) -> PathBuf {
+    match xdg {
+        Some(dir) if Path::new(dir).is_absolute() && Path::new(dir).is_dir() => {
+            Path::new(dir).join("kappastream")
+        }
+        _ => cache.join("mpv"),
+    }
+}
+
+/// Create (or accept an existing) dir and lock it down: 0700 where the
+/// platform has modes, and a REFUSAL (Err) when the path is a symlink or —
+/// on Linux, where the shared-machine threat model lives — not owned by
+/// the current uid. Engine init fails cleanly on refusal; the frontend
+/// hides the engine (mpv_available false) rather than running degraded.
+fn setup_private_dir(dir: &Path) -> Result<PathBuf, String> {
+    let name = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("runtime dir");
+    if let Ok(meta) = std::fs::symlink_metadata(dir) {
+        if meta.file_type().is_symlink() {
+            return Err(format!("{name}: refusing a symlinked runtime dir"));
+        }
+    }
+    std::fs::create_dir_all(dir).map_err(|e| format!("create {name}: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("chmod {name}: {e}"))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let uid = unsafe { libc::getuid() };
+        let owner = std::fs::metadata(dir)
+            .map_err(|e| format!("stat {name}: {e}"))?
+            .uid();
+        if owner != uid {
+            return Err(format!("{name}: runtime dir not owned by the current user"));
+        }
+    }
+    Ok(dir.to_path_buf())
+}
+
+/// Write a file inside the private runtime dir with mode 0600 where the
+/// platform has modes. Truncation is fine there: the dir is 0700 and ours.
+fn write_private_file(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| format!("open {name}: {e}"))?;
+        file.write_all(contents)
+            .map_err(|e| format!("write {name}: {e}"))?;
+        // `.mode()` only applies at creation — normalize a pre-existing
+        // file that may carry a wider mode from an earlier write style.
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("chmod {name}: {e}"))?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, contents).map_err(|e| format!("write {name}: {e}"))
+    }
+}
+
+fn ensure_private_runtime_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("app cache dir: {e}"))?;
+    #[cfg(target_os = "linux")]
+    let base = select_runtime_base(std::env::var("XDG_RUNTIME_DIR").ok().as_deref(), cache);
+    #[cfg(not(target_os = "linux"))]
+    let base = cache.join("mpv");
+    setup_private_dir(&base)
+}
+
 fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
     // Before ANY libmpv call — mpv_create checks the locale immediately.
     #[cfg(target_os = "linux")]
     pin_c_numeric_locale();
-    // Materialize the embedded OSD script — `scripts-append` takes a path.
-    let osc_script = std::env::temp_dir()
+    // Materialize the embedded OSD script into the PRIVATE per-user runtime
+    // dir (see ensure_private_runtime_dir) — 0600, never the shared /tmp.
+    let runtime_dir = ensure_private_runtime_dir(app)?;
+    let osc_script = runtime_dir
         .join("kappastream-osc.lua")
         .to_str()
-        .ok_or("temp dir path not UTF-8")?
+        .ok_or("runtime dir path not UTF-8")?
         .to_string();
-    std::fs::write(&osc_script, KS_OSC_LUA).map_err(|e| format!("write ks-osc.lua: {e}"))?;
+    write_private_file(Path::new(&osc_script), KS_OSC_LUA.as_bytes())
+        .map_err(|e| format!("write ks-osc.lua: {e}"))?;
     // Platform options that must apply at mpv-create time (Linux pins the
     // render API; the wid platforms set their window handle later instead).
     let mpv: &'static Mpv = Box::leak(Box::new(
@@ -590,9 +692,9 @@ impl Engine {
         }
     }
 
-    /// Resample the cached `key` bitmap to `dims`, write it to a temp file
-    /// and (re)issue overlay-add. `tag` separates same-geometry
-    /// different-content issuances (thumbnail tile indices).
+    /// Resample the cached `key` bitmap to `dims` and (re)issue overlay-add.
+    /// `tag` separates same-geometry different-content issuances (thumbnail
+    /// tile indices).
     fn show_bitmap(
         &mut self,
         id: u8,
@@ -614,15 +716,20 @@ impl Engine {
                 .ok_or_else(|| format!("no bitmap '{key}' (not decoded yet)"))?;
             resample_bgra(&bmp.bgra, bmp.w, bmp.h, w, h)
         };
-        let fname = format!("kappastream-osc-{}.bgra", key.replace(':', "-"));
-        let path = std::env::temp_dir().join(fname);
-        std::fs::write(&path, &scaled).map_err(|e| format!("write overlay file: {e}"))?;
-        let path_s = path.to_str().ok_or("temp path not UTF-8")?.to_string();
+        // overlay-add reads the bitmap straight from OUR memory: the
+        // `&<address>` source (docs: aimed at libmpv embedders). mpv copies
+        // it during the command and holds no reference after it returns —
+        // guaranteed since mpv 0.18.1 and every libmpv we ship against is
+        // >= 0.35 (bookworm) — and libmpv2's command() wraps the
+        // SYNCHRONOUS mpv_command, so `scaled` is guaranteed alive for the
+        // whole copy window and free to drop right after. No bitmap file
+        // ever touches disk.
+        let addr = format!("&{}", scaled.as_ptr() as usize);
         let args = [
             id.to_string(),
             x.to_string(),
             y.to_string(),
-            path_s,
+            addr,
             "0".to_string(),
             "bgra".to_string(),
             w.to_string(),
@@ -1236,6 +1343,65 @@ pub fn mpv_set_bitmap(
 #[cfg(all(test, feature = "mpv-embed"))]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn runtime_base_prefers_a_live_xdg_dir() {
+        let tmp = std::env::temp_dir().join(format!("ks-mpv-xdg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let cache = PathBuf::from("/nonexistent-cache");
+        // set + absolute + existing → XDG wins
+        assert_eq!(
+            select_runtime_base(Some(tmp.to_str().unwrap()), cache.clone()),
+            tmp.join("kappastream")
+        );
+        // relative, nonexistent or unset → the app cache dir
+        assert_eq!(
+            select_runtime_base(Some("relative/run"), cache.clone()),
+            cache.join("mpv")
+        );
+        assert_eq!(
+            select_runtime_base(Some("/definitely/not/here"), cache.clone()),
+            cache.join("mpv")
+        );
+        assert_eq!(select_runtime_base(None, cache.clone()), cache.join("mpv"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn private_dir_is_restricted_and_refuses_symlinks() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("ks-mpv-privdir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+
+        // fresh creation lands 0700, not a symlink
+        let dir = setup_private_dir(&base.join("rt")).unwrap();
+        let meta = std::fs::symlink_metadata(&dir).unwrap();
+        assert!(!meta.file_type().is_symlink());
+        assert_eq!(meta.permissions().mode() & 0o777, 0o700);
+
+        // files land 0600 — even when the path pre-exists with a wider mode
+        let file = dir.join("f.bin");
+        std::fs::write(&file, b"x").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private_file(&file, b"y").unwrap();
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        // a symlinked runtime dir is refused outright (pre-create race)
+        let real = base.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = base.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(setup_private_dir(&link).is_err());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn engine_ids_are_bounded_to_the_registry_range() {
