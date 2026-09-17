@@ -111,6 +111,14 @@ pub trait VideoSurface: Send + Sync {
     fn show(&self);
     fn hide(&self);
     fn set_rect(&self, x: i32, y: i32, w: i32, h: i32);
+    /// Re-apply the surface's input pass-through setup — called on every
+    /// FileLoaded. Windows NEEDS this: mpv's own "mpv"-class child window
+    /// is minted at VO init without the ex-styles and would swallow every
+    /// pointer event over the video (a VO re-init mid-session starts a
+    /// fresh one; see win32.rs). Default no-op — Linux shapes at bootstrap
+    /// and re-shapes on every allocation (linux.rs), macOS's surface is
+    /// still the unverified wid stub.
+    fn apply_input_passthrough(&self) {}
 }
 
 struct Engine {
@@ -567,6 +575,16 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                     // `start` is a load-time option: whatever position was
                     // requested for THIS file must not leak into the next.
                     let _ = mpv.set_property("start", "none");
+                    // Per-load re-apply of the video-side input pass-through
+                    // (no-op on Linux/macOS): a fresh VO window created for
+                    // this load must never briefly swallow pointer events.
+                    if let Some(engine) = engines()
+                        .lock()
+                        .expect("mpv engines lock poisoned")
+                        .get_mut(&id)
+                    {
+                        engine.surface.apply_input_passthrough();
+                    }
                     state_dirty = true;
                 }
                 Ok(Event::EndFile(_)) => {
