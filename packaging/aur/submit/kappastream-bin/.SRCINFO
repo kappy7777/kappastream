@@ -11,6 +11,7 @@ pkgbase = kappastream-bin
 	depends = gst-libav
 	depends = gst-plugins-base
 	depends = gst-plugins-good
+	depends = mpv
 	depends = hicolor-icon-theme
 	provides = kappastream=1.0.4
 	conflicts = kappastream

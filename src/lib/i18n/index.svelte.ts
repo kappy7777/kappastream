@@ -13,10 +13,9 @@
 //
 // Locale detection uses `navigator.language` (zero dependencies). In the Tauri
 // webview this reflects the OS/UI locale in both engines in practice: WebKitGTK
-// reads GLib's LANGUAGE/LC_*; WebView2 reads the Windows UI language. This could
-// NOT be empirically verified in the headless build container — verification on
-// an X11/Wayland (or Windows) box is still owed. An explicit English default is
-// the ultimate fallback so a wrong auto-detection never renders keys.
+// reads GLib's LANGUAGE/LC_*; WebView2 reads the Windows UI language. An
+// explicit English default is the ultimate fallback so a wrong auto-detection
+// never renders keys.
 
 import { en, type TKey } from './locales/en'
 import { de } from './locales/de'

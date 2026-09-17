@@ -5,8 +5,8 @@ use std::sync::OnceLock;
 use serde::Serialize;
 
 use crate::resolve::{
-    is_channel_name_valid, is_clip_slug_valid, is_vod_id_valid, select_binary_path, streamlink_bin,
-    streamlink_missing_message, ALLOWED_QUALITIES,
+    is_channel_name_valid, is_clip_slug_valid, is_quality_valid, is_vod_id_valid,
+    select_binary_path, streamlink_bin, streamlink_missing_message,
 };
 
 #[derive(Serialize)]
@@ -112,7 +112,7 @@ pub async fn launch_player(
 ) -> Result<LaunchPlayerResponse, String> {
     let q_raw = quality.unwrap_or_else(|| "best".to_string());
     let q = q_raw.trim().to_lowercase();
-    if !ALLOWED_QUALITIES.contains(&q.as_str()) {
+    if !is_quality_valid(&q) {
         return Ok(LaunchPlayerResponse {
             ok: false,
             error: Some("invalid stream quality".to_string()),

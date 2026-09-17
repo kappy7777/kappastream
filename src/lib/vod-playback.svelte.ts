@@ -17,6 +17,7 @@
 import { parseStoryboard, type Storyboard } from './vod-extras'
 import { fetchVideoExtras, type VodChapter, type VodMuteSpan } from './gql'
 import { vodPositions } from './vod-positions.svelte.ts'
+import { HtmlVideoBackend, type VideoBackend } from './video-backend'
 
 /** Transient bar shown after auto-resuming a VOD (null = no bar). */
 export interface ResumeBar {
@@ -55,9 +56,9 @@ export class VodPlaybackController {
     private readonly opts: {
       /** Rewrites an https URL to the ksvod-proxy form for the current platform. */
       proxyUrl: (httpsUrl: string) => string
-      /** The <video> element positions are saved from / restored to (may be
+      /** The player backend positions are saved from / restored to (may be
        *  briefly absent mid source-swap). */
-      getVideo: () => HTMLVideoElement | undefined
+      getBackend: () => VideoBackend | null | undefined
     },
   ) {}
 
@@ -108,12 +109,12 @@ export class VodPlaybackController {
    */
   save(videoId: string | null, force = false): void {
     if (!videoId) return
-    const el = this.opts.getVideo()
-    if (!el) return
+    const backend = this.opts.getBackend()
+    if (!backend) return
     const now = Date.now()
     if (!force && now - this.lastSaveAt < VOD_SAVE_INTERVAL_MS) return
     this.lastSaveAt = now
-    vodPositions.save(videoId, el.currentTime, Number.isFinite(el.duration) ? el.duration : 0)
+    vodPositions.save(videoId, backend.currentTime, Number.isFinite(backend.duration) ? backend.duration : 0)
   }
 
   /**
@@ -126,8 +127,14 @@ export class VodPlaybackController {
   restore(videoId: string): void {
     const saved = vodPositions.get(videoId)
     if (!saved || saved.position < 30) return
-    const el = this.opts.getVideo()
-    if (!el) return
+    const backend = this.opts.getBackend()
+    if (!backend) return
+    // The seekable-range wait is an HLS/<video> mechanism: hls.js needs a
+    // moment before the seekable window covers the position. The native mpv
+    // backend resumes via its own load-time start position instead and never
+    // comes through here (App drives its resume bar directly).
+    if (!(backend instanceof HtmlVideoBackend)) return
+    const el = backend.element
     let tries = 0
     const attempt = (): boolean => {
       const seekable = el.seekable
@@ -157,14 +164,14 @@ export class VodPlaybackController {
 
   /** Restart the VOD from 0: seek, play, forget the saved position, drop the bar. */
   restart(videoId: string | null): void {
-    const el = this.opts.getVideo()
-    if (el) {
+    const backend = this.opts.getBackend()
+    if (backend) {
       try {
-        el.currentTime = 0
+        backend.seek(0)
       } catch {
         /* ignore */
       }
-      void el.play().catch(() => {
+      void backend.play().catch(() => {
         /* ignore */
       })
     }

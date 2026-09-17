@@ -1,6 +1,5 @@
 <script lang="ts">
   import { notifications, type NotificationRecord } from './notifications.svelte.ts'
-  import { tooltip } from './tooltip.ts'
   import { t } from './i18n/index.svelte'
   import { relTimeShort } from './format'
 
@@ -62,7 +61,6 @@
     aria-label={count > 0 ? t('notify_ariaUnread', { n: count }) : t('notifications')}
     aria-haspopup="dialog"
     aria-expanded={open}
-    use:tooltip={t('notifications')}
   >
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
       <path
@@ -76,7 +74,7 @@
   </button>
 
   {#if open}
-    <div class="panel" bind:this={panelEl} role="dialog" aria-label={t('notifications')}>
+    <div class="panel notify-panel" bind:this={panelEl} role="dialog" aria-label={t('notifications')}>
       <div class="panel-head">
         <span class="panel-title">{t('notifications')}</span>
         {#if notifications.items.length > 0}
@@ -214,6 +212,14 @@
       opacity: 1;
       transform: scale(1) translateY(0);
     }
+  }
+
+  /* Native-engine mode: this menu rides the snapshot overlay over the
+     video, where the drop shadow reads as a dark smudge on a bright
+     picture (see App.svelte's .global-tooltip override for the tooltip
+     half of the same reasoning). */
+  :global(.app--native-video) .notify-panel {
+    box-shadow: none;
   }
 
   .panel-head {

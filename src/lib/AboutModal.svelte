@@ -2,15 +2,13 @@
   // The About modal (kappa logo in the top bar). Extracted from App.svelte —
   // markup and styles moved verbatim; App owns the open/close state and the
   // Escape handling (shortcuts.ts' close-about action) so the keyboard path
-  // and the modal stay decoupled. The Changelog button swaps this modal for
-  // the version-log overlay (firstLaunch.openChangelog) — App wires that.
+  // and the modal stay decoupled.
   import { t } from './i18n/index.svelte'
 
   interface Props {
     onclose: () => void
-    onchangelog: () => void
   }
-  const { onclose, onchangelog }: Props = $props()
+  const { onclose }: Props = $props()
 </script>
 
 <div class="about-backdrop" onclick={onclose} role="presentation"></div>
@@ -26,13 +24,6 @@
   <p class="about-modal-body">{t('about_body')}</p>
   <p class="about-modal-body">{t('about_streamlink')}</p>
   <p class="about-modal-tagline about-modal-tagline--last">Built to watch, not to be watched.</p>
-  <!-- On-demand changelog: swaps the About modal for the version-log
-       overlay (the same log the post-update what's-new screen shows —
-       every recorded release, scrollable). About closes so only one
-       modal is up. -->
-  <button type="button" class="about-changelog-btn" onclick={onchangelog}>
-    {t('about_changelog')}
-  </button>
   <div class="about-modal-donate">
     <span class="about-modal-donate-label">{t('donate')}</span>
     <div class="about-modal-donate-addr-group">
@@ -108,26 +99,6 @@
   .about-modal-tagline--last {
     font-style: italic;
     color: var(--accent);
-  }
-  /* Changelog button (opens the version-log overlay). Text-sized and pinned
-     to the modal's LEFT edge (align-self overrides the flex column's stretch,
-     which would make it a full-width row). */
-  .about-changelog-btn {
-    align-self: flex-start;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-    font-family: inherit;
-    padding: 3px 10px;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .about-changelog-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--accent);
-    color: var(--text-primary);
   }
   .about-modal-body {
     font-size: 13px;

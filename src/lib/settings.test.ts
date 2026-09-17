@@ -36,6 +36,7 @@ const KEYS = {
   noticesGift: 'app-chat-notices-gift-v1',
   noticesRaid: 'app-chat-notices-raid-v1',
   noticesAnnouncement: 'app-chat-notices-announcement-v1',
+  noticesStreak: 'app-chat-notices-streak-v1',
   legacySubnotices: 'app-chat-subnotices-v1',
   roomstate: 'app-chat-roomstate-v1',
   moderation: 'app-chat-moderation-v1',
@@ -48,6 +49,7 @@ describe('chat-feature toggle defaults', () => {
     expect(S.settings.chatNoticesGift).toBe(true)
     expect(S.settings.chatNoticesRaid).toBe(true)
     expect(S.settings.chatNoticesAnnouncement).toBe(true)
+    expect(S.settings.chatNoticesStreak).toBe(true)
     expect(S.settings.chatRoomstate).toBe(true)
     expect(S.settings.chatModeration).toBe(true)
     expect(S.settings.chatBits).toBe(true)
@@ -65,6 +67,7 @@ describe('chat-feature toggle defaults', () => {
     expect(mod.settings.chatNoticesGift).toBe(true)
     expect(mod.settings.chatNoticesRaid).toBe(true)
     expect(mod.settings.chatNoticesAnnouncement).toBe(true)
+    expect(mod.settings.chatNoticesStreak).toBe(true)
     expect(mod.settings.chatRoomstate).toBe(true)
   })
 
@@ -90,6 +93,7 @@ describe('notice-group split: legacy single-toggle migration', () => {
     expect(mod.settings.chatNoticesGift).toBe(true)
     expect(mod.settings.chatNoticesRaid).toBe(true)
     expect(mod.settings.chatNoticesAnnouncement).toBe(true)
+    expect(mod.settings.chatNoticesStreak).toBe(true)
   })
 
   it('a legacy "false" keeps all groups off (an old opt-out survives the default flip)', async () => {
@@ -100,6 +104,7 @@ describe('notice-group split: legacy single-toggle migration', () => {
     expect(mod.settings.chatNoticesGift).toBe(false)
     expect(mod.settings.chatNoticesRaid).toBe(false)
     expect(mod.settings.chatNoticesAnnouncement).toBe(false)
+    expect(mod.settings.chatNoticesStreak).toBe(false)
   })
 
   it('an explicit group key OVERRIDES the legacy fallback for that group only', async () => {

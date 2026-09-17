@@ -49,6 +49,8 @@ jobs:
         # Tauri v2 (linux) build requirements. libwebkit2gtk-4.1-dev +
         # libsoup-3.0-dev are the v2 webkit/soup headers; the rest are
         # transitive GTK/indicator deps + patchelf (appimage bundling).
+        # libmpv-dev is for the embedded-libmpv engine (a DEFAULT Cargo
+        # feature — every build links libmpv; see src-tauri/src/mpv/).
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -57,7 +59,8 @@ jobs:
             librsvg2-dev \
             libgtk-3-dev \
             patchelf \
-            libayatana-appindicator3-dev
+            libayatana-appindicator3-dev \
+            libmpv-dev
 
       - name: Cache Cargo (~/.cargo + src-tauri/target)
         uses: Swatinem/rust-cache@v2
@@ -115,6 +118,13 @@ jobs:
 
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      # AUR state parity: the -git PKGBUILD builds with --no-default-features
+      # (updater off — pacman owns updates) but re-adds mpv-embed, so the
+      # engine ships on AUR too. That combination compiles nowhere else in
+      # CI, so gate it explicitly to keep the AUR build green.
+      - name: Clippy (AUR state — updater off, mpv-embed on)
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features --features "mpv-embed,tauri/custom-protocol" --all-targets -- -D warnings
 
       - name: RustSec audit (cargo audit)
         # Supply-chain advisory scan. The `command -v` guard lets the

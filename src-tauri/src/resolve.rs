@@ -10,17 +10,25 @@ const RESOLVE_TIMEOUT: Duration = Duration::from_millis(25_000);
 const STREAMLINK_OFFLINE_MARKERS: &[&str] =
     &["No playable streams found", "error: No playable streams"];
 
-pub(crate) const ALLOWED_QUALITIES: &[&str] = &[
-    "best",
-    "worst",
-    "audio_only",
-    "160p",
-    "360p",
-    "480p",
-    "720p",
-    "720p60",
-    "1080p60",
-];
+/// Quality tokens accepted by the resolve/player commands. HISTORICALLY an
+/// enumerated allowlist (`best`/`audio_only`/`160p`…`1080p60`), but Twitch's
+/// transcode ladder is DYNAMIC — rungs are named after whatever the channel's
+/// master playlist happens to offer (`936p60`, `480p60`, …), so an
+/// enumeration silently made real rungs unresolvable (a `936p60` variant
+/// failed validation before streamlink ever saw it). Validation is now
+/// STRUCTURAL: after lowercasing, a quality token is exactly the character
+/// class streamlink itself uses for variant names (lowercase ASCII
+/// alphanumerics + underscore), bounded in length. The token reaches
+/// streamlink as a direct argv element (never through a shell), so this is
+/// defense-in-depth against malformed input, not an injection guard.
+pub(crate) fn is_quality_valid(q: &str) -> bool {
+    let len = q.chars().count();
+    if len == 0 || len > 16 {
+        return false;
+    }
+    q.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,6 +97,11 @@ pub(crate) fn streamlink_bin() -> PathBuf {
             let candidates: Vec<PathBuf> = if cfg!(target_os = "macos") {
                 let home = env::var("HOME").ok().map(PathBuf::from);
                 macos_streamlink_candidates(home.as_deref())
+            } else if cfg!(target_os = "windows") {
+                let exe_dir = env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(Path::to_path_buf));
+                windows_streamlink_candidates(exe_dir.as_deref())
             } else {
                 Vec::new()
             };
@@ -139,15 +152,33 @@ fn macos_streamlink_candidates(home: Option<&Path>) -> Vec<PathBuf> {
     candidates
 }
 
-/// A clear, actionable message for the case where the streamlink binary is not
-/// installed / not on PATH. This is a first-class user-facing state on Windows
-/// (where nothing declares streamlink as a dependency and the NSIS installer
-/// cannot provide it) rather than an obscure spawn error: it tells the user
-/// exactly what's missing, how to install it, and how to override the path via
-/// `STREAMLINK_BIN`. The debug build additionally names the path we looked for
-/// so a misconfigured override is easy to diagnose; release builds stay clean
-/// of local paths. Shared by `resolve_stream`/`resolve_vod`/`resolve_clip`
-/// (resolve.rs) and `launch_player` (player.rs).
+/// Windows streamlink candidate absolute paths: the copy BUNDLED with the
+/// app comes first. The NSIS installer ships streamlink's portable build
+/// (embedded Python + deps, ffmpeg stripped — this app only resolves URLs)
+/// at `<install>\streamlink\` via tauri.windows.conf.json's bundle
+/// resources, so a fresh install resolves streams with zero external
+/// setup. A system install (installer/pip) puts streamlink on PATH, which
+/// the bare fallback covers — no absolute candidates needed for it.
+/// `exe_dir` is passed in (rather than read via current_exe) so the list is
+/// unit-testable on any host; the caller passes the app binary's directory.
+fn windows_streamlink_candidates(exe_dir: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(dir) = exe_dir {
+        candidates.push(dir.join("streamlink").join("bin").join("streamlink.exe"));
+    }
+    candidates
+}
+
+/// A clear, actionable message for the case where the streamlink binary is
+/// not found. Windows installs BUNDLE streamlink next to the app (see
+/// windows_streamlink_candidates), so this arm is a fallback there (dev
+/// builds, or a broken install); on macOS/Linux it is the first-class
+/// first-run state. It tells the user exactly what's missing, how to
+/// install it, and how to override the path via `STREAMLINK_BIN`. The debug
+/// build additionally names the path we looked for so a misconfigured
+/// override is easy to diagnose; release builds stay clean of local paths.
+/// Shared by `resolve_stream`/`resolve_vod`/`resolve_clip` (resolve.rs)
+/// and `launch_player` (player.rs).
 pub(crate) fn streamlink_missing_message(bin: &std::path::Path) -> String {
     let detail = if include_detail() {
         format!(" (looked for '{}')", bin.display())
@@ -197,17 +228,29 @@ async fn run_streamlink(
     quality: &str,
     low_latency: bool,
 ) -> Result<String, StreamlinkError> {
-    let mut cmd = tokio::process::Command::new(bin);
-    cmd.arg("--loglevel").arg("error");
+    let mut args: Vec<String> = vec!["--loglevel".into(), "error".into()];
     // Twitch low-latency mode: requests the short-segment LL-HLS playlist so
     // the player can chase the live edge (~5-8s vs the usual 15-30s). Paired
     // with hls.js lowLatencyMode + liveSyncDurationCount in the frontend.
     if low_latency {
-        cmd.arg("--twitch-low-latency");
+        args.push("--twitch-low-latency".into());
     }
-    cmd.arg("--stream-url")
-        .arg(twitch_url)
-        .arg(quality)
+    args.push("--stream-url".into());
+    args.push(twitch_url.into());
+    args.push(quality.into());
+    spawn_streamlink(bin, args).await
+}
+
+/// Spawn streamlink with the given args, wait (bounded by RESOLVE_TIMEOUT),
+/// and return its stdout. The shared plumbing behind the resolve paths
+/// (which pass a quality + `--stream-url`) and the quality-list probe
+/// (which passes `--json`).
+async fn spawn_streamlink<S: AsRef<std::ffi::OsStr>>(
+    bin: &std::path::Path,
+    args: impl IntoIterator<Item = S>,
+) -> Result<String, StreamlinkError> {
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -343,7 +386,7 @@ pub async fn resolve_stream(
 
     let q_raw = quality.unwrap_or_else(|| "best".to_string());
     let q = q_raw.trim().to_lowercase();
-    if !ALLOWED_QUALITIES.contains(&q.as_str()) {
+    if !is_quality_valid(&q) {
         return Ok(ResolveResponse {
             ok: false,
             url: None,
@@ -471,6 +514,72 @@ pub async fn resolve_stream(
     }
 }
 
+/// Parse `streamlink --json <url>` LISTING output (no quality argument →
+/// streamlink prints its streams object and exits without playing) into the
+/// REAL variant rungs it advertises. Twitch's transcode ladder is dynamic —
+/// rungs carry whatever name the channel's master playlist uses (`936p60`,
+/// `480p60`, …) — so this does NOT intersect with any fixed vocabulary; it
+/// keeps every structurally-valid key (`is_quality_valid`) EXCEPT streamlink's
+/// own aliases (`best`/`worst` and their `*_unfiltered` twins), which just
+/// duplicate rungs — the frontend prepends its own `best`. Tolerant by
+/// design: anything unexpected — offline/error payloads (`{"error": …}`),
+/// malformed JSON, a missing `streams` object — yields an EMPTY vec, never
+/// an error; the frontend maps empty to "unknown" and falls back to the full
+/// static vocabulary.
+pub(crate) fn parse_available_qualities(stdout: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
+        return Vec::new();
+    };
+    let Some(streams) = value.get("streams").and_then(|s| s.as_object()) else {
+        return Vec::new();
+    };
+    const ALIASES: &[&str] = &["best", "worst", "best_unfiltered", "worst_unfiltered"];
+    streams
+        .keys()
+        .filter(|k| !ALIASES.contains(&k.as_str()) && is_quality_valid(k))
+        .cloned()
+        .collect()
+}
+
+/// The stream qualities a live channel actually offers RIGHT NOW — the source
+/// of truth for the players' quality menus. The static menu vocabulary
+/// over-promises: a channel transcoding 720p60 but not 720p makes the plain
+/// "720p" menu entry a guaranteed resolve failure (and a silent fallback to
+/// best). This probe runs `streamlink --json` in listing mode so the menu
+/// lists only real variants, INCLUDING rungs the old hardcoded vocabulary
+/// never knew (936p60 etc.). Presentation ORDER is the frontend's business
+/// (it sorts by encoded resolution height); this returns an unordered set of
+/// rung ids. ANY failure (streamlink missing, timeout, offline, malformed
+/// output) returns an empty list — the probe can never take the menu away,
+/// only sharpen it.
+#[tauri::command]
+pub async fn stream_qualities(
+    channel: String,
+    low_latency: Option<bool>,
+) -> Result<Vec<String>, String> {
+    let mut channel = channel.trim().to_lowercase();
+    if let Some(stripped) = channel.strip_prefix('#') {
+        channel = stripped.to_string();
+    }
+    if !is_channel_name_valid(&channel) {
+        return Ok(Vec::new());
+    }
+
+    let bin = streamlink_bin();
+    let url = format!("https://twitch.tv/{}", channel);
+    let mut args: Vec<String> = vec!["--loglevel".into(), "error".into()];
+    if low_latency.unwrap_or(false) {
+        args.push("--twitch-low-latency".into());
+    }
+    args.push("--json".into());
+    args.push(url);
+
+    match spawn_streamlink(&bin, args).await {
+        Ok(stdout) => Ok(parse_available_qualities(&stdout)),
+        Err(_) => Ok(Vec::new()),
+    }
+}
+
 // VOD/clip media (resolved HLS playlists and clip MP4s) are served from
 // Twitch's CloudFront distribution (e.g. d2nvs31859zcd8.cloudfront.net), which
 // the live `resolve_stream` allowlist below intentionally does NOT include.
@@ -530,7 +639,7 @@ pub async fn resolve_vod(
 
     let q_raw = quality.unwrap_or_else(|| "best".to_string());
     let q = q_raw.trim().to_lowercase();
-    if !ALLOWED_QUALITIES.contains(&q.as_str()) {
+    if !is_quality_valid(&q) {
         return Ok(ResolveResponse {
             ok: false,
             url: None,
@@ -670,7 +779,7 @@ pub async fn resolve_clip(
 
     let q_raw = quality.unwrap_or_else(|| "best".to_string());
     let q = q_raw.trim().to_lowercase();
-    if !ALLOWED_QUALITIES.contains(&q.as_str()) {
+    if !is_quality_valid(&q) {
         return Ok(ResolveResponse {
             ok: false,
             url: None,
@@ -776,6 +885,75 @@ mod tests {
     use super::*;
 
     #[test]
+    fn available_qualities_from_typical_listing() {
+        // Shape of `streamlink --json <url>` listing output (trimmed to the
+        // keys we read): aliases dropped, every real rung kept — INCLUDING
+        // ladder names the old hardcoded vocabulary never knew (936p60 is a
+        // standard modern Twitch rung between 1080p60 and 720p60).
+        let out = r#"{"plugin":"twitch","streams":{
+            "audio_only":{"type":"hls"},
+            "160p":{"type":"hls"},
+            "360p":{"type":"hls"},
+            "480p":{"type":"hls"},
+            "720p60":{"type":"hls"},
+            "936p60":{"type":"hls"},
+            "1080p60":{"type":"hls"},
+            "worst":{"type":"hls"},
+            "best":{"type":"hls"},
+            "worst_unfiltered":{"type":"hls"},
+            "best_unfiltered":{"type":"hls"}
+        }}"#;
+        let mut q = parse_available_qualities(out);
+        q.sort();
+        assert_eq!(
+            q,
+            vec![
+                "1080p60",
+                "160p",
+                "360p",
+                "480p",
+                "720p60",
+                "936p60",
+                "audio_only"
+            ]
+        );
+    }
+
+    #[test]
+    fn available_qualities_transcode_subset() {
+        // A sparse ladder (what smaller channels get): the highest rung IS
+        // the source, plus one transcode and audio_only — and no low rungs.
+        // The probe reports exactly that; nothing is invented or dropped.
+        let out = r#"{"streams":{"best":{},"1080p60":{},"720p60":{},"audio_only":{},"worst":{}}}"#;
+        let mut q = parse_available_qualities(out);
+        q.sort();
+        assert_eq!(q, vec!["1080p60", "720p60", "audio_only"]);
+    }
+
+    #[test]
+    fn available_qualities_drop_structurally_invalid_keys() {
+        // Keys that could never be streamlink variant names (spaces, caps,
+        // punctuation, oversize) are dropped rather than surfaced to menus.
+        let out = r#"{"streams":{"720p60":{},"not a quality":{},"720P":{},"x-y":{},"way_too_long_quality_name":{}}}"#;
+        let q = parse_available_qualities(out);
+        assert_eq!(q, vec!["720p60"]);
+    }
+
+    #[test]
+    fn available_qualities_offline_and_malformed_yield_empty() {
+        // Offline channels: streamlink --json exits non-zero with an error
+        // payload (no streams object). Malformed output likewise. Both must
+        // map to "unknown" (empty), never panic or error.
+        assert!(
+            parse_available_qualities(r#"{"error":"No playable streams found on this URL"}"#)
+                .is_empty()
+        );
+        assert!(parse_available_qualities("not json at all").is_empty());
+        assert!(parse_available_qualities(r#"{"streams":[]}"#).is_empty());
+        assert!(parse_available_qualities("").is_empty());
+    }
+
+    #[test]
     fn channel_name_valid_basic() {
         assert!(is_channel_name_valid("x"));
         assert!(is_channel_name_valid("twitch"));
@@ -836,9 +1014,9 @@ mod tests {
     }
 
     #[test]
-    fn allowed_qualities_complete() {
-        // The full allowlist mirrored by vite.config.ts ALLOWED_QUALITIES.
-        // Keep these in sync with the const at the top of this file.
+    fn quality_valid_accepts_realistic_rungs() {
+        // Everything a Twitch ladder realistically names, including rungs
+        // the old hardcoded vocabulary never knew.
         for q in [
             "best",
             "worst",
@@ -849,16 +1027,42 @@ mod tests {
             "720p",
             "720p60",
             "1080p60",
+            "936p60",
+            "480p60",
         ] {
-            assert!(
-                ALLOWED_QUALITIES.contains(&q),
-                "expected `{q}` in ALLOWED_QUALITIES"
-            );
+            assert!(is_quality_valid(q), "expected `{q}` to be valid");
         }
-        // common-but-not-allowed values must be rejected
-        assert!(!ALLOWED_QUALITIES.contains(&"4k"));
-        assert!(!ALLOWED_QUALITIES.contains(&"source"));
-        assert!(!ALLOWED_QUALITIES.contains(&"1080p"));
+    }
+
+    #[test]
+    fn quality_valid_rejects_malformed_tokens() {
+        // The check is structural (post-lowercase): no casing, separators,
+        // whitespace, emptiness, or oversize tokens may reach a streamlink
+        // argv.
+        assert!(!is_quality_valid(""));
+        assert!(!is_quality_valid("720P")); // uppercase never reaches streamlink
+        assert!(!is_quality_valid("1080p "));
+        assert!(!is_quality_valid("audio only"));
+        assert!(!is_quality_valid("best;rm -rf"));
+        assert!(!is_quality_valid("--stream-url"));
+        assert!(!is_quality_valid(&"q".repeat(17)));
+        assert!(is_quality_valid(&"q".repeat(16))); // boundary: exactly 16 ok
+    }
+
+    #[test]
+    fn windows_streamlink_candidates_prefer_the_bundled_copy() {
+        // The bundled tree ships at <install>/streamlink/bin/streamlink.exe
+        // (backslashes on the real platform — forward slashes keep the
+        // assertion join-semantics-identical on this test host).
+        assert_eq!(
+            windows_streamlink_candidates(Some(Path::new("C:/apps/kappastream"))),
+            vec![PathBuf::from(
+                "C:/apps/kappastream/streamlink/bin/streamlink.exe"
+            )]
+        );
+        // Without a resolvable exe dir there is nothing absolute to probe —
+        // selection degrades to the bare PATH fallback.
+        assert!(windows_streamlink_candidates(None).is_empty());
     }
 
     #[test]

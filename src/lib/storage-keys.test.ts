@@ -21,7 +21,7 @@ import { STORAGE_KEYS } from './storage-keys'
  *    must come from this registry.
  */
 
-const EXPECTED_KEY_COUNT = 35
+const EXPECTED_KEY_COUNT = 38
 
 describe('STORAGE_KEYS registry', () => {
   it('holds exactly the expected number of entries (bump deliberately)', () => {

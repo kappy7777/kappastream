@@ -68,15 +68,15 @@
 //!
 //! ## Common rules
 //!
-//! Both variables are applied only when ALL hold for their respective path:
+//! The variables are applied only when ALL hold for their respective path:
 //!  - the NVIDIA kernel driver appears loaded, AND
 //!  - the session matches (Wayland for explicit sync, X11 for DMA-BUF renderer), AND
 //!  - the user has not already set the variable.
 //!
-//! A user-provided value (including `"0"`, `"1"`, an arbitrary string, or even an
-//! empty string) is always preserved — we only ever set a variable when it is
-//! entirely absent. The single exception is the AppImage `GDK_BACKEND`
-//! selection above, which overwrites the hook's value by necessity and uses
+//! A user-provided value (including `"0"`, `"1"`, an arbitrary string, or even
+//! an empty string) is always preserved — we only ever set a variable when it is
+//! entirely absent. The exception is the AppImage `GDK_BACKEND` selection
+//! above, which overwrites the hook's value by necessity and uses
 //! `KAPPASTREAM_GDK_BACKEND` as its user-override channel instead.
 
 use std::path::Path;
@@ -278,7 +278,8 @@ fn read_inputs() -> CompatInputs {
 /// documented exception: the AppImage `GDK_BACKEND` selection may replace the
 /// linuxdeploy hook's pre-set `x11` (see the module doc).
 pub fn configure() {
-    let actions = select_actions(&read_inputs());
+    let inputs = read_inputs();
+    let actions = select_actions(&inputs);
     if actions.disable_nvidia_explicit_sync {
         std::env::set_var(NV_EXPLICIT_SYNC_VAR, "1");
     }

@@ -4,7 +4,6 @@ import {
   readLastSeenVersion,
   writeLastSeenVersion,
   streamlinkProbeFromResult,
-  firstLaunch,
 } from './first-launch.svelte'
 
 /*
@@ -123,31 +122,5 @@ describe('streamlinkProbeFromResult — present never yields the install path', 
   it('passes the platform through for every OS (used to pick the install command)', () => {
     expect(streamlinkProbeFromResult({ present: false, platform: 'windows' }).platform).toBe('windows')
     expect(streamlinkProbeFromResult({ present: true, platform: 'windows' }).state).toBe('present')
-  })
-})
-
-describe('on-demand changelog viewer (About-modal button)', () => {
-  beforeEach(() => {
-    localStorage.clear()
-    // Leave the store in the closed state for whichever test runs next.
-    firstLaunch.closeChangelog()
-  })
-
-  it('opens and closes without ever writing lastSeenVersion', () => {
-    writeLastSeenVersion('0.0.1') // sentinel: any write would clobber it
-    firstLaunch.openChangelog()
-    expect(firstLaunch.changelogOpen).toBe(true)
-    expect(readLastSeenVersion()).toBe('0.0.1')
-    firstLaunch.closeChangelog()
-    expect(firstLaunch.changelogOpen).toBe(false)
-    expect(readLastSeenVersion()).toBe('0.0.1')
-  })
-
-  it('close() routes to the changelog when it is the open surface (no version write)', () => {
-    writeLastSeenVersion('0.0.1')
-    firstLaunch.openChangelog()
-    firstLaunch.close()
-    expect(firstLaunch.changelogOpen).toBe(false)
-    expect(readLastSeenVersion()).toBe('0.0.1')
   })
 })

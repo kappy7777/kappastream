@@ -8,6 +8,12 @@ mod resolve;
 mod tray;
 mod vod_proxy;
 
+// Experimental embedded-libmpv engine — a DEFAULT Cargo feature; only
+// `--no-default-features` builds drop it (see src/mpv/mod.rs for the
+// gating rules and platform libmpv packaging).
+#[cfg(feature = "mpv-embed")]
+mod mpv;
+
 #[cfg(target_os = "linux")]
 pub mod compat;
 
@@ -111,6 +117,7 @@ pub fn run() {
             resolve::resolve_stream,
             resolve::resolve_vod,
             resolve::resolve_clip,
+            resolve::stream_qualities,
             resolve::streamlink_status,
             player::launch_player,
             platform::target_os,
@@ -118,6 +125,34 @@ pub fn run() {
             gql::gql_fetch,
             export::save_favorites_export,
             export::save_theme_export,
+            // Feature-gated entries stay hidden from the default build's
+            // command table entirely (the macro honours cfg on items).
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_available,
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_load,
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_stop,
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_set_paused,
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_seek,
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_set_volume,
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_set_muted,
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_set_rect,
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_pointer,
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_set_surface_visible,
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_page_snapshot,
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_script_msg,
+            #[cfg(feature = "mpv-embed")]
+            mpv::mpv_set_bitmap,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -17,7 +17,7 @@
   // `settings`, exactly as App.svelte does, so the session always stores every
   // event and toggles apply retroactively.
 
-  import { onDestroy } from 'svelte'
+  import { onDestroy, untrack } from 'svelte'
   import { invoke, isTauri } from '@tauri-apps/api/core'
   import { tileStore } from './tile-store.svelte'
   import { ChatSession } from './chat-session.svelte'
@@ -39,13 +39,19 @@
   import { formatCompact } from './format'
   import { tooltip } from './tooltip.ts'
   import { t } from './i18n/index.svelte'
+  import type { VideoBackend } from './video-backend'
 
   interface Props {
     isWindows: boolean
     chatSize: number
     onAuthorityVideo: (el: HTMLVideoElement | null) => void
+    /** The authority tile's playback BACKEND (native-engine tiles) — the
+     *  keyboard-shortcut target App uses instead of the <video> element. */
+    onAuthorityBackend: (b: VideoBackend | null) => void
+    /** invoke('mpv_available') result from App (feature build + surface). */
+    mpvAvailable: boolean
   }
-  const { isWindows, chatSize, onAuthorityVideo }: Props = $props()
+  const { isWindows, chatSize, onAuthorityVideo, onAuthorityBackend, mpvAvailable }: Props = $props()
 
   // Per-tile chat sessions. A Svelte reactive Map so `.get()` reads track.
   let sessions = $state(new Map<string, ChatSession>())
@@ -93,9 +99,234 @@
     for (const [, s] of sessions) s.dispose()
     sessions.clear()
     onAuthorityVideo(null)
+    onAuthorityBackend(null)
     document.removeEventListener('pointermove', onSplitMove)
     document.removeEventListener('pointerup', endSplitDrag)
     document.removeEventListener('pointercancel', endSplitDrag)
+  })
+
+  // ---- Native engine (embedded mpv) tiles -----------------------------------
+  // Tiles play through per-tile mpv engines when the setting is on and the
+  // engine is available. Each tile gets a STABLE numeric engine id from a
+  // free list of 1..4: ids are never reused by reorder (only by tile close),
+  // so a drag-swap never reloads either stream — and the Rust-side engine
+  // set stays bounded (engines live for the process once created).
+  const tilesNative = $derived(settings.mpvEngine && mpvAvailable)
+  let mpvIds = $state(new Map<string, number>())
+  const MPV_ID_POOL = [1, 2, 3, 4]
+  // The tile ids are collected OUTSIDE the untrack block on purpose: the
+  // store mutates `tiles` IN PLACE (push/splice/swap — the array reference
+  // never changes), so only a deep read (map over ids) re-runs this effect
+  // on a tile add; without it every post-mount tile found mpvEnabled=false
+  // and silently fell back to hls.js. Reads of the CURRENT map stay under
+  // untrack: a tracked read of state the effect then writes is the classic
+  // read-write-same-state effect loop (the layoutVersion variant of exactly
+  // that bug froze multi-view outright).
+  $effect.pre(() => {
+    const ids = new Set(tileStore.tiles.map((tile) => tile.id))
+    const tiles = tileStore.tiles
+    const native = tilesNative
+    const next = untrack(() => {
+      const map = new Map(mpvIds)
+      // Release the ids of closed tiles back into the pool (the Tile's own
+      // teardown disposes its backend / stops the engine).
+      let changed = false
+      for (const tileId of [...map.keys()]) {
+        if (!ids.has(tileId)) {
+          map.delete(tileId)
+          changed = true
+        }
+      }
+      if (native) {
+        for (const tile of tiles) {
+          if (map.has(tile.id)) continue
+          const taken = new Set(map.values())
+          const free = MPV_ID_POOL.find((n) => !taken.has(n))
+          if (free !== undefined) {
+            map.set(tile.id, free)
+            changed = true
+          }
+        }
+      }
+      return changed ? map : null
+    })
+    if (next) untrack(() => (mpvIds = next))
+  })
+
+  // Per-tile native video areas (registered by Tile via onNativeArea). A
+  // reactive Map so the overlay manager below re-runs when tiles come and
+  // go. Keyed by tile id; the engine id rides along from mpvIds.
+  let nativeAreas = $state(new Map<string, HTMLElement>())
+  function onNativeArea(tileId: string, el: HTMLElement | null): void {
+    if (el) nativeAreas.set(tileId, el)
+    else nativeAreas.delete(tileId)
+  }
+
+  // ---- Page UI vs the native tile surfaces ----------------------------------
+  // A trimmed mirror of App.svelte's single-player overlay guard, driven
+  // against EVERY native tile area instead of the one player rect: full
+  // modals (Settings/About/…) hide ALL surfaces (mpv_set_surface_visible
+  // broadcasts), and small strips (tooltips, the update banner, toasts) are
+  // composited OVER each intersecting tile via the same page-snapshot
+  // overlay path (keep-masked, per-tile ks-page geometry + snapshot).
+  $effect(() => {
+    if (!tilesNative) return
+    void nativeAreas
+    if (nativeAreas.size === 0) return
+    const fullSelector =
+      '.about-modal, .about-backdrop, .browse-modal, .browse-backdrop, .welcome-modal, .welcome-backdrop, .ct-panel, .ct-backdrop, .settings-modal, .settings-backdrop'
+    // Tile page UI over the native surfaces rides mpv's own OSC (the tiles
+    // feed it per engine id) — only genuinely page-side strips are snap-
+    // shotted over the tiles here.
+    const snapSelector = '.update-banner, .global-tooltip, .notif-toast, .fav-tooltip, .notify-panel, .search-dropdown'
+    let suppressed = false
+    // engine id -> pushed geometry key ('' = nothing shown for that engine)
+    const pushed = new Map<number, string>()
+    const pushedKeeps = new Map<number, number[]>()
+    let settleTimers: ReturnType<typeof setTimeout>[] = []
+    let lastInteractSnap = 0
+    const clearSettle = (): void => {
+      for (const tm of settleTimers) clearTimeout(tm)
+      settleTimers = []
+    }
+    const setVisible = (visible: boolean): void => {
+      void invoke('mpv_set_surface_visible', { visible }).catch(() => {})
+    }
+    const snapshot = (id: number, x: number, y: number, w: number, h: number, keeps: number[]): void => {
+      void invoke('mpv_page_snapshot', {
+        id,
+        x: Math.round(x),
+        y: Math.round(y),
+        w: Math.round(w),
+        h: Math.round(h),
+        keep: keeps,
+      }).catch(() => {})
+    }
+    const intersects = (el: HTMLElement, r2: DOMRect): boolean => {
+      const r = el.getBoundingClientRect()
+      if (r.width < 2 || r.height < 2) return false
+      return (
+        Math.min(r.right, r2.right) - Math.max(r.left, r2.left) >= 1 &&
+        Math.min(r.bottom, r2.bottom) - Math.max(r.top, r2.top) >= 1
+      )
+    }
+    const recheck = (): void => {
+      const areas = [...nativeAreas.entries()]
+        .map(([tileId, el]) => ({ id: mpvIds.get(tileId), el }))
+        .filter((a): a is { id: number; el: HTMLElement } => a.id !== undefined && a.el.isConnected)
+      if (areas.length === 0) return
+      // Full-window modals duck every native surface at once.
+      const hide = Array.from(document.querySelectorAll<HTMLElement>(fullSelector)).some((el) =>
+        areas.some((a) => intersects(el, a.el.getBoundingClientRect())),
+      )
+      if (hide !== suppressed) {
+        suppressed = hide
+        setVisible(!suppressed)
+        if (suppressed) {
+          for (const a of areas) sendPage(a.id, 'hide')
+        }
+      }
+      if (suppressed) return
+      // Per-tile strip overlays: each intersecting tile composites the part
+      // of the strip UI over ITS rect (fractions relative to that tile).
+      for (const a of areas) {
+        const pr = a.el.getBoundingClientRect()
+        let x1 = Infinity
+        let y1 = Infinity
+        let x2 = -Infinity
+        let y2 = -Infinity
+        const keeps: number[] = []
+        for (const el of document.querySelectorAll<HTMLElement>(snapSelector)) {
+          if (!intersects(el, pr)) continue
+          const r = el.getBoundingClientRect()
+          const ax = Math.max(r.left, pr.left)
+          const ay = Math.max(r.top, pr.top)
+          const bx = Math.min(r.right, pr.right)
+          const by = Math.min(r.bottom, pr.bottom)
+          keeps.push(Math.round(ax), Math.round(ay), Math.round(bx - ax), Math.round(by - ay))
+          x1 = Math.min(x1, ax)
+          y1 = Math.min(y1, ay)
+          x2 = Math.max(x2, bx)
+          y2 = Math.max(y2, by)
+        }
+        if (x2 <= x1) {
+          sendPage(a.id, 'hide')
+          continue
+        }
+        const key = `${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)},${Math.round(pr.width)}x${Math.round(pr.height)}`
+        if (key === (pushed.get(a.id) ?? '')) continue
+        pushed.set(a.id, key)
+        pushedKeeps.set(a.id, keeps)
+        sendPage(
+          a.id,
+          'show',
+          ((x1 - pr.left) / pr.width).toFixed(4),
+          ((y1 - pr.top) / pr.height).toFixed(4),
+          ((x2 - x1) / pr.width).toFixed(4),
+          ((y2 - y1) / pr.height).toFixed(4),
+        )
+        snapshot(a.id, x1, y1, x2 - x1, y2 - y1, keeps)
+        // Settle burst: tooltips fade in over ~120 ms — refresh the frozen
+        // frame a few times while the reveal settles (same rationale as the
+        // single-player guard).
+        for (const delay of [150, 350, 700]) {
+          settleTimers.push(
+            setTimeout(() => {
+              if (pushed.get(a.id) !== key) return
+              snapshot(a.id, x1, y1, x2 - x1, y2 - y1, keeps)
+            }, delay),
+          )
+        }
+      }
+    }
+    const sendPage = (id: number, action: 'show' | 'hide', ...fracs: string[]): void => {
+      const args = action === 'show' ? ['ks-page', 'show', ...fracs] : ['ks-page', 'hide']
+      void invoke('mpv_script_msg', { id, args }).catch(() => {})
+      if (action === 'hide') pushed.delete(id)
+    }
+    recheck()
+    const mo = new MutationObserver((muts) => {
+      const selector = `${fullSelector}, ${snapSelector}`
+      const isOverlayNode = (n: Node): boolean =>
+        n instanceof HTMLElement && (n.matches(selector) || n.querySelector(selector) !== null)
+      let relevant = false
+      for (const m of muts) {
+        for (const n of m.addedNodes) if (isOverlayNode(n)) relevant = true
+        for (const n of m.removedNodes) if (isOverlayNode(n)) relevant = true
+      }
+      if (relevant) recheck()
+    })
+    mo.observe(document.body, { childList: true, subtree: true })
+    window.addEventListener('resize', recheck)
+    const onSnapInteract = (ev: Event): void => {
+      if (pushed.size === 0) return
+      if (!(ev.target instanceof Element) || !ev.target.closest(snapSelector)) return
+      const now = performance.now()
+      if (now - lastInteractSnap < 150) return
+      lastInteractSnap = now
+      for (const a of nativeAreas.keys()) {
+        const id = mpvIds.get(a)
+        const key = id !== undefined ? pushed.get(id) : undefined
+        if (!id || !key) continue
+        const [x, y, x2, y2] = key.split(',').slice(0, 4).map(Number)
+        snapshot(id, x, y, x2 - x, y2 - y, pushedKeeps.get(id) ?? [])
+      }
+    }
+    // pointermove/pointerup keep HOVER STATES and the volume-slider drag
+    // fresh in the composited control bars (rate-limited below; gated on
+    // the target being inside a snapshotted element).
+    const interactTypes = ['pointerdown', 'keyup', 'scroll', 'wheel'] as const
+    for (const ty of interactTypes) document.addEventListener(ty, onSnapInteract, { capture: true, passive: true })
+    const geoIv = setInterval(recheck, 80)
+    return () => {
+      mo.disconnect()
+      window.removeEventListener('resize', recheck)
+      for (const ty of interactTypes) document.removeEventListener(ty, onSnapInteract, { capture: true })
+      clearInterval(geoIv)
+      clearSettle()
+      if (suppressed) setVisible(true)
+      for (const id of new Set(mpvIds.values())) sendPage(id, 'hide')
+    }
   })
 
   // The active chat tab follows tileStore.activeChat (moved by chat-tab clicks
@@ -149,16 +380,13 @@
     mergedView = false
   })
 
-  // Tile activation (video surface / status-bar row / drag handle) with the
-  // merged-view exception: when the pane is showing the MERGED stream and
-  // the clicked tile is one of the merged chats, only the AUDIO AUTHORITY
-  // moves (focusTileKeepChat) — the chat pointer staying put is what keeps
-  // the merged stream displayed (see the effect above). Clicking any tile
-  // outside the group keeps the original behaviour: both pointers move and
-  // the pane switches to that tile's own chat.
+  // Tile activation (video surface / native-video click / status-bar row):
+  // moves ONLY the audio authority — the chat pointer NEVER follows a tile
+  // click (owner rule, 2026-09-17; formerly the merged-view exception, now
+  // the general rule). Chat follows chat-tab clicks and newly opened
+  // channels exclusively.
   function activateTile(tileId: string): void {
-    if (mergedView && mergedIds.includes(tileId)) tileStore.focusTileKeepChat(tileId)
-    else tileStore.focusTile(tileId)
+    tileStore.focusTileKeepChat(tileId)
   }
 
   // Tiles in the merge group, in GRID order (stable regardless of the order
@@ -399,6 +627,34 @@
     document.removeEventListener('pointerup', endSplitDrag)
     document.removeEventListener('pointercancel', endSplitDrag)
   }
+  // Per-tile NATIVE-SURFACE seam insets (px per side): 1 where a splitter
+  // line straddles the tile's edge. hls draws the 2px seam line OVER the
+  // videos; a native surface would cover its half (it sits above the whole
+  // webview), so the surface insets 1px per seam side and the real page
+  // line stays visible — the grid seams look identical in both engines.
+  // Layout mirrors tileGridArea: 3 tiles = two on top (split column right /
+  // left + split row below), one centered below (split row above only —
+  // its side edges have no splitters, matching hls where no line is drawn
+  // there).
+  const NO_SEAM = { top: 0, right: 0, bottom: 0, left: 0 }
+  function tileSeams(i: number): { top: number; right: number; bottom: number; left: number } {
+    if (count < 2) return NO_SEAM
+    if (count === 2) {
+      return i === 0 ? { top: 0, right: 1, bottom: 0, left: 0 } : { top: 0, right: 0, bottom: 0, left: 1 }
+    }
+    if (count === 3) {
+      if (i === 0) return { top: 0, right: 1, bottom: 1, left: 0 }
+      if (i === 1) return { top: 0, right: 0, bottom: 1, left: 1 }
+      return { top: 1, right: 0, bottom: 0, left: 0 }
+    }
+    return i === 0
+      ? { top: 0, right: 1, bottom: 1, left: 0 }
+      : i === 1
+        ? { top: 0, right: 0, bottom: 1, left: 1 }
+        : i === 2
+          ? { top: 1, right: 1, bottom: 0, left: 0 }
+          : { top: 1, right: 0, bottom: 0, left: 1 }
+  }
 </script>
 
 <div class="mv-main" style="--chat-size:{chatSize}px">
@@ -423,9 +679,14 @@
             isDropTarget={dropTargetId === tile.id}
             {isWindows}
             {onAuthorityVideo}
+            {onAuthorityBackend}
+            {onNativeArea}
             onTileActivate={activateTile}
             onTileDragStart={startDrag}
             gridArea={tileGridArea(i)}
+            mpvEnabled={tilesNative && mpvIds.get(tile.id) !== undefined}
+            mpvId={mpvIds.get(tile.id) ?? 0}
+            seams={tileSeams(i)}
           />
         {/each}
         {#if count >= 2}

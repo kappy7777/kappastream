@@ -1,6 +1,6 @@
 // One hls.js playback engine — the attach / manifest-timeout / stall-recovery
-// / teardown machinery that used to exist as near-verbatim copies inside
-// App.svelte (live + VOD paths), Tile.svelte and PipWindow.svelte. Modelled
+// / teardown machinery shared by every video surface (App.svelte's live +
+// VOD paths, Tile.svelte, PipWindow.svelte). Modelled
 // on ChatSession (chat-session.svelte.ts): each video SURFACE constructs one
 // session, couples in via the attach options (a staleness predicate, error
 // formatting, status callbacks) and disposes it when the surface unmounts.
@@ -19,6 +19,7 @@ import Hls from 'hls.js'
 import { invoke } from '@tauri-apps/api/core'
 import { buildHlsConfig } from './hls-config'
 import { isFatalNetworkishError, liveEdgeSeekTarget, STALL_RECOVER_GRACE_MS } from './playback'
+import type { MpvBackend, MpvMediaKind } from './video-backend'
 
 const MANIFEST_TIMEOUT_MS = 20_000
 
@@ -47,10 +48,8 @@ export type ResolveLiveResult =
   { ok: true; url: string } | { ok: false; offline: boolean; unavailable?: boolean; error?: string }
 
 /**
- * resolve_stream invoke wrapper + payload normalization — the transport half
- * of what used to be duplicated as `resolveStream` in App.svelte and
- * Tile.svelte. POLICY (quality fallback, offline handling, error surfacing)
- * stays at the call sites.
+ * resolve_stream invoke wrapper + payload normalization. POLICY (quality
+ * fallback, offline handling, error surfacing) stays at the call sites.
  */
 export async function resolveLiveStream(channel: string, q: string, lowLatency: boolean): Promise<ResolveLiveResult> {
   type ResolveRaw = {
@@ -133,6 +132,23 @@ export interface AttachNativeOptions {
   onPlayed?: () => void
 }
 
+/** Options for the native-engine (mpv) attach. */
+export interface AttachMpvOptions {
+  /** The streamlink-resolved URL, RAW — mpv fetches it directly, no ksvod proxy. */
+  url: string
+  kind: MpvMediaKind
+  /** mpv hwdec mode from the settings. */
+  hwdec: string
+  /** Resume position for VODs. */
+  startAt?: number
+  /**
+   * Load-time audio state (passed through to mpv_load). Tiles pass the
+   * model-driven values — see MpvLoadOptions.
+   */
+  volume?: number
+  muted?: boolean
+}
+
 export class PlaybackSession {
   /**
    * Deliberate-pause flag: set by the call site BEFORE pausing so its own
@@ -144,12 +160,17 @@ export class PlaybackSession {
   /**
    * Monotonic staleness counter for THIS surface. Bumped by teardown() and
    * by nextGeneration() (the call site's "new load starts" bump). Call sites
-   * build their isCurrent predicate over it, exactly like the old local
-   * `streamGeneration` / Tile `generation` counters.
+   * build their isCurrent predicate over it.
    */
   generation = 0
 
   private hls: Hls | null = null
+  /**
+   * The native backend whose load is current, if any — teardown stops it
+   * (which hides the native surface). Cleared by every HTML attach so an
+   * engine flip never leaves a zombie surface behind.
+   */
+  private mpvBackend: MpvBackend | null = null
   private stallTimer: ReturnType<typeof setTimeout> | null = null
   private cancelPendingAttach: (() => void) | null = null
   private disposed = false
@@ -162,6 +183,7 @@ export class PlaybackSession {
   attachHls(opts: AttachHlsOptions): Promise<PlaybackAttachResult> {
     if (this.disposed) return Promise.resolve({ ok: false, error: 'session disposed' })
     this.clearStallRecover()
+    this.mpvBackend = null
     // Defensive destroy of a previous instance (a no-op when the call site
     // tore down first, as the VOD path does).
     if (this.hls) {
@@ -246,6 +268,7 @@ export class PlaybackSession {
   /** The `canPlayType('application/vnd.apple.mpegurl')` fallback branch. */
   async attachNative(video: HTMLVideoElement, url: string, opts: AttachNativeOptions): Promise<PlaybackAttachResult> {
     if (this.disposed) return { ok: false, error: 'session disposed' }
+    this.mpvBackend = null
     video.src = url
     try {
       await video.play()
@@ -255,6 +278,38 @@ export class PlaybackSession {
     } catch (err) {
       return { ok: false, error: (opts.errorPrefix ?? '') + (err as Error).message }
     }
+  }
+
+  /**
+   * Attach through the native engine: loadfile on the streamlink-resolved
+   * URL (never the ksvod proxy) and show the native surface. The hls-only
+   * stall recovery is deliberately NOT armed on this path — mpv recovers
+   * its own underruns. A failed load clears the association so teardown
+   * won't hide a surface that never showed.
+   */
+  async attachMpv(backend: MpvBackend, opts: AttachMpvOptions): Promise<PlaybackAttachResult> {
+    if (this.disposed) return { ok: false, error: 'session disposed' }
+    this.clearStallRecover()
+    // Defensive destroy of a previous hls instance (same discipline as
+    // attachHls — an engine flip must never leave both engines running).
+    if (this.hls) {
+      try {
+        this.hls.destroy()
+      } catch {
+        /* ignore */
+      }
+      this.hls = null
+    }
+    const result = await backend.load(opts.url, {
+      kind: opts.kind,
+      hwdec: opts.hwdec,
+      startAt: opts.startAt,
+      volume: opts.volume,
+      muted: opts.muted,
+    })
+    if (this.disposed) return { ok: false, error: 'session disposed' }
+    this.mpvBackend = result.ok ? backend : null
+    return result
   }
 
   /**
@@ -314,6 +369,13 @@ export class PlaybackSession {
         /* ignore */
       }
       this.hls = null
+    }
+    if (this.mpvBackend) {
+      const backend = this.mpvBackend
+      this.mpvBackend = null
+      // Stops playback AND hides the native surface (the transparent page
+      // region must not outlive the stream that opened it).
+      void backend.stop()
     }
     if (video) {
       try {

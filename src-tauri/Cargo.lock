@@ -858,7 +858,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -2031,8 +2031,18 @@ dependencies = [
 name = "kappastream"
 version = "1.0.4"
 dependencies = [
+ "cairo-rs",
  "futures-util",
+ "gdk",
+ "gio",
+ "glib",
+ "gtk",
+ "libc",
+ "libloading 0.8.9",
+ "libmpv2",
  "log",
+ "objc2",
+ "objc2-foundation",
  "reqwest",
  "rfd",
  "serde",
@@ -2048,6 +2058,8 @@ dependencies = [
  "temp-env",
  "tokio",
  "url",
+ "webkit2gtk",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2081,7 +2093,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e9ec52138abedcc58dc17a7c6c0c00a2bdb4f3427c7f63fa97fd0d859155caf"
 dependencies = [
  "gtk-sys",
- "libloading",
+ "libloading 0.7.4",
  "once_cell",
 ]
 
@@ -2109,6 +2121,31 @@ dependencies = [
  "cfg-if",
  "winapi",
 ]
+
+[[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link 0.2.1",
+]
+
+[[package]]
+name = "libmpv2"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f3d44c1c29b866d44453249d1d8b2822d891fdabd08359a5b85bb6944445e70"
+dependencies = [
+ "libmpv2-sys",
+]
+
+[[package]]
+name = "libmpv2-sys"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edb32cabe7176b7d270b0dca6ff418b75187ae8d3854423e3d06fbff376841e4"
 
 [[package]]
 name = "libredox"
@@ -4283,7 +4320,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

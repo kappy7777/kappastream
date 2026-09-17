@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import Hls from 'hls.js'
   import { invoke, isTauri } from '@tauri-apps/api/core'
+  import { listen } from '@tauri-apps/api/event'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { renderMessage, type Emote } from './lib/emotes'
   import './lib/emote.css'
@@ -27,6 +28,14 @@
   import { STORAGE_KEYS } from './lib/storage-keys'
   import { toKsvodProxyUrl, shouldRecoverStallAfterPause } from './lib/playback'
   import { PlaybackSession, resolveLiveStream } from './lib/playback-session.svelte'
+  import {
+    HtmlVideoBackend,
+    MpvBackend,
+    selectVideoBackend,
+    type MpvActionEvent,
+    type MpvAvailability,
+    type VideoBackend,
+  } from './lib/video-backend'
   import { pipController } from './lib/pip-controller.svelte.ts'
   import { sleepTimer, formatSleepRemaining } from './lib/sleep-timer.svelte.ts'
   import { vodPositions } from './lib/vod-positions.svelte.ts'
@@ -55,6 +64,8 @@
   import { parseTwitchClipUrl } from './lib/chat-links'
   import { t } from './lib/i18n/index.svelte'
   import { formatCompact, formatAge } from './lib/format'
+  import { effectiveQualities, mpvQualities, qualityLabel } from './lib/qualities'
+  import { stripBitmap, renderInfoBlock } from './lib/osd-bitmaps'
   import kappaUrl from './assets/kappa.png'
 
   // Tauri v2 webview origin differs by engine, and that changes whether a
@@ -161,6 +172,72 @@
   let playerStatus = $state<PlayerStatus>('idle')
   let playerError = $state('')
   let videoEl = $state<HTMLVideoElement | undefined>(undefined)
+  // Multi-stream split view. ALWAYS OFF on startup and NEVER persisted
+  // (starting in multi-view after a restart would be surprising and would
+  // spawn up to 4 streamlink resolves + 4 hls.js instances on launch). When
+  // on, MultiView.svelte renders the tile grid INSTEAD of App.svelte's
+  // single-stream `.main`; the chat pane is the shared ChatPane component
+  // either way. (The state itself is declared near the top of the script —
+  // the native-engine selection reads it; see toggleMultiView for policy.)
+  let multiView = $state(false)
+
+  // ---- Native video engine (experimental, mpv-embed builds) ---------------
+  // Available = the build carries the feature AND the native surface came up
+  // (invoke also bootstraps the engine on first call). In default builds the
+  // mpv_available command does not exist — the rejection maps to false and
+  // every gate below stays closed.
+  let mpvAvailable = $state(false)
+  onMount(() => {
+    if (!isTauri()) return
+    void invoke<MpvAvailability>('mpv_available')
+      .then((a) => {
+        mpvAvailable = a?.available === true
+      })
+      .catch(() => {
+        mpvAvailable = false
+      })
+  })
+  // The pure selection (unit-tested in video-backend.test.ts): the single
+  // player uses mpv only when the user opted in, the engine is actually
+  // there, and neither multi-view nor the PiP window owns playback.
+  const mpvSelected = $derived(
+    selectVideoBackend({
+      mpvEngineOn: settings.mpvEngine,
+      mpvAvailable,
+      multiView,
+      pipOpen: pipController.isOpen,
+    }) === 'mpv',
+  )
+  // The native backend lives while it is selected (across streams); created
+  // and disposed here so event subscriptions track the engine selection, not
+  // individual loads.
+  let mpvBackend = $state<MpvBackend | null>(null)
+  $effect(() => {
+    if (mpvSelected && !mpvBackend) {
+      mpvBackend = new MpvBackend()
+    } else if (!mpvSelected && mpvBackend) {
+      const stale = mpvBackend
+      mpvBackend = null
+      void stale.dispose() // unsubscribes + mpv_stop (hides the surface)
+    }
+  })
+  // True while a stream is actually loaded on the native engine — drives the
+  // page's transparent "video hole" (CSS at the bottom) and the rect pusher.
+  let nativeVideoActive = $state(false)
+
+  // The playback backend every state read / transport write goes through
+  // (VideoBackend in lib/video-backend.ts): the native backend while it is
+  // selected, otherwise the HTML wrapper over the single player's <video>
+  // element (pure delegation). The element remounts per stream ({#if
+  // playerActive} unmounts it), so the HTML backend is derived from it and is
+  // recreated with it.
+  const videoBackend = $derived.by((): VideoBackend | null => {
+    if (mpvSelected && mpvBackend) return mpvBackend
+    return videoEl ? new HtmlVideoBackend(videoEl) : null
+  })
+  // Last position seen on a timeupdate, whichever backend reported it — the
+  // engine-flip effect below uses it to carry a VOD position across the swap.
+  let lastVideoPosition = 0
   // Mirrors PlayerControls' effective visibility (visible && controlsShown) so
   // the VOD/clip "Back to live" banner can auto-hide with the controls during
   // playback and reappear on mouse activity. Defaults true so the banner shows
@@ -168,6 +245,12 @@
   let controlsVisible = $state(true)
   let quality = $state<string>('best')
   let pendingQuality: string | null = $state(null)
+  // Quality variants the joined channel ACTUALLY offers right now (the
+  // stream_qualities streamlink probe), or null while unknown — the quality
+  // menu lists only real variants (a channel transcoding 720p60 but not
+  // 720p must not offer plain "720p"). See refreshAvailableQualities.
+  let availableQualities = $state<string[] | null>(null)
+  let qualitiesProbedFor = ''
   let activeStatus: LiveStatus = $state({ state: 'unknown' })
 
   // VOD / clip playback mode. 'live' is the default (coupled chat + live
@@ -190,14 +273,14 @@
   // VOD playback support (scrub-bar extras, resume machinery, position
   // save/restore, the resume bar) lives in VodPlaybackController — extracted
   // from App.svelte; only the player lifecycle itself stays here. The
-  // proxyUrl/getVideo indirection keeps the controller platform-agnostic
-  // (it rewrites storyboard JSON reads through the ksvod proxy and reads the
-  // <video> element's position at call time).
+  // proxyUrl/getBackend indirection keeps the controller platform- and
+  // engine-agnostic (it rewrites storyboard JSON reads through the ksvod
+  // proxy and reads the playback backend's position at call time).
   const vodCtl = new VodPlaybackController({
     // Reads isWindows at call time (the shared helper is pure and takes the
     // flag as an argument) — same reactivity as the old local function.
     proxyUrl: (httpsUrl: string) => toKsvodProxyUrl(httpsUrl, isWindows),
-    getVideo: () => videoEl,
+    getBackend: () => videoBackend,
   })
   function currentVodId(): string | null {
     return playback.kind === 'vod' ? playback.id : null
@@ -233,20 +316,17 @@
   const compactViewport = $derived(viewportWidth < SIDEBAR_COMPACT_WIDTH)
   const effectiveSidebarMode = $derived(sidebarMode === 'full' && compactViewport ? 'icons' : sidebarMode)
   let aboutOpen = $state(false)
-  // Multi-stream split view. ALWAYS OFF on startup and NEVER persisted
-  // (starting in multi-view after a restart would be surprising and would
-  // spawn up to 4 streamlink resolves + 4 hls.js instances on launch). When on,
-  // MultiView.svelte renders the tile grid INSTEAD of App.svelte's single-stream
-  // `.main`; when off, this markup renders (the chat pane itself is the shared
-  // ChatPane component either way — rendering, not markup, is what stays
-  // identical between the two views).
-  let multiView = $state(false)
+  // (multiView itself is declared near the top — the native-engine selection
+  // reads it before this point. Full rationale comment there.)
   // The audio-authority tile's <video>, registered by Tile.svelte so the
   // keyboard shortcuts (space/k/m/arrows/f) target the AUTHORITY tile in
   // multi-view. The shortcut target deliberately follows the audio authority
   // (not the active chat tab): the shortcuts are media controls whose feedback
   // is audible, and only the authority tile persists volume/mute to settings.
   let authorityTileVideo = $state<HTMLVideoElement | null>(null)
+  // The same tile's playback BACKEND while it runs the native engine (the
+  // <video> is inert then — App's shortcuts drive the backend instead).
+  let authorityTileBackend = $state<VideoBackend | null>(null)
   let tooltipEl: HTMLElement | undefined = $state()
   let tooltipPos = $state({ left: 0, top: 0 })
   let probeEl: HTMLElement | undefined = $state()
@@ -365,12 +445,6 @@
   function closeAbout(): void {
     aboutOpen = false
   }
-  // About → changelog: close About, open the version-log overlay (one modal
-  // at a time — the log otherwise renders over the About dialog).
-  function openChangelogFromAbout(): void {
-    closeAbout()
-    firstLaunch.openChangelog()
-  }
   let shortcutsHelpOpen = $state(false)
 
   // Player keyboard shortcuts (space/k play-pause, m mute, f fullscreen, t
@@ -379,18 +453,52 @@
   // effects. Suppression: never while typing in any editable target, and never
   // behind an open modal/overlay (about / browse / this help). See shortcuts.ts.
   function toggleVideoPlay(): void {
-    const el = activeVideoEl()
-    if (!el) return
-    if (el.paused) {
+    // Tiles stay element-driven (they own their own <video>/hls.js) EXCEPT
+    // native-engine tiles, whose authority reports a playback BACKEND; the
+    // single-stream player always goes through the backend abstraction.
+    if (multiView) {
+      const backend = authorityTileBackend
+      if (backend) {
+        if (backend.paused) {
+          playbackSession.userPaused = false
+          void backend.play().catch(() => {
+            /* ignore */
+          })
+        } else {
+          // Flag the user pause BEFORE pausing so the live stall-recovery
+          // watcher doesn't treat it as a stall and auto-resume.
+          playbackSession.userPaused = true
+          backend.pause()
+        }
+        return
+      }
+      const el = authorityTileVideo
+      if (!el) return
+      if (el.paused) {
+        playbackSession.userPaused = false
+        void el.play().catch(() => {
+          /* ignore */
+        })
+      } else {
+        // Flag the user pause BEFORE pausing so the live stall-recovery
+        // watcher doesn't treat it as a stall and auto-resume.
+        playbackSession.userPaused = true
+        el.pause()
+      }
+      return
+    }
+    const backend = videoBackend
+    if (!backend) return
+    if (backend.paused) {
       playbackSession.userPaused = false
-      void el.play().catch(() => {
+      void backend.play().catch(() => {
         /* ignore */
       })
     } else {
       // Flag the user pause BEFORE pausing so the live stall-recovery watcher
       // doesn't treat it as a stall and auto-resume.
       playbackSession.userPaused = true
-      el.pause()
+      backend.pause()
     }
   }
   function toggleVideoMute(): void {
@@ -399,12 +507,12 @@
       settings.toggleMuted()
       return
     }
-    const el = videoEl
-    if (!el) return
-    el.muted = !el.muted
+    const backend = videoBackend
+    if (!backend) return
+    backend.setMuted(!backend.muted)
   }
   function toggleVideoFullscreen(): void {
-    if (multiView) {
+    if (multiView && !authorityTileBackend) {
       // Per-tile fullscreen via the HTML5 API on the authority tile's element
       // (the native-window `.app--fullscreen .player` lift has no `.player` in
       // multi-view). WebKitGTK supports element fullscreen.
@@ -415,8 +523,21 @@
       else if (target) void target.requestFullscreen?.()
       return
     }
-    const el = videoEl
-    if (!el) return
+    // Single view, or a native-engine tile grid (the tiles' native surfaces
+    // are window-relative, so the WINDOW going fullscreen — with the tile
+    // rect pushers following — is the only correct form of fullscreen).
+    const el = multiView ? null : videoEl
+    if (!el) {
+      const win = currentWin()
+      if (!win) return
+      void win
+        .isFullscreen()
+        .then((fs) => win.setFullscreen(!fs))
+        .catch(() => {
+          /* ignore */
+        })
+      return
+    }
     const win = currentWin()
     if (win) {
       // Native window fullscreen. The HTML5 Fullscreen API
@@ -439,12 +560,31 @@
     }
   }
   function seekVideoBy(delta: number): void {
-    const el = activeVideoEl()
-    if (!el) return
-    let next = el.currentTime + delta
-    if (Number.isFinite(el.duration) && el.duration > 0) next = Math.min(next, el.duration)
+    if (multiView) {
+      const backend = authorityTileBackend
+      if (backend) {
+        let next = backend.currentTime + delta
+        if (Number.isFinite(backend.duration) && backend.duration > 0) next = Math.min(next, backend.duration)
+        backend.seek(Math.max(0, next))
+        return
+      }
+      const el = authorityTileVideo
+      if (!el) return
+      let next = el.currentTime + delta
+      if (Number.isFinite(el.duration) && el.duration > 0) next = Math.min(next, el.duration)
+      try {
+        el.currentTime = Math.max(0, next)
+      } catch {
+        /* ignore */
+      }
+      return
+    }
+    const backend = videoBackend
+    if (!backend) return
+    let next = backend.currentTime + delta
+    if (Number.isFinite(backend.duration) && backend.duration > 0) next = Math.min(next, backend.duration)
     try {
-      el.currentTime = Math.max(0, next)
+      backend.seek(Math.max(0, next))
     } catch {
       /* ignore */
     }
@@ -455,12 +595,12 @@
       settings.setVolume(Math.max(0, Math.min(1, settings.volume + delta)))
       return
     }
-    const el = videoEl
-    if (!el) return
-    const cur = el.muted ? 0 : el.volume
+    const backend = videoBackend
+    if (!backend) return
+    const cur = backend.muted ? 0 : backend.volume
     const next = Math.max(0, Math.min(1, cur + delta))
-    el.volume = next
-    if (next > 0 && el.muted) el.muted = false
+    backend.setVolume(next)
+    if (next > 0 && backend.muted) backend.setMuted(false)
   }
 
   function onGlobalKeydown(e: KeyboardEvent): void {
@@ -468,9 +608,9 @@
       aboutOpen,
       browseOpen,
       helpOpen: shortcutsHelpOpen,
-      // The welcome/what's-new/changelog overlay (all one component) must
-      // suppress player shortcuts and win the Escape race.
-      welcomeOpen: firstLaunch.visible || firstLaunch.changelogOpen,
+      // The welcome/what's-new overlay must suppress player shortcuts and win
+      // the Escape race.
+      welcomeOpen: firstLaunch.visible,
       isLive: playback.kind === 'live',
     })
     if (!action) return
@@ -608,8 +748,10 @@
   // session snaps to the live edge and resumes. Cleared on `playing` and on
   // teardown.
   function onVideoWaiting(): void {
-    // Stall recovery is live-only — VOD/clip buffering resumes natively.
-    if (playback.kind !== 'live') return
+    // Stall recovery is live-only — VOD/clip buffering resumes natively —
+    // and hls-only: mpv recovers its own underruns (force-seeking the inert
+    // <video> element would do nothing).
+    if (playback.kind !== 'live' || mpvSelected) return
     // Buffer underrun — schedule recovery (a momentary blip refills and
     // fires `playing`, cancelling this).
     if (videoEl) playbackSession.scheduleStallRecover(videoEl)
@@ -621,8 +763,9 @@
     // Stall recovery is live-only (never force-seek a paused VOD/clip) and
     // skips user-initiated pauses (togglePlay sets userPaused BEFORE
     // pausing). A stall-induced pause in webkit2gtk lands here with
-    // userPaused still false — recover it.
-    if (shouldRecoverStallAfterPause(playback.kind === 'live', playbackSession.userPaused) && videoEl) {
+    // userPaused still false — recover it. Never on the native engine (see
+    // onVideoWaiting).
+    if (!mpvSelected && shouldRecoverStallAfterPause(playback.kind === 'live', playbackSession.userPaused) && videoEl) {
       playbackSession.scheduleStallRecover(videoEl)
     }
   }
@@ -630,11 +773,28 @@
   function onVideoPlaying(): void {
     playbackSession.clearStallRecover()
     playbackSession.userPaused = false
+    // The native engine reports playback through the backend events; mirror
+    // it into the player status (the HTML paths transition via their attach
+    // callbacks instead).
+    if (nativeVideoActive && playerStatus === 'loading') playerStatus = 'playing'
   }
 
   function onVideoTimeUpdate(): void {
-    // Throttled VOD position checkpoint (live + clips are ignored inside).
+    // Throttled VOD position checkpoint (live + clips are ignored inside) +
+    // the cross-engine position snapshot for the settings-flip re-home.
+    const backend = videoBackend
+    if (backend) lastVideoPosition = backend.currentTime
     vodCtl.save(currentVodId())
+  }
+
+  function onVideoError(): void {
+    // Mid-playback native-engine failure (load failures are handled at the
+    // attach sites instead). Surface it exactly like an HTML attach failure.
+    if (!nativeVideoActive) return
+    const backend = videoBackend
+    if (!(backend instanceof MpvBackend)) return
+    playerStatus = 'error'
+    playerError = backend.lastError ?? 'native engine error'
   }
 
   // A user scrub (or a programmatic seek). The `seeking` event fires ONLY for
@@ -643,10 +803,651 @@
   // to one request via the controller's seek debounce.
   function onVideoSeeking(): void {
     if (playback.kind !== 'vod') return
-    const el = videoEl
-    if (!el) return
-    vodChat.seek(el.currentTime)
+    const backend = videoBackend
+    if (!backend) return
+    vodChat.seek(backend.currentTime)
   }
+
+  // The <video> event handlers above are subscribed through the playback
+  // backend (not template attributes) so the same signals drive whatever
+  // backend is active. Subscriptions live exactly as long as the backend
+  // (i.e. the current <video> element, or the engine selection, does).
+  $effect(() => {
+    const backend = videoBackend
+    if (!backend) return
+    const unsubs = [
+      backend.on('waiting', onVideoWaiting),
+      backend.on('playing', onVideoPlaying),
+      backend.on('pause', onVideoPause),
+      backend.on('timeupdate', onVideoTimeUpdate),
+      backend.on('seeking', onVideoSeeking),
+      backend.on('error', onVideoError),
+    ]
+    return () => {
+      for (const u of unsubs) u()
+    }
+  })
+
+  // ---- Engine-flip re-home -------------------------------------------------
+  // Toggling the native-engine setting mid-playback (or any selection flip
+  // like leaving multi-view with the engine on) re-homes the CURRENT item on
+  // the other backend: live reloads at the fresh edge, VODs carry the
+  // position over (mpv's start option on the way in, the saved checkpoint on
+  // the way out), clips just reload. PiP and multi-view manage their own
+  // teardown + reload — never fight them here.
+  // (lastPlayedClip: playClip records the full ChannelClip object; the
+  // playback state only carries a subset, and playClip needs it all.)
+  let lastPlayedClip: ChannelClip | null = null
+  let prevMpvSelected: boolean | null = null
+  $effect(() => {
+    const selected = mpvSelected
+    if (prevMpvSelected === null) {
+      prevMpvSelected = selected
+      return
+    }
+    if (selected === prevMpvSelected) return
+    prevMpvSelected = selected
+    if (pipController.isOpen || multiView) return
+    if (playback.kind === 'vod') {
+      const pos = lastVideoPosition
+      if (pos > 1) vodCtl.save(playback.id, true)
+      teardownPlayer()
+      void loadVod(playback.id, quality, pos > 1 ? Math.floor(pos) : undefined)
+    } else if (playback.kind === 'clip' && lastPlayedClip && lastPlayedClip.slug === playback.slug) {
+      // The stored ChannelClip (playClip records it): position carry-over is
+      // meaningless for ~30 s clips, they just reload.
+      teardownPlayer()
+      void playClip(lastPlayedClip)
+    } else if (channelJoined && playerStatus !== 'idle') {
+      teardownPlayer()
+      void loadStream(channelJoined, quality)
+    }
+  })
+
+  // ---- Native surface geometry ---------------------------------------------
+  // While the native engine is active, the native surface must track the
+  // .player SECTION — the 16:9 rect the video surface covers exactly. The
+  // native controls strip below it is page chrome the surface must never
+  // cover, and mpv letterboxes inside its own surface.
+  // Tracking: a ResizeObserver for size changes, the scroll container for
+  // position changes (the stage scrolls inside .video-scroll), and the
+  // probe-measured zoom factor for UI-scale changes (which move/resize the
+  // stage in visual pixels WITHOUT a layout change the observer would see).
+  // Coalesced to one push per animation frame.
+  let playerVideoEl = $state<HTMLElement | null>(null)
+  $effect(() => {
+    if (!nativeVideoActive) return
+    const stage = playerVideoEl
+    if (!stage) return
+    void zoomK
+    const scroll = videoScrollEl
+    let frame = 0
+    let lastKey = ''
+    const push = () => {
+      frame = 0
+      if (!stage.isConnected) return
+      const r = stage.getBoundingClientRect()
+      if (r.width < 2 || r.height < 2) return
+      // getBoundingClientRect inside the zoomed subtree returns VISUAL px
+      // (that is exactly what the .zoom-probe measurement relies on), and
+      // GDK logical px == webview visual px — so the rect maps 1:1 onto the
+      // native window coordinates mpv_set_rect expects. Do NOT multiply by
+      // the zoom factor again. Identical pushes are skipped (the Rust side
+      // dedupes too; this also saves the IPC round-trip).
+      const key = `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)}`
+      if (key === lastKey) return
+      lastKey = key
+      void invoke('mpv_set_rect', {
+        x: Math.round(r.left),
+        y: Math.round(r.top),
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+      }).catch(() => {})
+    }
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(push)
+    }
+    const ro = new ResizeObserver(schedule)
+    ro.observe(stage)
+    ro.observe(document.documentElement)
+    scroll?.addEventListener('scroll', schedule, { passive: true })
+    schedule()
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      ro.disconnect()
+      scroll?.removeEventListener('scroll', schedule)
+    }
+  })
+
+  // ---- Native surface pointer forwarding (mpv OSC) --------------------------
+  // mpv's on-screen controller lives INSIDE mpv (OSD, rendered with the
+  // video), so interacting with it means feeding mpv's input queue: every
+  // pointer event over the player rect is forwarded NORMALIZED (0..1 within
+  // the rect — Rust rescales by mpv's own OSD dimensions, so a
+  // webview-devicePixelRatio vs GDK-scale mismatch can never desync the
+  // mapping). mpv's command API is CLICK-ONLY (no down/up), so clicks fire
+  // on pointerdown plus throttled held moves — the OSD script synthesizes
+  // drags from that stream (seek scrub + volume drag; it commits a scrub
+  // when the stream goes quiet, so a release click is not just unneeded —
+  // forwarding one would double-activate buttons on slow presses). Listeners
+  // ride the .player SECTION (the rect anchor) so they cover the
+  // (opacity-0, hit-testable) <video> exactly; the wheel no longer scrolls
+  // the page over the video in native mode — mpv owns that gesture now.
+  $effect(() => {
+    if (!nativeVideoActive) return
+    const stage = playerVideoEl
+    if (!stage) return
+    let lastClickAt = 0
+    const forward = (e: { clientX: number; clientY: number }, kind: string): void => {
+      const r = stage.getBoundingClientRect()
+      if (r.width < 1 || r.height < 1) return
+      const x = (e.clientX - r.left) / r.width
+      const y = (e.clientY - r.top) / r.height
+      void invoke('mpv_pointer', { x, y, kind }).catch(() => {})
+    }
+    const click = (e: PointerEvent): void => {
+      const now = performance.now()
+      if (now - lastClickAt < 50) return
+      lastClickAt = now
+      forward(e, 'click')
+    }
+    const onMove = (e: PointerEvent): void => {
+      forward(e, 'move')
+      if (e.buttons === 1) click(e)
+    }
+    const onDown = (e: PointerEvent): void => {
+      if (e.button !== 0) return
+      // Pointer capture keeps held-drag streams flowing even when the
+      // pointer leaves the player rect mid-drag.
+      try {
+        stage.setPointerCapture(e.pointerId)
+      } catch {
+        /* stage gone mid-gesture */
+      }
+      click(e)
+    }
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      forward(e, e.deltaY < 0 ? 'wheel-up' : 'wheel-down')
+    }
+    stage.addEventListener('pointermove', onMove, { passive: true })
+    stage.addEventListener('pointerdown', onDown)
+    stage.addEventListener('wheel', onWheel, { passive: false })
+    return () => {
+      stage.removeEventListener('pointermove', onMove)
+      stage.removeEventListener('pointerdown', onDown)
+      stage.removeEventListener('wheel', onWheel)
+    }
+  })
+
+  // ---- Native surface ducking + page overlays ---------------------------------
+  // Page UI that must appear ABOVE the video renders in the webview —
+  // UNDER the native video window. WebKitGTK can't punch a transparency
+  // hole, GDK visual shapes are a no-op on Wayland, and the
+  // rasterize-and-composite fallback (webkit snapshots re-drawn as mpv
+  // overlays) is too laggy — WebKit's own full-page composite per
+  // snapshot dominates and can't be avoided through that API. So
+  // overlapping UI is handled in two grades:
+  //
+  //  - Full-window modals (About/shortcuts, Browse, welcome/what's-new,
+  //    Settings, theme editor — the backdrop families): they cover the whole
+  //    player anyway, so the surface HIDES entirely (mpv_set_surface_visible).
+  //    The live webview shows through at full frame rate; mpv keeps playing
+  //    audio; the video returns when the modal stops overlapping.
+  //
+  //  - Small STRIPS (update banner, tooltips, toasts, the notification
+  //    menu, the search dropdown): must not duck a playing video for a
+  //    sliver of UI — they keep the snapshot overlay (positioned against
+  //    the video rect), one-shot per geometry change plus a settle burst
+  //    (reveal animations) and interaction refreshes (typing/scrolling
+  //    inside the overlaid element). The bitmap is MASKED to the element
+  //    rects (keep rects), so the union crop carries no dark
+  //    empty-player padding between/around elements.
+  //
+  // This effect owns WHEN: it polls the player rect against the classes
+  // (DOM changes, resizes, a short tick for moving tooltips). New dialogs
+  // must be classified explicitly into one of the two lists.
+  $effect(() => {
+    if (!nativeVideoActive) return
+    const fullSelector =
+      '.about-modal, .about-backdrop, .browse-modal, .browse-backdrop, .welcome-modal, .welcome-backdrop, .ct-panel, .ct-backdrop, .settings-modal, .settings-backdrop'
+    // Snapshotted strips: small/static/transient UI — a one-shot bitmap
+    // with interaction + settle refreshes, never a duck.
+    const snapSelector = '.update-banner, .global-tooltip, .notif-toast, .fav-tooltip, .notify-panel, .search-dropdown'
+    const selector = `${fullSelector}, ${snapSelector}`
+    let suppressed = false // the native surface is fully hidden
+    let shown = false // a snapshot overlay is currently composited
+    let pushed = '' // last geometry pushed (window-space box; '' = hidden)
+    let pushedKeeps: number[] = [] // keep rects (flat CSS px) for `pushed`
+    let settleTimers: ReturnType<typeof setTimeout>[] = []
+    let lastInteractSnap = 0
+    const clearSettle = (): void => {
+      for (const tm of settleTimers) clearTimeout(tm)
+      settleTimers = []
+    }
+    const snapshot = (x: number, y: number, w: number, h: number, keeps: number[]): void => {
+      void invoke('mpv_page_snapshot', {
+        x: Math.round(x),
+        y: Math.round(y),
+        w: Math.round(w),
+        h: Math.round(h),
+        keep: keeps,
+      }).catch(() => {})
+    }
+    const snapshotPushed = (): void => {
+      if (!shown || !pushed) return
+      const [x, y, x2, y2] = pushed.split(',').slice(0, 4).map(Number)
+      snapshot(x, y, x2 - x, y2 - y, pushedKeeps)
+    }
+    const setVisible = (visible: boolean): void => {
+      void invoke('mpv_set_surface_visible', { visible }).catch(() => {})
+    }
+    const intersectsPlayer = (el: HTMLElement, pr: DOMRect): boolean => {
+      const r = el.getBoundingClientRect()
+      if (r.width < 2 || r.height < 2) return false
+      return (
+        Math.min(r.right, pr.right) - Math.max(r.left, pr.left) >= 1 &&
+        Math.min(r.bottom, pr.bottom) - Math.max(r.top, pr.top) >= 1
+      )
+    }
+    const recheck = (): void => {
+      const stage = playerVideoEl
+      if (!stage) return
+      const pr = stage.getBoundingClientRect()
+      if (pr.width < 2 || pr.height < 2) return
+      // Full-window modals: hide the surface for as long as one overlaps
+      // the player. While hidden everything is live — no bitmap overlay, no
+      // snapshots (a stale composited dialog must not survive the duck).
+      const hide = Array.from(document.querySelectorAll<HTMLElement>(fullSelector)).some((el) =>
+        intersectsPlayer(el, pr),
+      )
+      if (hide !== suppressed) {
+        suppressed = hide
+        setVisible(!suppressed)
+        if (suppressed && shown) {
+          shown = false
+          pushed = ''
+          sendOsd(['ks-page', 'hide'])
+        }
+      }
+      if (suppressed) return
+      // Snapshotted strips: union of their overlap with the video rect.
+      // Each element's clamped rect also becomes a KEEP rect — the bitmap
+      // is masked to exactly these, so the union crop carries no dark
+      // empty-player padding between or around them.
+      let x1 = Infinity
+      let y1 = Infinity
+      let x2 = -Infinity
+      let y2 = -Infinity
+      const keeps: number[] = []
+      for (const el of document.querySelectorAll<HTMLElement>(snapSelector)) {
+        if (!intersectsPlayer(el, pr)) continue
+        const r = el.getBoundingClientRect()
+        const ax = Math.max(r.left, pr.left)
+        const ay = Math.max(r.top, pr.top)
+        const bx = Math.min(r.right, pr.right)
+        const by = Math.min(r.bottom, pr.bottom)
+        keeps.push(Math.round(ax), Math.round(ay), Math.round(bx - ax), Math.round(by - ay))
+        x1 = Math.min(x1, ax)
+        y1 = Math.min(y1, ay)
+        x2 = Math.max(x2, bx)
+        y2 = Math.max(y2, by)
+      }
+      if (x2 <= x1) {
+        if (shown) {
+          shown = false
+          pushed = ''
+          sendOsd(['ks-page', 'hide'])
+        }
+        return
+      }
+      shown = true
+      pushedKeeps = keeps
+      // Window-space box drives the snapshot crop + the dedupe key;
+      // fractions of the video rect drive the OSD geometry.
+      const key = `${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)},${Math.round(pr.width)}x${Math.round(pr.height)}`
+      if (key === pushed) return
+      pushed = key
+      sendOsd([
+        'ks-page',
+        'show',
+        ((x1 - pr.left) / pr.width).toFixed(4),
+        ((y1 - pr.top) / pr.height).toFixed(4),
+        ((x2 - x1) / pr.width).toFixed(4),
+        ((y2 - y1) / pr.height).toFixed(4),
+      ])
+      snapshot(x1, y1, x2 - x1, y2 - y1, keeps)
+      // Settle burst: the one-shot above can catch an element mid-reveal
+      // (tooltips fade in over ~120 ms) — a frozen half-faded frame reads
+      // as a darker tooltip. A few cheap re-snapshots while the reveal
+      // settles; cancelled as soon as the geometry moves.
+      clearSettle()
+      for (const delay of [150, 350, 700]) {
+        settleTimers.push(
+          setTimeout(() => {
+            if (shown && pushed === key) snapshotPushed()
+          }, delay),
+        )
+      }
+    }
+    recheck()
+    const isOverlayNode = (n: Node): boolean =>
+      n instanceof HTMLElement && (n.matches(selector) || n.querySelector(selector) !== null)
+    const mo = new MutationObserver((muts) => {
+      // Cheap gate — chat mutates constantly; only re-check when a mutation
+      // actually added/removed an overlay subtree (a removal needs the full
+      // re-check because another overlay may still be open). The poll below
+      // catches attribute-only changes (tooltips moving, animations).
+      let relevant = false
+      for (const m of muts) {
+        for (const n of m.addedNodes) {
+          if (isOverlayNode(n)) {
+            relevant = true
+            break
+          }
+        }
+        if (relevant) break
+        for (const n of m.removedNodes) {
+          if (isOverlayNode(n)) {
+            relevant = true
+            break
+          }
+        }
+      }
+      if (relevant) recheck()
+    })
+    mo.observe(document.body, { childList: true, subtree: true })
+    window.addEventListener('resize', recheck)
+    // Interaction refresh: clicks/keys/scrolls INSIDE a snapshotted strip
+    // (notification-menu toggles, banner buttons, the menu's list scroll)
+    // change pixels without moving geometry — one-shot re-snapshots, rate
+    // limited, gated on the event target actually being in the strip.
+    const onSnapInteract = (ev: Event): void => {
+      if (!shown || !pushed) return
+      if (!(ev.target instanceof Element) || !ev.target.closest(snapSelector)) return
+      const now = performance.now()
+      if (now - lastInteractSnap < 150) return
+      lastInteractSnap = now
+      snapshotPushed()
+    }
+    const interactTypes = ['pointerdown', 'keyup', 'scroll', 'wheel'] as const
+    for (const ty of interactTypes) document.addEventListener(ty, onSnapInteract, { capture: true, passive: true })
+    // Fast poll: catches class-only changes (tooltips revealing/moving),
+    // in-flight transitions, and dialog open/close the MutationObserver
+    // can't see (elements re-used, attributes only). Deliberately NO raw
+    // scroll GEOMETRY listener (every selector element is position:fixed,
+    // page scrolling never moves them, and chat autoscroll would storm the
+    // recheck) and NO periodic pixel refresh (one-shot + settle burst +
+    // interaction refresh are all these strips ever need).
+    const geoIv = setInterval(recheck, 80)
+    return () => {
+      mo.disconnect()
+      window.removeEventListener('resize', recheck)
+      for (const ty of interactTypes) document.removeEventListener(ty, onSnapInteract, { capture: true })
+      clearInterval(geoIv)
+      clearSettle()
+      // Leaving native mode must not leave a hidden surface or a stale
+      // overlay composited.
+      if (suppressed) setVisible(true)
+      if (shown) sendOsd(['ks-page', 'hide'])
+    }
+  })
+
+  // ---- Native OSD (ks-osc) wiring --------------------------------------------
+  // The in-video controls are mpv's OSD (src-tauri/src/mpv/ks-osc.lua): the
+  // app feeds it data over mpv_script_msg and relays its button actions back
+  // onto the same handlers the hls.js overlay controls use.
+  const sendOsd = (args: string[]): void => {
+    void invoke('mpv_script_msg', { args }).catch(() => {})
+  }
+
+  function onNativeOsdAction(name: string): void {
+    if (name === 'stop') onStopClick()
+    else if (name === 'pip') void pipController.toggle()
+    else if (name === 'mpv') onMpvClick()
+    else if (name === 'theater') settings.toggleTheaterMode()
+    else if (name === 'fullscreen') toggleVideoFullscreen()
+    else if (name.startsWith('quality:')) {
+      const label = name.slice('quality:'.length)
+      // Reverse-map against the SAME list the OSC was fed (it can contain
+      // real rungs outside the static vocabulary, e.g. 936p60) — the mpv
+      // variant, so audio_only (never offered) can't match either.
+      const id = mpvQualities(playback.kind === 'live' ? availableQualities : null).find(
+        (qid) => qualityLabel(qid) === label,
+      )
+      if (id) void changeQuality(id)
+    }
+  }
+
+  $effect(() => {
+    if (!nativeVideoActive) return
+    let un: (() => void) | undefined
+    void listen<MpvActionEvent>('mpv://action', (e) => {
+      // Engine 0 = the single player's OSD; the tile engines' OSDs are
+      // disabled (their controls are the HTML strips).
+      if (e.payload.id !== 0) return
+      onNativeOsdAction(e.payload.action)
+    })
+      .then((u) => {
+        un = u
+      })
+      .catch(() => {})
+    return () => un?.()
+  })
+
+  // The info block as a WEBVIEW-RENDERED BITMAP: libass cannot select
+  // color-emoji fonts (its fontconfig provider filters outline-only fonts),
+  // but the webview's font stack renders them natively — so the whole
+  // top-left block (avatar + title + "game · N viewers") is rasterized here
+  // at the OSD's device-px metrics and composited over the video via the
+  // same overlay path as the storyboard thumbnails (ks-infoblock / overlay
+  // id 4). Without the bitmap nothing draws in the top-left.
+  //
+  // THEATER-ONLY + LIVE-ONLY, exactly mirroring the hls.js overlay's
+  // .theater-info (PlayerControls): non-theater mode shows the stream info
+  // BELOW the video (.stream-info), and VOD/clip titles have no in-video
+  // info bar on either engine.
+  $effect(() => {
+    if (!nativeVideoActive) return
+    const st = activeStatus
+    const showInfo = settings.theaterMode && st.state === 'live'
+    const title = showInfo ? st.title : ''
+    let extra = ''
+    if (showInfo) {
+      const bits = [st.game]
+      if (st.viewers > 0) bits.push(`${formatCompact(st.viewers)} ${t('viewers')}`)
+      extra = bits.filter(Boolean).join(' · ')
+    }
+    const url = showInfo ? st.avatarUrl : undefined
+    void settings.theme
+    void settings.uiScale
+    const cs = getComputedStyle(document.documentElement)
+    const text = cs.getPropertyValue('--text-primary').trim()
+    const dim = cs.getPropertyValue('--text-secondary').trim()
+    const dpr = window.devicePixelRatio || 1
+    let cancelled = false
+    const push = (): void => {
+      const rect = playerVideoEl?.getBoundingClientRect() ?? null
+      const hOsd = rect ? Math.round(rect.height * dpr) : 0
+      if ((!title && !extra) || hOsd < 2) {
+        sendOsd(['ks-infoblock', '0'])
+        return
+      }
+      // Mirror ks-osc.lua's scale math exactly (its s drives the text sizes
+      // this bitmap replaces).
+      const s = Math.min(Math.max((hOsd / 720) * settings.uiScale, 0.6), 3.0)
+      const maxWidth = rect ? Math.round(rect.width * dpr - 28 * s) : 800
+      void renderInfoBlock({
+        title: title ?? '',
+        extra,
+        avatarUrl: url,
+        text,
+        dim,
+        s,
+        uiScale: settings.uiScale,
+        dpr,
+        maxWidth,
+      })
+        .then((bmp) => {
+          if (cancelled) return
+          if (!bmp) {
+            sendOsd(['ks-infoblock', '0'])
+            return
+          }
+          void invoke('mpv_set_bitmap', { key: 'infoblock', b64: bmp.b64, w: bmp.w, h: bmp.h }).catch(() => {})
+          sendOsd(['ks-infoblock', '1', String(bmp.w), String(bmp.h)])
+        })
+        .catch(() => {
+          if (!cancelled) sendOsd(['ks-infoblock', '0'])
+        })
+    }
+    push()
+    const onResize = (): void => push()
+    window.addEventListener('resize', onResize)
+    return () => {
+      cancelled = true
+      window.removeEventListener('resize', onResize)
+    }
+  })
+
+  // Theme colors (the OSD can't read CSS vars; send the resolved ones).
+  $effect(() => {
+    if (!nativeVideoActive) return
+    void settings.theme
+    const cs = getComputedStyle(document.documentElement)
+    const v = (name: string): string => cs.getPropertyValue(name).trim().replace(/^#/, '')
+    sendOsd([
+      'ks-theme',
+      v('--bg-app'),
+      v('--accent'),
+      v('--text-primary'),
+      v('--text-secondary'),
+      v('--border'),
+      v('--live'),
+    ])
+  })
+
+  // UI-scale following: the OSD scales with the VIDEO height; the app's HTML
+  // scales with uiScale — send the factor so the two stay in step.
+  $effect(() => {
+    if (!nativeVideoActive) return
+    sendOsd(['ks-scale', String(settings.uiScale)])
+  })
+
+  // Live/VOD mode: LIVE hides the OSC's seek strip + time/LIVE block (mpv
+  // reports an HLS pseudo-duration even on live streams, which would draw a
+  // jumpable seek bar). VODs/clips keep it.
+  $effect(() => {
+    if (!nativeVideoActive) return
+    sendOsd(['ks-mode', playback.kind === 'live' ? 'live' : 'vod'])
+  })
+
+  // Quality list (live only — VODs/clips have no quality menu; an empty list
+  // hides the OSD gear). Labels re-resolve on language switches.
+  $effect(() => {
+    if (!nativeVideoActive) return
+    if (playback.kind !== 'live') {
+      sendOsd(['ks-qualities', t('quality'), ''])
+      return
+    }
+    void quality
+    // This effect only runs while the native engine is up (nativeVideoActive),
+    // so the list is always the mpv variant — audio_only never offered (no
+    // OSD canvas in audio-only → no way back; see mpvQualities).
+    sendOsd([
+      'ks-qualities',
+      t('quality'),
+      qualityLabel(quality),
+      ...mpvQualities(playback.kind === 'live' ? availableQualities : null).map((qid) => qualityLabel(qid)),
+    ])
+  })
+
+  // VOD scrubber extras on the OSD: chapter marks + muted segments (pure
+  // data), and the storyboard geometry for the hover preview. vodCtl clears
+  // all three for live/clip playback, which sends the empty variants.
+  $effect(() => {
+    if (!nativeVideoActive) return
+    const chapters = vodCtl.chapters
+    const args = ['ks-chapters', String(chapters.length)]
+    for (const c of chapters) args.push(String(Math.round(c.startSec)), c.label)
+    sendOsd(args)
+  })
+
+  $effect(() => {
+    if (!nativeVideoActive) return
+    const spans = vodCtl.mutedSpans
+    const args = ['ks-muted', String(spans.length)]
+    for (const sp of spans) args.push(String(Math.round(sp.startSec)), String(Math.round(sp.endSec)))
+    sendOsd(args)
+  })
+
+  $effect(() => {
+    if (!nativeVideoActive) return
+    const sb = vodCtl.storyboard
+    if (!sb) {
+      sendOsd(['ks-storyboard', '0'])
+      return
+    }
+    sendOsd([
+      'ks-storyboard',
+      String(sb.intervalSec),
+      String(sb.count),
+      String(sb.cols),
+      String(sb.rows),
+      String(sb.imageUrls.length),
+      String(sb.width),
+      String(sb.height),
+    ])
+    // Strip pixels: decode through the ksvod proxy (CDN sends no CORS) onto a
+    // 160px-tile grid and upload once per VOD; Rust crops tiles per hover.
+    const tileW = 160
+    const tileH = Math.round((160 * sb.height) / sb.width)
+    let cancelled = false
+    sb.imageUrls.forEach((url, i) => {
+      void stripBitmap(toKsvodProxyUrl(url, isWindows), sb.cols, sb.rows, tileW, tileH).then((bmp) => {
+        if (cancelled || !bmp) return
+        void invoke('mpv_set_bitmap', {
+          key: `thumb:${i}`,
+          b64: bmp.b64,
+          w: bmp.w,
+          h: bmp.h,
+          cols: sb.cols,
+          rows: sb.rows,
+        }).catch(() => {})
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  })
+
+  // Toggle-button highlight states.
+  $effect(() => {
+    if (!nativeVideoActive) return
+    const pip = pipController.isOpen
+    const theater = settings.theaterMode
+    const fs = isFullscreen
+    sendOsd(['ks-pip', pip ? '1' : '0'])
+    sendOsd(['ks-theater', theater ? '1' : '0'])
+    sendOsd(['ks-fullscreen', fs ? '1' : '0'])
+  })
+
+  // With PlayerControls unmounted in native mode (the OSD owns the
+  // controls), the app hydrates mpv's audio state from settings at engine
+  // hand-off and persists backend-reported volume/mute changes itself —
+  // exactly what PlayerControls' onVol did for the element. (PiP and the
+  // native engine are mutually exclusive, so no PiP mute guard is needed.)
+  $effect(() => {
+    if (!nativeVideoActive) return
+    const backend = videoBackend
+    if (!backend) return
+    backend.setVolume(settings.volume)
+    backend.setMuted(settings.muted)
+    return backend.on('volumechange', () => {
+      settings.setVolume(backend.volume)
+      settings.setMuted(backend.muted)
+    })
+  })
   // ---- VOD chat replay ----------------------------------------------------
   // Past-broadcast chat, synced to the playhead. Each replay comment is
   // normalized to the same ChatMessage shape the live renderer uses, so there
@@ -688,8 +1489,8 @@
         maxOffset: page.maxOffset,
       }
     },
-    getPlayhead: () => (videoEl ? videoEl.currentTime : 0),
-    getPaused: () => playback.kind !== 'vod' || !videoEl || videoEl.paused,
+    getPlayhead: () => (videoBackend ? videoBackend.currentTime : 0),
+    getPaused: () => playback.kind !== 'vod' || !videoBackend || videoBackend.paused,
     getChatVisible: () => settings.chatVisible,
   })
 
@@ -842,9 +1643,11 @@
     // we are stopping the main player *because* PiP just took over — then the
     // PiP stream must keep playing).
     if (!keepPip) pipController.clearStream()
-    // Generation bump, timer cancels, pending-attach cancel, hls destroy and
-    // the <video> reset all live in the shared session now.
+    // Generation bump, timer cancels, pending-attach cancel, hls destroy,
+    // mpv stop (hides the native surface) and the <video> reset all live in
+    // the shared session now.
     playbackSession.teardown(videoEl)
+    nativeVideoActive = false
   }
 
   // Centralized video-only disconnect: tears down HLS + the <video> element and
@@ -858,6 +1661,8 @@
     vodChat.stop()
     playerStatus = 'idle'
     playerError = ''
+    // Re-joining the same channel later must re-probe its variant list.
+    qualitiesProbedFor = ''
   }
 
   // (The resolve_stream transport is the shared resolveLiveStream in
@@ -911,8 +1716,26 @@
     url: string,
     generation: number,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    if (!videoEl) return { ok: false, error: 'no video element' }
     if (!isCurrentStream(generation, channel, q)) return { ok: false, error: 'stale stream request' }
+
+    // Native engine: the RAW resolved URL — mpv fetches it itself (no
+    // browser, no CORS, no ksvod proxy). A failed load falls through to the
+    // HTML path for THIS item (toast + toggle stays on).
+    const mpv = mpvSelected ? mpvBackend : null
+    if (mpv) {
+      const attach = await playbackSession.attachMpv(mpv, {
+        url,
+        kind: 'live',
+        hwdec: settings.mpvHwdec,
+      })
+      if (attach.ok) {
+        nativeVideoActive = true
+        return attach
+      }
+      showNotifToast(t('toast_mpvEngineFailed', { error: attach.error }))
+    }
+
+    if (!videoEl) return { ok: false, error: 'no video element' }
 
     // On Windows the live manifest must go through the ksvod proxy (Chromium
     // WebView2 enforces CORS on the real `http://tauri.localhost` origin and
@@ -920,8 +1743,7 @@
     // manifestLoadError). Linux keeps the direct fetch (lower latency; WebKit
     // allows it). macOS (WKWebView, `tauri://localhost`) shares WebKit's CORS
     // model with WebKitGTK, so it falls into this same non-Windows / direct-
-    // fetch branch by default — UNVERIFIED on real Mac hardware from this
-    // headless build env. If live playback fails on macOS with a
+    // fetch branch by default. If live playback ever fails on macOS with a
     // manifestLoadError, the fix is to also route macOS through the proxy:
     // `(isWindows || os === 'macos')` here and at the PiP mirror below. The
     // ksvod scheme FORM is unaffected (macOS already uses `ksvod://localhost/`,
@@ -963,8 +1785,31 @@
   async function startStream(channel: string): Promise<void> {
     const savedQ = settings.getQualityFor(channel)
     quality = savedQ ?? pendingQuality ?? quality
+    // The native engine never offers audio_only (no OSD canvas in audio-only
+    // → no in-video way back); a preference saved while on the hls engine
+    // must not strand an mpv load in it. Storage is left untouched so
+    // switching back to hls restores it.
+    if (mpvSelected && quality === 'audio_only') quality = 'best'
     pendingQuality = null
     await loadStream(channel, quality)
+  }
+
+  /** Ask streamlink which variants this channel actually offers right now
+   *  (`stream_qualities` — a `--json` listing probe). Fire-and-forget: until
+   *  it answers (or if it fails/offline) the menu shows the full vocabulary,
+   *  so the probe can only sharpen the menu, never break it. The result is
+   *  dropped if the user already moved on to another channel. */
+  async function refreshAvailableQualities(channel: string): Promise<void> {
+    try {
+      const r = (await invoke('stream_qualities', {
+        channel,
+        lowLatency: settings.lowLatency,
+      })) as unknown
+      if (channelJoined !== channel) return
+      availableQualities = Array.isArray(r) ? (r as string[]) : null
+    } catch {
+      if (channelJoined === channel) availableQualities = null
+    }
   }
 
   async function loadStream(channel: string, q: string): Promise<void> {
@@ -975,6 +1820,13 @@
     // A new stream load implies the user wants playback; clear any stale
     // pause-intent from the previous channel so stalls on the new one recover.
     playbackSession.userPaused = false
+    // Probe the channel's real variant list once per join (not on quality
+    // switches of the same channel). Reset to unknown while it runs.
+    if (qualitiesProbedFor !== channel) {
+      qualitiesProbedFor = channel
+      availableQualities = null
+      void refreshAvailableQualities(channel)
+    }
 
     const resolved = await resolveLiveStream(channel, q, settings.lowLatency)
     if (!isCurrentStream(generation, channel, q)) return
@@ -994,6 +1846,9 @@
           quality = 'best'
           if (channelJoined) settings.setQualityFor(channelJoined, 'best')
           showNotifToast(t('toast_qualityFallback', { q, source: t('pc_sourceQuality') }))
+          // The probe list just proved stale (it offered a variant that
+          // vanished) — re-probe so the menu stops offering it.
+          void refreshAvailableQualities(channel)
           await loadStream(channel, 'best')
           return
         }
@@ -1164,6 +2019,13 @@
     for (const m of members) {
       tileStore.addOrReplace(m.login, 'best', settings.volume)
     }
+    // Every addOrReplace moves the audio authority to the newly added tile,
+    // so after the loop the LAST member would be the audible one. The
+    // session was opened from THIS channel's status bar — put the authority
+    // (and the chat pointer) back on the first tile (the host; members are
+    // sorted leader-first behind it). Exactly ONE stream starts audible.
+    const first = tileStore.tiles[0]
+    if (first) tileStore.focusTile(first.id)
   }
 
   // Leave multi-view. Restores the audio-authority tile's channel as the single
@@ -1178,6 +2040,7 @@
     multiView = false
     tileStore.exitAll()
     authorityTileVideo = null
+    authorityTileBackend = null
     if (ch) selectChannel(ch)
   }
 
@@ -1186,11 +2049,8 @@
     tileStore.onShouldExit = () => exitMultiView()
   })
 
-  // The <video> the keyboard shortcuts target: the authority tile's in
-  // multi-view, the single player otherwise.
-  function activeVideoEl(): HTMLVideoElement | null | undefined {
-    return multiView ? authorityTileVideo : videoEl
-  }
+  // (Keyboard shortcuts target the authority tile's element in multi-view and
+  // the playback backend otherwise — see toggleVideoPlay/seekVideoBy/nudgeVolume.)
 
   // ---- VOD / clip playback -------------------------------------------------
   // A VOD/clip has no live chat, so entering playback STOPS the IRC socket but
@@ -1253,7 +2113,7 @@
   // VOD resume / save / restore / extras all live in vodCtl — the
   // VodPlaybackController near the top of this file.)
 
-  async function loadVod(videoId: string, q: string): Promise<void> {
+  async function loadVod(videoId: string, q: string, startAt?: number): Promise<void> {
     playerError = ''
     playerStatus = 'resolving'
     type ResolveRaw = { ok?: boolean; url?: string | null; error?: string | null }
@@ -1272,6 +2132,34 @@
       return
     }
     playerStatus = 'loading'
+    // Native engine: the RAW cloudfront/ttvnw URL (no proxy — mpv fetches it
+    // itself) with the resume position as mpv's `start` load option. A fresh
+    // load without an explicit startAt resumes from the saved checkpoint,
+    // mirroring the HTML path's vodCtl.restore.
+    const mpv = mpvSelected ? mpvBackend : null
+    if (mpv) {
+      const resume = startAt ?? vodPositions.get(videoId)?.position ?? 0
+      const attach = await playbackSession.attachMpv(mpv, {
+        url: raw.url,
+        kind: 'vod',
+        hwdec: settings.mpvHwdec,
+        startAt: resume > 0.5 ? resume : undefined,
+      })
+      if (attach.ok) {
+        playerStatus = 'playing'
+        nativeVideoActive = true
+        if (resume >= 30) vodCtl.showResumeBar(videoId, resume)
+        if (channelJoined)
+          pipController.setStream({
+            url: toKsvodProxyUrl(raw.url, isWindows),
+            channel: channelJoined,
+            quality: q,
+            isLive: false,
+          })
+        return
+      }
+      showNotifToast(t('toast_mpvEngineFailed', { error: attach.error }))
+    }
     // Rewrite the cloudfront/ttvnw URL through the ksvod proxy: the VOD CDN
     // doesn't send CORS headers so hls.js's XHR is blocked. The ksvod scheme
     // is handled by a Rust URI-scheme protocol (vod_proxy.rs) that fetches via
@@ -1319,6 +2207,7 @@
     if (!channelJoined) return
     vodChat.stop()
     vodCtl.clearExtras()
+    lastPlayedClip = clip
     playback = {
       kind: 'clip',
       slug: clip.slug,
@@ -1348,6 +2237,31 @@
       return
     }
     playerStatus = 'loading'
+    // Native engine: the resolved MP4 URL directly.
+    const mpv = mpvSelected ? mpvBackend : null
+    if (mpv) {
+      const attach = await playbackSession.attachMpv(mpv, {
+        url: raw.url,
+        kind: 'clip',
+        hwdec: settings.mpvHwdec,
+      })
+      if (attach.ok) {
+        playerStatus = 'playing'
+        nativeVideoActive = true
+        // isLive is a literal false here by necessity: playClip flow-narrows
+        // `playback` to the clip variant (same as the HTML path below).
+        if (channelJoined)
+          pipController.setStream({
+            url: raw.url,
+            channel: channelJoined,
+            quality: 'best',
+            mediaKind: 'mp4',
+            isLive: false,
+          })
+        return
+      }
+      showNotifToast(t('toast_mpvEngineFailed', { error: attach.error }))
+    }
     const attach = await attachClipMp4(raw.url)
     if (attach.ok) {
       playerStatus = 'playing'
@@ -1935,6 +2849,7 @@
   class:app--sidebar-icons={effectiveSidebarMode === 'icons'}
   class:app--sidebar-hidden={effectiveSidebarMode === 'hidden'}
   class:app--fullscreen={isFullscreen}
+  class:app--native-video={nativeVideoActive}
 >
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <!-- Double-click on empty title-bar space toggles maximize (mouse-only
@@ -2008,7 +2923,6 @@
           class="layout-toggle"
           onclick={toggleStacked}
           aria-label={stacked ? t('tb_switchSideBySide') : t('tb_stackChat')}
-          use:tooltip={stacked ? t('tb_switchSideBySide') : t('tb_stackChat')}
         >
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
             {#if stacked}
@@ -2028,7 +2942,6 @@
         onclick={toggleMultiView}
         aria-label={multiView ? t('mv_exitMultiView') : t('mv_multiView')}
         aria-pressed={multiView}
-        use:tooltip={multiView ? t('mv_exitMultiView') : t('mv_multiView')}
       >
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
           <rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1" fill="currentColor" />
@@ -2118,8 +3031,12 @@
       <MultiView
         {isWindows}
         {chatSize}
+        {mpvAvailable}
         onAuthorityVideo={(el) => {
           authorityTileVideo = el
+        }}
+        onAuthorityBackend={(b) => {
+          authorityTileBackend = b
         }}
       />
     {:else}
@@ -2127,47 +3044,73 @@
         <div class="video-pane">
           <div class="video-scroll" bind:this={videoScrollEl}>
             <div class="player-stage">
-              {#if playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)}
-                <div class="playback-banner">
+              <!-- The controls bar renders in ONE of two places: overlaid on
+                   the video (hls.js path), or in the strip BELOW the video
+                   (native mpv engine — the video surface covers the player
+                   rect, so page content can't overlay it). Same component,
+                   one definition, rendered per mode. -->
+              {#snippet controlsBar(overlayMode: boolean)}
+                <PlayerControls
+                  video={videoEl}
+                  backend={videoBackend}
+                  visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')}
+                  {quality}
+                  qualities={playback.kind === 'live' ? effectiveQualities(availableQualities) : undefined}
+                  onqualitychange={(q) => void changeQuality(q)}
+                  onmpv={onMpvClick}
+                  onstop={onStopClick}
+                  onplayintent={(p) => {
+                    playbackSession.userPaused = !p
+                  }}
+                  oncontrolsvisible={(v) => {
+                    controlsVisible = v
+                  }}
+                  {activeStatus}
+                  {isFullscreen}
+                  ontogglefullscreen={toggleVideoFullscreen}
+                  live={playback.kind === 'live'}
+                  chapters={vodCtl.chapters}
+                  mutedSpans={vodCtl.mutedSpans}
+                  storyboard={vodCtl.storyboard}
+                  overlay={overlayMode}
+                />
+              {/snippet}
+              {#snippet playbackBanner(strip: boolean, title: string)}
+                <div class="playback-banner" class:playback-banner--strip={strip}>
                   <button type="button" class="playback-back" onclick={backToLive}>{t('backToLive')}</button>
-                  <span class="playback-title">{playback.title}</span>
+                  <span class="playback-title">{title}</span>
                 </div>
+              {/snippet}
+              {#snippet resumeBar(strip: boolean)}
+                <div class="resume-bar" class:resume-bar--strip={strip} role="status">
+                  <span class="resume-bar-text"
+                    >{t('player_resumedFrom', { time: formatVodTime(vodCtl.resumeBar!.position) })}</span
+                  >
+                  <button type="button" class="resume-bar-btn" onclick={() => vodCtl.restart(currentVodId())}
+                    >{t('player_restart')}</button
+                  >
+                  <button
+                    type="button"
+                    class="resume-bar-close"
+                    onclick={() => vodCtl.dismissResumeBar()}
+                    aria-label={t('player_dismissResume')}>×</button
+                  >
+                </div>
+              {/snippet}
+              {#if !nativeVideoActive && playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)}
+                {@render playbackBanner(false, playback.title)}
               {/if}
               <div class="player-fold">
-                <section class="player" class:player--active={playerActive}>
+                <!-- The .player section is the native video RECT (the rect
+                     pusher tracks it): in native mode mpv's surface covers
+                     exactly this 16:9 area — nothing page-rendered may
+                     overlay it. -->
+                <section class="player" class:player--active={playerActive} bind:this={playerVideoEl}>
                   {#if playerActive}
-                    <video
-                      bind:this={videoEl}
-                      class="video"
-                      autoplay
-                      muted
-                      playsinline
-                      onwaiting={onVideoWaiting}
-                      onplaying={onVideoPlaying}
-                      onpause={onVideoPause}
-                      ontimeupdate={onVideoTimeUpdate}
-                      onseeking={onVideoSeeking}
-                    ></video>
-                    <PlayerControls
-                      video={videoEl}
-                      visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')}
-                      {quality}
-                      onqualitychange={(q) => void changeQuality(q)}
-                      onmpv={onMpvClick}
-                      onstop={onStopClick}
-                      onplayintent={(p) => {
-                        playbackSession.userPaused = !p
-                      }}
-                      oncontrolsvisible={(v) => {
-                        controlsVisible = v
-                      }}
-                      {activeStatus}
-                      {isFullscreen}
-                      ontogglefullscreen={toggleVideoFullscreen}
-                      chapters={vodCtl.chapters}
-                      mutedSpans={vodCtl.mutedSpans}
-                      storyboard={vodCtl.storyboard}
-                    />
+                    <video bind:this={videoEl} class="video" autoplay muted playsinline></video>
+                    {#if !nativeVideoActive}
+                      {@render controlsBar(true)}
+                    {/if}
                     {#if showPlayerOverlay}
                       <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
                         {#if isPlayerBusy}
@@ -2194,26 +3137,30 @@
                         >
                       </div>
                     {/if}
-                    {#if vodCtl.resumeBar}
-                      <div class="resume-bar" role="status">
-                        <span class="resume-bar-text"
-                          >{t('player_resumedFrom', { time: formatVodTime(vodCtl.resumeBar.position) })}</span
-                        >
-                        <button type="button" class="resume-bar-btn" onclick={() => vodCtl.restart(currentVodId())}
-                          >{t('player_restart')}</button
-                        >
-                        <button
-                          type="button"
-                          class="resume-bar-close"
-                          onclick={() => vodCtl.dismissResumeBar()}
-                          aria-label={t('player_dismissResume')}>×</button
-                        >
-                      </div>
+                    {#if vodCtl.resumeBar && !nativeVideoActive}
+                      {@render resumeBar(false)}
                     {/if}
                   {:else}
                     <div class="player-placeholder">{t('player_placeholder')}</div>
                   {/if}
                 </section>
+                {#if nativeVideoActive && playerActive && ((playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)) || vodCtl.resumeBar)}
+                  <!-- Native-engine banners: the CONTROLS themselves are
+                       mpv's OSD now (ks-osc.lua, fed + driven by the native
+                       OSD effects below) — only the two banners with no OSD
+                       equivalent remain below the video. The page's loading /
+                       error overlays stay in .player: the native surface is
+                       hidden until the first frame presents, so they render
+                       uncovered. -->
+                  <div class="native-strip">
+                    {#if playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)}
+                      {@render playbackBanner(true, playback.title)}
+                    {/if}
+                    {#if vodCtl.resumeBar}
+                      {@render resumeBar(true)}
+                    {/if}
+                  </div>
+                {/if}
               </div>
               {#if !settings.theaterMode}
                 <div class="stream-info">
@@ -2527,7 +3474,7 @@
   <div class="zoom-probe" bind:this={probeEl} aria-hidden="true"></div>
 
   {#if aboutOpen}
-    <AboutModal onclose={closeAbout} onchangelog={openChangelogFromAbout} />
+    <AboutModal onclose={closeAbout} />
   {/if}
 
   {#if shortcutsHelpOpen}
@@ -3090,6 +4037,50 @@
     background: #000;
   }
 
+  /* Experimental native video engine (mpv-embed builds): the native video
+     surface sits ABOVE the (fully opaque) page and covers exactly the .player
+     rect — input-transparent, so clicks/wheel/dblclick over the video still
+     land on the (invisible, hit-testable) <video> below it and the existing
+     HTML handlers keep working. NO transparency anywhere: WebKitGTK cannot
+     render transparent regions correctly on this stack (its webview surface
+     never clears between frames — smears, accumulating tints, laggy holes;
+     every working web-UI-over-mpv app uses Chromium instead). The in-video
+     CONTROLS are mpv's OSD (ks-osc.lua); only the "Back to live" banner and
+     the VOD resume bar render BELOW the video in .native-strip (see the
+     markup). The page's loading/error overlays stay inside .player — the
+     native surface stays hidden until the first frame presents. */
+  .app--native-video .video {
+    opacity: 0;
+  }
+  /* On Windows/macOS the native surface sits BELOW the webview (a child
+     HWND / NSView under it) — the page must not paint over the video rect,
+     so the player backdrop goes transparent there too. On Linux this is
+     visually a no-op: the surface is ABOVE the page and the parent behind
+     .player paints the same theme color; before the first frame presents
+     the area falls back to that parent background instead of this one. */
+  .app--native-video .player {
+    background: transparent;
+  }
+  .native-strip {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+  }
+  /* The banner + resume bar become in-flow rows (their overlay CSS is
+     absolute/positioned over the player, which the native surface covers). */
+  .native-strip .playback-banner--strip {
+    position: static;
+    max-width: none;
+    margin: 6px 8px 0;
+    animation: none;
+  }
+  .native-strip .resume-bar--strip {
+    position: static;
+    margin: 6px 8px 0;
+  }
+
   /* Status bar: the bottom flex child of .player-stage (NOT of .video-pane),
      so at scroll 0 it pins to the bottom of the app window — no empty band
      below it when the 16:9 player leaves vertical space free — while
@@ -3395,6 +4386,19 @@
     to {
       opacity: 1;
     }
+  }
+
+  /* Native-engine mode: tooltips are composited over the video as bitmap
+     snapshots. Their 0.92-alpha background blends with whatever the PAGE
+     has behind them (the empty player) before the bitmap lands on the
+     video, and the drop shadow reads as a dark smudge over a bright
+     picture — over the video they must be opaque and shadow-free so the
+     composited half matches the live half. (The notification menu's
+     equivalent override lives in NotifyMenu.svelte — App styles can't
+     reach into child components.) */
+  .app--native-video .global-tooltip {
+    background: var(--bg-panel);
+    box-shadow: none;
   }
 
   /* Hidden probe that measures how position:fixed left/top map to visual

@@ -4,7 +4,8 @@
   "identifier": "dev.kappy.kappastream",
   "build": {
     "frontendDist": "../dist",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npm run build",
+    "beforeBundleCommand": "bash packaging/macos/bundle-libmpv.sh"
   },
   "app": {
     "windows": [
@@ -12,8 +13,6 @@
       "title": "kappastream",
       "width": 1280,
       "height": 800,
-      "minWidth": 960,
-      "minHeight": 600,
       "center": true,
       "resizable": true,
       "visible": false,
@@ -23,6 +22,7 @@
     }
   ],
     "withGlobalTauri": false,
+    "macOSPrivateApi": true,
     "security": {
       "csp": {
         "default-src": ["'self'"],
@@ -101,10 +101,10 @@
         "bundleMediaFramework": true
       },
       "deb": {
-        "depends": ["streamlink"]
+        "depends": ["streamlink", "libmpv2"]
       },
       "rpm": {
-        "depends": ["streamlink"]
+        "depends": ["streamlink", "mpv-libs"]
       }
     },
     "macOS": {

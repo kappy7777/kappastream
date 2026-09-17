@@ -11,6 +11,7 @@ pkgbase = kappastream-git
 	depends = gst-libav
 	depends = gst-plugins-base
 	depends = gst-plugins-good
+	depends = mpv
 	depends = hicolor-icon-theme
 	makedepends = rust
 	makedepends = cargo

@@ -361,10 +361,16 @@ export function composeUsernoticeFallback(msgId: string, tags: Record<string, st
 // The individually toggleable USERNOTICE groups (Settings → Chat → Features).
 // Subs and resubs deliberately share ONE category; the gift-chain ids (gifted
 // subs, community gifts, gift upgrades) share the gift category; unraid rides
-// raids. 'other' collects the exotic ids (bitsbadgetier, viewermilestone,
+// raids. Watch streaks ride their own category: Twitch sends them as
+// msg-id=viewermilestone with msg-param-category=watch-streak ("X watched N
+// consecutive streams and sparked a watch streak!") — the docs' msg-id table
+// also lists a literal watch-streak id, so both are accepted. Classification
+// is msgId-only, so a future NON-streak viewermilestone category would also
+// ride 'streak' — acceptable while watch streaks are that msg-id's only
+// observed use. 'other' collects the remaining exotic ids (bitsbadgetier,
 // future Twitch ids) — classification stays with the message; only the
 // PRESENTATION is gated (see isNoticeVisible).
-export type UsernoticeCategory = 'sub' | 'gift' | 'raid' | 'announcement' | 'other'
+export type UsernoticeCategory = 'sub' | 'gift' | 'raid' | 'announcement' | 'streak' | 'other'
 
 export function usernoticeCategory(msgId: string): UsernoticeCategory {
   switch (msgId) {
@@ -381,6 +387,9 @@ export function usernoticeCategory(msgId: string): UsernoticeCategory {
       return 'raid'
     case 'announcement':
       return 'announcement'
+    case 'viewermilestone':
+    case 'watch-streak':
+      return 'streak'
     default:
       return 'other'
   }
@@ -391,9 +400,10 @@ export interface NoticeToggles {
   gift: boolean
   raid: boolean
   announcement: boolean
+  streak: boolean
 }
 
-// Gate for rendering a stored notice. The four named groups follow their own
+// Gate for rendering a stored notice. The five named groups follow their own
 // toggle; 'other' (unknown/exotic ids) renders when ANY toggle is on — the
 // granular version of "never drop an unknown msg-id while the feature group
 // is enabled".
@@ -407,8 +417,10 @@ export function isNoticeVisible(category: UsernoticeCategory, toggles: NoticeTog
       return toggles.raid
     case 'announcement':
       return toggles.announcement
+    case 'streak':
+      return toggles.streak
     case 'other':
-      return toggles.sub || toggles.gift || toggles.raid || toggles.announcement
+      return toggles.sub || toggles.gift || toggles.raid || toggles.announcement || toggles.streak
   }
 }
 

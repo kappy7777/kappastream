@@ -29,8 +29,34 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # unregistered crates' code is unreferenced and dropped by the linker/LTO, so
 # the shipped AUR binary carries no updater runtime — only the build compiles it.
 [features]
-default = ["updater"]
+default = ["updater", "mpv-embed"]
 updater = []
+# Experimental embedded-libmpv video engine (see src/mpv/mod.rs). IN the
+# default set (owner decision 2026-09-16): every release build ships the
+# engine, so each platform's packaging carries libmpv — deb/rpm declare it
+# in tauri.conf.json (libmpv2 / mpv-libs), the AppImage bundles it via
+# linuxdeploy, Windows ships libmpv-2.dll next to the exe (see
+# tauri.windows.conf.json + packaging/windows/mpv.def), macOS bundles the
+# Homebrew libmpv closure into the .app (packaging/macos/bundle-libmpv.sh
+# as beforeBundleCommand + tauri.macos.conf.json), and the AUR packages
+# depend on Arch's `mpv`. The ONLY libmpv-free builds are
+# `--no-default-features` invocations that don't re-add the feature.
+# Note: libmpv2 needs a rustc newer than the crate's rust-version 1.77.2
+# floor — the MSRV only holds for --no-default-features builds.
+mpv-embed = [
+  "dep:libmpv2",
+  "dep:libloading",
+  "dep:gtk",
+  "dep:glib",
+  "dep:gdk",
+  "dep:gio",
+  "dep:webkit2gtk",
+  "dep:windows-sys",
+  "dep:objc2",
+  "dep:objc2-foundation",
+  "dep:libc",
+  "dep:cairo",
+]
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
@@ -49,7 +75,11 @@ url = "2"
 # DevTools are enabled by default in debug builds (`tauri dev`). The `devtools`
 # Cargo feature is intentionally NOT enabled so production/release builds do
 # not ship the web inspector. See tauri.conf.json window `devtools` field.
-tauri = { version = "2.11.3", features = ["tray-icon"] }
+# `macos-private-api` enables wry's transparent-WKWebView path, required by
+# the mpv-embed engine on macOS (the video NSView sits BELOW the webview —
+# see src/mpv/macos.rs + tauri.macos.conf.json's macOSPrivateApi). Inert on
+# the other targets (the feature is cfg-gated to macOS inside wry).
+tauri = { version = "2.11.3", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-log = "2"
 tauri-plugin-notification = "2.3.3"
 # Single-instance guard: a second launch (e.g. clicking the dock/AppImage
@@ -62,6 +92,48 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-window-state = "2.4.1"
+# Embedded libmpv engine (feature `mpv-embed`). Optional so default builds
+# never compile — let alone link — against libmpv. `render` (in libmpv2's
+# default features) is what lets us draw into a GLArea instead of letting mpv
+# create its own window. libloading dlopens libepoxy at runtime for the GL
+# proc-address bridge on Linux (see src/mpv/ for why not the stale `epoxy`
+# crate). The gtk/glib/webkit2gtk versions deliberately match what
+# tauri/wry already resolve to (check Cargo.lock) so they unify — the surface
+# module manipulates the very widgets wry created.
+libmpv2 = { version = "6", optional = true }
+libloading = { version = "0.8", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", optional = true }
+glib = { version = "0.18", optional = true }
+gdk = { version = "0.18", optional = true }
+# mpv-embed only: the webkit2gtk snapshot API takes a gio cancellable.
+# Version matches what gtk already resolves to so the trees unify.
+gio = { version = "0.18", optional = true }
+webkit2gtk = { version = "2.0", optional = true }
+# mpv-embed only: pin LC_NUMERIC back to "C" before creating the libmpv core
+# (see pin_c_numeric_locale in src/mpv/mod.rs).
+libc = { version = "0.2", optional = true }
+# mpv-embed only: the Linux surface's INPUT-PASS-THROUGH region (the empty
+# cairo::Region handed to the video EventBox's input_shape_combine_region —
+# see src/mpv/linux.rs). Package renamed to the lib name so the code says
+# `cairo::…`; version matches what gtk already resolves to so the trees
+# unify.
+cairo = { version = "0.18", package = "cairo-rs", optional = true }
+
+# UNVERIFIED Windows/macOS mpv surfaces (see src/mpv/win32.rs + macos.rs):
+# raw child-HWND / NSView plumbing. Versions match what tauri already
+# resolves so the dependency trees unify.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_LibraryLoader",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3", optional = true, features = ["NSGeometry"] }
 
 [dev-dependencies]
 # Used in resolve.rs tests to set/unset env vars without mutating the global

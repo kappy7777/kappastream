@@ -6,24 +6,18 @@
   import type { VodChapter, VodMuteSpan } from './gql'
   import { chapterAt, storyboardThumbAt, type Storyboard } from './vod-extras'
   import { isTauri } from '@tauri-apps/api/core'
+  import type { VideoBackend } from './video-backend'
   import { t } from './i18n/index.svelte'
   import { formatCompact } from './format'
   import { nextVolume } from './volume'
-
-  // Quality menu. The resolution IDs (1080p60 …) are technical streamlink args
-  // and are NOT translated; only the two display words ('Source', 'Audio only')
-  // are, resolved reactively via qualityLabel() so a language switch updates
-  // the open menu live (a module-level const label would freeze on first load).
-  const QUALITY_IDS = ['best', '1080p60', '720p60', '720p', '480p', '360p', '160p', 'audio_only'] as const
-
-  function qualityLabel(id: string): string {
-    if (id === 'best') return t('pc_sourceQuality')
-    if (id === 'audio_only') return t('pc_audioOnly')
-    return id
-  }
+  import { QUALITY_IDS, qualityLabel } from './qualities'
 
   interface Props {
     video: HTMLVideoElement | null | undefined
+    /** The playback backend state + transport go through. Mirrors `video`'s
+     *  lifetime (both derive from the same element), so the pair is never
+     *  half-present. */
+    backend: VideoBackend | null | undefined
     visible: boolean
     quality: string
     onqualitychange: (q: string) => void
@@ -47,10 +41,25 @@
     chapters?: VodChapter[]
     mutedSpans?: VodMuteSpan[]
     storyboard?: Storyboard | null
+    // OVERLAY mode (default, the hls.js-style bar floating over the video)
+    // vs STRIP mode (the native mpv engine's below-video bar, where the
+    // video surface covers the player rect): the strip pins the controls
+    // visible (auto-hide would blank a layout bar) and never renders the
+    // theater-info gradient (it would sit under the native video).
+    overlay?: boolean
+    /** LIVE playback: no seek bar at all (owner rule 2026-09-17 — live
+     *  streams never show a scrubber; VODs/clips/highlights always do). */
+    live?: boolean
+    /** Quality ids the current stream ACTUALLY offers (App's
+     *  stream_qualities probe, already intersected + ordered via
+     *  effectiveQualities). Undefined → the full vocabulary (VOD/clip or
+     *  probe unknown). */
+    qualities?: readonly string[]
   }
 
   const {
     video,
+    backend,
     visible,
     quality,
     onqualitychange,
@@ -64,6 +73,9 @@
     chapters = [],
     mutedSpans = [],
     storyboard = null,
+    overlay = true,
+    live = false,
+    qualities = QUALITY_IDS,
   }: Props = $props()
 
   function toggleTheater(): void {
@@ -98,7 +110,13 @@
     controlsShown = true
   }
 
-  function attach(v: HTMLVideoElement): () => void {
+  // Player state comes from the playback BACKEND (see video-backend.ts) —
+  // today the pure-delegation wrapper over the <video> element, so these are
+  // the exact listeners/subscriptions that used to attach to the element
+  // directly. The INPUT surface (hover/move/click + the scroll-wheel volume)
+  // stays on the element itself: that is a property of the visible player
+  // stage, not of whichever engine is playing.
+  function subscribeState(b: VideoBackend): () => void {
     const onPlay = () => {
       playing = true
     }
@@ -106,75 +124,69 @@
       playing = false
     }
     const onTime = () => {
-      currentTime = v.currentTime
+      currentTime = b.currentTime
     }
     const onMeta = () => {
-      duration = v.duration
+      duration = b.duration
     }
+    // NOTE: the element version also listened to `loadedmetadata`; at the
+    // interface level `durationchange` alone covers it — the media spec fires
+    // durationchange whenever the duration first becomes known.
     const onVol = () => {
-      volume = v.volume
-      muted = v.muted
+      volume = b.volume
+      muted = b.muted
       if (volumeHydrated) {
-        settings.setVolume(v.volume)
+        settings.setVolume(b.volume)
         // While the PiP window is open the controller force-mutes this video;
         // don't persist that transient mute (it is restored on PiP close).
         if (!pipController.overridingMainMute) {
-          settings.setMuted(v.muted)
+          settings.setMuted(b.muted)
         }
       }
     }
     const onProgress = () => {
-      try {
-        if (v.buffered.length > 0) {
-          buffered = v.buffered.end(v.buffered.length - 1)
-        }
-      } catch {
-        /* ignore */
-      }
+      buffered = b.buffered
     }
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      const dir = e.deltaY < 0 ? 1 : -1
-      const current = v.muted ? 0 : v.volume
-      const next = nextVolume(current, dir)
-      if (next > 0 && v.muted) v.muted = false
-      v.volume = next
-    }
-    v.addEventListener('play', onPlay)
-    v.addEventListener('pause', onPause)
-    v.addEventListener('timeupdate', onTime)
-    v.addEventListener('loadedmetadata', onMeta)
-    v.addEventListener('durationchange', onMeta)
-    v.addEventListener('volumechange', onVol)
-    v.addEventListener('progress', onProgress)
-    v.addEventListener('wheel', onWheel, { passive: false })
+    const unsubs = [
+      b.on('play', onPlay),
+      b.on('pause', onPause),
+      b.on('timeupdate', onTime),
+      b.on('durationchange', onMeta),
+      b.on('volumechange', onVol),
+      b.on('progress', onProgress),
+    ]
 
-    v.volume = settings.volume
-    v.muted = settings.muted
-    volume = v.volume
-    muted = v.muted
+    // Hydrate the element's audio state from the persisted settings BEFORE
+    // flagging hydration (the writes above fire volumechange, which must not
+    // round-trip back into settings). This deliberately mirrors the order the
+    // old element-attached version used.
+    b.setVolume(settings.volume)
+    b.setMuted(settings.muted)
+    volume = settings.volume
+    muted = settings.muted
     volumeHydrated = true
-    playing = !v.paused
-    duration = isFinite(v.duration) ? v.duration : 0
+    playing = !b.paused
+    duration = isFinite(b.duration) ? b.duration : 0
 
     return () => {
       volumeHydrated = false
-      v.removeEventListener('play', onPlay)
-      v.removeEventListener('pause', onPause)
-      v.removeEventListener('timeupdate', onTime)
-      v.removeEventListener('loadedmetadata', onMeta)
-      v.removeEventListener('durationchange', onMeta)
-      v.removeEventListener('volumechange', onVol)
-      v.removeEventListener('progress', onProgress)
-      v.removeEventListener('wheel', onWheel)
+      for (const u of unsubs) u()
     }
   }
 
   $effect(() => {
-    if (!video) return
-    const detach = attach(video)
+    if (!video || !backend) return
+    const detachState = subscribeState(backend)
 
     const v: HTMLVideoElement = video
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const dir = e.deltaY < 0 ? 1 : -1
+      const current = backend.muted ? 0 : backend.volume
+      const next = nextVolume(current, dir)
+      if (next > 0 && backend.muted) backend.setMuted(false)
+      backend.setVolume(next)
+    }
     const onEnter = () => {
       bumpActivity()
     }
@@ -187,6 +199,7 @@
     const onClick = () => {
       bumpActivity()
     }
+    v.addEventListener('wheel', onWheel, { passive: false })
     v.addEventListener('mouseenter', onEnter)
     v.addEventListener('mouseleave', onLeave)
     v.addEventListener('mousemove', onMove)
@@ -204,7 +217,8 @@
     if (initialW > 0) playerWidth = initialW
 
     return () => {
-      detach()
+      detachState()
+      v.removeEventListener('wheel', onWheel)
       v.removeEventListener('mouseenter', onEnter)
       v.removeEventListener('mouseleave', onLeave)
       v.removeEventListener('mousemove', onMove)
@@ -223,39 +237,40 @@
 
   // The effective visibility the parent should mirror for any sibling that
   // auto-hides with the controls. Recomputed declaratively from the same two
-  // signals the controls render on (`{#if visible && controlsShown}`).
-  const effectiveVisible = $derived(visible && controlsShown)
+  // signals the controls render on (`{#if effectiveVisible}`). In strip mode
+  // (native mpv engine) the bar is layout, not an overlay — always shown.
+  const effectiveVisible = $derived(visible && (overlay ? controlsShown : true))
   $effect(() => {
     oncontrolsvisible?.(effectiveVisible)
   })
 
   function togglePlay(): void {
-    if (!video) return
-    if (video.paused) {
-      void video.play()
+    if (!backend) return
+    if (backend.paused) {
+      void backend.play()
       onplayintent(true)
     } else {
       // Flag the user pause BEFORE calling pause() so App's onVideoPause
       // sees userPaused and doesn't auto-resume a deliberate pause.
       onplayintent(false)
-      video.pause()
+      backend.pause()
     }
   }
 
   function toggleMute(): void {
-    if (!video) return
-    video.muted = !video.muted
+    if (!backend) return
+    backend.setMuted(!backend.muted)
   }
 
   function setVolume(v: number): void {
-    if (!video) return
-    video.volume = v
-    if (v > 0 && video.muted) video.muted = false
+    if (!backend) return
+    backend.setVolume(v)
+    if (v > 0 && backend.muted) backend.setMuted(false)
   }
 
   function seekTo(pos: number): void {
-    if (!video) return
-    video.currentTime = Math.max(0, Math.min(pos, isFinite(duration) ? duration : pos))
+    if (!backend) return
+    backend.seek(Math.max(0, Math.min(pos, isFinite(duration) ? duration : pos)))
   }
 
   function seekFromEvent(e: MouseEvent): void {
@@ -364,7 +379,7 @@
   }
 </script>
 
-{#if settings.theaterMode && activeStatus.state === 'live' && visible && controlsShown}
+{#if overlay && settings.theaterMode && activeStatus.state === 'live' && effectiveVisible}
   <div class="theater-info">
     {#if activeStatus.avatarUrl}
       <img class="theater-info-avatar" src={activeStatus.avatarUrl} alt="" />
@@ -381,58 +396,60 @@
   </div>
 {/if}
 
-{#if visible && controlsShown}
+{#if effectiveVisible}
   <div class="controls" role="presentation" onkeydown={onControlsKey} style="--ctrl-scale: {ctrlScale.toFixed(3)}">
     {#if menuOpen}
       <button type="button" class="menu-backdrop" aria-label={t('pc_closeMenu')} onclick={closeMenu}></button>
     {/if}
-    <div
-      class="progress"
-      bind:this={progressEl}
-      onclick={onProgressClick}
-      onmousemove={onProgressHover}
-      onmouseleave={onProgressLeave}
-      onkeydown={onProgressKey}
-      role="slider"
-      tabindex="0"
-      aria-label={t('pc_seek')}
-      aria-valuemin="0"
-      aria-valuemax={isFinite(duration) ? Math.floor(duration) : 0}
-      aria-valuenow={Math.floor(currentTime)}
-    >
-      <div class="progress-buffered" style="width: {progressPct(buffered)}%"></div>
-      <div class="progress-played" style="width: {progressPct(currentTime)}%"></div>
-      {#if mutedSpans.length > 0}
-        {#each mutedSpans as span (span.startSec)}
-          <div class="progress-muted" style={mutedSpanStyle(span)} aria-hidden="true"></div>
-        {/each}
-      {/if}
-      {#if chapters.length > 0}
-        {#each chapters as chapter (chapter.startSec)}
-          {#if chapter.startSec > 0}
-            <div class="progress-chapter" style="left: {progressPct(chapter.startSec)}%" aria-hidden="true"></div>
-          {/if}
-        {/each}
-      {/if}
-      {#if hoverTime !== null}
-        <div class="progress-hover" style="left: {progressPct(hoverTime)}%">
-          {#if hoverThumb}
-            <div
-              class="progress-hover-thumb"
-              style="width: {storyboard?.width}px; height: {storyboard?.height}px; background-image: url('{hoverThumb.url}'); background-size: {(storyboard?.cols ??
-                1) * (storyboard?.width ?? 0)}px {(storyboard?.rows ?? 1) *
-                (storyboard?.height ?? 0)}px; background-position: {hoverThumb.x}px {hoverThumb.y}px;"
-              aria-hidden="true"
-            ></div>
-          {/if}
-          <div class="progress-hover-bubble">
-            {formatTime(hoverTime)}{#if hoverChapterLabel}<span class="progress-hover-chapter">
-                · {hoverChapterLabel}</span
-              >{/if}
+    {#if !live}
+      <div
+        class="progress"
+        bind:this={progressEl}
+        onclick={onProgressClick}
+        onmousemove={onProgressHover}
+        onmouseleave={onProgressLeave}
+        onkeydown={onProgressKey}
+        role="slider"
+        tabindex="0"
+        aria-label={t('pc_seek')}
+        aria-valuemin="0"
+        aria-valuemax={isFinite(duration) ? Math.floor(duration) : 0}
+        aria-valuenow={Math.floor(currentTime)}
+      >
+        <div class="progress-buffered" style="width: {progressPct(buffered)}%"></div>
+        <div class="progress-played" style="width: {progressPct(currentTime)}%"></div>
+        {#if mutedSpans.length > 0}
+          {#each mutedSpans as span (span.startSec)}
+            <div class="progress-muted" style={mutedSpanStyle(span)} aria-hidden="true"></div>
+          {/each}
+        {/if}
+        {#if chapters.length > 0}
+          {#each chapters as chapter (chapter.startSec)}
+            {#if chapter.startSec > 0}
+              <div class="progress-chapter" style="left: {progressPct(chapter.startSec)}%" aria-hidden="true"></div>
+            {/if}
+          {/each}
+        {/if}
+        {#if hoverTime !== null}
+          <div class="progress-hover" style="left: {progressPct(hoverTime)}%">
+            {#if hoverThumb}
+              <div
+                class="progress-hover-thumb"
+                style="width: {storyboard?.width}px; height: {storyboard?.height}px; background-image: url('{hoverThumb.url}'); background-size: {(storyboard?.cols ??
+                  1) * (storyboard?.width ?? 0)}px {(storyboard?.rows ?? 1) *
+                  (storyboard?.height ?? 0)}px; background-position: {hoverThumb.x}px {hoverThumb.y}px;"
+                aria-hidden="true"
+              ></div>
+            {/if}
+            <div class="progress-hover-bubble">
+              {formatTime(hoverTime)}{#if hoverChapterLabel}<span class="progress-hover-chapter">
+                  · {hoverChapterLabel}</span
+                >{/if}
+            </div>
           </div>
-        </div>
-      {/if}
-    </div>
+        {/if}
+      </div>
+    {/if}
     <div class="controls-row">
       <button
         type="button"
@@ -526,7 +543,7 @@
           <div class="menu" role="menu">
             <div class="menu-section">
               <div class="menu-label">{t('quality')}</div>
-              {#each QUALITY_IDS as qid (qid)}
+              {#each qualities as qid (qid)}
                 <button
                   type="button"
                   class="menu-item"
@@ -682,12 +699,18 @@
     left: 0;
     right: 0;
     bottom: 0;
-    padding: 0 calc(12px * var(--ctrl-scale)) calc(8px * var(--ctrl-scale));
+    /* Compact bar (owner request 2026-09-16): the row shrank from 32px to
+       22px buttons (15px icons — every control stays visible and clickable),
+       the scrub hit strip from 14 to 11 and the bottom padding from 8 to 5,
+       cutting the bar's total height ~31% (58px → 40px at scale 1). The
+       quality menu / hover bubble keep their sizes (only the bar
+       shrank). */
+    padding: 0 calc(12px * var(--ctrl-scale)) calc(5px * var(--ctrl-scale));
     background: linear-gradient(to top, var(--bg-overlay), transparent);
     color: var(--text-primary);
     display: flex;
     flex-direction: column;
-    gap: calc(4px * var(--ctrl-scale));
+    gap: calc(2px * var(--ctrl-scale));
     box-sizing: border-box;
     z-index: 5;
     pointer-events: auto;
@@ -705,7 +728,7 @@
 
   .progress {
     position: relative;
-    height: calc(14px * var(--ctrl-scale));
+    height: calc(11px * var(--ctrl-scale));
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -815,13 +838,13 @@
     display: flex;
     align-items: center;
     gap: calc(6px * var(--ctrl-scale));
-    height: calc(32px * var(--ctrl-scale));
+    height: calc(22px * var(--ctrl-scale));
   }
 
   .ctrl-btn {
     flex: 0 0 auto;
-    width: calc(32px * var(--ctrl-scale));
-    height: calc(32px * var(--ctrl-scale));
+    width: calc(22px * var(--ctrl-scale));
+    height: calc(22px * var(--ctrl-scale));
     border: none;
     background: transparent;
     color: var(--text-primary);
@@ -835,8 +858,8 @@
   }
 
   .ctrl-btn svg {
-    width: calc(18px * var(--ctrl-scale));
-    height: calc(18px * var(--ctrl-scale));
+    width: calc(15px * var(--ctrl-scale));
+    height: calc(15px * var(--ctrl-scale));
   }
 
   .ctrl-btn:hover {
@@ -849,12 +872,12 @@
   }
 
   .ctrl-btn--play {
-    width: calc(36px * var(--ctrl-scale));
+    width: calc(26px * var(--ctrl-scale));
   }
 
   .ctrl-btn--play svg {
-    width: calc(20px * var(--ctrl-scale));
-    height: calc(20px * var(--ctrl-scale));
+    width: calc(17px * var(--ctrl-scale));
+    height: calc(17px * var(--ctrl-scale));
   }
 
   .volume {

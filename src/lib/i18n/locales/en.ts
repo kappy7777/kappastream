@@ -99,6 +99,7 @@ export const en = {
   toast_sleepStopped: 'Sleep timer: playback stopped',
   toast_launchingMpv: 'Launching in mpv…',
   toast_mpvFailed: 'Could not launch mpv',
+  toast_mpvEngineFailed: 'Native engine failed ({error}) — using the web player',
   toast_qualityFallback: 'Quality "{q}" is not available — using {source}',
   toast_invalidChannel: 'Invalid channel name.',
   toast_notificationsDenied: 'Notifications were not granted.',
@@ -215,7 +216,6 @@ export const en = {
   about_body:
     'No login, project telemetry, analytics, or project-operated backend. Chat connects anonymously — nothing tied to who you are. Network calls go only to the services needed to watch: Twitch infrastructure and the open community APIs (7TV, BTTV, FFZ) that power emotes and stream info.',
   about_streamlink: 'Stream resolution powered by streamlink.',
-  about_changelog: 'Changelog',
   about_bitcoin: 'Bitcoin',
 
   // ---- App.svelte: shortcuts help overlay ---------------------------------
@@ -252,6 +252,8 @@ export const en = {
   settings_noticesRaidHint: 'incoming raids',
   settings_noticesAnnouncement: 'Announcements',
   settings_noticesAnnouncementHint: 'moderator announcements',
+  settings_noticesStreak: 'Watch streaks',
+  settings_noticesStreakHint: 'consecutive watch-streak notices',
   settings_chatMode: 'Chat mode indicator',
   settings_chatModeHint: 'sub/followers-only, slow, emote-only, r9k',
   settings_moderation: 'Show moderation actions',
@@ -276,6 +278,9 @@ export const en = {
   settings_resetTo: 'Reset to {n}×',
   settings_lowLatency: 'Low latency',
   settings_lowLatencyHint: 'chase the live edge (closer to chat); may stutter on weak connections',
+  settings_mpvEngine: 'Native video engine (mpv)',
+  settings_mpvEngineHint: 'experimental: render video through an embedded mpv',
+  settings_mpvHwdec: 'Hardware decoding',
   settings_closeToTray: 'Close to tray',
   settings_closeToTrayHint: 'keep running + notifications when the window is closed',
   settings_checkUpdates: 'Check for updates',
@@ -423,6 +428,13 @@ export const en = {
   whatsnew_fixed: 'Fixed',
   whatsnew_generic: 'This update includes improvements and bug fixes.',
   whatsnew_continue: 'Continue',
+
+  // ---- Settings window section titles (sidebar + pane headers) -------------
+  settings_sectionAppearance: 'Appearance',
+  settings_sectionPlayback: 'Playback',
+  settings_sectionGeneral: 'General',
+  settings_sectionFavorites: 'Favorites',
+  settings_sectionChangelog: 'Changelog',
 
   // ---- Custom themes (Settings theme section + CustomThemeEditor) ---------
   settings_customThemes: 'Custom themes',

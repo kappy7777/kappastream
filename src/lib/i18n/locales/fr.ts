@@ -86,6 +86,7 @@ export const fr: Record<TKey, string> = {
   toast_sleepStopped: 'Minuteur : lecture arrêtée',
   toast_launchingMpv: 'Ouverture dans mpv…',
   toast_mpvFailed: 'Impossible d’ouvrir mpv',
+  toast_mpvEngineFailed: 'Échec du moteur natif ({error}) — retour au lecteur web',
   toast_qualityFallback: 'La qualité « {q} » n’est pas disponible — utilisation de {source}',
   toast_invalidChannel: 'Nom de chaîne invalide.',
   toast_notificationsDenied: 'Les notifications n’ont pas été accordées.',
@@ -195,7 +196,6 @@ export const fr: Record<TKey, string> = {
   about_body:
     'Pas de connexion, télémétrie, analytique ni serveur géré par le projet. Le chat se connecte anonymement — rien n’est lié à votre identité. Les appels réseau ne vont qu’aux services nécessaires pour regarder : l’infrastructure de Twitch et les API communautaires ouvertes (7TV, BTTV, FFZ) qui fournissent les emotes et les infos du stream.',
   about_streamlink: 'Résolution du stream propulsée par streamlink.',
-  about_changelog: 'Nouveautés',
   about_bitcoin: 'Bitcoin',
 
   shortcuts_title: 'Raccourcis clavier',
@@ -230,6 +230,8 @@ export const fr: Record<TKey, string> = {
   settings_noticesRaidHint: 'raids entrants',
   settings_noticesAnnouncement: 'Annonces',
   settings_noticesAnnouncementHint: 'annonces des modérateurs',
+  settings_noticesStreak: 'Séries de visionnage',
+  settings_noticesStreakHint: 'notifications de série de visionnage',
   settings_chatMode: 'Indicateur de mode du chat',
   settings_chatModeHint: 'abonnés/abonnés uniquement, lent, emotes uniquement, r9k',
   settings_moderation: 'Afficher les actions de modération',
@@ -255,6 +257,9 @@ export const fr: Record<TKey, string> = {
   settings_resetTo: 'Réinitialiser à {n}×',
   settings_lowLatency: 'Faible latence',
   settings_lowLatencyHint: 'suivre le bord en direct (plus près du chat) ; peut saccader sur les connexions faibles',
+  settings_mpvEngine: 'Moteur vidéo natif (mpv)',
+  settings_mpvEngineHint: 'expérimental : rendu vidéo via un mpv intégré',
+  settings_mpvHwdec: 'Décodage matériel',
   settings_closeToTray: 'Fermer vers la barre des tâches',
   settings_closeToTrayHint: 'continue de tourner + notifications quand la fenêtre est fermée',
   settings_checkUpdates: 'Vérifier les mises à jour',
@@ -395,6 +400,13 @@ export const fr: Record<TKey, string> = {
   whatsnew_fixed: 'Corrections',
   whatsnew_generic: 'Cette mise à jour apporte des améliorations et des correctifs.',
   whatsnew_continue: 'Continuer',
+
+  // ---- Sections de la fenêtre de réglages (barre latérale + titres) -------
+  settings_sectionAppearance: 'Apparence',
+  settings_sectionPlayback: 'Lecture',
+  settings_sectionGeneral: 'Général',
+  settings_sectionFavorites: 'Favoris',
+  settings_sectionChangelog: 'Nouveautés',
 
   // ---- Thèmes personnalisés (Settings + CustomThemeEditor) ----------------
   settings_customThemes: 'Thèmes personnalisés',

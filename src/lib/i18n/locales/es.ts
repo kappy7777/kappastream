@@ -86,6 +86,7 @@ export const es: Record<TKey, string> = {
   toast_sleepStopped: 'Temporizador: reproducción detenida',
   toast_launchingMpv: 'Abriendo en mpv…',
   toast_mpvFailed: 'No se pudo abrir mpv',
+  toast_mpvEngineFailed: 'El motor nativo falló ({error}); se usa el reproductor web',
   toast_qualityFallback: 'La calidad «{q}» no está disponible — usando {source}',
   toast_invalidChannel: 'Nombre de canal no válido.',
   toast_notificationsDenied: 'No se concedieron los permisos de notificación.',
@@ -195,7 +196,6 @@ export const es: Record<TKey, string> = {
   about_body:
     'Sin inicio de sesión, telemetría, analítica ni servidor propio. El chat se conecta de forma anónima — nada te identifica. Las conexiones de red van solo a los servicios necesarios para ver: infraestructura de Twitch y las APIs comunitarias abiertas (7TV, BTTV, FFZ) que proporcionan emotes e información del stream.',
   about_streamlink: 'Resolución del stream gracias a streamlink.',
-  about_changelog: 'Novedades',
   about_bitcoin: 'Bitcoin',
 
   shortcuts_title: 'Atajos de teclado',
@@ -230,6 +230,8 @@ export const es: Record<TKey, string> = {
   settings_noticesRaidHint: 'raids entrantes',
   settings_noticesAnnouncement: 'Anuncios',
   settings_noticesAnnouncementHint: 'anuncios de los moderadores',
+  settings_noticesStreak: 'Rachas de visualización',
+  settings_noticesStreakHint: 'avisos de rachas de visualización',
   settings_chatMode: 'Indicador de modo del chat',
   settings_chatModeHint: 'solo subs/seguidores, lento, solo emotes, r9k',
   settings_moderation: 'Mostrar acciones de moderación',
@@ -254,6 +256,9 @@ export const es: Record<TKey, string> = {
   settings_resetTo: 'Restablecer a {n}×',
   settings_lowLatency: 'Baja latencia',
   settings_lowLatencyHint: 'seguir el borde en directo (más cerca del chat); puede entrecortarse en conexiones débiles',
+  settings_mpvEngine: 'Motor de vídeo nativo (mpv)',
+  settings_mpvEngineHint: 'experimental: renderizar el vídeo con un mpv integrado',
+  settings_mpvHwdec: 'Decodificación por hardware',
   settings_closeToTray: 'Cerrar a la bandeja',
   settings_closeToTrayHint: 'seguir ejecutándose + notificaciones cuando se cierra la ventana',
   settings_checkUpdates: 'Buscar actualizaciones',
@@ -394,6 +399,13 @@ export const es: Record<TKey, string> = {
   whatsnew_fixed: 'Correcciones',
   whatsnew_generic: 'Esta actualización incluye mejoras y correcciones de errores.',
   whatsnew_continue: 'Continuar',
+
+  // ---- Secciones de la ventana de ajustes (barra lateral + encabezados) ----
+  settings_sectionAppearance: 'Apariencia',
+  settings_sectionPlayback: 'Reproducción',
+  settings_sectionGeneral: 'General',
+  settings_sectionFavorites: 'Favoritos',
+  settings_sectionChangelog: 'Novedades',
 
   // ---- Temas personalizados (Settings + CustomThemeEditor) ----------------
   settings_customThemes: 'Temas personalizados',

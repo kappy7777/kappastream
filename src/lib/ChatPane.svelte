@@ -68,14 +68,15 @@
     attribution,
   }: Props = $props()
 
-  // Whether a stored USERNOTICE line renders under the four granular notice
-  // toggles (unknown msg-ids show when any of the four is on).
+  // Whether a stored USERNOTICE line renders under the five granular notice
+  // toggles (unknown msg-ids show when any of the five is on).
   function noticeShown(msgId: string | null): boolean {
     return isNoticeVisible(usernoticeCategory(msgId ?? ''), {
       sub: settings.chatNoticesSub,
       gift: settings.chatNoticesGift,
       raid: settings.chatNoticesRaid,
       announcement: settings.chatNoticesAnnouncement,
+      streak: settings.chatNoticesStreak,
     })
   }
 

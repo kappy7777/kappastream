@@ -83,9 +83,18 @@ jobs:
   # The AUR tarball reuses THIS job's compiled binary, so it inherits the same
   # 22.04 baseline. No AppImage is built here.
   build-native-packages:
-    name: build native (deb/rpm/aur) · ubuntu-22.04
+    name: build native (deb/rpm/aur) · debian-12 container
     needs: [check]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    # Debian 12 (bookworm), not ubuntu-22.04: the embedded-libmpv engine
+    # links the BUILD HOST's libmpv, and the deb/rpm `depends` declare
+    # libmpv2 / mpv-libs (libmpv.so.2 — what every current distro ships).
+    # jammy only has libmpv1 (mpv 0.34, SONAME .so.1): a jammy-built package
+    # would carry the wrong SONAME and be broken everywhere. bookworm gives
+    # libmpv2 0.35 + the widest glibc window that actually has it (2.36 —
+    # Debian 12+, Ubuntu 24.04+, Fedora 40+; the AppImage job's 24.04
+    # baseline stays the higher 2.39).
+    container: debian:12
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -105,24 +114,43 @@ jobs:
         # (they rely on the host's system libs at runtime), and
         # bundleMediaFramework only runs for the AppImage target. Only the
         # webkit2gtk-4.1 / soup-3 / gtk-3 / appindicator dev headers needed
-        # to compile/link are required here.
+        # to compile/link are required here. libmpv-dev is for the
+        # embedded-libmpv engine (default Cargo feature — the deb/rpm
+        # binaries link libmpv; the packages declare libmpv2 / mpv-libs in
+        # tauri.conf.json). The container base image is bare, so unlike the
+        # GH runner images the toolchain basics (build-essential, curl,
+        # xz for setup-node's tarballs, rpmbuild for the .rpm bundle) must
+        # be installed explicitly; inside the container we are root, so no
+        # sudo.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          apt-get install -y \
+            build-essential \
+            pkg-config \
+            curl \
+            ca-certificates \
+            xz-utils \
+            file \
+            git \
+            rpm \
+            patchelf \
+            libssl-dev \
+            libdbus-1-dev \
             libwebkit2gtk-4.1-dev \
             libsoup-3.0-dev \
             librsvg2-dev \
             libgtk-3-dev \
-            patchelf \
-            libayatana-appindicator3-dev
+            libayatana-appindicator3-dev \
+            libmpv-dev
 
-      # Separate cache key from the AppImage job: 22.04 and 24.04 produce
-      # glibc-incompatible target/ dirs that must never cross-restore.
+      # Separate cache key from the AppImage job: the container's
+      # Debian-12 toolchain and 24.04's produce glibc-incompatible
+      # target/ dirs that must never cross-restore.
       - name: Cache Cargo (~/.cargo + src-tauri/target)
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-          shared-key: native-2204
+          shared-key: native-deb12
 
       - name: Install JS dependencies
         run: npm ci
@@ -154,7 +182,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri -- build --bundles deb,rpm
 
-      # Packages the just-compiled 22.04 native binary with desktop/metainfo/
+      # Packages the just-compiled Debian-12 native binary with desktop/metainfo/
       # wrapper/icons/LICENSE into packaging/aur/dist/kappastream-<ver>-x86_64.tar.gz
       # (consumed by the kappastream-bin AUR PKGBUILD).
       #
@@ -162,12 +190,15 @@ jobs:
       # owns updates on Arch and an AUR -bin install must never show an update
       # prompt. So we recompile the native binary WITHOUT the default `updater`
       # Cargo feature (overwriting target/release/kappastream) right before
-      # packaging. The .deb/.rpm built above already embedded their own
+      # packaging. The engine's mpv-embed feature (default) is explicitly
+      # RE-ADDED after --no-default-features — AUR ships the embedded mpv
+      # engine too, and the -bin PKGBUILD declares Arch's `mpv` package as a
+      # runtime dep. The .deb/.rpm built above already embedded their own
       # updater-ON binaries, so they are unaffected. This recompile is
       # incremental (only the kappastream crate + relink; deps stay cached).
-      - name: Recompile native binary for AUR (updater off)
+      - name: Recompile native binary for AUR (updater off, mpv on)
         working-directory: src-tauri
-        run: cargo build --release --locked --no-default-features --features tauri/custom-protocol
+        run: cargo build --release --locked --no-default-features --features "mpv-embed,tauri/custom-protocol"
 
       - name: Build AUR -bin tarball
         run: packaging/aur/build-release-tarball.sh
@@ -224,6 +255,9 @@ jobs:
         #     video.
         # Package names are identical on 22.04 and 24.04; they resolve against
         # 24.04's newer versions here (webkit2gtk-4.1 2.44, gstreamer 1.24).
+        # libmpv-dev: the engine is a default Cargo feature, and linuxdeploy
+        # bundles the resulting libmpv.so.2 (plus its FFmpeg closure) into the
+        # AppImage, making it self-contained.
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -237,7 +271,8 @@ jobs:
             gstreamer1.0-plugins-good \
             gstreamer1.0-plugins-bad \
             gstreamer1.0-plugins-ugly \
-            gstreamer1.0-libav
+            gstreamer1.0-libav \
+            libmpv-dev
 
       - name: Cache Cargo (~/.cargo + src-tauri/target)
         uses: Swatinem/rust-cache@v2
@@ -368,14 +403,76 @@ jobs:
           fi
           echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
 
+      # The embedded-libmpv engine is a default Cargo feature, so the Windows
+      # build LINKS against libmpv and the installer must SHIP libmpv-2.dll.
+      # Source: shinchiro mpv-winbuild's dev package (pinned release + sha256;
+      # the DLL statically contains the whole FFmpeg stack, so no companion
+      # DLLs are needed). The archive's import library is GCC-format
+      # (libmpv.dll.a, unusable by MSVC link.exe), so we generate mpv.lib from
+      # the committed packaging/windows/mpv.def via VS's lib.exe. The DLL then
+      # rides the bundle through tauri.windows.conf.json's `resources` entry
+      # (copied next to kappastream.exe inside the NSIS install dir; Windows
+      # resolves DLLs from the app dir first).
+      - name: Fetch libmpv and build MSVC import library
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260903/mpv-dev-x86_64-20260903-git-69e63f425a.7z"
+          $expected = "fac135c68a35b7639e39d72c0c365104edbaebdea39a0dfdd8c36e8c8e80faef"
+          Invoke-WebRequest -Uri $url -OutFile mpv-dev.7z
+          $actual = (Get-FileHash mpv-dev.7z -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $expected) { throw "libmpv archive sha256 mismatch: $actual" }
+          $sevenZip = (Get-Command 7z -ErrorAction SilentlyContinue).Source
+          if (-not $sevenZip) { $sevenZip = "C:\Program Files\7-Zip\7z.exe" }
+          & $sevenZip x -y mpv-dev.7z -ompv-dev | Out-Null
+          if (-not (Test-Path "mpv-dev/libmpv-2.dll")) { throw "libmpv-2.dll missing after extract" }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $lib = & $vswhere -latest -products * -find "VC\Tools\MSVC\*\bin\Hostx64\x64\lib.exe" | Select-Object -First 1
+          if (-not $lib) { throw "lib.exe not found via vswhere" }
+          & $lib /def:packaging/windows/mpv.def /name:libmpv-2.dll /out:mpv-dev/mpv.lib /machine:X64
+          if (-not (Test-Path "mpv-dev/mpv.lib")) { throw "mpv.lib not produced" }
+          "libmpv staged: $((Get-Item mpv-dev/libmpv-2.dll).Length) bytes dll + mpv.lib"
+
+      # Bundle streamlink (the URL resolver this app spawns) so a fresh
+      # Windows install needs ZERO external tools: streamlink's own portable
+      # build (embedded Python + deps) from the streamlink/windows-builds
+      # releases is staged at streamlink-bundle/ and shipped via
+      # tauri.windows.conf.json resources to <install>\streamlink\, where
+      # resolve.rs's windows_streamlink_candidates prefers it over PATH.
+      # The ffmpeg/ subtree (139 MB) is DELETED: streamlink only needs it
+      # for mux/transcode features this app never invokes — we resolve HLS
+      # URLs and hand them to players, no remuxing.
+      - name: Stage bundled streamlink
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://github.com/streamlink/windows-builds/releases/download/8.6.1-1/streamlink-8.6.1-1-py314-x86_64.zip"
+          $expected = "fb8027f4783c7e6453070a8fd53a1bf4abaebb4456d9c95c908aeae25010de6c"
+          Invoke-WebRequest -Uri $url -OutFile streamlink-win.zip
+          $actual = (Get-FileHash streamlink-win.zip -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $expected) { throw "streamlink zip sha256 mismatch: $actual" }
+          Expand-Archive streamlink-win.zip -DestinationPath sl-extract
+          $inner = Get-ChildItem sl-extract -Directory | Select-Object -First 1
+          Move-Item $inner.FullName streamlink-bundle
+          Remove-Item -Recurse -Force streamlink-bundle\ffmpeg
+          if (-not (Test-Path "streamlink-bundle/bin/streamlink.exe")) { throw "bundled streamlink.exe missing" }
+          # Relocation smoke test: the portable launcher must run from the
+          # renamed tree (it locates ../Python + ../pkgs relative to itself).
+          & .\streamlink-bundle\bin\streamlink.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "bundled streamlink failed to run" }
+          $mb = [math]::Round((Get-ChildItem streamlink-bundle -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1)
+          "staged streamlink: $mb MB (ffmpeg tree excluded)"
+
       # NSIS is the reliable, cross-platform-capable Windows target and the
       # one the test checklist depends on, so it GATES this job. It must
       # always produce a downloadable *-setup.exe. The signing env makes
-      # tauri-cli emit `*-setup.exe.sig` for the updater.
+      # tauri-cli emit `*-setup.exe.sig` for the updater. RUSTFLAGS points
+      # the linker at mpv.lib (see the libmpv step above).
       - name: Build NSIS setup .exe
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RUSTFLAGS: "-L native=${{ github.workspace }}\\mpv-dev"
         run: npm run tauri -- build --bundles nsis
 
       - name: Stage artifacts
@@ -423,9 +520,12 @@ jobs:
   # minisign keypair (TAURI_SIGNING_PRIVATE_KEY), completely independent of
   # Apple code signing, and works the same as on Linux/Windows.
   #
-  # No system-dependency install step: the macos-latest runner ships the Xcode
-  # Command Line Tools (Tauri links the system WebKit/Cocoa frameworks), and
-  # streamlink/mpv are RUNTIME deps, not build deps.
+  # mpv: the embedded engine is a default Cargo feature. This job links
+  # Homebrew's libmpv (RUSTFLAGS adds the arm64 brew lib dir to the linker
+  # path) and then BUNDLES libmpv + its whole non-system dependency closure
+  # into the .app via beforeBundleCommand (packaging/macos/bundle-libmpv.sh
+  # + tauri.macos.conf.json resources) — the shipped .app/.dmg run with NO
+  # Homebrew install on the user's machine.
   build-macos:
     name: build macos (app/dmg) · macos-latest · arm64
     needs: [check]
@@ -442,6 +542,20 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      # mpv is a BUILD dep (the embedded engine is a default Cargo feature):
+      # Homebrew's libmpv.dylib is linked here, and the build's
+      # beforeBundleCommand hook (packaging/macos/bundle-libmpv.sh) collects
+      # libmpv + its dependency closure with dylibbundler, rewrites every
+      # load path to @executable_path/../Resources/mpv-libs/, and ships the
+      # dylibs as bundle resources (tauri.macos.conf.json) — the distributed
+      # .app needs NO Homebrew on the user's machine. RUSTFLAGS adds the
+      # arm64 Homebrew lib dir to the linker search path (ld64 does not
+      # include /opt/homebrew/lib by default).
+      - name: Install libmpv + dylibbundler (Homebrew)
+        run: |
+          brew install mpv dylibbundler
+          echo "RUSTFLAGS=-L /opt/homebrew/lib" >> $GITHUB_ENV
 
       # Separate cache key from the Linux/Windows jobs (aarch64-apple-darwin).
       - name: Cache Cargo (~/.cargo + src-tauri/target)
@@ -468,6 +582,7 @@ jobs:
           fi
           echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
 
+      # `--bundles app,dmg` builds kappastream.app then kappastream.dmg. With
       # `--bundles app,dmg` builds kappastream.app then kappastream.dmg. With
       # createUpdaterArtifacts:true tauri-cli ALSO emits kappastream.app.tar.gz
       # + kappastream.app.tar.gz.sig (the macOS updater payload — distinct
@@ -496,6 +611,21 @@ jobs:
           # fail the step. `basename` is everywhere. The Linux/Windows staging
           # steps keep `-printf` because their runners ship GNU find.
           find staging -maxdepth 1 -type f -exec basename {} \; | sort
+
+      # beforeBundleCommand (during the build step above) recorded the size
+      # of the bundled libmpv closure; surface it in the run summary so the
+      # .app growth from the dylibs is visible per build.
+      - name: Report bundled libmpv size
+        if: always()
+        run: |
+          if [ -f /tmp/ks-mac-mpv-libs-size.txt ]; then
+            {
+              echo "## macOS bundled libmpv"
+              echo '```'
+              cat /tmp/ks-mac-mpv-libs-size.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v7

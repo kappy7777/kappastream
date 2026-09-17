@@ -101,6 +101,18 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
 // reader/writer functions below.
 export const MAX_MUTED_USERS = 100
 
+// Experimental native video engine (mpv-embed builds): the hardware-decode
+// mode passed to mpv's `hwdec` property. `no` (software) is the default; the
+// Settings UI offers only the entries valid for the running platform, but the
+// store validates against the full set so a stored value is never garbage.
+export type MpvHwdec = 'no' | 'auto-safe' | 'nvdec' | 'vaapi' | 'videotoolbox' | 'd3d11va'
+export const MPV_HWDEC_VALUES: readonly MpvHwdec[] = ['no', 'auto-safe', 'nvdec', 'vaapi', 'videotoolbox', 'd3d11va']
+export const MPV_HWDEC_DEFAULT: MpvHwdec = 'no'
+
+export function isMpvHwdec(v: string | null): v is MpvHwdec {
+  return v !== null && (MPV_HWDEC_VALUES as readonly string[]).includes(v)
+}
+
 export const UI_SCALE_MIN = 0.5
 export const UI_SCALE_MAX = 4
 export const UI_SCALE_STEP = 0.05
@@ -172,6 +184,18 @@ function readLowLatency(): boolean {
   return safeRead(STORAGE_KEYS.lowLatency) === 'true'
 }
 
+// Experimental native video engine — default OFF (opt-in experiment; the
+// toggle is only even SHOWN when the build carries the mpv-embed feature and
+// the native surface initialized, see mpv_available in src-tauri/src/mpv/).
+function readMpvEngine(): boolean {
+  return safeRead(STORAGE_KEYS.mpvEngine) === 'true'
+}
+
+function readMpvHwdec(): MpvHwdec {
+  const v = safeRead(STORAGE_KEYS.mpvHwdec)
+  return isMpvHwdec(v) ? v : MPV_HWDEC_DEFAULT
+}
+
 function readCloseToTray(): boolean {
   // Default ON: the whole point of the tray is background notifications,
   // so close-to-tray is the expected behavior out of the box. Users who
@@ -213,6 +237,9 @@ function readChatNoticesRaid(): boolean {
 }
 function readChatNoticesAnnouncement(): boolean {
   return readChatNoticeGroup(STORAGE_KEYS.chatNoticesAnnouncement)
+}
+function readChatNoticesStreak(): boolean {
+  return readChatNoticeGroup(STORAGE_KEYS.chatNoticesStreak)
 }
 function readChatRoomstate(): boolean {
   return safeRead(STORAGE_KEYS.chatRoomstate) !== 'false'
@@ -297,12 +324,15 @@ class SettingsStore {
   sortMode: SortMode = $state(readSortMode())
   uiScale: number = $state(readUiScale())
   lowLatency: boolean = $state(readLowLatency())
+  mpvEngine: boolean = $state(readMpvEngine())
+  mpvHwdec: MpvHwdec = $state(readMpvHwdec())
   closeToTray: boolean = $state(readCloseToTray())
   checkUpdates: boolean = $state(readCheckUpdates())
   chatNoticesSub: boolean = $state(readChatNoticesSub())
   chatNoticesGift: boolean = $state(readChatNoticesGift())
   chatNoticesRaid: boolean = $state(readChatNoticesRaid())
   chatNoticesAnnouncement: boolean = $state(readChatNoticesAnnouncement())
+  chatNoticesStreak: boolean = $state(readChatNoticesStreak())
   chatRoomstate: boolean = $state(readChatRoomstate())
   chatModeration: boolean = $state(readChatModeration())
   chatBits: boolean = $state(readChatBits())
@@ -416,6 +446,20 @@ class SettingsStore {
     this.setLowLatency(!this.lowLatency)
   }
 
+  setMpvEngine(v: boolean): void {
+    this.mpvEngine = v
+    safeWrite(STORAGE_KEYS.mpvEngine, v ? 'true' : 'false')
+  }
+
+  toggleMpvEngine(): void {
+    this.setMpvEngine(!this.mpvEngine)
+  }
+
+  setMpvHwdec(v: MpvHwdec): void {
+    this.mpvHwdec = v
+    safeWrite(STORAGE_KEYS.mpvHwdec, v)
+  }
+
   setCloseToTray(v: boolean): void {
     this.closeToTray = v
     safeWrite(STORAGE_KEYS.closeToTray, v ? 'true' : 'false')
@@ -468,6 +512,15 @@ class SettingsStore {
 
   toggleChatNoticesAnnouncement(): void {
     this.setChatNoticesAnnouncement(!this.chatNoticesAnnouncement)
+  }
+
+  setChatNoticesStreak(v: boolean): void {
+    this.chatNoticesStreak = v
+    safeWrite(STORAGE_KEYS.chatNoticesStreak, v ? 'true' : 'false')
+  }
+
+  toggleChatNoticesStreak(): void {
+    this.setChatNoticesStreak(!this.chatNoticesStreak)
   }
 
   setChatRoomstate(v: boolean): void {

@@ -29,6 +29,9 @@ export const STORAGE_KEYS = {
   lowLatency: 'app-low-latency-v1',
   vodPositions: 'app-vod-positions-v1',
   pipWindowRect: 'pip-window-rect-v1',
+  // Experimental native video engine (feature-gated mpv build only)
+  mpvEngine: 'app-mpv-engine-v1',
+  mpvHwdec: 'app-mpv-hwdec-v1',
 
   // ---- Appearance & layout
   theme: 'app-theme-v1',
@@ -47,6 +50,7 @@ export const STORAGE_KEYS = {
   chatNoticesGift: 'app-chat-notices-gift-v1',
   chatNoticesRaid: 'app-chat-notices-raid-v1',
   chatNoticesAnnouncement: 'app-chat-notices-announcement-v1',
+  chatNoticesStreak: 'app-chat-notices-streak-v1',
   chatRoomstate: 'app-chat-roomstate-v1',
   chatModeration: 'app-chat-moderation-v1',
   chatBits: 'app-chat-bits-v1',

@@ -198,27 +198,35 @@ describe('notice categories (granular USERNOTICE toggles)', () => {
     expect(usernoticeCategory('announcement')).toBe('announcement')
   })
 
+  it("watch streaks (msg-id viewermilestone / the docs' watch-streak id) are their own category", () => {
+    expect(usernoticeCategory('viewermilestone')).toBe('streak')
+    expect(usernoticeCategory('watch-streak')).toBe('streak')
+  })
+
   it('exotic and unknown ids land in other', () => {
     expect(usernoticeCategory('bitsbadgetier')).toBe('other')
-    expect(usernoticeCategory('viewermilestone')).toBe('other')
     expect(usernoticeCategory('brand-new-id')).toBe('other')
     expect(usernoticeCategory('')).toBe('other')
   })
 
   it('each named category follows exactly its own toggle', () => {
-    const none = { sub: false, gift: false, raid: false, announcement: false }
+    const none = { sub: false, gift: false, raid: false, announcement: false, streak: false }
     expect(isNoticeVisible('sub', { ...none, sub: true })).toBe(true)
     expect(isNoticeVisible('sub', { ...none, gift: true })).toBe(false)
     expect(isNoticeVisible('gift', { ...none, gift: true })).toBe(true)
     expect(isNoticeVisible('raid', { ...none, raid: true })).toBe(true)
     expect(isNoticeVisible('announcement', { ...none, announcement: true })).toBe(true)
+    expect(isNoticeVisible('streak', { ...none, streak: true })).toBe(true)
+    // Streaks hide while every other notice group stays on — the exact ask.
+    expect(isNoticeVisible('streak', { ...none, sub: true, gift: true, raid: true, announcement: true })).toBe(false)
   })
 
   it('other (unknown ids) shows when ANY toggle is on — never dropped while the group is enabled', () => {
-    const none = { sub: false, gift: false, raid: false, announcement: false }
+    const none = { sub: false, gift: false, raid: false, announcement: false, streak: false }
     expect(isNoticeVisible('other', none)).toBe(false)
     expect(isNoticeVisible('other', { ...none, raid: true })).toBe(true)
     expect(isNoticeVisible('other', { ...none, announcement: true })).toBe(true)
+    expect(isNoticeVisible('other', { ...none, streak: true })).toBe(true)
   })
 })
 

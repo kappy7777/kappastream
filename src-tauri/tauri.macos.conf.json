@@ -1,0 +1,23 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "kappastream",
+        "width": 1280,
+        "height": 800,
+        "center": true,
+        "resizable": true,
+        "visible": false,
+        "fullscreen": false,
+        "devtools": true,
+        "decorations": false,
+        "transparent": true
+      }
+    ]
+  },
+  "bundle": {
+    "resources": {
+      "../mac-mpv-libs/": "mpv-libs/"
+    }
+  }
+}

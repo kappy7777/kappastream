@@ -30,6 +30,9 @@ depends=(
   'gst-libav'           # avdec_h264 / avdec_aac (Twitch H.264 + AAC)
   'gst-plugins-base'    # autoaudiosink + audioconvert/resample + videoconvert
   'gst-plugins-good'    # pulsesink → PulseAudio/PipeWire
+  # Embedded-libmpv engine (default upstream feature): the prebuilt binary
+  # links libmpv.so.2, shipped in Arch's `mpv` package.
+  'mpv'
   'hicolor-icon-theme'
 )
 provides=("${_pkgname}=${pkgver}")

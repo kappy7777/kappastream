@@ -14,6 +14,12 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 
 export default defineConfig({
   plugins: [svelte()],
+  resolve: {
+    // Browser-condition resolution so component tests can `mount()`: without
+    // it the 'svelte' package resolves its server entry and mount/unmount
+    // throw lifecycle_function_unavailable (see multiview-mount.test.ts).
+    conditions: ['browser'],
+  },
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
