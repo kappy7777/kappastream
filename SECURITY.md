@@ -27,9 +27,27 @@ commands plus one custom URI scheme to its WebView. The complete surface
 
 - **Stream resolution** (`resolve_stream`, `resolve_vod`, `resolve_clip`)
   and **mpv handoff** (`launch_player`) — shell out to the local
-  `streamlink` binary (and `mpv`). Channel names, VOD IDs, clip slugs,
-  and stream qualities are validated against strict allowlists before any
-  subprocess runs.
+  `streamlink` binary (and `mpv`). Channel names, VOD IDs, and clip slugs
+  are validated against strict patterns before any subprocess runs;
+  stream qualities are validated structurally (lowercase alphanumeric
+  tokens, length-bounded — Twitch's transcode ladder is dynamic, so a
+  fixed allowlist would reject real variants), and the token reaches
+  streamlink as a direct argv element, never through a shell. Every URL
+  streamlink returns is itself re-validated (https-only, no userinfo,
+  default port, allowlisted Twitch media host families) before the
+  frontend ever sees it.
+- **Embedded mpv engine** (`mpv_*`, when the `mpv-embed` Cargo feature is
+  compiled in — the default for release builds) — libmpv renders video
+  into a native surface. The URL handed to `mpv_load` is validated the
+  same way resolver output is (https, no userinfo, default port, and the
+  host family matching the media kind — live vs VOD/clip), so mpv can
+  never be pointed at `file://`, `edl://`, `smb://` or any off-site host
+  by the page. Engine ids are bounded to 0..=4 (single view + multi-view
+  tiles); no command can mint extra mpv cores. The engine's OSD script
+  lives in a private per-user runtime dir (0700, files 0600 — never the
+  shared `/tmp`), and OSD bitmaps are passed to mpv by memory, not files.
+  The engine is currently enabled on Linux only (`mpv_available` returns
+  false elsewhere pending on-hardware verification).
 - **Twitch GQL proxy** (`gql_fetch`) — a POST proxy to `gql.twitch.tv`
   that bypasses browser CORS, with Twitch's public web Client-ID pinned
   in the native binary so the page cannot change or omit it.
