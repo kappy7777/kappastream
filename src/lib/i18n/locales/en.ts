@@ -130,6 +130,7 @@ export const en = {
   player_restart: 'Restart',
   player_dismissResume: 'Dismiss resume notice',
   player_qualityUnavailableError: 'Quality "{q}" is not available for this stream',
+  player_streamlinkOld: 'Streamlink {version} is older than the supported minimum ({min}); update streamlink.',
 
   // ---- App.svelte: moderation (chat-event) --------------------------------
   mod_messageDeleted: 'Message deleted',

@@ -115,6 +115,8 @@ export const es: Record<TKey, string> = {
   player_restart: 'Reiniciar',
   player_dismissResume: 'Ocultar aviso',
   player_qualityUnavailableError: 'La calidad «{q}» no está disponible para este stream',
+  player_streamlinkOld:
+    'Streamlink {version} es anterior a la versión mínima compatible ({min}); actualiza streamlink.',
 
   mod_messageDeleted: 'Mensaje eliminado',
   mod_chatCleared: 'Chat limpiado',

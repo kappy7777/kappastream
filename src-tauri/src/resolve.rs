@@ -313,6 +313,25 @@ enum StreamlinkError {
 pub struct StreamlinkStatus {
     pub present: bool,
     pub platform: String,
+    pub version: Option<String>,
+}
+
+/// Parse streamlink's `--version` output down to the dotted numeric core.
+/// The first line is "streamlink X.Y.Z"; distro and dev builds append
+/// suffixes ("+dfsg-1", "+g<hash>") which are stripped. Anything else
+/// (missing prefix, non-numeric version, empty output) yields None — an
+/// unparseable version is reported as absent, never an error.
+pub(crate) fn parse_streamlink_version(stdout: &str) -> Option<String> {
+    let first = stdout.lines().next()?.trim();
+    let rest = first.strip_prefix("streamlink ")?.trim_start();
+    let core: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    if core.is_empty() || core.split('.').any(str::is_empty) {
+        return None;
+    }
+    Some(core)
 }
 
 /// Whether streamlink is installed and discoverable, plus the compile-time
@@ -335,7 +354,7 @@ pub async fn streamlink_status() -> StreamlinkStatus {
     let mut cmd = tokio::process::Command::new(&bin);
     cmd.arg("--version")
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
     crate::env_spawn::configure(cmd.as_std_mut(), None);
@@ -343,21 +362,32 @@ pub async fn streamlink_status() -> StreamlinkStatus {
     // Windows (same as every other streamlink spawn).
     crate::env_spawn::hide_console(cmd.as_std_mut());
     match cmd.spawn() {
-        Ok(mut child) => {
-            // --version exits immediately; reap it so we never orphan a handle.
-            let _ = child.wait().await;
+        Ok(child) => {
+            // --version exits immediately; a bound keeps a wedged install
+            // from hanging the probe. Reap + read via wait_with_output so
+            // the version line is captured and the child is never orphaned.
+            let version =
+                match tokio::time::timeout(RESOLVE_TIMEOUT, child.wait_with_output()).await {
+                    Ok(Ok(output)) if output.status.success() => {
+                        parse_streamlink_version(&String::from_utf8_lossy(&output.stdout))
+                    }
+                    _ => None,
+                };
             StreamlinkStatus {
                 present: true,
                 platform,
+                version,
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => StreamlinkStatus {
             present: false,
             platform,
+            version: None,
         },
         Err(_) => StreamlinkStatus {
             present: true,
             platform,
+            version: None,
         },
     }
 }
@@ -1278,6 +1308,35 @@ mod tests {
         assert!(!looks_sub_only("error: No playable streams found"));
         assert!(!looks_sub_only("transient network hiccup"));
         assert!(!looks_sub_only(""));
+    }
+
+    #[test]
+    fn streamlink_version_parses_plain_distro_and_dev_outputs() {
+        assert_eq!(
+            parse_streamlink_version("streamlink 7.3.0\n"),
+            Some("7.3.0".to_string())
+        );
+        // Dev checkouts append "+g<hash>".
+        assert_eq!(
+            parse_streamlink_version("streamlink 6.8.1+9f2e1dc\n"),
+            Some("6.8.1".to_string())
+        );
+        // Distro builds append packaging suffixes.
+        assert_eq!(
+            parse_streamlink_version("streamlink 7.3.0+dfsg-1\n"),
+            Some("7.3.0".to_string())
+        );
+    }
+
+    #[test]
+    fn streamlink_version_rejects_garbage() {
+        assert_eq!(parse_streamlink_version(""), None);
+        assert_eq!(parse_streamlink_version("streamlink dev\n"), None);
+        // No "streamlink " prefix on the version line.
+        assert_eq!(parse_streamlink_version("7.3.0\n"), None);
+        assert_eq!(parse_streamlink_version("streamlink x.y.z\n"), None);
+        // A trailing dot leaves an empty numeric part.
+        assert_eq!(parse_streamlink_version("streamlink 7.3.\n"), None);
     }
 
     #[test]

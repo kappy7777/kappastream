@@ -63,6 +63,7 @@
   import { pinnedChat } from './lib/pinned-chat.svelte'
   import { parseTwitchClipUrl } from './lib/chat-links'
   import { t } from './lib/i18n/index.svelte'
+  import { initStreamlinkVersion, installedStreamlinkVersion, streamlinkFloorHint } from './lib/streamlink-floor'
   import { formatCompact, formatAge } from './lib/format'
   import { effectiveQualities, mpvQualities, qualityLabel } from './lib/qualities'
   import { stripBitmap, renderInfoBlock } from './lib/osd-bitmaps'
@@ -2281,7 +2282,13 @@
   async function loadVod(videoId: string, q: string, startAt?: number): Promise<void> {
     playerError = ''
     playerStatus = 'resolving'
-    type ResolveRaw = { ok?: boolean; url?: string | null; error?: string | null }
+    type ResolveRaw = {
+      ok?: boolean
+      url?: string | null
+      error?: string | null
+      offline?: boolean
+      unavailable?: boolean
+    }
     let raw: ResolveRaw
     try {
       raw = (await invoke('resolve_vod', { videoId, quality: q })) as ResolveRaw
@@ -2293,7 +2300,9 @@
     }
     if (!raw.ok || !raw.url) {
       playerStatus = 'error'
-      playerError = raw.error ?? 'failed to load video'
+      const base = raw.error ?? 'failed to load video'
+      const hint = raw.offline || raw.unavailable ? null : streamlinkFloorHint(installedStreamlinkVersion())
+      playerError = hint ? `${base}\n${hint}` : base
       return
     }
     playerStatus = 'loading'
@@ -2386,7 +2395,13 @@
     if (videoScrollEl) videoScrollEl.scrollTop = 0
     playerError = ''
     playerStatus = 'resolving'
-    type ResolveRaw = { ok?: boolean; url?: string | null; error?: string | null }
+    type ResolveRaw = {
+      ok?: boolean
+      url?: string | null
+      error?: string | null
+      offline?: boolean
+      unavailable?: boolean
+    }
     let raw: ResolveRaw
     try {
       raw = (await invoke('resolve_clip', { slug: clip.slug, quality: 'best' })) as ResolveRaw
@@ -2398,7 +2413,9 @@
     }
     if (!raw.ok || !raw.url) {
       playerStatus = 'error'
-      playerError = raw.error ?? 'failed to load clip'
+      const base = raw.error ?? 'failed to load clip'
+      const hint = raw.offline || raw.unavailable ? null : streamlinkFloorHint(installedStreamlinkVersion())
+      playerError = hint ? `${base}\n${hint}` : base
       return
     }
     playerStatus = 'loading'
@@ -2759,6 +2776,9 @@
     // refresh in the background if stale. Never blocks startup; silent on
     // failure (degrades to baseline). No new host (reuses gql.twitch.tv).
     void initBadgeRefresh()
+    // Streamlink version for the old-install hint appended to resolve
+    // failures; fetched once, silent when unavailable.
+    void initStreamlinkVersion()
   })
 
   // Player overlay headline per status. A function (not a const map) so the

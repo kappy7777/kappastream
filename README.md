@@ -180,6 +180,8 @@ brew install mpv
 
 kappastream uses [streamlink](https://streamlink.github.io/) as a local helper to resolve Twitch streams.
 
+**streamlink 6.0.0 or newer is required.** Older installs fail to resolve today's Twitch streams; when a resolve fails and the installed streamlink is older, kappastream appends an update hint to the error message.
+
 The `.deb` and `.rpm` packages install it as a dependency. AppImage, Windows, and macOS users must install it separately:
 
 ```bash

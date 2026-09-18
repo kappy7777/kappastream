@@ -19,6 +19,7 @@ import Hls from 'hls.js'
 import { invoke } from '@tauri-apps/api/core'
 import { buildHlsConfig } from './hls-config'
 import { isFatalNetworkishError, liveEdgeSeekTarget, STALL_RECOVER_GRACE_MS } from './playback'
+import { installedStreamlinkVersion, streamlinkFloorHint } from './streamlink-floor'
 import type { MpvBackend, MpvMediaKind } from './video-backend'
 
 const MANIFEST_TIMEOUT_MS = 20_000
@@ -69,11 +70,16 @@ export async function resolveLiveStream(channel: string, q: string, lowLatency: 
   }
   if (raw.offline) return { ok: false, offline: true }
   if (!raw.ok || !raw.url) {
+    const unavailable = raw.unavailable === true
+    const base = raw.error ?? 'unknown resolve error'
+    // An old streamlink explains most resolve failures; an unavailable
+    // stream has its own (accurate) message, so it stays undecorated.
+    const hint = unavailable ? null : streamlinkFloorHint(installedStreamlinkVersion())
     return {
       ok: false,
       offline: false,
-      unavailable: raw.unavailable === true,
-      error: raw.error ?? 'unknown resolve error',
+      unavailable,
+      error: hint ? `${base}\n${hint}` : base,
     }
   }
   return { ok: true, url: raw.url }
