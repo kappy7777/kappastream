@@ -146,13 +146,9 @@ Because the installer isn't code-signed, Windows SmartScreen may show a "Windows
 
 The [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) is required (preinstalled on Windows 11 and recent Windows 10); the installer will prompt you to install it if it is missing.
 
-Install [streamlink](https://streamlink.github.io/install.html#windows-binaries) separately — kappastream needs it to resolve streams:
+The installer **bundles [streamlink](https://streamlink.github.io/)** — it ships as `streamlink\` inside the install directory and kappastream prefers that copy, so stream resolution works out of the box and nothing extra is needed on `PATH`.
 
-```bash
-pip install --user streamlink
-```
-
-If `streamlink` is not on your `PATH`, set it before launching kappastream:
+To make kappastream use a different streamlink, point `STREAMLINK_BIN` at it before launching:
 
 ```powershell
 $env:STREAMLINK_BIN = "C:\path\to\streamlink.exe"

@@ -801,7 +801,7 @@ jobs:
           {
             echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_TAG}/CHANGELOG.md) for what changed in this release."
             echo
-            echo "Artifacts attached below include the AppImage, \`.deb\`, and \`.rpm\` packages for Linux and a Windows \`-setup.exe\` installer. Verify them with the published \`SHA256SUMS\`."
+            echo "Artifacts attached below include the AppImage, \`.deb\`, and \`.rpm\` packages for Linux, a Windows \`-setup.exe\` installer, and a macOS \`.dmg\` (Apple Silicon). Verify them with the published \`SHA256SUMS\`."
           } > release-notes.md
 
           # On a tag push the git tag already exists; on a manual dispatch it
