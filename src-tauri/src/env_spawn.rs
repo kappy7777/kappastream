@@ -36,6 +36,18 @@ pub const SAFE_ENV_VARS: &[&str] = &[
     "GDK_DPI_SCALE",
     "QT_SCALE_FACTOR",
     "QT_AUTO_SCREEN_SCALE_FACTOR",
+    // Desktop-session identity + X authorization. xdg-open hands the URL
+    // to the session's browser, which needs XAUTHORITY to connect to the
+    // X server and the session vars to find its running instance (KDE's
+    // browser wrappers key off KDE_FULL_SESSION). The AppRun hooks rewrite
+    // XDG_DATA_DIRS / GTK_* / GST_* themselves — those stay excluded so
+    // bundled-library pollution is still scrubbed.
+    "XAUTHORITY",
+    "XDG_CURRENT_DESKTOP",
+    "XDG_SESSION_TYPE",
+    "DESKTOP_SESSION",
+    "KDE_FULL_SESSION",
+    "KDE_SESSION_VERSION",
 ];
 
 /// True when the app was launched from a Type-2 AppImage (the runtime
@@ -52,16 +64,15 @@ pub(crate) fn in_appimage() -> bool {
 ///
 /// Under an AppImage the runtime pollutes the env with bundled-library
 /// paths (LD_LIBRARY_PATH, …) that break system subprocesses, so we
-/// clear everything and forward only the safe whitelist above.
+/// clear everything and forward only the safe whitelist above. The
+/// whitelist carries the display + session vars (XAUTHORITY,
+/// XDG_CURRENT_DESKTOP, …) so a browser launched by `xdg-open` can
+/// connect to the display even under the scrub — without them it never
+/// starts unless it was already running (then the URL is forwarded over
+/// IPC and the running browser's own env is what matters).
 ///
 /// In a native build (e.g. the AUR package) there is no such pollution,
-/// so we inherit the parent env wholesale. This is also required for
-/// correctness: a browser launched by `xdg-open` needs display-auth /
-/// session vars (XAUTHORITY, XDG_CURRENT_DESKTOP, …) that the whitelist
-/// omits. Without them a freshly-launched browser cannot connect to the
-/// display and never starts — which is why the opener only worked when
-/// the browser was already running (the URL is then forwarded over IPC
-/// and the running browser's own env is what matters).
+/// so we inherit the parent env wholesale.
 pub fn configure(cmd: &mut Command, path_override: Option<&str>) {
     if !in_appimage() {
         // Native: inherit the parent env untouched. `path_override` is
@@ -126,4 +137,37 @@ pub fn detach(cmd: &mut Command) {
     // No-op on non-Windows (dropping the child handle already reparents it).
     #[cfg(not(target_os = "windows"))]
     let _ = cmd;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SAFE_ENV_VARS;
+
+    #[test]
+    fn safe_env_vars_carry_session_identity_but_not_appimage_pollution() {
+        for var in [
+            "XAUTHORITY",
+            "XDG_CURRENT_DESKTOP",
+            "XDG_SESSION_TYPE",
+            "DESKTOP_SESSION",
+            "KDE_FULL_SESSION",
+            "KDE_SESSION_VERSION",
+        ] {
+            assert!(SAFE_ENV_VARS.contains(&var), "{var} missing from whitelist");
+        }
+        // The AppImage runtime's apprun-hooks rewrite these; forwarding the
+        // rewritten values into children would re-introduce the
+        // bundled-library pollution the whitelist exists to scrub.
+        for var in [
+            "XDG_DATA_DIRS",
+            "LD_LIBRARY_PATH",
+            "GTK_PATH",
+            "GTK_EXE_PREFIX",
+            "GIO_MODULE_DIR",
+            "GST_PLUGIN_SYSTEM_PATH",
+            "GST_PLUGIN_PATH",
+        ] {
+            assert!(!SAFE_ENV_VARS.contains(&var), "{var} must stay excluded");
+        }
+    }
 }
