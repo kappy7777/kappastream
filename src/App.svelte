@@ -950,7 +950,8 @@
       `--video-left: ${pct(c.x / b.w)}; ` +
       `--video-right: ${pct((b.w - c.x - c.w) / b.w)}; ` +
       `--video-top: ${pct(c.y / b.h)}; ` +
-      `--video-bottom: ${pct((b.h - c.y - c.h) / b.h)}`
+      `--video-bottom: ${pct((b.h - c.y - c.h) / b.h)}; ` +
+      `--video-width: ${pct(c.w / b.w)}`
     )
   })
 
@@ -4057,16 +4058,20 @@
     justify-content: center;
   }
 
-  /* "Back to live" banner shown over the player while a VOD/clip is playing. */
+  /* "Back to live" banner shown over the player while a VOD/clip is playing.
+     Anchored to the VIDEO content rect (the --video-* vars from the shared
+     fit), not the player box, so it hugs the picture when the box goes wider
+     than 16:9. The native-engine variant renders static in .native-strip
+     (the --strip override) where these offsets are irrelevant. */
   .playback-banner {
     position: absolute;
-    top: 8px;
-    left: 8px;
+    top: calc(var(--video-top, 0%) + 8px);
+    left: calc(var(--video-left, 0%) + 8px);
     z-index: 5;
     display: flex;
     align-items: center;
     gap: 8px;
-    max-width: calc(100% - 16px);
+    max-width: calc(var(--video-width, 100%) - 16px);
     padding: 4px 8px 4px 4px;
     background: rgba(0, 0, 0, 0.7);
     border-radius: 5px;
@@ -4147,6 +4152,15 @@
     flex: none;
     aspect-ratio: auto;
     max-height: none;
+    background: #000;
+  }
+  /* The letterbox bars themselves are painted by the <video> element (it
+     fills the player box; object-fit: contain letterboxes INSIDE it), so
+     fullscreen must override its themed background too — the cinema bars
+     stay #000 on purpose, unlike the themed side bars of the normal
+     layout. The controls/banner still track the video edges via the
+     --video-* vars, which re-fit for the fullscreen box automatically. */
+  .app--fullscreen .video {
     background: #000;
   }
 
@@ -4566,12 +4580,13 @@
     background: var(--bg-overlay-strong);
   }
 
-  /* VOD resume notice — non-modal, sits over the lower-left of the player for a
-     few seconds after auto-resuming. One-action "Restart" revert. */
+  /* VOD resume notice — non-modal, sits over the lower-left of the VIDEO for a
+     few seconds after auto-resuming (video-relative via the --video-* vars,
+     so it tracks the picture inside the box). One-action "Restart" revert. */
   .resume-bar {
     position: absolute;
-    left: 10px;
-    bottom: 56px;
+    left: calc(var(--video-left, 0%) + 10px);
+    bottom: calc(var(--video-bottom, 0%) + 56px);
     display: flex;
     align-items: center;
     gap: 8px;
@@ -4583,7 +4598,7 @@
     font-size: 12px;
     box-shadow: var(--shadow-menu);
     z-index: 20;
-    max-width: calc(100% - 20px);
+    max-width: calc(var(--video-width, 100%) - 20px);
   }
 
   .resume-bar-text {

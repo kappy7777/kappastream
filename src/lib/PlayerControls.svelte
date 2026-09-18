@@ -640,8 +640,11 @@
 <style>
   .theater-info {
     position: absolute;
-    top: 0;
-    left: 0;
+    /* Anchored to the VIDEO content rect (the --video-* vars fed by the
+       shared fit on .player), not the box, so the info block hugs the
+       picture when the box letterboxes. */
+    top: var(--video-top, 0%);
+    left: var(--video-left, 0%);
     display: flex;
     align-items: center;
     gap: 10px;
@@ -696,9 +699,12 @@
   .controls {
     --ctrl-scale: 1;
     position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    /* Track the VIDEO content rect, not the box: when the .player box is
+       wider (or taller) than the video, the bar's edges must line up with
+       the picture — the --video-* vars on .player carry the shared fit. */
+    left: var(--video-left, 0%);
+    right: var(--video-right, 0%);
+    bottom: var(--video-bottom, 0%);
     /* Compact bar (owner request 2026-09-16): the row shrank from 32px to
        22px buttons (15px icons — every control stays visible and clickable),
        the scrub hit strip from 14 to 11 and the bottom padding from 8 to 5,
