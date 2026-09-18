@@ -71,6 +71,13 @@ describe('chat links: allowlist', () => {
       { text: ' now', url: null },
     ])
   })
+
+  it('a twitch URL containing & in the query still linkifies (feature preservation)', () => {
+    const chunks = splitTwitchLinks('see https://www.twitch.tv/videos/123?t=1h2m3s&foo=bar now')
+    const link = chunks.find((c) => c.url !== null)
+    expect(link?.text).toBe('https://www.twitch.tv/videos/123?t=1h2m3s&foo=bar')
+    expect(link?.url).toBe('https://www.twitch.tv/videos/123?t=1h2m3s&foo=bar')
+  })
 })
 
 describe('chat links: clip URL parsing', () => {
@@ -103,5 +110,10 @@ describe('chat links: clip URL parsing', () => {
     expect(parseTwitchClipUrl('https://evil.example/chan9/clip/SomeSlug-1')).toBeNull()
     expect(parseTwitchClipUrl('https://twitch.tv.example/chan/clip/SomeSlug-1')).toBeNull()
     expect(parseTwitchClipUrl('not a url')).toBeNull()
+  })
+
+  it('both clip URL shapes still resolve to the slug (feature preservation)', () => {
+    expect(parseTwitchClipUrl('https://clips.twitch.tv/HappySunnyOtter-x1')).toBe('HappySunnyOtter-x1')
+    expect(parseTwitchClipUrl('https://www.twitch.tv/chan9/clip/HappySunnyOtter-x1')).toBe('HappySunnyOtter-x1')
   })
 })

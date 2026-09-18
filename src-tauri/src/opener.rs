@@ -25,10 +25,10 @@ pub struct CandidateResult {
     /// - Linux/KDE: `xdg-open` execs the browser directly (no
     ///   xdg-desktop-portal), so the child we tracked IS the browser
     ///   launching.
-    /// - Windows: `cmd.exe`/`rundll32.exe` normally exit within
-    ///   milliseconds of handing the URL to the shell handler; reaching
-    ///   the grace period means a hang, but detaching is still safer than
-    ///   killing a possibly-launching browser.
+    /// - Windows: `rundll32.exe` normally exits within milliseconds of
+    ///   handing the URL to the shell handler; reaching the grace period
+    ///   means a hang, but detaching is still safer than killing a
+    ///   possibly-launching browser.
     pub still_running: bool,
     pub stderr: String,
 }
@@ -61,14 +61,27 @@ fn validated_url(raw_url: &str) -> Option<String> {
     {
         return None;
     }
-    Some(parsed.to_string())
+    // Character-level backstop for the spawn path: whatever process we
+    // hand this URL to must never receive a backslash, a double quote,
+    // whitespace or a control character. Url::parse percent-encodes most
+    // of these, but anything that survives parsing is rejected here
+    // rather than trusted to the next parser down the chain. `&`, `=`,
+    // `?` and `%XX` are legitimate in Twitch URLs and stay accepted.
+    let serialized = parsed.to_string();
+    if serialized
+        .chars()
+        .any(|c| c == '\\' || c == '"' || c.is_whitespace() || c.is_control())
+    {
+        return None;
+    }
+    Some(serialized)
 }
 
 // --- Windows candidate helpers ------------------------------------------------
 // The Linux opener list below uses hardcoded absolute paths because every
 // Linux distro ships the openers under well-known locations. Windows has no
 // such fixed layout guarantee (SystemRoot is technically not bound to the
-// C: drive), so we resolve cmd.exe / rundll32.exe through %SystemRoot%
+// C: drive), so we resolve rundll32.exe through %SystemRoot%
 // (falling back to %windir%) and keep the same absolute-path `is_file()`
 // existence check the Linux path uses — we deliberately do NOT fall back to a
 // bare PATH lookup, to keep a PATH-hijacked binary of the same name from
@@ -85,32 +98,40 @@ fn system_root() -> Option<String> {
 /// Build `<system_root>\System32\<binary>`. Kept pure (root passed
 /// explicitly, no env access) so it can be unit-tested on any host; the
 /// SystemRoot/windir lookup lives in `system_root()` above.
-#[cfg(target_os = "windows")]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn system32_binary(system_root: &str, binary: &str) -> String {
     format!("{}\\System32\\{}", system_root, binary)
 }
 
-/// `cmd.exe /C start "" <url>` argument vector. The empty string at index 2
-/// is `start`'s window-TITLE parameter and is MANDATORY: `start` parses the
-/// first quoted positional argument as the title (per Microsoft's `start`
-/// reference: `start <"title"> ... <command>`), so without the explicit `""`
-/// the URL itself would be consumed as the title and nothing would open.
-/// `cmd /C` runs the command then exits.
-#[cfg(target_os = "windows")]
-fn cmd_start_args(url: &str) -> Vec<String> {
-    vec![
-        "/C".to_string(),
-        "start".to_string(),
-        String::new(),
-        url.to_string(),
-    ]
-}
-
-/// `rundll32.exe url.dll,FileProtocolHandler <url>` — the long-standing
-/// ShellExecute-based fallback when `cmd /C start` does not succeed.
-#[cfg(target_os = "windows")]
+/// `rundll32.exe url.dll,FileProtocolHandler <url>` — hands the URL to
+/// ShellExecute as one argument; nothing re-parses the command line with
+/// shell metacharacters.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn rundll_url_args(url: &str) -> Vec<String> {
     vec!["url.dll,FileProtocolHandler".to_string(), url.to_string()]
+}
+
+/// Windows opener candidates for a resolved SystemRoot, in try order: only
+/// `rundll32.exe url.dll,FileProtocolHandler`, which hands the URL to
+/// ShellExecute without any shell re-parsing of the argument vector.
+///
+/// (An earlier first candidate, `cmd.exe /C start "" <url>`, was removed:
+/// cmd.exe re-parses the whole command line with its own metacharacters,
+/// and Rust's argument quoting escapes only whitespace, so an `&` inside a
+/// query string made cmd execute everything after it — one-click command
+/// execution from a chat link. `validated_url` keeps a character-level
+/// backstop for the remaining spawn paths.)
+///
+/// Kept pure (root and url passed explicitly, no env access) so it compiles
+/// and is unit-tested on every host; the SystemRoot/windir lookup lives in
+/// `system_root()` above.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn windows_candidates(system_root: &str, url: &str) -> Vec<(&'static str, String, Vec<String>)> {
+    vec![(
+        "rundll32",
+        system32_binary(system_root, "rundll32.exe"),
+        rundll_url_args(url),
+    )]
 }
 
 fn run_candidate(name: &str, path: &str, args: &[String], child_path: &str) -> CandidateResult {
@@ -132,7 +153,7 @@ fn run_candidate(name: &str, path: &str, args: &[String], child_path: &str) -> C
         .stderr(Stdio::null());
     crate::env_spawn::configure(&mut cmd, Some(child_path));
     // Suppress the console window a GUI app would otherwise flash when
-    // spawning cmd.exe/rundll32.exe on Windows. No-op on Unix (no
+    // spawning rundll32.exe on Windows. No-op on Unix (no
     // per-process console window). NOT detach(): the opener child is
     // short-lived by design (it hands the URL to the shell handler and
     // exits), so the survive-the-parent detachment semantics that the
@@ -176,12 +197,11 @@ fn run_candidate(name: &str, path: &str, args: &[String], child_path: &str) -> C
             //   browser that just started launching. Killing it would abort
             //   a freshly-starting browser — the exact symptom where the
             //   link "only opens if the browser is already running".
-            // - Windows: `cmd.exe`/`rundll32.exe` normally exit within
-            //   milliseconds of handing the URL to the shell handler;
-            //   reaching here means they hung. This is NOT the expected
-            //   path on Windows (unlike the KDE case), but detaching is
-            //   still the right call rather than killing something that may
-            //   be mid-launch.
+            // - Windows: `rundll32.exe` normally exits within milliseconds
+            //   of handing the URL to the shell handler; reaching here
+            //   means it hung. This is NOT the expected path on Windows
+            //   (unlike the KDE case), but detaching is still the right
+            //   call rather than killing something that may be mid-launch.
             // Either way: drop the handle so the child is reparented to
             // init (Unix) / orphaned but left running (Windows), and report
             // success.
@@ -314,26 +334,13 @@ pub async fn open_url_robust(url: String) -> Result<OpenResult, String> {
             vec![opener_url.clone()],
         )];
 
-        // Windows: cmd.exe /C start "" <url> first (most universal —
-        // resolves the URL through the registered https handler), then
-        // rundll32 url.dll,FileProtocolHandler as the fallback. Both
-        // resolved under %SystemRoot%\System32 to stay off PATH.
+        // Windows: rundll32.exe url.dll,FileProtocolHandler — the single
+        // candidate (see windows_candidates for why nothing shells out).
+        // Resolved under %SystemRoot%\System32 to stay off PATH.
         #[cfg(target_os = "windows")]
-        let candidates: Vec<(&'static str, String, Vec<String>)> = {
-            let mut list: Vec<(&'static str, String, Vec<String>)> = Vec::new();
-            if let Some(root) = system_root() {
-                list.push((
-                    "cmd.exe",
-                    system32_binary(&root, "cmd.exe"),
-                    cmd_start_args(&opener_url),
-                ));
-                list.push((
-                    "rundll32",
-                    system32_binary(&root, "rundll32.exe"),
-                    rundll_url_args(&opener_url),
-                ));
-            }
-            list
+        let candidates: Vec<(&'static str, String, Vec<String>)> = match system_root() {
+            Some(root) => windows_candidates(&root, &opener_url),
+            None => Vec::new(),
         };
 
         let mut results = Vec::new();
@@ -413,7 +420,7 @@ pub async fn open_url_robust(url: String) -> Result<OpenResult, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::validated_url;
+    use super::{rundll_url_args, system32_binary, validated_url, windows_candidates};
 
     #[test]
     fn accepts_and_normalizes_twitch_https_urls() {
@@ -437,22 +444,57 @@ mod tests {
             assert_eq!(validated_url(url), None, "accepted {url}");
         }
     }
-}
 
-// NOTE: this module is #[cfg(target_os = "windows")], so it only compiles
-// (and only runs) on a Windows runner. The functions under test
-// (system32_binary, cmd_start_args, rundll_url_args) are themselves
-// Windows-gated, so the tests cannot run on this Linux dev host — they are
-// exercised by the windows-latest CI job in release.yml / ci.yml.
-#[cfg(all(test, target_os = "windows"))]
-mod windows_tests {
-    use super::{cmd_start_args, rundll_url_args, system32_binary};
+    #[test]
+    fn accepts_query_strings_and_clip_slugs() {
+        assert_eq!(
+            validated_url("https://www.twitch.tv/videos/123?t=1h2m3s&foo=bar"),
+            Some("https://www.twitch.tv/videos/123?t=1h2m3s&foo=bar".to_string())
+        );
+        assert_eq!(
+            validated_url("https://clips.twitch.tv/Some-Slug_1"),
+            Some("https://clips.twitch.tv/Some-Slug_1".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_backslash_in_query() {
+        assert_eq!(validated_url("https://www.twitch.tv/x?a=\\calc"), None);
+    }
+
+    #[test]
+    fn windows_candidates_never_spawn_cmd_exe() {
+        let candidates = windows_candidates("C:\\Windows", "https://twitch.tv/somechannel");
+        assert!(!candidates.is_empty());
+        for (_, path, _) in &candidates {
+            assert!(
+                !path.to_ascii_lowercase().ends_with("cmd.exe"),
+                "cmd.exe candidate survived: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn ampersand_url_is_a_single_byte_identical_argv_element() {
+        // The injection payload: cmd metacharacters must stay inert data.
+        let url = "https://www.twitch.tv/x?a=1&calc.exe";
+        let validated = validated_url(url).expect("query ampersand is legitimate");
+        assert_eq!(validated, url);
+        for (_, _, args) in windows_candidates("C:\\Windows", &validated) {
+            assert_eq!(
+                args.len(),
+                2,
+                "rundll32 takes the handler spec and the url, nothing else"
+            );
+            assert_eq!(args[1], url, "url must be one byte-identical argv element");
+        }
+    }
 
     #[test]
     fn system32_binary_joins_root_and_name() {
         assert_eq!(
-            system32_binary("C:\\Windows", "cmd.exe"),
-            "C:\\Windows\\System32\\cmd.exe"
+            system32_binary("C:\\Windows", "rundll32.exe"),
+            "C:\\Windows\\System32\\rundll32.exe"
         );
         // A relocated Windows install (SystemRoot != C:\Windows) is still
         // resolved correctly because we build from the env var, not a
@@ -464,22 +506,11 @@ mod windows_tests {
     }
 
     #[test]
-    fn cmd_start_args_include_mandatory_empty_title() {
-        let url = "https://twitch.tv/some_channel";
-        let args = cmd_start_args(url);
-        // `start` parses its first quoted positional argument as the window
-        // TITLE, not the target. The empty string at index 2 is mandatory;
-        // without it the URL would be misparsed as the title.
-        assert_eq!(args, vec!["/C", "start", "", url]);
-        assert_eq!(args[2], "", "the empty title argument must be present");
-        // And the URL must still be the final target, not swallowed as title.
-        assert_eq!(args[3], url);
-    }
-
-    #[test]
     fn rundll_args_use_file_protocol_handler() {
         let url = "https://twitch.tv/some_channel";
-        let args = rundll_url_args(url);
-        assert_eq!(args, vec!["url.dll,FileProtocolHandler", url]);
+        assert_eq!(
+            rundll_url_args(url),
+            vec!["url.dll,FileProtocolHandler".to_string(), url.to_string()]
+        );
     }
 }
