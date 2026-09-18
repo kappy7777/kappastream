@@ -129,10 +129,13 @@ impl GlLib {
                     continue;
                 }
             };
-            // SAFETY: the library is leaked and never unloaded.
-            let probe: Result<libloading::Symbol<unsafe extern "C" fn()>, _> =
-                unsafe { lib.get(b"glGetString") };
-            if probe.is_ok() {
+            // SAFETY: lookups only, against the leaked library.
+            let has =
+                |sym: &[u8]| -> bool { unsafe { lib.get::<unsafe extern "C" fn()>(sym) }.is_ok() };
+            // Both entry points the engine itself resolves must be present:
+            // glGetString is mpv's loader probe, glGetIntegerv feeds the
+            // render callbacks. A library missing either is not usable.
+            if has(b"glGetString") && has(b"glGetIntegerv") {
                 return Ok(GlLib { lib });
             }
             errors.push(format!("{name}: exports no raw gl* entry points"));
@@ -506,8 +509,16 @@ fn init_on_main_thread(
     fixed.put(&video_box, 0, 0);
 
     // Resolve glGetIntegerv once (through the GL provider) for the render
-    // callbacks.
-    let get_integerv: GlGetIntegervFn = unsafe { std::mem::transmute(gl.get("glGetIntegerv")) };
+    // callbacks. A null symbol must never be transmuted to a fn pointer —
+    // merely creating (let alone calling) one is UB — so a missing symbol
+    // fails surface init: the engine reports unavailable and the frontend
+    // falls back to hls.js.
+    let get_integerv_ptr = gl.get("glGetIntegerv");
+    if get_integerv_ptr.is_null() {
+        return Err("GL provider exports no glGetIntegerv".to_string());
+    }
+    // SAFETY: non-null dlsym result for the documented signature.
+    let get_integerv: GlGetIntegervFn = unsafe { std::mem::transmute(get_integerv_ptr) };
     let _ = GL_GET_INTEGERV.set(get_integerv);
 
     // mpv's render context initializes its GL renderer AT CREATION (it does
