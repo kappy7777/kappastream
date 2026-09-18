@@ -6,7 +6,7 @@ authors = ["kappy <kappy777@proton.me>"]
 license = "GPL-3.0-only"
 repository = "https://github.com/kappy7777/kappastream"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.89.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -42,8 +42,12 @@ updater = []
 # links nothing mpv and needs nothing installed. On Linux the only
 # libmpv-free builds are `--no-default-features` invocations that don't
 # re-add the feature (the AUR PKGBUILDs re-add it explicitly).
-# Note: libmpv2 needs a rustc newer than the crate's rust-version 1.77.2
-# floor — the MSRV only holds for builds without the feature.
+# Note: the crate rust-version is the MAXIMUM rust_version declared across
+# the resolved DEFAULT-feature dependency graph (see `cargo metadata`):
+# notify-rust 4.18.0, via tauri-plugin-notification, sets the 1.89.0 floor.
+# This default-on feature is part of that graph, so the floor holds for
+# every release build; the only --no-default-features consumers (AUR,
+# updater off) re-add the feature explicitly.
 mpv-embed = [
   "dep:libmpv2",
   "dep:libloading",
