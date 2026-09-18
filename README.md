@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="public/kappastream-wordmark.svg" alt="kappastream" width="520">
+<img src="docs/kappastream-wordmark.svg" alt="kappastream" width="520">
 
 ### A lightweight, anonymous Twitch viewer for Linux, macOS, and Windows
 
