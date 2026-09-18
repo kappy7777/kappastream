@@ -17,6 +17,32 @@ mod vod_proxy;
 #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
 mod mpv;
 
+// The honest availability probe for every build WITHOUT the Linux engine
+// (Windows, macOS, and --no-default-features builds): it must still
+// RESOLVE with an explicit reason, so the Settings row explains itself
+// ("not supported on this platform") on a disabled toggle instead of
+// silently hiding, and the frontend's engine selection falls back to
+// hls.js. Every other mpv_* command is simply not registered in these
+// builds — invokes reject cleanly (all frontend call sites catch).
+#[cfg(not(all(feature = "mpv-embed", target_os = "linux")))]
+mod mpv_unavailable {
+    use serde::Serialize;
+
+    #[derive(Serialize, Clone)]
+    pub struct AvailabilityPayload {
+        pub available: bool,
+        pub reason: Option<String>,
+    }
+
+    #[tauri::command]
+    pub fn mpv_available() -> AvailabilityPayload {
+        AvailabilityPayload {
+            available: false,
+            reason: Some("not supported on this platform".to_string()),
+        }
+    }
+}
+
 #[cfg(target_os = "linux")]
 pub mod compat;
 
@@ -130,9 +156,12 @@ pub fn run() {
             export::save_theme_export,
             // Feature-gated entries stay hidden from the default build's
             // command table entirely (the macro honours cfg on items).
-            // The Linux-only cfg mirrors the mod declaration above.
+            // The Linux-only cfg mirrors the mod declaration above; the
+            // stub probe below covers every other build.
             #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_available,
+            #[cfg(not(all(feature = "mpv-embed", target_os = "linux")))]
+            mpv_unavailable::mpv_available,
             #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_load,
             #[cfg(all(feature = "mpv-embed", target_os = "linux"))]

@@ -1062,10 +1062,9 @@ fn with_engine<R>(id: u32, f: impl FnOnce(&mut Engine) -> Result<R, String>) -> 
     f(engine)
 }
 
-/// Runtime availability probe result for the frontend. Flagged builds always
-/// RESOLVE — when the surface fails to init the `reason` carries the exact
-/// error so Settings can display it instead of silently hiding the feature
-/// (a rejected invoke means a default build, where this command doesn't exist).
+/// Runtime availability probe result for the frontend. The probe always
+/// RESOLVES — when the surface fails to init the `reason` carries the exact
+/// error so Settings can display it instead of silently hiding the feature.
 #[derive(Serialize, Clone)]
 pub struct AvailabilityPayload {
     pub available: bool,
@@ -1073,27 +1072,15 @@ pub struct AvailabilityPayload {
 }
 
 /// Runtime availability probe for the frontend (also engine 0's eager
-/// bootstrap: a first call creates the single-player core + surface). In
-/// default builds this command does not exist at all (registration is
-/// feature-gated in lib.rs) — the frontend's invoke rejects and is treated as
-/// "not available".
+/// bootstrap: a first call creates the single-player core + surface). This
+/// command only exists in Linux mpv-embed builds; every other build
+/// registers the lib.rs `mpv_unavailable` stub, which resolves
+/// available:false with a "not supported on this platform" reason (the
+/// frontend also treats a missing command as "not available" for good
+/// measure). The engine cannot be force-enabled anywhere it isn't
+/// compiled in — there is no escape hatch by design.
 #[tauri::command]
 pub fn mpv_available(app: AppHandle) -> AvailabilityPayload {
-    // Linux is the only owner-verified platform. On Windows/macOS the
-    // surface has never run on hardware, so the Settings toggle stays
-    // hidden there (the frontend renders nothing for a false probe and
-    // selectVideoBackend falls back to hls). Escape hatch for the owner's
-    // on-hardware verification runs: launch the binary with
-    // KAPPASTREAM_MPV_FORCE=1 to have the engine offered as if verified.
-    #[cfg(not(target_os = "linux"))]
-    {
-        if std::env::var_os("KAPPASTREAM_MPV_FORCE").is_none() {
-            return AvailabilityPayload {
-                available: false,
-                reason: Some("engine not verified on this platform yet".to_string()),
-            };
-        }
-    }
     match ensure_engine(&app, 0) {
         Ok(_) => AvailabilityPayload {
             available: true,

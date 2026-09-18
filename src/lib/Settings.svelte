@@ -28,13 +28,15 @@
 
   let { onarmsleep }: { onarmsleep?: (minutes: number) => void } = $props()
 
-  // ---- Experimental native video engine (mpv-embed builds only) ----------
-  // The toggle row renders only when the build carries the mpv-embed feature
-  // AND its native surface initialized. In default builds the mpv_available
-  // command is not registered at all — the invoke rejects and maps to hidden.
-  // In flagged builds the probe always resolves; a failed init carries the
-  // Rust-side reason, shown on a DISABLED row (so a broken engine is visible
-  // instead of indistinguishable from a default build).
+  // ---- Experimental native video engine (LINUX mpv-embed builds only) ----
+  // The engine is Linux-only (owner scope decision 2026-09-18). The probe
+  // ALWAYS resolves: on Linux with the engine compiled in, a failed surface
+  // init carries the Rust-side reason; everywhere else (Windows/macOS, or a
+  // --no-default-features build) the Rust stub answers "not supported on
+  // this platform". Both render a DISABLED row with the reason — only a
+  // live engine shows the working toggle. A persisted mpvEngine=true copied
+  // from a Linux machine stays INERT here: the engine selection requires
+  // mpvAvailable and falls back to hls.js (video-backend.ts).
   let mpvAvailable = $state(false)
   let mpvUnavailableReason = $state('')
   // Compile-time target OS (the same authoritative `target_os` command App
@@ -43,9 +45,9 @@
   // Per-platform hwdec choices. Technical mpv property values, deliberately
   // NOT translated (same convention as the quality ids in PlayerControls).
   const HWDEC_BY_OS: Record<string, readonly MpvHwdec[]> = {
+    // The engine is Linux-only; non-Linux target_os values get the safe
+    // fallback pair below (the row never renders there anyway).
     linux: ['no', 'auto-safe', 'vaapi', 'nvdec'],
-    windows: ['no', 'auto-safe', 'd3d11va', 'nvdec'],
-    macos: ['no', 'auto-safe', 'videotoolbox'],
   }
   // Until target_os resolves (or outside Tauri): the safe pair only.
   const hwdecChoices = $derived<readonly MpvHwdec[]>(HWDEC_BY_OS[platformOs] ?? ['no', 'auto-safe'])
