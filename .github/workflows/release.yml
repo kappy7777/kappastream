@@ -97,10 +97,10 @@ jobs:
     container: debian:12
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
           cache: npm
@@ -152,7 +152,7 @@ jobs:
       # Debian-12 toolchain and 24.04's produce glibc-incompatible
       # target/ dirs that must never cross-restore.
       - name: Cache Cargo (~/.cargo + src-tauri/target)
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri -> target
           shared-key: native-deb12
@@ -221,7 +221,7 @@ jobs:
           find staging -maxdepth 1 -type f -printf '%f\n' | sort
 
       - name: Upload native artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: native-packages
           path: staging/
@@ -238,10 +238,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
           cache: npm
@@ -280,7 +280,7 @@ jobs:
             libmpv-dev
 
       - name: Cache Cargo (~/.cargo + src-tauri/target)
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri -> target
           shared-key: appimage-2404
@@ -300,6 +300,29 @@ jobs:
             exit 1
           fi
           echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
+
+      # tauri-bundler downloads linuxdeploy-plugin-gtk.sh from an UNPINNED
+      # master branch (raw.githubusercontent.com/tauri-apps/
+      # linuxdeploy-plugin-gtk/master/...) the first time it is needed and
+      # then reuses the cached file unchanged (crates/tauri-bundler/src/
+      # bundle/linux/appimage/linuxdeploy.rs in @tauri-apps/cli 2.11.4:
+      # `if !gtk.exists() { download(...) }`, cache dir
+      # $XDG_CACHE_HOME|~/.cache + /tauri). Seeding that cache path with a
+      # commit-pinned copy, gated on a sha256, means CI never performs the
+      # master download and the script that lands in the AppImage is exactly
+      # the one pinned here.
+      - name: Pre-seed the linuxdeploy gtk hook (commit-pinned)
+        env:
+          GTK_HOOK_URL: https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/b5eb8d05b4c0ed40107fe2158c5d8527f94568ef/linuxdeploy-plugin-gtk.sh
+          GTK_HOOK_SHA256: cb379f9b0733e9ad9f8bd78f8c2fa038aef2478523bb7d4c8e64ff6a1ea3501a
+        run: |
+          set -eu
+          dest="${XDG_CACHE_HOME:-$HOME/.cache}/tauri/linuxdeploy-plugin-gtk.sh"
+          mkdir -p "$(dirname "$dest")"
+          curl -fsSL "$GTK_HOOK_URL" -o "$dest"
+          echo "linuxdeploy-plugin-gtk.sh sha256: $(sha256sum "$dest" | cut -d' ' -f1)"
+          echo "$GTK_HOOK_SHA256  $dest" | sha256sum -c -
+          chmod +x "$dest"
 
       - name: Build AppImage
         env:
@@ -350,7 +373,7 @@ jobs:
           find staging -maxdepth 1 -type f -printf '%f\n' | sort
 
       - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: appimage
           path: staging/
@@ -371,10 +394,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
           cache: npm
@@ -384,7 +407,7 @@ jobs:
 
       # Separate cache key from the Linux jobs (different target triple).
       - name: Cache Cargo (~/.cargo + src-tauri/target)
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri -> target
           shared-key: windows-x86_64
@@ -501,7 +524,7 @@ jobs:
           find staging -maxdepth 1 -type f -printf '%f\n' | sort
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: windows-installer
           path: staging/
@@ -544,10 +567,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
           cache: npm
@@ -557,7 +580,7 @@ jobs:
 
       # Separate cache key from the Linux/Windows jobs (aarch64-apple-darwin).
       - name: Cache Cargo (~/.cargo + src-tauri/target)
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri -> target
           shared-key: macos-aarch64
@@ -610,7 +633,7 @@ jobs:
           find staging -maxdepth 1 -type f -exec basename {} \; | sort
 
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: macos
           path: staging/
@@ -638,13 +661,13 @@ jobs:
       # checkout (the build artifacts arrive via download-artifact below, not
       # from this checkout).
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # merge-multiple flattens every artifact into release-staging/ with
       # clean basenames (no per-artifact subdirs), so the release files
       # end up side by side.
       - name: Download build artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: release-staging
           merge-multiple: true
