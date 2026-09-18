@@ -38,7 +38,6 @@
           "https://cdn.7tv.app",
           "https://cdn.betterttv.net",
           "https://cdn.frankerfacez.com",
-          "https://cloudfront.net",
           "https://*.cloudfront.net"
         ],
         "connect-src": [
@@ -55,7 +54,6 @@
           "https://*.twitch.tv",
           "https://ttv-clips.net",
           "https://*.ttv-clips.net",
-          "https://cloudfront.net",
           "https://*.cloudfront.net",
           "ksvod:",
           "http://ksvod.localhost"
@@ -69,7 +67,6 @@
           "https://*.twitch.tv",
           "https://ttv-clips.net",
           "https://*.ttv-clips.net",
-          "https://cloudfront.net",
           "https://*.cloudfront.net"
         ],
         "worker-src": ["'self'", "blob:"],

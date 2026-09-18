@@ -57,15 +57,20 @@ fn proxy_client() -> &'static reqwest::Client {
 }
 
 /// Parse the custom-scheme URI and reconstruct the original HTTPS URL
-/// (`https://host/path?q=1`). Returns `None` if the host extracted from the
-/// path is not on the shared VOD allowlist (see `resolve::is_allowed_vod_host`).
+/// (`https://host/path?q=1`). Returns `None` unless the reconstructed
+/// target passes the ONE shared media-URL validator
+/// (`resolve::parse_media_url` over `resolve::is_allowed_vod_host`):
+/// https, no userinfo, default port, allowlisted host, single line — a
+/// crafted proxy URI cannot smuggle credentials or an off-port host into
+/// the fetch, and the fetched URL is always the parsed serialization,
+/// never the raw reconstruction.
 ///
 /// Tauri v2 fronts a registered URI scheme differently per webview engine: on
 /// Linux/macOS (WebKit) it is `ksvod://localhost/host/path?q=1`, on Windows
 /// (WebView2) it is `http://ksvod.localhost/host/path?q=1`. Both forms are
 /// accepted here so the proxy is robust regardless of which engine fronts it
 /// (a frontend form mismatch surfaces a 403 instead of silently 404-ing). The
-/// host allowlist still validates the extracted host, so accepting the Windows
+/// shared validator still gates the extracted host, so accepting the Windows
 /// http prefix does not widen what can be fetched.
 fn reconstruct_https_url(raw_uri: &str) -> Option<String> {
     // The path component after the prefix encodes the original
@@ -82,15 +87,8 @@ fn reconstruct_https_url(raw_uri: &str) -> Option<String> {
         return None;
     }
     let target = format!("https://{rest}");
-    let parsed = url::Url::parse(&target).ok()?;
-    if parsed.scheme() != "https" {
-        return None;
-    }
-    let host = parsed.host_str()?;
-    if !crate::resolve::is_allowed_vod_host(host) {
-        return None;
-    }
-    Some(target)
+    crate::resolve::parse_media_url(&target, crate::resolve::is_allowed_vod_host)
+        .map(|parsed| parsed.as_str().to_string())
 }
 
 /// Register the `ksvod` URI scheme protocol on the Tauri builder. Each request
@@ -321,6 +319,40 @@ mod tests {
         // "notcloudfront.net" is a suffix-match trap — must be rejected.
         assert_eq!(
             reconstruct_https_url("ksvod://localhost/notcloudfront.net/x"),
+            None
+        );
+    }
+
+    #[test]
+    fn reconstruct_rejects_userinfo_port_and_bare_apex() {
+        // Credentials smuggled through the proxy URI.
+        assert_eq!(
+            reconstruct_https_url("ksvod://localhost/user:pw@d2nvs31859zcd8.cloudfront.net/x"),
+            None
+        );
+        // A non-default port must never reach the fetch.
+        assert_eq!(
+            reconstruct_https_url("ksvod://localhost/d2nvs31859zcd8.cloudfront.net:8443/x"),
+            None
+        );
+        // The bare cloudfront.net apex is not a Twitch media distribution.
+        assert_eq!(
+            reconstruct_https_url("ksvod://localhost/cloudfront.net/x"),
+            None
+        );
+    }
+
+    #[test]
+    fn reconstruct_rejects_non_twitch_cloudfront_labels() {
+        // Only the single-label d<a-z0-9>{13} shape is a Twitch media
+        // distribution; anything else under *.cloudfront.net belongs to
+        // another AWS customer.
+        assert_eq!(
+            reconstruct_https_url("ksvod://localhost/a.b.cloudfront.net/x"),
+            None
+        );
+        assert_eq!(
+            reconstruct_https_url("ksvod://localhost/evil.cloudfront.net/x"),
             None
         );
     }

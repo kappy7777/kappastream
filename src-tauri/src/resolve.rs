@@ -412,14 +412,8 @@ pub async fn resolve_stream(
 
     match result {
         Ok(url) => {
-            let parsed = url::Url::parse(&url).ok().filter(|parsed| {
-                parsed.scheme() == "https"
-                    && parsed.username().is_empty()
-                    && parsed.password().is_none()
-                    && parsed.port_or_known_default() == Some(443)
-                    && parsed.host_str().is_some_and(is_allowed_live_host)
-            });
-            if parsed.is_none() || url.lines().count() != 1 {
+            let parsed = parse_media_url(&url, is_allowed_live_host);
+            if parsed.is_none() {
                 let err = if include_detail() {
                     format!(
                         "streamlink returned non-url: {}",
@@ -573,13 +567,36 @@ pub async fn stream_qualities(
     }
 }
 
+/// The one URL validator every streamlink-output consumer uses —
+/// resolve_stream, resolve_vod, resolve_clip, validate_media_url (the
+/// mpv_load trust boundary) and the ksvod proxy's reconstructed targets:
+/// https, no userinfo, the default port, an allowlisted host, and a single
+/// line of input. Returns the parsed `Url` so callers use its serialized
+/// form (`as_str`) rather than any raw string they were handed — the proxy
+/// in particular must never fetch a hand-assembled target.
+pub(crate) fn parse_media_url(raw: &str, host_ok: fn(&str) -> bool) -> Option<url::Url> {
+    if raw.lines().count() != 1 {
+        return None;
+    }
+    let parsed = url::Url::parse(raw).ok()?;
+    if parsed.scheme() != "https"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port_or_known_default() != Some(443)
+        || !parsed.host_str().is_some_and(host_ok)
+    {
+        return None;
+    }
+    Some(parsed)
+}
+
 // VOD/clip media (resolved HLS playlists and clip MP4s) are served from
-// Twitch's CloudFront distribution (e.g. d2nvs31859zcd8.cloudfront.net), which
+// Twitch's CloudFront distributions (e.g. d2nvs31859zcd8.cloudfront.net), which
 // the live host list above intentionally does NOT include.
 // The VOD path gets its own broader host set so the live path stays untouched.
 // Shared (pub(crate)) with vod_proxy.rs so the proxy validates fetches against
 // the SAME single list — two copies would silently drift (a security-relevant
-// failure mode). The proxy comment used to say "mirrors"; it now uses this.
+// failure mode).
 pub(crate) fn is_allowed_vod_host(host: &str) -> bool {
     host == "twitch.tv"
         || host.ends_with(".twitch.tv")
@@ -587,8 +604,23 @@ pub(crate) fn is_allowed_vod_host(host: &str) -> bool {
         || host.ends_with(".ttvnw.net")
         || host == "ttv-clips.net"
         || host.ends_with(".ttv-clips.net")
-        || host == "cloudfront.net"
-        || host.ends_with(".cloudfront.net")
+        || is_twitch_cloudfront_host(host)
+}
+
+/// Twitch's CloudFront media distributions all have the single-label shape
+/// `d[a-z0-9]{13}.cloudfront.net` (observed on VOD playlist URIs and clip
+/// MP4s: d2nvs31859zcd8, d3vd9lfkzbru3h, d2vi6trrdongqn, d1ndex63qxojbr).
+/// Requiring exactly that shape keeps every OTHER AWS customer hosted
+/// under `*.cloudfront.net` — and the bare apex — out of the fetch set.
+fn is_twitch_cloudfront_host(host: &str) -> bool {
+    let Some(label) = host.strip_suffix(".cloudfront.net") else {
+        return false;
+    };
+    label.len() == 14
+        && label.starts_with('d')
+        && label[1..]
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
 }
 
 /// Host families the LIVE path may resolve to: the twitch.tv page itself
@@ -610,12 +642,12 @@ pub(crate) fn is_allowed_live_host(host: &str) -> bool {
 /// The webview is the caller, so this is a trust boundary: handed an
 /// attacker-chosen string, mpv will open `file://`, `edl://`, `memory://`,
 /// `lavf://`, `smb://` and local playlist files just as readily as https.
-/// Same predicate shape the resolvers apply to streamlink's output —
-/// https, no userinfo, default port, single line — with the host set
-/// chosen by media kind: live resolves inside `is_allowed_live_host`;
-/// VOD playlists AND clip MP4s inside `is_allowed_vod_host` (streamlink
-/// signs both onto CloudFront). Debug builds may name the offending host;
-/// release builds get a stable generic message (include_detail()).
+/// Uses the same shared parse_media_url validator the resolvers apply to
+/// streamlink's output, with the host set chosen by media kind: live
+/// resolves inside `is_allowed_live_host`; VOD playlists AND clip MP4s
+/// inside `is_allowed_vod_host` (streamlink signs both onto CloudFront).
+/// Debug builds may name the offending host; release builds get a stable
+/// generic message (include_detail()).
 #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
 pub(crate) fn validate_media_url(url: &str, kind: &str) -> Result<(), String> {
     let host_ok: fn(&str) -> bool = match kind {
@@ -623,14 +655,7 @@ pub(crate) fn validate_media_url(url: &str, kind: &str) -> Result<(), String> {
         "vod" | "clip" => is_allowed_vod_host,
         other => return Err(format!("unknown media kind: {other}")),
     };
-    let parsed = url::Url::parse(url).ok().filter(|parsed| {
-        parsed.scheme() == "https"
-            && parsed.username().is_empty()
-            && parsed.password().is_none()
-            && parsed.port_or_known_default() == Some(443)
-            && parsed.host_str().is_some_and(host_ok)
-    });
-    if parsed.is_some() && url.lines().count() == 1 {
+    if parse_media_url(url, host_ok).is_some() {
         return Ok(());
     }
     if include_detail() {
@@ -706,14 +731,8 @@ pub async fn resolve_vod(
 
     match result {
         Ok(url) => {
-            let parsed = url::Url::parse(&url).ok().filter(|parsed| {
-                parsed.scheme() == "https"
-                    && parsed.username().is_empty()
-                    && parsed.password().is_none()
-                    && parsed.port_or_known_default() == Some(443)
-                    && parsed.host_str().is_some_and(is_allowed_vod_host)
-            });
-            if parsed.is_none() || url.lines().count() != 1 {
+            let parsed = parse_media_url(&url, is_allowed_vod_host);
+            if parsed.is_none() {
                 let err = if include_detail() {
                     format!(
                         "streamlink returned non-url: {}",
@@ -846,14 +865,8 @@ pub async fn resolve_clip(
 
     match result {
         Ok(url) => {
-            let parsed = url::Url::parse(&url).ok().filter(|parsed| {
-                parsed.scheme() == "https"
-                    && parsed.username().is_empty()
-                    && parsed.password().is_none()
-                    && parsed.port_or_known_default() == Some(443)
-                    && parsed.host_str().is_some_and(is_allowed_vod_host)
-            });
-            if parsed.is_none() || url.lines().count() != 1 {
+            let parsed = parse_media_url(&url, is_allowed_vod_host);
+            if parsed.is_none() {
                 let err = if include_detail() {
                     format!(
                         "streamlink returned non-url: {}",
@@ -1208,16 +1221,52 @@ mod tests {
 
     #[test]
     fn vod_host_allowlist_accepts_cloudfront() {
-        // VOD/clip media is served from CloudFront — the live allowlist omits
-        // it, but resolve_vod's allowlist must accept it.
+        // VOD/clip media is served from Twitch's CloudFront distributions —
+        // the live allowlist omits them, but resolve_vod's allowlist must
+        // accept exactly the observed single-label shape.
         assert!(is_allowed_vod_host("d2nvs31859zcd8.cloudfront.net"));
         assert!(is_allowed_vod_host("d1ndex63qxojbr.cloudfront.net"));
         assert!(is_allowed_vod_host("eun12.playlist.ttvnw.net"));
         assert!(is_allowed_vod_host("twitch.tv"));
-        // Not accepted: unrelated hosts.
+        // Not accepted: unrelated hosts, the bare apex, and other AWS
+        // customers under *.cloudfront.net.
         assert!(!is_allowed_vod_host("evil.example.net"));
         assert!(!is_allowed_vod_host("notcloudfront.net")); // suffix must be .cloudfront.net
         assert!(!is_allowed_vod_host("cloudfront.net.evil.com"));
+        assert!(!is_allowed_vod_host("cloudfront.net"));
+        assert!(!is_allowed_vod_host("evil.cloudfront.net"));
+        assert!(!is_allowed_vod_host("a.b.cloudfront.net"));
+    }
+
+    #[test]
+    fn parse_media_url_requires_single_line_https_no_userinfo() {
+        assert!(parse_media_url(
+            "https://d2nvs31859zcd8.cloudfront.net/v/playlist.m3u8?sig=abc&token=def",
+            is_allowed_vod_host
+        )
+        .is_some());
+        assert_eq!(
+            parse_media_url(
+                "https://user@d2nvs31859zcd8.cloudfront.net/x",
+                is_allowed_vod_host
+            ),
+            None
+        );
+        assert_eq!(
+            parse_media_url(
+                "https://d2nvs31859zcd8.cloudfront.net:8443/x",
+                is_allowed_vod_host
+            ),
+            None
+        );
+        // Multi-line output is never a URL, no matter what line 1 says.
+        assert_eq!(
+            parse_media_url(
+                "https://d2nvs31859zcd8.cloudfront.net/x\nhttps://evil.example/y",
+                is_allowed_vod_host
+            ),
+            None
+        );
     }
 
     #[test]
