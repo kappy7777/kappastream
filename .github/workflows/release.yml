@@ -466,15 +466,22 @@ jobs:
           [ -x "$seven_zip" ] || { echo "7z not found" >&2; exit 1; }
           "$seven_zip" l "$exe" > nsis-tree.txt
           size_mb=$(( $(stat -c %s "$exe") / 1048576 ))
+          # The resource maps ../streamlink-bundle/ -> streamlink/, so the
+          # exe lands at streamlink\bin\streamlink.exe (7z lists backslashes
+          # on Windows). Match path-agnostically: any listing line that
+          # contains the streamlink dir AND streamlink.exe.
           {
             echo "## Windows NSIS install tree"
             echo '```'
             echo "$exe (${size_mb} MB) — key entries:"
-            grep -E 'kappastream\.exe|streamlink\\streamlink\.exe' nsis-tree.txt || true
+            grep -E 'kappastream\.exe|streamlink.*streamlink\.exe' nsis-tree.txt || true
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          grep -q 'streamlink\\streamlink\.exe' nsis-tree.txt \
-            || { echo "ERROR: the bundled streamlink tree is missing from the NSIS install tree" >&2; exit 1; }
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -Eq 'streamlink.*streamlink\.exe' nsis-tree.txt || {
+            echo "ERROR: the bundled streamlink tree is missing from the NSIS install tree" >&2
+            grep -i streamlink nsis-tree.txt | head -5 >&2 || true
+            exit 1
+          }
           if grep -q 'libmpv' nsis-tree.txt; then
             echo "ERROR: libmpv payload found in the NSIS install tree — the mpv engine is Linux-only" >&2
             exit 1
