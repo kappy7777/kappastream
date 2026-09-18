@@ -864,6 +864,15 @@
       opacity 120ms ease,
       visibility 0s linear 0s;
   }
+
+  /* Native-engine mode: the tooltip rides the page-snapshot overlay over
+     the video; the 120 ms opacity fade would be frozen half-faded by the
+     snapshot (see App.svelte's .global-tooltip override — same
+     reasoning). Show AND hide become instant (pure class flips, no
+     listeners to break). */
+  :global(.app--native-video) .fav-tooltip {
+    transition: none;
+  }
   .fav-tooltip-name {
     font-weight: 700;
     color: var(--text-primary);

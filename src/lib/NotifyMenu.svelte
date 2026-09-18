@@ -219,9 +219,12 @@
   /* Native-engine mode: this menu rides the snapshot overlay over the
      video, where the drop shadow reads as a dark smudge on a bright
      picture (see App.svelte's .global-tooltip override for the tooltip
-     half of the same reasoning). */
+     half of the same reasoning). The reveal animation is disabled too:
+     the page snapshot would freeze the 150 ms scale/fade mid-flight,
+     and nothing listens for it to end. */
   :global(.app--native-video) .notify-panel {
     box-shadow: none;
+    animation: none;
   }
 
   .panel-head {

@@ -331,6 +331,15 @@
     }
   }
 
+  /* Native-engine mode: the dropdown rides the page-snapshot overlay over
+     the video; the 120 ms slide-fade would be frozen mid-flight by the
+     snapshot (see App.svelte's .global-tooltip override — same
+     reasoning). The dropdown appears/leaves via {#if}, so nothing
+     depends on the animation ending. */
+  :global(.app--native-video) .search-dropdown {
+    animation: none;
+  }
+
   .search-status {
     padding: 8px 10px;
     font-size: 12px;

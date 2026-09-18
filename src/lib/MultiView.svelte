@@ -183,12 +183,7 @@
     // engine id -> pushed geometry key ('' = nothing shown for that engine)
     const pushed = new Map<number, string>()
     const pushedKeeps = new Map<number, number[]>()
-    let settleTimers: ReturnType<typeof setTimeout>[] = []
     let lastInteractSnap = 0
-    const clearSettle = (): void => {
-      for (const tm of settleTimers) clearTimeout(tm)
-      settleTimers = []
-    }
     const setVisible = (visible: boolean): void => {
       void invoke('mpv_set_surface_visible', { visible }).catch(() => {})
     }
@@ -266,17 +261,6 @@
           ((y2 - y1) / pr.height).toFixed(4),
         )
         snapshot(a.id, x1, y1, x2 - x1, y2 - y1, keeps)
-        // Settle burst: tooltips fade in over ~120 ms — refresh the frozen
-        // frame a few times while the reveal settles (same rationale as the
-        // single-player guard).
-        for (const delay of [150, 350, 700]) {
-          settleTimers.push(
-            setTimeout(() => {
-              if (pushed.get(a.id) !== key) return
-              snapshot(a.id, x1, y1, x2 - x1, y2 - y1, keeps)
-            }, delay),
-          )
-        }
       }
     }
     const sendPage = (id: number, action: 'show' | 'hide', ...fracs: string[]): void => {
@@ -323,7 +307,6 @@
       window.removeEventListener('resize', recheck)
       for (const ty of interactTypes) document.removeEventListener(ty, onSnapInteract, { capture: true })
       clearInterval(geoIv)
-      clearSettle()
       if (suppressed) setVisible(true)
       for (const id of new Set(mpvIds.values())) sendPage(id, 'hide')
     }

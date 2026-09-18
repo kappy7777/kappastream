@@ -1012,11 +1012,13 @@
   //  - Small STRIPS (update banner, tooltips, toasts, the notification
   //    menu, the search dropdown): must not duck a playing video for a
   //    sliver of UI — they keep the snapshot overlay (positioned against
-  //    the video rect), one-shot per geometry change plus a settle burst
-  //    (reveal animations) and interaction refreshes (typing/scrolling
-  //    inside the overlaid element). The bitmap is MASKED to the element
-  //    rects (keep rects), so the union crop carries no dark
-  //    empty-player padding between/around elements.
+  //    the video rect), one-shot per geometry change plus interaction
+  //    refreshes (typing/scrolling inside the overlaid element). The
+  //    bitmap is MASKED to the element rects (keep rects), so the union
+  //    crop carries no dark empty-player padding between/around elements.
+  //    Their reveal animations are disabled in native mode (see the
+  //    .app--native-video rules), so the first snapshot is already the
+  //    final frame — no settle burst needed.
   //
   // This effect owns WHEN: it polls the player rect against the classes
   // (DOM changes, resizes, a short tick for moving tooltips). New dialogs
@@ -1033,12 +1035,7 @@
     let shown = false // a snapshot overlay is currently composited
     let pushed = '' // last geometry pushed (window-space box; '' = hidden)
     let pushedKeeps: number[] = [] // keep rects (flat CSS px) for `pushed`
-    let settleTimers: ReturnType<typeof setTimeout>[] = []
     let lastInteractSnap = 0
-    const clearSettle = (): void => {
-      for (const tm of settleTimers) clearTimeout(tm)
-      settleTimers = []
-    }
     const snapshot = (x: number, y: number, w: number, h: number, keeps: number[]): void => {
       void invoke('mpv_page_snapshot', {
         x: Math.round(x),
@@ -1131,18 +1128,6 @@
         ((y2 - y1) / pr.height).toFixed(4),
       ])
       snapshot(x1, y1, x2 - x1, y2 - y1, keeps)
-      // Settle burst: the one-shot above can catch an element mid-reveal
-      // (tooltips fade in over ~120 ms) — a frozen half-faded frame reads
-      // as a darker tooltip. A few cheap re-snapshots while the reveal
-      // settles; cancelled as soon as the geometry moves.
-      clearSettle()
-      for (const delay of [150, 350, 700]) {
-        settleTimers.push(
-          setTimeout(() => {
-            if (shown && pushed === key) snapshotPushed()
-          }, delay),
-        )
-      }
     }
     recheck()
     const isOverlayNode = (n: Node): boolean =>
@@ -1199,7 +1184,6 @@
       window.removeEventListener('resize', recheck)
       for (const ty of interactTypes) document.removeEventListener(ty, onSnapInteract, { capture: true })
       clearInterval(geoIv)
-      clearSettle()
       // Leaving native mode must not leave a hidden surface or a stale
       // overlay composited.
       if (suppressed) setVisible(true)
@@ -4407,12 +4391,24 @@
      has behind them (the empty player) before the bitmap lands on the
      video, and the drop shadow reads as a dark smudge over a bright
      picture — over the video they must be opaque and shadow-free so the
-     composited half matches the live half. (The notification menu's
-     equivalent override lives in NotifyMenu.svelte — App styles can't
-     reach into child components.) */
+     composited half matches the live half. The reveal animation is also
+     disabled: a snapshot fired at reveal time would otherwise freeze a
+     HALF-FADED frame into the composited bitmap (there is no settle
+     burst to re-capture; nothing listens for the animation to end).
+     (The notification menu's equivalent override lives in
+     NotifyMenu.svelte — App styles can't reach into child components.) */
   .app--native-video .global-tooltip {
     background: var(--bg-panel);
     box-shadow: none;
+    animation: none;
+  }
+
+  /* Same reveal-freeze reasoning as the tooltip above: the toast's
+     150 ms slide-fade would be captured mid-flight by the page-snapshot
+     overlay. Dismissal is a 3.5 s state timer (element removal), so
+     nothing depends on the animation completing. */
+  .app--native-video .notif-toast {
+    animation: none;
   }
 
   /* Hidden probe that measures how position:fixed left/top map to visual
