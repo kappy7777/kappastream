@@ -17,7 +17,7 @@
 // core is treated as "equal" (no what's-new screen) — see the note on
 // `classifyLaunch` below. This is benign for kappastream: rc tags are
 // throwaway updater smoke-test builds and an rc user has already seen those
-// features; the owner is the only rc audience.
+// features.
 
 import { isVersionNewer } from './version'
 import { STORAGE_KEYS } from './storage-keys'

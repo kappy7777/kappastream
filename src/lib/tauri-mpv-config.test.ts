@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 // Drift guard for the window/transparency posture of the embedded-libmpv
 // engine (feature `mpv-embed`, see src-tauri/src/mpv/).
 //
-// THE RULE (owner scope decision 2026-09-18): the engine is LINUX-ONLY and
+// THE RULE: the engine is LINUX-ONLY and
 // needs NO transparency ANYWHERE — the Linux surface draws video ABOVE the
 // fully opaque webview. Concretely:
 //   - no config, base or overlay, may set `macOSPrivateApi` (the flag once

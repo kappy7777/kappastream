@@ -31,9 +31,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 default = ["updater", "mpv-embed"]
 updater = []
-# Embedded-libmpv video engine (see src/mpv/mod.rs) — LINUX-ONLY (owner
-# scope decision 2026-09-18). IN the default set (owner decision
-# 2026-09-16): every LINUX release build ships the engine and its
+# Embedded-libmpv video engine (see src/mpv/mod.rs) — LINUX-ONLY. In the
+# default set: every LINUX release build ships the engine and its
 # packaging carries libmpv — deb/rpm declare it in tauri.conf.json
 # (libmpv2 / the libmpv.so.2 SONAME capability), the AppImage bundles it
 # via linuxdeploy, and the AUR packages depend on Arch's `mpv`. On
@@ -81,8 +80,9 @@ url = "2"
 # (Historical: the removed mpv macOS surface once required wry's
 # `macos-private-api` transparent-WKWebView path, carried in every
 # per-target config overlay to satisfy tauri-build's exact feature-equality
-# check. The engine is Linux-only since 2026-09-18 and needs no transparency
-# anywhere — do not re-add the feature or the overlays without an owner task.)
+# check. The engine is Linux-only and needs no transparency anywhere —
+# do not re-add the feature or the overlays without a deliberate decision
+# to bring those surfaces back.)
 tauri = { version = "2.11.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-notification = "2.3.3"

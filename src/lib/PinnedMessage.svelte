@@ -8,8 +8,8 @@
   // every uiScale (no viewport units → no --ui-zoom compensation needed).
   //
   // The body is the MESSAGE ITSELF (the "Pinned by …" header already names
-  // the moderator; the original sender is deliberately left unmentioned per
-  // the owner's direction). It renders through the same renderMessage()
+  // the moderator; the original sender is deliberately left unmentioned).
+  // It renders through the same renderMessage()
   // pipeline the chat pane uses — same third-party emote map prop, Twitch
   // emote ranges rebuilt from the pin's own fragments — plus the shared
   // twitch-link handling (LinkifiedText): only twitch.tv URLs are

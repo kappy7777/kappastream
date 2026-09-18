@@ -1,8 +1,7 @@
 // Experimental embedded-libmpv video engine ("video above the page") —
-// LINUX-ONLY (owner scope decision 2026-09-18). Windows and macOS build
-// no mpv code at all and run the hls.js engine exclusively; see the
-// preserved hardware findings in the local AGENTS.md for why off-Linux
-// support is out of scope rather than pending.
+// LINUX-ONLY. Windows and macOS build no mpv code at all and run the
+// hls.js engine exclusively; off-Linux support is out of scope rather
+// than pending.
 //
 // When the `mpv-embed` Cargo feature is on AND the runtime toggle is on, the
 // main player renders through libmpv drawing into a native surface positioned
@@ -24,7 +23,7 @@
 // GATING — three layers, all must hold:
 //   1. This module only compiles under
 //      `#[cfg(all(feature = "mpv-embed", target_os = "linux"))]`. The
-//      feature is a DEFAULT (owner decision 2026-09-16) whose dependency
+//      feature is a DEFAULT whose dependency
 //      set is target-gated to Linux in Cargo.toml — so every LINUX release
 //      build ships the engine and its packaging carries libmpv (deb/rpm
 //      depends, AppImage bundling via linuxdeploy, AUR `mpv` dep), while a

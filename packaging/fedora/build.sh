@@ -17,7 +17,7 @@ PKG="kappastream"
 cd "$REPO_ROOT"
 
 # Version: package.json is the single read source (kept in sync with
-# src-tauri/Cargo.toml and src-tauri/tauri.conf.json — see AGENTS.md).
+# src-tauri/Cargo.toml and src-tauri/tauri.conf.json — see CONTRIBUTING.md).
 VERSION="$(node -p "require('./package.json').version")"
 TARBALL="${PKG}-${VERSION}.tar.gz"
 OUTDIR="$SCRIPT_DIR/dist"

@@ -8,13 +8,14 @@
 // entry here falls back to a generic line; a version with an entry here but no
 // CHANGELOG section is drift to fix.
 //
-// OWNER CONVENTIONS (see the Release-notes rule in AGENTS.md): this file is
-// owner-controlled prose — entries are drafted and approved by the owner
-// alongside the CHANGELOG in each release cycle, and every bullet starts with
-// a fitting emoji (pinned by release-notes.test.ts).
+// MAINTAINER CURATION (see CONTRIBUTING.md): this file is maintainer-
+// controlled prose — entries are drafted and approved by the maintainer
+// alongside the CHANGELOG in each release cycle (a PR should not add
+// entries here), and every bullet starts with a fitting emoji (pinned by
+// release-notes.test.ts).
 //
-// WHY CURATED (not generated from CHANGELOG.md): the CHANGELOG is owner-
-// controlled prose, its format doesn't map cleanly to short bullets, and a
+// WHY CURATED (not generated from CHANGELOG.md): the CHANGELOG is
+// maintainer-controlled prose, its format doesn't map cleanly to short bullets, and a
 // build-time markdown parser would add complexity for no gain. A curated map
 // ships in the bundle (offline — the what's-new screen adds NO network
 // request) and is a one-line edit per release. The CHANGELOG remains the
@@ -134,7 +135,7 @@ export function releaseNotesFor(version: string): VersionNotes {
  * `currentVersion` (the running build). The what's-new screen and the
  * About-modal changelog render this list scrollably, so highlights from
  * previous releases stay reachable. Versions NEWER than the running build
- * are excluded: an owner drafting the next release's entry before tagging
+ * are excluded: a draft of the next release's entry written before tagging
  * it must never surface unreleased notes in a shipped build. Comparison is
  * SemVer-core (rc tails compare as their core).
  */

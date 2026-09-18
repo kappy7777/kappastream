@@ -25,7 +25,7 @@ describe('effectiveQualities', () => {
   })
 
   it('offers exactly a sparse ladder, inventing nothing', () => {
-    // The owner's case: this channel really only transcodes these — no
+    // A channel that really only transcodes these — no
     // 480p/360p/160p exists, and the menu must not pretend otherwise.
     expect(effectiveQualities(['1080p60', '720p60', 'audio_only'])).toEqual(['best', '1080p60', '720p60', 'audio_only'])
   })

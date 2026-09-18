@@ -156,8 +156,7 @@ export class HtmlVideoBackend implements VideoBackend {
 // ---------------------------------------------------------------------------
 // The native (embedded libmpv) backend — only reachable when the app shell
 // is a LINUX mpv-embed build AND its surface initialized
-// (invoke('mpv_available') === true). The engine is Linux-only (owner
-// scope decision 2026-09-18): everywhere else the probe resolves false
+// (invoke('mpv_available') === true). The engine is Linux-only: everywhere else the probe resolves false
 // ("not supported on this platform") or the commands are not registered
 // at all, so this backend is never selected and any invoke below would
 // simply reject and be swallowed. See src-tauri/src/mpv/ for the Rust side.

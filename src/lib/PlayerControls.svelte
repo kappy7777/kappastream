@@ -47,8 +47,8 @@
     // visible (auto-hide would blank a layout bar) and never renders the
     // theater-info gradient (it would sit under the native video).
     overlay?: boolean
-    /** LIVE playback: no seek bar at all (owner rule 2026-09-17 — live
-     *  streams never show a scrubber; VODs/clips/highlights always do). */
+    /** LIVE playback: no seek bar at all — live streams never show a
+     *  scrubber; VODs/clips/highlights always do. */
     live?: boolean
     /** Quality ids the current stream ACTUALLY offers (App's
      *  stream_qualities probe, already intersected + ordered via
@@ -705,7 +705,7 @@
     left: var(--video-left, 0%);
     right: var(--video-right, 0%);
     bottom: var(--video-bottom, 0%);
-    /* Compact bar (owner request 2026-09-16): the row shrank from 32px to
+    /* Compact bar: the row shrank from 32px to
        22px buttons (15px icons — every control stays visible and clickable),
        the scrub hit strip from 14 to 11 and the bottom padding from 8 to 5,
        cutting the bar's total height ~31% (58px → 40px at scale 1). The

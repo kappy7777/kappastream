@@ -4,7 +4,7 @@
 // flags, and the offline-close rule) so it is fully unit-testable without a DOM
 // or a network.
 //
-// DESIGN — see the multi-view section of AGENTS.md / the task spec:
+// DESIGN:
 //  - Multi-view is ALWAYS OFF on startup and is NEVER persisted to localStorage.
 //    Starting in multi-view after a restart would be surprising and would spawn
 //    up to 4 streamlink resolve calls + 4 hls.js instances on launch.

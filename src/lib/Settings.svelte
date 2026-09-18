@@ -29,7 +29,7 @@
   let { onarmsleep }: { onarmsleep?: (minutes: number) => void } = $props()
 
   // ---- Experimental native video engine (LINUX mpv-embed builds only) ----
-  // The engine is Linux-only (owner scope decision 2026-09-18). The probe
+  // The engine is Linux-only. The probe
   // ALWAYS resolves: on Linux with the engine compiled in, a failed surface
   // init carries the Rust-side reason; everywhere else (Windows/macOS, or a
   // --no-default-features build) the Rust stub answers "not supported on
@@ -855,7 +855,7 @@
             {:else if mpvUnavailableReason}
               <!-- Flagged build whose surface failed to init: show WHY instead of
                    hiding the row (a hidden row is indistinguishable from a default
-                   build and gives the owner nothing to act on). -->
+                   build and gives the user nothing to act on). -->
               <div class="toggle-row toggle-row--disabled">
                 <span class="toggle-label" id="mpv-engine-label">
                   {t('settings_mpvEngine')}
@@ -1083,7 +1083,7 @@
     left: 50%;
     transform: translate(-50%, -50%);
     z-index: 1001;
-    /* FIXED size for every section (owner request 2026-09-16): switching
+    /* FIXED size for every section: switching
        sections must not resize the window. The height matches the Playback
        pane's content (the tallest commonly-used section fits without
        scrolling; taller panes — e.g. Chat with a full mute list — scroll in

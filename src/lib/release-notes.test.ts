@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { RELEASE_NOTES, releaseNotesFor, releaseNoteVersions } from './release-notes'
 
 /*
- * Owner conventions for the what's-new highlights (see the Release-notes rule
- * in AGENTS.md): entries mirror the CHANGELOG's Added / Changed / Fixed
+ * Conventions for the what's-new highlights (see CONTRIBUTING.md):
+ * entries mirror the CHANGELOG's Added / Changed / Fixed
  * sections, and every bullet starts with a fitting emoji. These tests pin the
  * conventions so a future entry can't silently drop them.
  */
@@ -14,7 +14,7 @@ const SECTION_KEYS = ['added', 'changed', 'fixed'] as const
 // need VS16 for colour presentation, e.g. 🎚️ / 🖱️ / 🏷️).
 const EMOJI_LEAD = /^\p{Extended_Pictographic}/u
 
-describe('release-notes — sectioned, emoji-led highlights (owner conventions)', () => {
+describe('release-notes — sectioned, emoji-led highlights (maintainer conventions)', () => {
   const versions = Object.keys(RELEASE_NOTES)
 
   it('has curated entries to check', () => {

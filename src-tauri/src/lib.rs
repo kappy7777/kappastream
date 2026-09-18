@@ -8,8 +8,8 @@ mod resolve;
 mod tray;
 mod vod_proxy;
 
-// Embedded libmpv engine — a DEFAULT Cargo feature, LINUX-ONLY (owner
-// scope decision 2026-09-18). The feature's deps are target-gated to
+// Embedded libmpv engine — a DEFAULT Cargo feature, LINUX-ONLY. The
+// feature's deps are target-gated to
 // Linux in Cargo.toml, so on Windows/macOS it resolves to an empty dep
 // set AND this cfg keeps the module out entirely: a plain `cargo build`
 // there compiles and links nothing mpv. See src/mpv/mod.rs for the

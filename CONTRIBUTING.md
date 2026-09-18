@@ -50,6 +50,10 @@ no-account, no-tracking native Twitch viewer). Before opening one:
    mpv-related — the engine is Linux-only and its dependency set is
    target-gated away there.
 
+4. **Leave release prose to the maintainer.** Don't edit `CHANGELOG.md` or
+   `src/lib/release-notes.ts` in a PR — both are curated alongside each
+   release, and the what's-new highlights mirror the CHANGELOG by design.
+
 ## Scope notes
 
 - **Linux, macOS, and Windows.** Linux targets X11 + Wayland; macOS and Windows are also first-class targets. macOS builds target Apple Silicon (arm64) only.

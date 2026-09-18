@@ -430,9 +430,8 @@
 
   // Tile activation (video surface / native-video click / status-bar row):
   // moves ONLY the audio authority — the chat pointer NEVER follows a tile
-  // click (owner rule, 2026-09-17; formerly the merged-view exception, now
-  // the general rule). Chat follows chat-tab clicks and newly opened
-  // channels exclusively.
+  // click. Chat follows chat-tab clicks and newly opened channels
+  // exclusively.
   function activateTile(tileId: string): void {
     tileStore.focusTileKeepChat(tileId)
   }
@@ -610,7 +609,7 @@
   // ---- hideable status bar (#3) ----
   // Persisted via settings.mvStatusBarHidden. When hidden the bar collapses to
   // a thin strip below the grid whose centered "show" button is ALWAYS visible
-  // (owner request — the old hover-to-reveal button was undiscoverable). The
+  // (the old hover-to-reveal button was undiscoverable). The
   // strip is its own flex row so it never steals clicks from tiles/controls.
 
   // ---- resizable tile splits (#3) -------------------------------------------
@@ -1196,7 +1195,7 @@
   /* Hidden-state strip: a thin strip beneath the grid. Never overlaps
      tiles/controls, so it cannot steal their clicks. The reveal button inside
      is a real focusable <button> (Tab surfaces it for keyboard users) and is
-     ALWAYS visible (owner request — the old hover-to-reveal button was
+     ALWAYS visible (the old hover-to-reveal button was
      undiscoverable). */
   .mv-statusbar-hoverzone {
     flex: 0 0 auto;

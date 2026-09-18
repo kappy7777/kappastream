@@ -323,7 +323,7 @@ describe('planTileMuteToggle — unmute derived from EFFECTIVE audibility, never
     expect(S.planTileMuteToggle(true, true, false)).toEqual({ globalMuted: true })
   })
 
-  it("the owner's exact repro as one story: mute authority → move authority away → unmute the old tile — it plays", () => {
+  it('the mute-authority repro as one story: mute authority → move authority away → unmute the old tile — it plays', () => {
     // Word-for-word the reported sequence: (1) the audio-authority tile's mute
     // button is clicked, (2) audio authority moves to another tile, (3) the OLD
     // tile's now-unmute button is clicked. Pre-fix, step 3 flipped only
