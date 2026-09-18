@@ -807,7 +807,9 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
     // origin, clamped into the bitmap) — anything outside every keep gets
     // masked transparent by the worker.
     let keep_px = keep
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter_map(|r| {
             let a1 = clamp(f64::from(r[0]) * scale_x, sw);
             let a2 = clamp(f64::from(r[0].saturating_add(r[2])) * scale_x, sw);

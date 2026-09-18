@@ -902,7 +902,7 @@ fn argb32_crop_to_bgra(
     let mut out = Vec::with_capacity(w * (y2 - y1) * 4);
     for row in y1..y2 {
         let base = row * stride + x1 * 4;
-        for px in data[base..base + w * 4].chunks_exact(4) {
+        for px in data[base..base + w * 4].as_chunks::<4>().0 {
             let (b, g, r, a) = (px[0], px[1], px[2], px[3]);
             if a == 0 {
                 out.extend_from_slice(&[0, 0, 0, 0]);
@@ -941,7 +941,7 @@ fn mask_keep_rects(bgra: &mut [u8], w: usize, h: usize, keeps: &[(usize, usize, 
             row[x1..x2].fill(1);
         }
     }
-    for (px, keep) in bgra.chunks_exact_mut(4).zip(mask) {
+    for (px, keep) in bgra.as_chunks_mut::<4>().0.iter_mut().zip(mask) {
         if keep == 0 {
             px[3] = 0;
         }
