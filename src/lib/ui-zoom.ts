@@ -13,6 +13,15 @@
 // Windows it stays unset and the `1` fallback makes the calc identical to the
 // bare unit — no behaviour change there. `zoomDivisor` is the pure factor the
 // CSS divides by; extracting it keeps the compensation math unit-testable.
+//
+// RULE (2026-09-18, the "Settings renders much smaller on macOS" bug): the
+// divisor applies to VIEWPORT-UNIT TERMS ONLY, never to px constants. A px
+// length inside the zoomed subtree already paints at zoom × its css size on
+// every engine — dividing px too would shrink such a box to design size
+// while its zoom-scaled content (fonts, rows) still paints zoom × — exactly
+// the macOS-smaller-than-Windows discrepancy. For a `min(520px, calc(100vw
+// - 32px))` cap, write `min(520px, calc(100vw / var(--ui-zoom, 1) - 32px))`
+// — divide the unit term, keep the min() structure, leave px arms alone.
 
 export const UI_ZOOM_VAR = '--ui-zoom'
 

@@ -1087,8 +1087,16 @@
        scrolling; taller panes — e.g. Chat with a full mute list — scroll in
        place); the width grew a little past the old 480px. Still capped by
        the same viewport formula so short windows keep the modal on-screen. */
-    width: calc(min(520px, calc(100vw - 32px)) / var(--ui-zoom, 1));
-    height: calc(min(400px, calc(100vh - 64px)) / var(--ui-zoom, 1));
+    /* --ui-zoom divides ONLY the viewport-unit term, never the px arms:
+       on macOS a px length under documentElement zoom paints at zoom × its
+       css size (same as Windows/Linux), so dividing px too would shrink the
+       box to design size while its zoom-scaled content overflows it — the
+       "Settings renders much smaller on macOS" bug (2026-09-18). Viewport
+       units are the one thing WKWebView does NOT rescale with the zoom;
+       only they need the divisor. With the var at its 1 fallback
+       (Linux/Windows) the calc is identical to the bare form. */
+    width: min(520px, calc(100vw / var(--ui-zoom, 1) - 32px));
+    height: min(400px, calc(100vh / var(--ui-zoom, 1) - 64px));
     background: var(--bg-panel);
     border: 1px solid var(--border);
     border-radius: 8px;

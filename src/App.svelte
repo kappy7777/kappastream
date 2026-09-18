@@ -119,7 +119,14 @@
   // Reacts to both the platform signal and the live UI-scale value.
   $effect(() => {
     if (!isMacOS) return
-    document.documentElement.style.setProperty(UI_ZOOM_VAR, String(zoomDivisor(settings.uiScale)))
+    const divisor = zoomDivisor(settings.uiScale)
+    document.documentElement.style.setProperty(UI_ZOOM_VAR, String(divisor))
+    // Surface the ACTUAL runtime value (owner mandate: log it, don't reason
+    // about it) — stderr via the mpv debug bridge; check with
+    // KAPPASTREAM_MPV_LOG=1 from a terminal or stderr redirection.
+    void invoke('mpv_debug_log', {
+      line: `ui-zoom: isMacOS=${isMacOS} uiScale=${settings.uiScale} --ui-zoom=${divisor}`,
+    }).catch(() => {})
   })
 
   // Sleep timer expiry = STOP playback completely (not just pause): tear down

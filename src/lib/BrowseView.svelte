@@ -340,9 +340,11 @@
     left: 50%;
     transform: translate(-50%, -50%);
     z-index: 1001;
-    width: calc(min(1100px, calc(100vw - 32px)) / var(--ui-zoom, 1));
+    /* viewport-unit terms only — see Settings.svelte (dividing px arms too
+       shrinks the box on macOS while its zoom-scaled content does not). */
+    width: min(1100px, calc(100vw / var(--ui-zoom, 1) - 32px));
     max-width: 100%;
-    height: calc(min(82vh, 820px) / var(--ui-zoom, 1));
+    height: min(calc(82vh / var(--ui-zoom, 1)), 820px);
     display: flex;
     flex-direction: column;
     background: var(--bg-panel);

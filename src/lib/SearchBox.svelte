@@ -306,7 +306,9 @@
     left: 0;
     right: 0;
     min-width: 0;
-    max-height: calc(min(60vh, 420px) / var(--ui-zoom, 1));
+    /* viewport-unit term only — see Settings.svelte (dividing px arms too
+       shrinks the box on macOS while its zoom-scaled content does not). */
+    max-height: min(calc(60vh / var(--ui-zoom, 1)), 420px);
     overflow-y: auto;
     background: var(--bg-panel);
     border: 1px solid var(--border);

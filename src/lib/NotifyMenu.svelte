@@ -190,7 +190,9 @@
     top: calc(100% + 6px);
     right: 0;
     width: 320px;
-    max-height: calc(min(calc(100vh - 60px), 480px) / var(--ui-zoom, 1));
+    /* viewport-unit term only — see Settings.svelte (dividing px arms too
+       shrinks the box on macOS while its zoom-scaled content does not). */
+    max-height: min(calc(100vh / var(--ui-zoom, 1) - 60px), 480px);
     display: flex;
     flex-direction: column;
     background: var(--bg-panel);

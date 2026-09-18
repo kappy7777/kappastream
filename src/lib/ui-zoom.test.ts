@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { UI_ZOOM_VAR, zoomDivisor } from './ui-zoom'
 
 describe('zoomDivisor', () => {
@@ -30,5 +33,68 @@ describe('zoomDivisor', () => {
 
   it('exposes the CSS custom-property name the stylesheets divide by', () => {
     expect(UI_ZOOM_VAR).toBe('--ui-zoom')
+  })
+})
+
+// Drift guard for the CSS side of the compensation (2026-09-18, the
+// "Settings renders much smaller on macOS" bug): the divisor may apply to
+// VIEWPORT-UNIT TERMS ONLY — never to a px term. A px length under
+// documentElement zoom already paints at zoom × its css size on every
+// engine, so dividing a whole `min(520px, calc(100vw - 32px))` (or any px
+// term) makes the box design-sized on macOS while Windows/Linux render it
+// zoom-scaled — the panel then renders smaller on macOS than on
+// Windows/Linux AND its zoom-scaled content overflows the shrunken box.
+// A whole-min() division IS legitimate when every arm is pure viewport
+// arithmetic (App.svelte's `min(70vh, calc(100vw * 9 / 16))`), so the
+// check is: at each `/ var(--ui-zoom` site, either the divisor directly
+// follows a viewport unit, or the balanced group it closes contains NO px
+// token.
+describe('ui-zoom CSS usage (viewport-unit terms only)', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const files = [
+    '../App.svelte',
+    './Settings.svelte',
+    './SearchBox.svelte',
+    './NotifyMenu.svelte',
+    './BrowseView.svelte',
+  ]
+
+  // The text of the outermost balanced `(...)` group ending exactly at
+  // `end`, or null when the divisor does not close a group.
+  function precedingGroup(css: string, end: number): string | null {
+    let depth = 0
+    for (let i = end - 1; i >= 0; i--) {
+      const c = css[i]
+      if (c === ')') depth++
+      else if (c === '(') {
+        if (depth === 0) return null
+        depth--
+        if (depth === 0) return css.slice(i + 1, end)
+      }
+    }
+    return null
+  }
+
+  it('no division site divides a px term (directly or via a whole min())', () => {
+    for (const rel of files) {
+      const raw = readFileSync(join(here, rel), 'utf8')
+      // Scan CSS/TS code only — prose comments mention the calc form too.
+      const css = raw.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+      const marker = '/ var(--ui-zoom'
+      let total = 0
+      let at = css.indexOf(marker)
+      while (at !== -1) {
+        total++
+        const unitPreceded = /\d(?:vh|vw|dvh|svh|lvh|vmin|vmax) $/.test(css.slice(0, at))
+        const group = precedingGroup(css, at)
+        const groupClean = group === null || !/\d\s*px\b/.test(group)
+        expect(
+          unitPreceded || groupClean,
+          `${rel}: division at offset ${at} divides a px term (site: …${css.slice(Math.max(0, at - 60), at + 20)}…)`,
+        ).toBe(true)
+        at = css.indexOf(marker, at + marker.length)
+      }
+      expect(total, `${rel}: expected at least one ui-zoom division`).toBeGreaterThan(0)
+    }
   })
 })
