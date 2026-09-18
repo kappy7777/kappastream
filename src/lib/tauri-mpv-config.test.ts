@@ -44,6 +44,7 @@ const readConfig = (name: string): unknown => JSON.parse(readFileSync(join(here,
 
 type Conf = {
   app: { macOSPrivateApi?: boolean; windows?: Array<Record<string, unknown>> }
+  bundle?: { macOS?: { entitlements?: string } }
 }
 const base = readConfig('tauri.conf.json') as Conf
 const linux = readConfig('tauri.linux.conf.json') as Conf
@@ -93,5 +94,18 @@ describe('tauri.conf.json window opacity (mpv-embed posture)', () => {
     const features = line!.match(/features = \[([^\]]*)\]/)?.[1] ?? ''
     expect(features).toContain('"macos-private-api"')
     expect(features).toContain('"tray-icon"')
+  })
+
+  it('the macOS overlay ships the disable-library-validation entitlement (library-validation launch fix, 2026-09-18)', () => {
+    // tauri-bundler signs the main executable ad-hoc WITH hardened runtime
+    // (bundle.macOS.hardenedRuntime defaults true) → library validation on →
+    // the separately ad-hoc-signed mpv-libs dylibs (no team identity to
+    // match) are rejected and dyld kills the app before main(). The
+    // entitlement opts out of exactly that check. release.yml's signing
+    // gate verifies the SHIPPED .app carries it; this pins the config side.
+    expect(macos.bundle?.macOS?.entitlements).toBe('packaging/macos/Entitlements.plist')
+    const plist = readFileSync(join(here, '../../packaging/macos/Entitlements.plist'), 'utf8')
+    expect(plist).toContain('com.apple.security.cs.disable-library-validation')
+    expect(plist).toContain('<true/>')
   })
 })

@@ -17,6 +17,15 @@
 # run AFTER the rpath dedupe below — the dedupe's install_name_tool calls
 # invalidate whatever signatures existed before it.
 #
+# NOTE on the FINAL signing (tauri-bundler, after this hook): it re-signs the
+# .app's main executable ad-hoc WITH hardened runtime (bundle.macOS
+# .hardenedRuntime defaults true) — library validation then rejects these
+# separately ad-hoc-signed dylibs at launch (no team identity to match;
+# hardware-verified macOS 26.6, 2026-09-18). tauri.macos.conf.json therefore
+# points bundle.macOS.entitlements at packaging/macos/Entitlements.plist
+# (disable-library-validation), which rides that final pass. Nothing here
+# needs to change for it; release.yml's signing gate verifies the result.
+#
 # LC_RPATH DEDUPE + GATE (2026-09-18): dylibbundler rewrites EACH LC_RPATH of
 # a copied dylib's ORIGINAL Homebrew build to the -p value — ONE
 # `install_name_tool -rpath <old> <prefix>` per ORIGINAL entry (its

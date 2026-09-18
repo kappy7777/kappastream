@@ -734,6 +734,45 @@ jobs:
           fi
           echo "OK: no /opt/homebrew load paths; no duplicate LC_RPATH in the shipped .app"
 
+      # The signing gate that would have caught the 2026-09-18 hardware
+      # finding: the .app must VERIFY (deep+strict) and its main executable
+      # must carry EXACTLY the intended posture — ad-hoc signed, hardened
+      # runtime ON, and library validation disabled via the
+      # disable-library-validation entitlement (packaging/macos/Entitlements.plist
+      # via bundle.macOS.entitlements). Without the entitlement the ad-hoc
+      # main executable + the separately ad-hoc-signed mpv-libs dylibs fail
+      # library validation and dyld kills the app before main() — a build
+      # like that must never ship as an artifact.
+      - name: Verify .app code signing (adhoc + runtime + disable-library-validation)
+        run: |
+          set -euo pipefail
+          app="src-tauri/target/release/bundle/macos/kappastream.app"
+          test -d "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          info="$(codesign -dvv "$app" 2>&1 || true)"
+          ent="$(codesign -d --entitlements - --xml "$app" 2>/dev/null || true)"
+          {
+            echo "## macOS .app code signing"
+            echo '```'
+            echo "$info"
+            echo "--- entitlements"
+            echo "$ent"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          flags="$(printf '%s\n' "$info" | grep -io 'flags=[^ ]*' | head -n1 || true)"
+          case "$flags" in
+            *runtime*adhoc*|*adhoc*runtime*) ;;
+            *)
+              echo "ERROR: main executable signing flags are '$flags' — expected adhoc + runtime (ad-hoc identity, hardened runtime on; library validation disabled separately by entitlement)" >&2
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$ent" | grep -q 'com.apple.security.cs.disable-library-validation'; then
+            echo "ERROR: the disable-library-validation entitlement is missing from the main executable — the bundled mpv-libs dylibs (separately ad-hoc signed) would be rejected by library validation and the .app cannot launch" >&2
+            exit 1
+          fi
+          echo "OK: .app verifies deep+strict; adhoc+runtime; library validation disabled by entitlement"
+
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v7
         with:

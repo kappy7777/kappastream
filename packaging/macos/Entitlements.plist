@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Code-signing entitlements for the .app (bundle.macOS.entitlements in
+  tauri.macos.conf.json; applied by tauri-bundler's final codesign pass).
+
+  The ONE key here exists because the app bundles third-party dylibs
+  (Resources/mpv-libs/, ad-hoc signed by packaging/macos/bundle-libmpv.sh)
+  while tauri-bundler signs the main executable ad-hoc WITH hardened
+  runtime (bundle.macOS.hardenedRuntime defaults to true). Hardened
+  runtime enables library validation, which rejects any library whose
+  Team ID differs from the main executable's — and two separate ad-hoc
+  signatures carry NO team identity, so they can never match. Without
+  this entitlement the .app dies in dyld before main():
+  "code signature in '…/libmpv.2.dylib' not valid for use in process:
+  mapping process and mapped file (non-platform) have different Team IDs"
+  (verified on hardware, macOS 26.6 / M4, 2026-09-18).
+
+  disable-library-validation is the standard exception for exactly this
+  shape of app (bundled plug-in/library ecosystems); everything else
+  about the hardened runtime stays on. Do NOT add entitlements that were
+  not verified to be needed — the app launched (past dyld, to the
+  libmpv load) without any entitlements at all.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>
