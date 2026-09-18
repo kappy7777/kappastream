@@ -288,7 +288,7 @@ impl VideoSurface for LinuxSurface {
                     // the reveal lands in place without waiting for the
                     // queued relayout (see set_rect).
                     video_box.show_all();
-                    let (x, y, w, h) = *rect.lock().expect("mpv rect lock poisoned");
+                    let (x, y, w, h) = *super::lock_or_recover(&rect);
                     if x >= 0 && video_box.is_mapped() {
                         if let Some(win) = video_box.window() {
                             if win.parent().is_some() {
@@ -313,7 +313,7 @@ impl VideoSurface for LinuxSurface {
 
     fn set_rect(&self, x: i32, y: i32, w: i32, h: i32) {
         {
-            let mut last = self.last_rect.lock().expect("mpv rect lock poisoned");
+            let mut last = super::lock_or_recover(&self.last_rect);
             if *last == (x, y, w, h) {
                 return;
             }
@@ -651,18 +651,14 @@ pub(super) fn page_snapshot(
 ) -> Result<bool, String> {
     use webkit2gtk::WebViewExt;
 
-    if !super::engines()
-        .lock()
-        .expect("mpv engines lock poisoned")
-        .contains_key(&id)
-    {
+    if !super::lock_or_recover(super::engines()).contains_key(&id) {
         return Err("no engine".to_string());
     }
     {
-        let mut last = PAGE_SNAPSHOT_LAST
-            .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-            .lock()
-            .expect("mpv snapshot guard lock poisoned");
+        let mut last = super::lock_or_recover(
+            PAGE_SNAPSHOT_LAST
+                .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new())),
+        );
         let fresh = match last.get(&id) {
             Some(t) => t.elapsed() >= Duration::from_millis(SNAPSHOT_COALESCE_MS),
             None => true,
@@ -831,9 +827,7 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
     // Allocate the sequence number under the engine lock so request order
     // is what the worker compares against, and spawn the heavy half. If the
     // engine died in between, the worker simply finds nothing.
-    let seq = super::engines()
-        .lock()
-        .expect("mpv engines lock poisoned")
+    let seq = super::lock_or_recover(super::engines())
         .get_mut(&id)
         .map(|e| {
             e.page_seq += 1;
@@ -879,7 +873,7 @@ fn store_page_snapshot(crop: PageCrop) {
         (0, 0, w as usize, h as usize),
     );
     super::mask_keep_rects(&mut bgra, w as usize, h as usize, &keep);
-    let mut engines = super::engines().lock().expect("mpv engines lock poisoned");
+    let mut engines = super::lock_or_recover(super::engines());
     let Some(engine) = engines.get_mut(&id) else {
         return;
     };

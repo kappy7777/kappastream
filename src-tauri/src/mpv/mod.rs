@@ -172,6 +172,19 @@ fn engines() -> &'static Mutex<HashMap<u32, Engine>> {
     ENGINES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Lock one of the mpv statics, recovering from a poisoned lock instead of
+/// panicking. A panic on some other thread while holding one of these locks
+/// must not take every mpv command down with it: the guarded state is a
+/// plain registry / counter / rect that stays structurally valid across a
+/// panicking critical section, so the data behind a poisoned lock is still
+/// safe to keep using.
+pub(super) fn lock_or_recover<T>(lock: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    match lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Engine bootstrap
 
@@ -197,28 +210,17 @@ fn pin_c_numeric_locale() {
 /// up simply keeps failing on every probe/load, which the frontend surfaces
 /// as "unavailable" (single player) or a per-load fallback to hls.js (tiles).
 fn ensure_engine(app: &AppHandle, id: u32) -> Result<(), String> {
-    if engines()
-        .lock()
-        .expect("mpv engines lock poisoned")
-        .contains_key(&id)
-    {
+    if lock_or_recover(engines()).contains_key(&id) {
         return Ok(());
     }
     // Serialize concurrent first calls (mpv_available + a first load racing).
-    let _guard = INIT_GUARD.lock().expect("mpv engine init lock poisoned");
-    if engines()
-        .lock()
-        .expect("mpv engines lock poisoned")
-        .contains_key(&id)
-    {
+    let _guard = lock_or_recover(&INIT_GUARD);
+    if lock_or_recover(engines()).contains_key(&id) {
         return Ok(());
     }
     match build_engine(app, id) {
         Ok(engine) => {
-            engines()
-                .lock()
-                .expect("mpv engines lock poisoned")
-                .insert(id, engine);
+            lock_or_recover(engines()).insert(id, engine);
             Ok(())
         }
         Err(err) => {
@@ -558,11 +560,7 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                     // normally instead of being covered by a black box.
                     // Suppressed while a blocking overlay owns the screen
                     // (mpv_set_surface_visible re-shows on its dismissal).
-                    if let Some(engine) = engines()
-                        .lock()
-                        .expect("mpv engines lock poisoned")
-                        .get_mut(&id)
-                    {
+                    if let Some(engine) = lock_or_recover(engines()).get_mut(&id) {
                         engine.active = true;
                         if !engine.overlay_suppressed {
                             engine.surface.show();
@@ -618,11 +616,7 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                         // mpv composites via overlay-add. Best-effort — a
                         // failed overlay is a visual no-op, not an error the
                         // user can act on.
-                        if let Some(engine) = engines()
-                            .lock()
-                            .expect("mpv engines lock poisoned")
-                            .get_mut(&id)
-                        {
+                        if let Some(engine) = lock_or_recover(engines()).get_mut(&id) {
                             let _ = engine.handle_ks_overlay(&args[1..]);
                         }
                     }
@@ -642,11 +636,7 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                 // Idle = no file: the engine is no longer an active surface
                 // (a broadcast re-show must not un-hide a stopped engine).
                 if state.is_none() {
-                    if let Some(engine) = engines()
-                        .lock()
-                        .expect("mpv engines lock poisoned")
-                        .get_mut(&id)
-                    {
+                    if let Some(engine) = lock_or_recover(engines()).get_mut(&id) {
                         engine.active = false;
                     }
                 }
@@ -1014,7 +1004,7 @@ fn engine_id(id: Option<u32>) -> Result<u32, String> {
 }
 
 fn with_engine<R>(id: u32, f: impl FnOnce(&mut Engine) -> Result<R, String>) -> Result<R, String> {
-    let mut engines = engines().lock().expect("mpv engines lock poisoned");
+    let mut engines = lock_or_recover(engines());
     let engine = engines
         .get_mut(&id)
         .ok_or_else(|| "mpv engine unavailable".to_string())?;
@@ -1119,11 +1109,7 @@ pub fn mpv_load(
 #[tauri::command]
 pub fn mpv_stop(id: Option<u32>) -> Result<(), String> {
     let id = engine_id(id)?;
-    if let Some(engine) = engines()
-        .lock()
-        .expect("mpv engines lock poisoned")
-        .get_mut(&id)
-    {
+    if let Some(engine) = lock_or_recover(engines()).get_mut(&id) {
         engine.active = false;
         let _ = engine.mpv.command("stop", &[]);
         engine.surface.hide();
@@ -1238,7 +1224,7 @@ pub fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Result<(), 
 /// unconditionally).
 #[tauri::command]
 pub fn mpv_set_surface_visible(visible: bool) -> Result<(), String> {
-    let mut engines = engines().lock().expect("mpv engines lock poisoned");
+    let mut engines = lock_or_recover(engines());
     for engine in engines.values_mut() {
         engine.overlay_suppressed = !visible;
         if visible {
@@ -1453,7 +1439,7 @@ mod tests {
         // must fail cleanly rather than panic. mpv_stop is the deliberate
         // exception — teardown paths call it unconditionally, so it must be
         // a quiet no-op (for every id).
-        assert!(engines().lock().unwrap().is_empty());
+        assert!(lock_or_recover(engines()).is_empty());
         assert!(with_engine(0, |_| Ok(())).is_err());
         assert!(with_engine(2, |_| Ok(())).is_err());
         assert!(mpv_stop(None).is_ok());
