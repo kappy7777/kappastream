@@ -95,14 +95,16 @@ tauri-plugin-window-state = "2.4.1"
 # never compile — let alone link — against libmpv. `render` (in libmpv2's
 # default features) is what lets us draw into a GLArea instead of letting mpv
 # create its own window. libloading dlopens libepoxy at runtime for the GL
-# proc-address bridge on Linux (see src/mpv/ for why not the stale `epoxy`
-# crate). The gtk/glib/webkit2gtk versions deliberately match what
-# tauri/wry already resolve to (check Cargo.lock) so they unify — the surface
-# module manipulates the very widgets wry created.
+# proc-address bridge (see src/mpv/ for why not the stale `epoxy` crate).
+# The gtk/glib/webkit2gtk versions deliberately match what tauri/wry already
+# resolve to (check Cargo.lock) so they unify — the surface module manipulates
+# the very widgets wry created. ALL engine deps are target-gated to Linux
+# (the engine is Linux-only, 2026-09-18): on Windows/macOS the feature
+# resolves to an empty dep set and the module is cfg'd out in lib.rs — a
+# plain `cargo build` there compiles and links nothing mpv.
+[target.'cfg(target_os = "linux")'.dependencies]
 libmpv2 = { version = "6", optional = true }
 libloading = { version = "0.8", optional = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", optional = true }
 glib = { version = "0.18", optional = true }
 gdk = { version = "0.18", optional = true }

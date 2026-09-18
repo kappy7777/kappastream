@@ -616,6 +616,7 @@ pub(crate) fn is_allowed_live_host(host: &str) -> bool {
 /// VOD playlists AND clip MP4s inside `is_allowed_vod_host` (streamlink
 /// signs both onto CloudFront). Debug builds may name the offending host;
 /// release builds get a stable generic message (include_detail()).
+#[cfg(all(feature = "mpv-embed", target_os = "linux"))]
 pub(crate) fn validate_media_url(url: &str, kind: &str) -> Result<(), String> {
     let host_ok: fn(&str) -> bool = match kind {
         "live" => is_allowed_live_host,
@@ -1259,6 +1260,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
     fn validate_media_url_rejects_local_and_offsite_sources() {
         // mpv would open every one of these if it were handed them raw.
         let rejected = [
@@ -1293,6 +1295,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
     fn validate_media_url_accepts_real_resolved_urls() {
         // The shapes streamlink really returns: a signed usher playlist for
         // live, a signed CloudFront playlist for VOD, a signed CloudFront

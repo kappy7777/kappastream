@@ -270,7 +270,6 @@ fn log_pointer_event(kind: &str, x: f64, y: f64, osd: Option<(i64, i64)>) -> boo
 /// helpers and nothing else in this app depends on LC_NUMERIC, so this is the
 /// standard embedded-libmpv fix; mpv also requires it to STAY "C" for
 /// the core's whole lifetime, hence no restore.
-#[cfg(target_os = "linux")]
 fn pin_c_numeric_locale() {
     // SAFETY: setlocale with a constant, always-available locale name. The
     // process-wide effect is exactly the point (see the comment above).
@@ -323,7 +322,6 @@ fn ensure_engine(app: &AppHandle, id: u32) -> Result<(), String> {
 /// anyway. Linux prefers $XDG_RUNTIME_DIR/kappastream (0700 by systemd
 /// convention) when it is set, absolute and exists; everything else falls
 /// back to the per-user cache dir.
-#[cfg(target_os = "linux")]
 fn select_runtime_base(xdg: Option<&str>, cache: PathBuf) -> PathBuf {
     match xdg {
         Some(dir) if Path::new(dir).is_absolute() && Path::new(dir).is_dir() => {
@@ -349,13 +347,11 @@ fn setup_private_dir(dir: &Path) -> Result<PathBuf, String> {
         }
     }
     std::fs::create_dir_all(dir).map_err(|e| format!("create {name}: {e}"))?;
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
             .map_err(|e| format!("chmod {name}: {e}"))?;
     }
-    #[cfg(target_os = "linux")]
     {
         use std::os::unix::fs::MetadataExt;
         let uid = unsafe { libc::getuid() };
@@ -377,7 +373,6 @@ fn write_private_file(path: &Path, contents: &[u8]) -> Result<(), String> {
         .and_then(|n| n.to_str())
         .unwrap_or("file")
         .to_string();
-    #[cfg(unix)]
     {
         use std::io::Write;
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -396,10 +391,6 @@ fn write_private_file(path: &Path, contents: &[u8]) -> Result<(), String> {
             .map_err(|e| format!("chmod {name}: {e}"))?;
         Ok(())
     }
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, contents).map_err(|e| format!("write {name}: {e}"))
-    }
 }
 
 fn ensure_private_runtime_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -407,16 +398,12 @@ fn ensure_private_runtime_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .path()
         .app_cache_dir()
         .map_err(|e| format!("app cache dir: {e}"))?;
-    #[cfg(target_os = "linux")]
     let base = select_runtime_base(std::env::var("XDG_RUNTIME_DIR").ok().as_deref(), cache);
-    #[cfg(not(target_os = "linux"))]
-    let base = cache.join("mpv");
     setup_private_dir(&base)
 }
 
 fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
     // Before ANY libmpv call — mpv_create checks the locale immediately.
-    #[cfg(target_os = "linux")]
     pin_c_numeric_locale();
     // Materialize the embedded OSD script into the PRIVATE per-user runtime
     // dir (see ensure_private_runtime_dir) — 0600, never the shared /tmp.
@@ -432,7 +419,6 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
     // render API; the wid platforms set their window handle later instead).
     let mpv: &'static Mpv = Box::leak(Box::new(
         Mpv::with_initializer(|init| {
-            #[cfg(target_os = "linux")]
             init.set_property("vo", "libmpv")?;
             // Deliberate per spec: never park on the last frame when a file
             // ends; the frontend learns 'ended' from the state event.
@@ -1390,15 +1376,7 @@ pub fn mpv_page_snapshot(
             return Err("keep must be flat x,y,w,h rects".to_string());
         }
     }
-    #[cfg(target_os = "linux")]
-    {
-        linux::page_snapshot(&app, engine_id(id)?, x, y, w, h, keep.unwrap_or_default())
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (app, keep);
-        Err("page-UI overlay snapshots are Linux-only for now".to_string())
-    }
+    linux::page_snapshot(&app, engine_id(id)?, x, y, w, h, keep.unwrap_or_default())
 }
 
 /// Upload an OSD image bitmap (base64 BGRA + dims; storyboard strips also

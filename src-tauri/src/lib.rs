@@ -8,10 +8,13 @@ mod resolve;
 mod tray;
 mod vod_proxy;
 
-// Experimental embedded-libmpv engine — a DEFAULT Cargo feature; only
-// `--no-default-features` builds drop it (see src/mpv/mod.rs for the
-// gating rules and platform libmpv packaging).
-#[cfg(feature = "mpv-embed")]
+// Embedded libmpv engine — a DEFAULT Cargo feature, LINUX-ONLY (owner
+// scope decision 2026-09-18). The feature's deps are target-gated to
+// Linux in Cargo.toml, so on Windows/macOS it resolves to an empty dep
+// set AND this cfg keeps the module out entirely: a plain `cargo build`
+// there compiles and links nothing mpv. See src/mpv/mod.rs for the
+// gating rules and Linux libmpv packaging.
+#[cfg(all(feature = "mpv-embed", target_os = "linux"))]
 mod mpv;
 
 #[cfg(target_os = "linux")]
@@ -127,33 +130,34 @@ pub fn run() {
             export::save_theme_export,
             // Feature-gated entries stay hidden from the default build's
             // command table entirely (the macro honours cfg on items).
-            #[cfg(feature = "mpv-embed")]
+            // The Linux-only cfg mirrors the mod declaration above.
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_available,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_load,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_stop,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_set_paused,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_seek,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_set_volume,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_set_muted,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_set_rect,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_pointer,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_set_surface_visible,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_page_snapshot,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_script_msg,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_set_bitmap,
-            #[cfg(feature = "mpv-embed")]
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_debug_log,
         ])
         .run(tauri::generate_context!())
