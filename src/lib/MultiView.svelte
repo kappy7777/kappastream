@@ -187,15 +187,34 @@
     const setVisible = (visible: boolean): void => {
       void invoke('mpv_set_surface_visible', { visible }).catch(() => {})
     }
+    // Drop-retry: the command resolves false when the per-engine coalesce
+    // guard dropped the request; retry once the window has comfortably
+    // expired so a dropped FINAL request of a move can't strand the
+    // overlay on stale geometry (same rationale as App.svelte).
+    const retryTimers: ReturnType<typeof setTimeout>[] = []
+    const onSnapshotDropped = (id: number): void => {
+      retryTimers.push(
+        setTimeout(() => {
+          const key = pushed.get(id)
+          if (key === undefined) return
+          const [x, y, x2, y2] = key.split(',').slice(0, 4).map(Number)
+          snapshot(id, x, y, x2 - x, y2 - y, pushedKeeps.get(id) ?? [])
+        }, 140),
+      )
+    }
     const snapshot = (id: number, x: number, y: number, w: number, h: number, keeps: number[]): void => {
-      void invoke('mpv_page_snapshot', {
+      void invoke<boolean>('mpv_page_snapshot', {
         id,
         x: Math.round(x),
         y: Math.round(y),
         w: Math.round(w),
         h: Math.round(h),
         keep: keeps,
-      }).catch(() => {})
+      })
+        .then((accepted) => {
+          if (accepted === false) onSnapshotDropped(id)
+        })
+        .catch(() => {})
     }
     const intersects = (el: HTMLElement, r2: DOMRect): boolean => {
       const r = el.getBoundingClientRect()
@@ -352,6 +371,7 @@
       document.removeEventListener('animationend', onSettle, { capture: true })
       if (raf) cancelAnimationFrame(raf)
       clearInterval(geoIv)
+      for (const tm of retryTimers) clearTimeout(tm)
       if (suppressed) setVisible(true)
       for (const id of new Set(mpvIds.values())) sendPage(id, 'hide')
     }

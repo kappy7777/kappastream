@@ -178,12 +178,17 @@ fn gl_lib() -> Result<&'static GlLib, String> {
 
 /// Page-snapshot coalescing window, PER ENGINE: each snapshot re-renders
 /// the whole page, so requests for the SAME engine inside the window are
-/// skipped. 120 ms ≈ 8 Hz — the frontend's activity-aware cadence asks at
-/// up to 10 Hz while the user scrolls inside an overlaid dialog, and
-/// anything tighter spends the GTK main thread's time on frames the user
-/// can't perceive. A TIMESTAMP, deliberately not an in-flight flag — if
-/// WebKit ever failed to invoke the completion, a flag would wedge the
-/// path for the whole session while the window simply expires.
+/// skipped. 70 ms ≈ the measured p95 of the WebKit composite itself
+/// (hardware round 2026-09-18, KAPPASTREAM_MPV_LOG: cb-latency p50 48 ms
+/// / p95 66 ms; the full-viewport snapshot dominates — every later stage
+/// is ≤1.6 ms at p95, and crop size is irrelevant next to it) — set to
+/// roughly that p95, never below, so a fresh composite starts only after
+/// the previous one has very likely finished on this same GTK-main/video
+/// thread. A coalesced request now resolves Ok(false) so the frontend
+/// can retry it once the window expires. A TIMESTAMP, deliberately not
+/// an in-flight flag — if WebKit ever failed to invoke the completion, a
+/// flag would wedge the path for the whole session while the window
+/// simply expires.
 ///
 /// Per-ENGINE, not global, on purpose: page UI overlapping TWO tiles (a
 /// favorites tooltip across the grid seam) must snapshot on BOTH — a
@@ -193,6 +198,11 @@ fn gl_lib() -> Result<&'static GlLib, String> {
 static PAGE_SNAPSHOT_LAST: std::sync::OnceLock<
     std::sync::Mutex<std::collections::HashMap<u32, Instant>>,
 > = std::sync::OnceLock::new();
+
+/// The coalesce window length (see PAGE_SNAPSHOT_LAST's doc for the
+/// measured rationale). The frontend's drop-retry delay must stay
+/// comfortably above this.
+const SNAPSHOT_COALESCE_MS: u64 = 70;
 
 // ---------------------------------------------------------------------------
 // Page-snapshot latency diagnostics (KAPPASTREAM_MPV_LOG)
@@ -707,9 +717,13 @@ fn init_on_main_thread(
 /// composites its own page overlay). Runs its WebKitGTK work inside
 /// `with_webview` (main thread); the async completion converts + stores the
 /// crop and re-issues the overlay from the engine's last known geometry.
-/// Snapshots are coalesced by a 120 ms window (see PAGE_SNAPSHOT_LAST) —
+/// Snapshots are coalesced by a 70 ms window (see PAGE_SNAPSHOT_LAST) —
 /// a self-expiring guard, deliberately NOT an in-flight flag: if WebKit
 /// ever failed to call back, a flag would wedge the path forever.
+/// Coalesced requests resolve Ok(false) — the value is the frontend's
+/// retry signal (dropped requests must not strand a stale overlay: the
+/// 2026-09-18 hardware round measured 34% of requests coalesced during
+/// pointer movement).
 pub(super) fn page_snapshot(
     app: &AppHandle,
     id: u32,
@@ -718,7 +732,7 @@ pub(super) fn page_snapshot(
     w: i32,
     h: i32,
     keep: Vec<i32>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     use webkit2gtk::WebViewExt;
 
     let t_request = Instant::now();
@@ -735,14 +749,14 @@ pub(super) fn page_snapshot(
             .lock()
             .expect("mpv snapshot guard lock poisoned");
         let fresh = match last.get(&id) {
-            Some(t) => t.elapsed() >= Duration::from_millis(120),
+            Some(t) => t.elapsed() >= Duration::from_millis(SNAPSHOT_COALESCE_MS),
             None => true,
         };
         if !fresh {
             // Diagnostic gold: how often the guard actually thins requests
-            // in normal use. If this rarely fires it cannot be the latency
-            // bottleneck; if it fires constantly, requests ARE being lost
-            // behind the 120 ms window.
+            // in normal use (measured 2026-09-18: 34% of requests during
+            // pointer movement — the Ok(false) retry contract below is
+            // load-bearing, not defensive).
             if super::debug_log_enabled() {
                 let age = last.get(&id).map(|t| t.elapsed().as_millis()).unwrap_or(0);
                 snap_stats()
@@ -750,10 +764,14 @@ pub(super) fn page_snapshot(
                     .expect("snapshot stats lock poisoned")
                     .drops += 1;
                 eprintln!(
-                    "[mpv-snap] engine {id} request DROPPED by the coalesce guard ({age} ms into the 120 ms window)"
+                    "[mpv-snap] engine {id} request DROPPED by the coalesce guard ({age} ms into the 70 ms window)"
                 );
             }
-            return Ok(()); // coalesced; the active snapshot's result lands first
+            // Coalesced, NOT lost: Ok(false) tells the frontend to retry
+            // after the window expires — a dropped FINAL request of a move
+            // would otherwise strand the overlay on stale geometry (the
+            // backstop poll dedupes on an unchanged key and never resends).
+            return Ok(false);
         }
         last.insert(id, Instant::now());
     }
@@ -784,6 +802,7 @@ pub(super) fn page_snapshot(
                 move |res| finish_page_snapshot(res, meta),
             );
         })
+        .map(|_| true)
         .map_err(|e| format!("with_webview dispatch failed: {e}"))
 }
 
@@ -814,6 +833,10 @@ struct PageCrop {
     keep: Vec<(usize, usize, usize, usize)>,
     id: u32,
     seq: u64,
+    /// The FULL snapshot surface dims (viewport at device scale) — the
+    /// composite's cost driver, logged so runs at different resolutions
+    /// are comparable.
+    view: (usize, usize),
     t_request: Instant,
     t_dispatch: Option<Instant>,
     t_callback: Instant,
@@ -961,6 +984,7 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
             keep: keep_px,
             id,
             seq,
+            view: (sw, sh),
             t_request,
             t_dispatch,
             t_callback,
@@ -986,6 +1010,7 @@ fn store_page_snapshot(crop: PageCrop) {
         keep,
         id,
         seq,
+        view,
         t_request,
         t_dispatch,
         t_callback,
@@ -1036,7 +1061,7 @@ fn store_page_snapshot(crop: PageCrop) {
     );
     if super::debug_log_enabled() {
         eprintln!(
-            "[mpv-snap] engine {id} total {:.1}ms (cb {}.{:03}ms incl. dispatch {:?}, crop-blit {:.2}ms, convert+mask {:.2}ms, store+overlay {:.2}ms) crop {w}x{h}",
+            "[mpv-snap] engine {id} total {:.1}ms (cb {}.{:03}ms incl. dispatch {:?}, crop-blit {:.2}ms, convert+mask {:.2}ms, store+overlay {:.2}ms) view {}x{} crop {w}x{h}",
             total_us as f64 / 1000.0,
             cb_us / 1000,
             cb_us % 1000,
@@ -1044,6 +1069,8 @@ fn store_page_snapshot(crop: PageCrop) {
             blit_us as f64 / 1000.0,
             conv_us as f64 / 1000.0,
             store_us as f64 / 1000.0,
+            view.0,
+            view.1,
         );
     }
     record_snapshot_stages(total_us, cb_us, blit_us, conv_us, store_us);

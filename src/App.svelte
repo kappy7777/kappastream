@@ -1028,7 +1028,7 @@
     const fullSelector =
       '.about-modal, .about-backdrop, .browse-modal, .browse-backdrop, .welcome-modal, .welcome-backdrop, .ct-panel, .ct-backdrop, .settings-modal, .settings-backdrop'
     // Snapshotted strips: small/static/transient UI — a one-shot bitmap
-    // with interaction + settle refreshes, never a duck.
+    // with interaction + drop-retry refreshes, never a duck.
     const snapSelector = '.update-banner, .global-tooltip, .notif-toast, .fav-tooltip, .notify-panel, .search-dropdown'
     const selector = `${fullSelector}, ${snapSelector}`
     let suppressed = false // the native surface is fully hidden
@@ -1036,14 +1036,37 @@
     let pushed = '' // last geometry pushed (window-space box; '' = hidden)
     let pushedKeeps: number[] = [] // keep rects (flat CSS px) for `pushed`
     let lastInteractSnap = 0
+    let retryTimers: ReturnType<typeof setTimeout>[] = []
+    const clearRetries = (): void => {
+      for (const tm of retryTimers) clearTimeout(tm)
+      retryTimers = []
+    }
+    // The command resolves false when the per-engine coalesce guard
+    // DROPPED the request (the guard thins, it doesn't queue — measured
+    // 34% of requests during pointer movement). Retry once the 70 ms
+    // window has comfortably expired: a dropped FINAL request of a move
+    // must not strand the overlay on stale geometry (the backstop poll
+    // dedupes on an unchanged key and never resends). A redundant retry
+    // is cheap — identical pixels dedupe in the Rust store.
+    const onSnapshotDropped = (): void => {
+      retryTimers.push(
+        setTimeout(() => {
+          if (shown && pushed) snapshotPushed()
+        }, 140),
+      )
+    }
     const snapshot = (x: number, y: number, w: number, h: number, keeps: number[]): void => {
-      void invoke('mpv_page_snapshot', {
+      void invoke<boolean>('mpv_page_snapshot', {
         x: Math.round(x),
         y: Math.round(y),
         w: Math.round(w),
         h: Math.round(h),
         keep: keeps,
-      }).catch(() => {})
+      })
+        .then((accepted) => {
+          if (accepted === false) onSnapshotDropped()
+        })
+        .catch(() => {})
     }
     const snapshotPushed = (): void => {
       if (!shown || !pushed) return
@@ -1228,6 +1251,7 @@
       document.removeEventListener('animationend', onSettle, { capture: true })
       if (raf) cancelAnimationFrame(raf)
       clearInterval(geoIv)
+      clearRetries()
       // Leaving native mode must not leave a hidden surface or a stale
       // overlay composited.
       if (suppressed) setVisible(true)

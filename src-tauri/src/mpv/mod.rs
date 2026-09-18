@@ -1350,6 +1350,12 @@ pub fn mpv_debug_log(line: String) -> Result<(), String> {
 /// the notification menu + a tooltip poking past its edge doesn't carry
 /// the empty player's opaque background as dark padding around the
 /// elements. Empty/absent = keep everything.
+///
+/// Returns Ok(false) when the request was COALESCED (per-engine window,
+/// see linux::PAGE_SNAPSHOT_LAST): the frontend retries after the window
+/// expires, so a dropped FINAL request of a move can never strand the
+/// overlay on stale geometry. Ok(true) = accepted (the store dedupes an
+/// identical frame); Ok(false) = coalesced, retry.
 #[tauri::command]
 pub fn mpv_page_snapshot(
     app: AppHandle,
@@ -1359,7 +1365,7 @@ pub fn mpv_page_snapshot(
     w: i32,
     h: i32,
     keep: Option<Vec<i32>>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     if x < 0 || y < 0 || w < 1 || h < 1 {
         return Err("snapshot rect must be non-negative with w/h >= 1".to_string());
     }
