@@ -52,9 +52,6 @@ mpv-embed = [
   "dep:gio",
   "dep:webkit2gtk",
   "dep:windows-sys",
-  "dep:webview2-com",
-  "dep:windows",
-  "dep:windows-core",
   "dep:objc2",
   "dep:objc2-foundation",
   "dep:libc",
@@ -135,35 +132,15 @@ libc = { version = "0.2", optional = true }
 # unify.
 cairo = { version = "0.18", package = "cairo-rs", optional = true }
 
-# Windows mpv surface plumbing (see src/mpv/win32.rs — hardware-verified
-# 2026-09-18: video renders above the webview, audio + keyboard + modal
-# ducking all work; remaining hardware item is the pointer pass-through
-# re-test). Versions match what tauri already resolves so the trees unify.
+# UNVERIFIED Windows/macOS mpv surfaces (see src/mpv/win32.rs + macos.rs):
+# raw child-HWND / NSView plumbing. Versions match what tauri already
+# resolves so the dependency trees unify.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", optional = true, features = [
   "Win32_Foundation",
   "Win32_UI_WindowsAndMessaging",
   "Win32_System_LibraryLoader",
 ] }
-# mpv-embed only (page-UI snapshots over the video surface): CDP
-# Page.captureScreenshot through the WebView2 controller tauri already
-# hosts. BOTH crates are already transitive deps of tauri/wry at these
-# exact versions (see Cargo.lock) — declaring them here adds edges, not
-# packages. `windows` carries the WIC PNG decoder (a system component) and
-# the #[implement] COM machinery, so the snapshot path introduces no new
-# external crate; the version must match what wry resolves to keep the
-# feature unification exact. (webview2-com's own #[completed_callback]
-# macro is crate-internal and NOT depended on — the handler is a plain
-# windows::core::implement class.)
-webview2-com = { version = "0.38", optional = true }
-windows = { version = "0.61", optional = true, features = [
-  "Win32_Graphics_Imaging",
-  "Win32_System_Com",
-] }
-# Direct dep ONLY so `#[windows::core::implement]` resolves: the macro
-# emits `windows_core::…` paths, which require the crate under that name at
-# the use site (same reason wry depends on it directly).
-windows-core = { version = "0.61", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", optional = true }
