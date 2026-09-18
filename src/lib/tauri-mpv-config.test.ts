@@ -103,7 +103,12 @@ describe('tauri.conf.json window opacity (mpv-embed posture)', () => {
     // match) are rejected and dyld kills the app before main(). The
     // entitlement opts out of exactly that check. release.yml's signing
     // gate verifies the SHIPPED .app carries it; this pins the config side.
-    expect(macos.bundle?.macOS?.entitlements).toBe('packaging/macos/Entitlements.plist')
+    // tauri-bundler signs the .app with cwd = src-tauri/ (the config's
+    // directory — same resolution as the ../mac-mpv-libs/ resources entry;
+    // a project-root-relative path made codesign fail with "cannot read
+    // entitlement data" in the 2026-09-18 smoke run), so the path must
+    // carry the ../ prefix.
+    expect(macos.bundle?.macOS?.entitlements).toBe('../packaging/macos/Entitlements.plist')
     const plist = readFileSync(join(here, '../../packaging/macos/Entitlements.plist'), 'utf8')
     expect(plist).toContain('com.apple.security.cs.disable-library-validation')
     expect(plist).toContain('<true/>')

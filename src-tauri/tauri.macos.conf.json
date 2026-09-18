@@ -18,7 +18,7 @@
   },
   "bundle": {
     "macOS": {
-      "entitlements": "packaging/macos/Entitlements.plist"
+      "entitlements": "../packaging/macos/Entitlements.plist"
     },
     "resources": {
       "../mac-mpv-libs/": "mpv-libs/"

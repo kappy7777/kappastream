@@ -25,6 +25,8 @@
 # points bundle.macOS.entitlements at packaging/macos/Entitlements.plist
 # (disable-library-validation), which rides that final pass. Nothing here
 # needs to change for it; release.yml's signing gate verifies the result.
+# (Path gotcha: the entitlements value resolves against src-tauri/ — the
+# bundler's cwd — hence the ../ prefix, like the ../mac-mpv-libs/ resource.)
 #
 # LC_RPATH DEDUPE + GATE (2026-09-18): dylibbundler rewrites EACH LC_RPATH of
 # a copied dylib's ORIGINAL Homebrew build to the -p value — ONE
