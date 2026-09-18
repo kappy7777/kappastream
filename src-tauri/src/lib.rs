@@ -53,8 +53,28 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
-        .manage(gql::GqlClient::new().expect("failed to build GQL HTTP client"))
-        .plugin(tauri_plugin_notification::init());
+        .manage(gql::GqlClient::new().expect("failed to build GQL HTTP client"));
+
+    // Single-instance guard: a second launch (e.g. the user clicks the
+    // dock/AppImage while the window is hidden to the tray) must NOT start a
+    // duplicate process — instead it surfaces + focuses the existing window
+    // and the new process exits. Without this, close-to-tray + a dock click
+    // leaves two processes running and two tray icons. Registered FIRST,
+    // before every other plugin, per the Tauri docs (the plugin checks the
+    // lock on init, so a later registration widens the window in which a
+    // duplicate instance can slip past). Desktop-only: the plugin does not
+    // build on mobile.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window(tray::MAIN_WINDOW) {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }));
+    }
+
+    builder = builder.plugin(tauri_plugin_notification::init());
 
     // Remember the main window's size / position / maximized state across
     // launches: saved to a small JSON file in the app config dir and restored
@@ -97,23 +117,6 @@ pub fn run() {
         builder = builder
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_process::init());
-    }
-
-    // Single-instance guard: a second launch (e.g. the user clicks the
-    // dock/AppImage while the window is hidden to the tray) must NOT start a
-    // duplicate process — instead it surfaces + focuses the existing window
-    // and the new process exits. Without this, close-to-tray + a dock click
-    // leaves two processes running and two tray icons. Registered before
-    // other plugins per the Tauri docs. Desktop-only: the plugin does not
-    // build on mobile.
-    #[cfg(desktop)]
-    {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window(tray::MAIN_WINDOW) {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-        }));
     }
 
     builder = vod_proxy::register(builder);
