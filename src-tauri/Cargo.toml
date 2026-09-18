@@ -75,7 +75,8 @@ rfd = "0.17"
 url = "2"
 # DevTools are enabled by default in debug builds (`tauri dev`). The `devtools`
 # Cargo feature is intentionally NOT enabled so production/release builds do
-# not ship the web inspector. See tauri.conf.json window `devtools` field.
+# not ship the web inspector; the window `devtools` config key is gone too
+# (it only affected release builds, where the feature gate kept it inert).
 #
 # (Historical: the removed mpv macOS surface once required wry's
 # `macos-private-api` transparent-WKWebView path, carried in every

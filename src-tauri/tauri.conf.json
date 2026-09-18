@@ -16,7 +16,6 @@
       "resizable": true,
       "visible": false,
       "fullscreen": false,
-      "devtools": true,
       "decorations": false
     }
   ],
