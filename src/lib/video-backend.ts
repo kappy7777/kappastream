@@ -137,9 +137,12 @@ export class HtmlVideoBackend implements VideoBackend {
 
 // ---------------------------------------------------------------------------
 // The native (embedded libmpv) backend — only reachable when the app shell
-// was built with the `mpv-embed` Cargo feature AND its surface initialized
-// (invoke('mpv_available') === true); in default builds every invoke below
-// simply rejects and is swallowed. See src-tauri/src/mpv/ for the Rust side.
+// is a LINUX mpv-embed build AND its surface initialized
+// (invoke('mpv_available') === true). The engine is Linux-only (owner
+// scope decision 2026-09-18): everywhere else the probe resolves false
+// ("not supported on this platform") or the commands are not registered
+// at all, so this backend is never selected and any invoke below would
+// simply reject and be swallowed. See src-tauri/src/mpv/ for the Rust side.
 //
 // MULTI-ENGINE: the Rust host keeps one mpv core per surface id (0 = the
 // single-stream player, 1..4 = multi-view tiles). Every `mpv://…` event
@@ -150,9 +153,12 @@ export class HtmlVideoBackend implements VideoBackend {
 /** The media kinds the Rust mpv_load command accepts. */
 export type MpvMediaKind = 'live' | 'vod' | 'clip'
 
-/** Result of the `mpv_available` probe. Flagged builds always RESOLVE: on a
- *  failed engine init `reason` carries the Rust-side error (surfaced on a
- *  disabled Settings row). A rejected invoke = default build (no command). */
+/** Result of the `mpv_available` probe. It always RESOLVES in builds that
+ *  carry the Linux engine: on a failed init `reason` carries the
+ *  Rust-side error (surfaced on a disabled Settings row). Builds without
+ *  the engine resolve false with "not supported on this platform" — and a
+ *  rejected invoke (a Linux build with the feature compiled out entirely)
+ *  maps to the same conclusion. */
 export interface MpvAvailability {
   available: boolean
   reason?: string | null

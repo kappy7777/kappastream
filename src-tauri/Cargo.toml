@@ -31,18 +31,19 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 default = ["updater", "mpv-embed"]
 updater = []
-# Experimental embedded-libmpv video engine (see src/mpv/mod.rs). IN the
-# default set (owner decision 2026-09-16): every release build ships the
-# engine, so each platform's packaging carries libmpv — deb/rpm declare it
-# in tauri.conf.json (libmpv2 / mpv-libs), the AppImage bundles it via
-# linuxdeploy, Windows ships libmpv-2.dll next to the exe (see
-# tauri.windows.conf.json + packaging/windows/mpv.def), macOS bundles the
-# Homebrew libmpv closure into the .app (packaging/macos/bundle-libmpv.sh
-# as beforeBundleCommand + tauri.macos.conf.json), and the AUR packages
-# depend on Arch's `mpv`. The ONLY libmpv-free builds are
-# `--no-default-features` invocations that don't re-add the feature.
+# Embedded-libmpv video engine (see src/mpv/mod.rs) — LINUX-ONLY (owner
+# scope decision 2026-09-18). IN the default set (owner decision
+# 2026-09-16): every LINUX release build ships the engine and its
+# packaging carries libmpv — deb/rpm declare it in tauri.conf.json
+# (libmpv2 / the libmpv.so.2 SONAME capability), the AppImage bundles it
+# via linuxdeploy, and the AUR packages depend on Arch's `mpv`. On
+# Windows/macOS the feature's deps are target-gated away and the module
+# is cfg'd out (see lib.rs): a plain `cargo build` there compiles and
+# links nothing mpv and needs nothing installed. On Linux the only
+# libmpv-free builds are `--no-default-features` invocations that don't
+# re-add the feature (the AUR PKGBUILDs re-add it explicitly).
 # Note: libmpv2 needs a rustc newer than the crate's rust-version 1.77.2
-# floor — the MSRV only holds for --no-default-features builds.
+# floor — the MSRV only holds for builds without the feature.
 mpv-embed = [
   "dep:libmpv2",
   "dep:libloading",

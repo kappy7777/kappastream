@@ -96,9 +96,10 @@ build() {
   # src-tauri/src/lib.rs. pacman owns updates on Arch — an AUR install must
   # never surface an in-app update prompt or hit the update endpoint) AND
   # `mpv-embed`. The engine is explicitly re-added via `--features
-  # mpv-embed` so AUR ships the embedded mpv engine like every other
-  # platform (the `mpv` package above provides libmpv at build + runtime).
-  # Both features are empty (no dep changes), so --locked still holds.
+  # mpv-embed` so AUR ships the embedded mpv engine like every other Linux
+  # package (it is a Linux-only feature; the `mpv` package above provides
+  # libmpv at build + runtime). Both features are empty (no dep changes),
+  # so --locked still holds.
   cargo build --release --locked --no-default-features --features "mpv-embed,tauri/custom-protocol"
 }
 

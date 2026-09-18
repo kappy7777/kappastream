@@ -44,7 +44,11 @@ no-account, no-tracking native Twitch viewer). Before opening one:
    change seems to need auth, open an issue to discuss it first.
 
 3. **Build from source** to confirm it compiles end-to-end — see the
-   [README](./README.md#build-from-source).
+   [README](./README.md#build-from-source). Linux builds additionally need
+   `libmpv-dev` (`pacman -S mpv` on Arch): the embedded video engine is a
+   default Cargo feature on Linux. Windows and macOS builds need nothing
+   mpv-related — the engine is Linux-only and its dependency set is
+   target-gated away there.
 
 ## Scope notes
 

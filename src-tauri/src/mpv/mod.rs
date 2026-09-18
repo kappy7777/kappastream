@@ -1,4 +1,8 @@
-// Experimental embedded-libmpv video engine ("video above the page").
+// Experimental embedded-libmpv video engine ("video above the page") —
+// LINUX-ONLY (owner scope decision 2026-09-18). Windows and macOS build
+// no mpv code at all and run the hls.js engine exclusively; see the
+// preserved hardware findings in the local AGENTS.md for why off-Linux
+// support is out of scope rather than pending.
 //
 // When the `mpv-embed` Cargo feature is on AND the runtime toggle is on, the
 // main player renders through libmpv drawing into a native surface positioned
@@ -18,28 +22,28 @@
 // compositor handles this. Hence: no transparency anywhere.)
 //
 // GATING — three layers, all must hold:
-//   1. This module only compiles under `#[cfg(feature = "mpv-embed")]` — a
-//      DEFAULT feature (owner decision 2026-09-16): every release build
-//      ships the engine and its platform packaging carries libmpv (deb/rpm
-//      depends, AppImage bundling, Windows DLL resource, macOS dylib
-//      closure bundled into the .app, AUR `mpv` dep). Only
-//      `--no-default-features` builds exclude it (nothing ships that way).
+//   1. This module only compiles under
+//      `#[cfg(all(feature = "mpv-embed", target_os = "linux"))]`. The
+//      feature is a DEFAULT (owner decision 2026-09-16) whose dependency
+//      set is target-gated to Linux in Cargo.toml — so every LINUX release
+//      build ships the engine and its packaging carries libmpv (deb/rpm
+//      depends, AppImage bundling via linuxdeploy, AUR `mpv` dep), while a
+//      plain Windows/macOS `cargo build` compiles and links NOTHING mpv
+//      and needs nothing installed. There is no force-enable hatch.
 //   2. Nothing release-affecting: the window/webview stay exactly as
-//      tauri.conf.json builds them (opaque); the platform surfaces arrange
+//      tauri.conf.json builds them (opaque); the Linux surface arranges
 //      the native video surface at runtime.
-//   3. `mpv_available()` returns true only when the feature is compiled in
-//      AND the platform surface initialized; the Settings toggle is hidden
-//      otherwise (the frontend also treats a missing command as false).
+//   3. `mpv_available()` returns true only when the surface initialized;
+//      builds without the engine register a lib.rs stub that resolves
+//      false with "not supported on this platform" (the frontend also
+//      treats a missing command as false).
 //
-// BUILD PREREQUISITES (any build that keeps the default feature):
-//   Linux:   libmpv — Arch: `pacman -S mpv`; Debian/Ubuntu: `apt install
-//            libmpv-dev` (also the runtime libmpv.so.2, pulled in by it).
-//            GL symbols are dlopened at runtime from libGL.so.1 /
-//            libOpenGL.so.0 (GLVND; always present on a desktop, no dev
-//            package needed — see src/mpv/linux.rs).
-//   Windows: libmpv-2.dll + import library (see the Windows surface notes in
-//            a later phase; MPV_SOURCE env for libmpv2's build script).
-//   macOS:   `brew install mpv` (libmpv.dylib + headers).
+// BUILD PREREQUISITES (Linux only — the only platform that compiles this):
+//   libmpv — Arch: `pacman -S mpv`; Debian/Ubuntu: `apt install
+//   libmpv-dev` (also the runtime libmpv.so.2, pulled in by it). GL
+//   symbols are dlopened at runtime from libGL.so.1 / libOpenGL.so.0
+//   (GLVND; always present on a desktop, no dev package needed — see
+//   src/mpv/linux.rs).
 //
 // ARCHITECTURE
 //   - A small REGISTRY of engines keyed by id: 0 is the single-stream player
@@ -54,9 +58,9 @@
 //     mpv events/property changes into the `mpv://…` webview events (every
 //     payload carries the engine id so the frontend routes them), and
 //     throttles time updates to ~4 Hz in Rust.
-//   - Platform surfaces (the native window region mpv draws into) live in
-//     per-target modules behind the `VideoSurface` trait. Rects are LOGICAL
-//     (GDK) pixels, already zoom-adjusted by the frontend.
+//   - The platform surface (the native window region mpv draws into) is
+//     linux.rs behind the `VideoSurface` trait. Rects are LOGICAL (GDK)
+//     pixels, already zoom-adjusted by the frontend.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -220,7 +224,9 @@ fn log_pointer_event(kind: &str, x: f64, y: f64, osd: Option<(i64, i64)>) -> boo
     if !debug_log_enabled() {
         return false;
     }
-    let mut diag = pointer_diag().lock().expect("mpv pointer diag lock poisoned");
+    let mut diag = pointer_diag()
+        .lock()
+        .expect("mpv pointer diag lock poisoned");
     *diag.counts.entry(kind.to_string()).or_insert(0) += 1;
     let t = diag.started.elapsed();
     let in_window = !diag.window_ended && t < Duration::from_secs(15);
@@ -231,9 +237,7 @@ fn log_pointer_event(kind: &str, x: f64, y: f64, osd: Option<(i64, i64)>) -> boo
             }
             _ => {
                 diag.dropped += 1;
-                eprintln!(
-                    "[mpv-pointer] t+{t:?} kind={kind} xy=({x:.3},{y:.3}) osd=0x0 DROPPED"
-                );
+                eprintln!("[mpv-pointer] t+{t:?} kind={kind} xy=({x:.3},{y:.3}) osd=0x0 DROPPED");
             }
         }
     } else if !diag.window_ended {
@@ -415,8 +419,9 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
         .to_string();
     write_private_file(Path::new(&osc_script), KS_OSC_LUA.as_bytes())
         .map_err(|e| format!("write ks-osc.lua: {e}"))?;
-    // Platform options that must apply at mpv-create time (Linux pins the
-    // render API; the wid platforms set their window handle later instead).
+    // Platform options that must apply at mpv-create time: Linux pins the
+    // render API (vo=libmpv drawing into our GLArea — mpv never creates a
+    // window of its own).
     let mpv: &'static Mpv = Box::leak(Box::new(
         Mpv::with_initializer(|init| {
             init.set_property("vo", "libmpv")?;
