@@ -51,9 +51,6 @@ mpv-embed = [
   "dep:gdk",
   "dep:gio",
   "dep:webkit2gtk",
-  "dep:windows-sys",
-  "dep:objc2",
-  "dep:objc2-foundation",
   "dep:libc",
   "dep:cairo",
 ]
@@ -131,20 +128,6 @@ libc = { version = "0.2", optional = true }
 # `cairo::…`; version matches what gtk already resolves to so the trees
 # unify.
 cairo = { version = "0.18", package = "cairo-rs", optional = true }
-
-# UNVERIFIED Windows/macOS mpv surfaces (see src/mpv/win32.rs + macos.rs):
-# raw child-HWND / NSView plumbing. Versions match what tauri already
-# resolves so the dependency trees unify.
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61", optional = true, features = [
-  "Win32_Foundation",
-  "Win32_UI_WindowsAndMessaging",
-  "Win32_System_LibraryLoader",
-] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = { version = "0.6", optional = true }
-objc2-foundation = { version = "0.3", optional = true, features = ["NSGeometry"] }
 
 [dev-dependencies]
 # Used in resolve.rs tests to set/unset env vars without mutating the global

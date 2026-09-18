@@ -2041,8 +2041,6 @@ dependencies = [
  "libloading 0.8.9",
  "libmpv2",
  "log",
- "objc2",
- "objc2-foundation",
  "reqwest",
  "rfd",
  "serde",
@@ -2059,7 +2057,6 @@ dependencies = [
  "tokio",
  "url",
  "webkit2gtk",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

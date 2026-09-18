@@ -73,17 +73,6 @@ mod linux;
 #[cfg(target_os = "linux")]
 use linux as platform;
 
-// Per-platform surfaces for the OTHER targets.
-#[cfg(target_os = "windows")]
-mod win32;
-#[cfg(target_os = "windows")]
-use win32 as platform;
-
-#[cfg(target_os = "macos")]
-mod macos;
-#[cfg(target_os = "macos")]
-use macos as platform;
-
 /// The UA mpv presents when fetching the resolved media URLs: THE SAME
 /// shared browser const the GQL proxy sends (gql::USER_AGENT) — an alias,
 /// not a second copy. The previous "streamlink/7.2.0" was never streamlink's
@@ -104,21 +93,13 @@ const KS_OSC_LUA: &str = include_str!("ks-osc.lua");
 /// Min interval between `mpv://time` emits (~4 Hz).
 const TIME_EMIT_INTERVAL: Duration = Duration::from_millis(250);
 
-/// The native region under the webview mpv renders into, one implementation
-/// per platform. All rects in LOGICAL px, window-relative. Implementations
-/// marshal to the UI thread themselves; calls are cheap and non-blocking.
+/// The native region under the webview mpv renders into. All rects in
+/// LOGICAL px, window-relative. The implementation marshals to the UI
+/// thread itself; calls are cheap and non-blocking.
 pub trait VideoSurface: Send + Sync {
     fn show(&self);
     fn hide(&self);
     fn set_rect(&self, x: i32, y: i32, w: i32, h: i32);
-    /// Re-apply the surface's input pass-through setup — called on every
-    /// FileLoaded. Windows NEEDS this: mpv's own "mpv"-class child window
-    /// is minted at VO init without the ex-styles and would swallow every
-    /// pointer event over the video (a VO re-init mid-session starts a
-    /// fresh one; see win32.rs). Default no-op — Linux shapes at bootstrap
-    /// and re-shapes on every allocation (linux.rs), macOS's surface is
-    /// still the unverified wid stub.
-    fn apply_input_passthrough(&self) {}
 }
 
 struct Engine {
@@ -663,38 +644,6 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                     // `start` is a load-time option: whatever position was
                     // requested for THIS file must not leak into the next.
                     let _ = mpv.set_property("start", "none");
-                    // Per-load re-apply of the video-side input pass-through
-                    // (no-op on Linux/macOS): a fresh VO window created for
-                    // this load must never briefly swallow pointer events.
-                    if let Some(engine) = engines()
-                        .lock()
-                        .expect("mpv engines lock poisoned")
-                        .get_mut(&id)
-                    {
-                        engine.surface.apply_input_passthrough();
-                    }
-                    state_dirty = true;
-                }
-                Ok(Event::VideoReconfig) => {
-                    // Fires after every video (re)configuration — the ONE
-                    // event that is guaranteed to come AFTER mpv's video
-                    // output (and its Windows child window) exists. The
-                    // FileLoaded hook above races VO creation: on the first
-                    // load of a stream mpv typically creates its "mpv"-class
-                    // window only when the video chain initializes, i.e.
-                    // AFTER FileLoaded (timing varies with stream probing —
-                    // the likely reason the Windows OSC was dead from the
-                    // start but flashed in once, 2026-09-18 hardware round).
-                    // Re-apply here so the pass-through styles land no
-                    // matter which of the two events the window straddles;
-                    // the patch is idempotent and free when nothing changed.
-                    if let Some(engine) = engines()
-                        .lock()
-                        .expect("mpv engines lock poisoned")
-                        .get_mut(&id)
-                    {
-                        engine.surface.apply_input_passthrough();
-                    }
                     state_dirty = true;
                 }
                 Ok(Event::EndFile(_)) => {
