@@ -2,7 +2,7 @@
 #
 # Fedora ships current-enough rust + nodejs in its own repos (unlike Ubuntu
 # LTS), so no rustup / nodesource is needed — the distro toolchain satisfies
-# the Tauri 2 MSRV (>=1.77.2) and Vite 8 (Node >=20.19).
+# the crate rust-version (>=1.89.0) and Vite 8 (Node >=20.19).
 #
 # glibc floor: pin the OLDEST Fedora you intend to support. A binary built
 # here runs on this release and all newer ones, but not older (the dynamic
@@ -25,6 +25,7 @@ RUN dnf -y install \
       cmake perl \
       openssl-devel \
       webkit2gtk4.1-devel \
+      mpv-devel \
       gtk3-devel \
       libsoup3-devel \
       desktop-file-utils \

@@ -30,6 +30,12 @@ Source0:        %{name}-%{version}.tar.gz
 # (F43+) would break a name-pinned Requires, while the soname Require survives it.
 Requires:       streamlink
 Requires:       hicolor-icon-theme
+# Embedded-libmpv video engine (Linux-only, default Cargo feature): the
+# binary links libmpv.so.2. Declared as the SONAME capability (matching
+# tauri.conf.json's rpm depends) so every provider satisfies it — Fedora's
+# mpv-libs and openSUSE's libmpv2 both Provide it; a name-pinned Requires
+# would break on one of them.
+Requires:       libmpv.so.2()(64bit)
 # Forces the FULL (RPM Fusion free) ffmpeg libraries, which carry the H.264
 # decoder GStreamer's libav plugin exposes as avdec_h264. Fedora ships only
 # ffmpeg-free (patent-stripped — no H.264), and ffmpeg-free Provides: ffmpeg,
@@ -43,6 +49,8 @@ Requires:       ffmpeg-libs
 BuildRequires:  make
 BuildRequires:  gcc
 BuildRequires:  rust
+# Headers for the embedded-libmpv engine the build links.
+BuildRequires:  mpv-devel
 BuildRequires:  cargo
 BuildRequires:  nodejs
 BuildRequires:  npm

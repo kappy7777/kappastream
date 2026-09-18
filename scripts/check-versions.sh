@@ -149,4 +149,22 @@ for aur_pkgbuild in \
     fi
 done
 
-echo "check-versions: OK — package.json, Cargo.toml and Cargo.lock all at $PKG_VER; no stale packaging versions; AUR -git builds are updater-off."
+# AUR template/snapshot pair identity (packaging drift, not version drift).
+# packaging/aur/PKGBUILD + PKGBUILD-bin are the editable templates;
+# submit/kappastream-{git,bin}/PKGBUILD are the published AUR snapshots. A
+# pair must stay byte-identical — any difference means an edit landed on one
+# side only, which is exactly how the -git pair once drifted to a stale
+# pkgver with no mpv-embed while the published snapshot moved on. Re-publishing
+# a snapshot (e.g. a bumped pkgver) must copy the file back over the template
+# in the same commit.
+for aur_pair in \
+    "packaging/aur/PKGBUILD packaging/aur/submit/kappastream-git/PKGBUILD" \
+    "packaging/aur/PKGBUILD-bin packaging/aur/submit/kappastream-bin/PKGBUILD"; do
+    aur_template=${aur_pair%% *}
+    aur_snapshot=${aur_pair##* }
+    if ! cmp -s "$aur_template" "$aur_snapshot"; then
+        fail "$aur_template and $aur_snapshot differ — keep each AUR template/snapshot pair byte-identical (copy one over the other in the same commit that changes either)"
+    fi
+done
+
+echo "check-versions: OK — package.json, Cargo.toml and Cargo.lock all at $PKG_VER; no stale packaging versions; AUR -git builds are updater-off; AUR template/snapshot pairs identical."

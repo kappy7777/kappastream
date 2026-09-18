@@ -5,17 +5,13 @@
 # A native (non-AppImage) build. The frontend is built with Vite, then
 # `cargo build --release` embeds it into the Rust binary via tauri-build.
 #
-# This is the editable template; packaging/aur/submit/kappastream-git/PKGBUILD
-# is the published snapshot (plus its derived .SRCINFO). Keep them in sync —
-# scripts/check-versions.sh asserts the updater opt-out is present in both.
-#
 # Submission notes: see packaging/aur/README.md
 
 _pkgname=kappastream
 _repo="https://github.com/kappy7777/kappastream"
 
 pkgname=${_pkgname}-git
-pkgver=0.2.6.r0.g8777d390
+pkgver=1.0.4.r0.gdb548e3
 pkgrel=1
 pkgdesc="A lightweight, anonymous Twitch viewer (live stream, chat, favorites) for Linux"
 arch=('x86_64')

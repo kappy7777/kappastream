@@ -23,7 +23,7 @@ The recipes live in this directory:
 | `.gitignore` | Excludes makepkg output, local clones, and `dist/`. |
 | `README.md` | This file. |
 
-The recipes in this directory (`PKGBUILD`, `PKGBUILD-bin`) are the **editable templates**. `submit/kappastream-{git,bin}/` holds the **published AUR snapshot** (PKGBUILD + its derived `.SRCINFO` + README). Keep the template and its `submit/` copy in sync — `scripts/check-versions.sh` asserts both `-git` PKGBUILDs build with `--no-default-features` (the updater opt-out) and fails CI otherwise.
+The recipes in this directory (`PKGBUILD`, `PKGBUILD-bin`) are the **editable templates**. `submit/kappastream-{git,bin}/` holds the **published AUR snapshot** (PKGBUILD + its derived `.SRCINFO` + README). Each template/snapshot pair must stay **byte-identical** — `scripts/check-versions.sh` fails CI when a pair differs (a difference means an edit landed on one side only) and also asserts both `-git` PKGBUILDs build with `--no-default-features` (the updater opt-out). When re-publishing a snapshot with a bumped `pkgver`, copy the file back over the template in the same commit.
 
 Shared assets (also used by the Debian/Fedora packages, live in
 `packaging/shared/`):
