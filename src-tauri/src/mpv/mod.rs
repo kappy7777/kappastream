@@ -187,6 +187,94 @@ fn engines() -> &'static Mutex<HashMap<u32, Engine>> {
     ENGINES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Env-gated stderr diagnostics for the native video path. Release builds
+/// are `windows_subsystem = "windows"` and the log plugin registers in
+/// debug builds only, so stderr redirection (Windows:
+/// `Start-Process -RedirectStandardError`, or running the binary from a
+/// terminal anywhere) is the ONLY channel that exists on a shipped build.
+/// Any value (even empty) enables; absence = fully silent, zero overhead
+/// beyond one env lookup per log site.
+pub(super) fn debug_log_enabled() -> bool {
+    std::env::var_os("KAPPASTREAM_MPV_LOG").is_some()
+}
+
+// ---------------------------------------------------------------------------
+// Pointer-forwarding diagnostics (KAPPASTREAM_MPV_LOG)
+//
+// The three failure signatures this exists to separate (2026-09-18 Windows
+// hardware round: the ks-osc OSD flashed into view ONCE, then never again):
+//   (a) pass-through dead: the page never sees pointer events over the
+//       video → ZERO mpv_pointer calls reach Rust (silence on the wire);
+//   (b) the Windows vo reports osd-width/height 0 → every call DROPPED at
+//       the early return (calls arrive, all logged `osd=0x0 DROPPED`);
+//   (c) intermittent: calls arrive in bursts — e.g. a patch hook raced an
+//       mpv window (re)creation — visible as logged-event gaps while the
+//       pointer demonstrably moves.
+// Per-event logging runs for a bounded window after the FIRST call (15 s,
+// plenty to wiggle the mouse over a fresh stream), then one summary line;
+// clicks/wheels keep logging afterwards (rare, high-signal).
+
+struct PointerDiag {
+    started: Instant,
+    window_ended: bool,
+    counts: HashMap<String, usize>,
+    dropped: usize,
+}
+
+fn pointer_diag() -> &'static Mutex<PointerDiag> {
+    static DIAG: OnceLock<Mutex<PointerDiag>> = OnceLock::new();
+    DIAG.get_or_init(|| {
+        Mutex::new(PointerDiag {
+            started: Instant::now(),
+            window_ended: false,
+            counts: HashMap::new(),
+            dropped: 0,
+        })
+    })
+}
+
+/// Log one pointer-forwarding event (or its drop) under
+/// KAPPASTREAM_MPV_LOG. Returns true while the per-event window is open.
+fn log_pointer_event(kind: &str, x: f64, y: f64, osd: Option<(i64, i64)>) -> bool {
+    if !debug_log_enabled() {
+        return false;
+    }
+    let mut diag = pointer_diag().lock().expect("mpv pointer diag lock poisoned");
+    *diag.counts.entry(kind.to_string()).or_insert(0) += 1;
+    let t = diag.started.elapsed();
+    let in_window = !diag.window_ended && t < Duration::from_secs(15);
+    if in_window {
+        match osd {
+            Some((w, h)) if w > 0 && h > 0 => {
+                eprintln!("[mpv-pointer] t+{t:?} kind={kind} xy=({x:.3},{y:.3}) osd={w}x{h}");
+            }
+            _ => {
+                diag.dropped += 1;
+                eprintln!(
+                    "[mpv-pointer] t+{t:?} kind={kind} xy=({x:.3},{y:.3}) osd=0x0 DROPPED"
+                );
+            }
+        }
+    } else if !diag.window_ended {
+        diag.window_ended = true;
+        let total: usize = diag.counts.values().sum();
+        eprintln!(
+            "[mpv-pointer] per-event log window ended: {total} events ({}) — further moves are silent, clicks/wheels still log",
+            diag.counts
+                .iter()
+                .map(|(k, n)| format!("{k}={n}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        // The event that flipped the window is still worth one line.
+    }
+    // Clicks/wheels stay visible past the window (rare, high-signal).
+    if diag.window_ended && matches!(kind, "click" | "wheel-up" | "wheel-down") {
+        eprintln!("[mpv-pointer] t+{t:?} kind={kind} xy=({x:.3},{y:.3})");
+    }
+    in_window
+}
+
 // ---------------------------------------------------------------------------
 // Engine bootstrap
 
@@ -578,6 +666,28 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                     // Per-load re-apply of the video-side input pass-through
                     // (no-op on Linux/macOS): a fresh VO window created for
                     // this load must never briefly swallow pointer events.
+                    if let Some(engine) = engines()
+                        .lock()
+                        .expect("mpv engines lock poisoned")
+                        .get_mut(&id)
+                    {
+                        engine.surface.apply_input_passthrough();
+                    }
+                    state_dirty = true;
+                }
+                Ok(Event::VideoReconfig) => {
+                    // Fires after every video (re)configuration — the ONE
+                    // event that is guaranteed to come AFTER mpv's video
+                    // output (and its Windows child window) exists. The
+                    // FileLoaded hook above races VO creation: on the first
+                    // load of a stream mpv typically creates its "mpv"-class
+                    // window only when the video chain initializes, i.e.
+                    // AFTER FileLoaded (timing varies with stream probing —
+                    // the likely reason the Windows OSC was dead from the
+                    // start but flashed in once, 2026-09-18 hardware round).
+                    // Re-apply here so the pass-through styles land no
+                    // matter which of the two events the window straddles;
+                    // the patch is idempotent and free when nothing changed.
                     if let Some(engine) = engines()
                         .lock()
                         .expect("mpv engines lock poisoned")
@@ -1202,9 +1312,14 @@ pub fn mpv_set_rect(id: Option<u32>, x: i32, y: i32, w: i32, h: i32) -> Result<(
 pub fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Result<(), String> {
     with_engine(engine_id(id)?, |e| {
         // 0 until the first render configured the OSD size — nothing to
-        // hit-test yet, drop the event.
+        // hit-test yet, drop the event. (Deliberately NOT a fallback to the
+        // window rect: if the Windows vo ever reports 0x0 while rendering,
+        // the CORRECT source has to be established first — the
+        // KAPPASTREAM_MPV_LOG line below makes the drop visible instead of
+        // silent, and the fix follows from what it shows.)
         let osd_w = e.mpv.get_property::<i64>("osd-width").unwrap_or(0);
         let osd_h = e.mpv.get_property::<i64>("osd-height").unwrap_or(0);
+        log_pointer_event(&kind, x, y, Some((osd_w, osd_h)));
         if osd_w <= 0 || osd_h <= 0 {
             return Ok(());
         }
@@ -1274,6 +1389,19 @@ pub fn mpv_script_msg(id: Option<u32>, args: Vec<String>) -> Result<(), String> 
             .command("script-message", &argv)
             .map_err(|err| format!("script-message: {err}"))
     })
+}
+
+/// Frontend → stderr bridge under KAPPASTREAM_MPV_LOG (see
+/// debug_log_enabled): the webview has no stderr, so effect lifecycle
+/// lines (pointer-listener attach/detach, the macOS ui-zoom value) ride
+/// this to the same redirected stream as the Rust-side diagnostics.
+/// Silent no-op when the env var is absent.
+#[tauri::command]
+pub fn mpv_debug_log(line: String) -> Result<(), String> {
+    if debug_log_enabled() && !line.is_empty() {
+        eprintln!("[mpv-fe] {}", line.replace(['\n', '\r'], " "));
+    }
+    Ok(())
 }
 
 /// Snapshot the webview and composite the page UI that overlaps the video

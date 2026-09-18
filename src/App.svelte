@@ -973,10 +973,17 @@
     stage.addEventListener('pointermove', onMove, { passive: true })
     stage.addEventListener('pointerdown', onDown)
     stage.addEventListener('wheel', onWheel, { passive: false })
+    // KAPPASTREAM_MPV_LOG: proves the listeners exist — if no [mpv-pointer]
+    // lines follow on stderr while the pointer moves over the video, the
+    // events never reach the page (the Windows pass-through (a) signature).
+    void invoke('mpv_debug_log', {
+      line: `pointer-forwarding attached to .player (${Math.round(stage.getBoundingClientRect().width)}x${Math.round(stage.getBoundingClientRect().height)} px)`,
+    }).catch(() => {})
     return () => {
       stage.removeEventListener('pointermove', onMove)
       stage.removeEventListener('pointerdown', onDown)
       stage.removeEventListener('wheel', onWheel)
+      void invoke('mpv_debug_log', { line: 'pointer-forwarding detached' }).catch(() => {})
     }
   })
 

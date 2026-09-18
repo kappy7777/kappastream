@@ -106,13 +106,15 @@ fn wide(s: &str) -> Vec<u16> {
 
 /// Add the pass-through ex-styles to one window. Idempotent: an already
 /// patched window short-circuits (no SetWindowLongPtrW write, no
-/// SetWindowPos) so the per-load re-apply is free.
-fn add_passthrough_ex_style(hwnd: HWND) {
+/// SetWindowPos) so the per-load re-apply is free. Returns whether a style
+/// write happened (diagnostics: distinguishes "already patched" from
+/// "patched a fresh window").
+fn add_passthrough_ex_style(hwnd: HWND) -> bool {
     unsafe {
         let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         let mask = PASSTHROUGH_EX_STYLE as isize;
         if style & mask == mask {
-            return;
+            return false;
         }
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | mask);
         // SetWindowLongPtr docs: "Certain window data is cached, so changes
@@ -130,14 +132,29 @@ fn add_passthrough_ex_style(hwnd: HWND) {
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
         );
+        true
     }
+}
+
+/// Patch bookkeeping threaded through EnumChildWindows' LPARAM: how many
+/// descendant windows exist vs how many needed a style write. A descendant
+/// count that grows between calls = mpv minted a window since the last
+/// patch (the (c) signature in the input investigation).
+#[derive(Default)]
+struct PatchStats {
+    found: u32,
+    written: u32,
 }
 
 /// EnumChildWindows callback: patch every descendant of the Static (the
 /// documentation guarantees descendants are enumerated too, so mpv's
 /// "mpv"-class child — and anything IT ever parents — is covered).
-unsafe extern "system" fn patch_descendant(hwnd: HWND, _lparam: LPARAM) -> BOOL {
-    add_passthrough_ex_style(hwnd);
+unsafe extern "system" fn patch_descendant(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let stats = unsafe { &mut *(lparam as *mut PatchStats) };
+    stats.found += 1;
+    if add_passthrough_ex_style(hwnd) {
+        stats.written += 1;
+    }
     1 // keep enumerating
 }
 
@@ -157,11 +174,27 @@ fn raise_to_top(hwnd: HWND) {
 }
 
 /// Patch the Static itself and every descendant (mpv's video window). Must
-/// run on the UI thread (same thread as the window's creator).
+/// run on the UI thread (same thread as the window's creator). Under
+/// KAPPASTREAM_MPV_LOG, prints the found/written counts — the difference
+/// between consecutive calls is what exposes an mpv window minted between
+/// patches.
 fn patch_surface_tree(hwnd: HWND) {
-    add_passthrough_ex_style(hwnd);
+    let mut stats = PatchStats::default();
+    if add_passthrough_ex_style(hwnd) {
+        stats.written += 1;
+    }
     unsafe {
-        EnumChildWindows(hwnd, Some(patch_descendant), 0);
+        EnumChildWindows(
+            hwnd,
+            Some(patch_descendant),
+            &mut stats as *mut PatchStats as LPARAM,
+        );
+    }
+    if super::debug_log_enabled() {
+        eprintln!(
+            "[mpv-win32] input passthrough: {} descendant(s), {} style write(s) this pass",
+            stats.found, stats.written
+        );
     }
 }
 
@@ -292,6 +325,9 @@ pub(super) fn create(
         .map_err(|_| "surface init timed out")?;
     if hwnd.raw().is_null() {
         return Err("CreateWindowExW failed".to_string());
+    }
+    if super::debug_log_enabled() {
+        eprintln!("[mpv-win32] surface created: static HWND {:p}", hwnd.raw());
     }
 
     // mpv owns this window from here on: `wid` pins its video output to the
