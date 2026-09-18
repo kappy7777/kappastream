@@ -239,7 +239,9 @@ fn log_pointer_event(kind: &str, x: f64, y: f64, osd: Option<(i64, i64)>) -> boo
     if !debug_log_enabled() {
         return false;
     }
-    let mut diag = pointer_diag().lock().expect("mpv pointer diag lock poisoned");
+    let mut diag = pointer_diag()
+        .lock()
+        .expect("mpv pointer diag lock poisoned");
     *diag.counts.entry(kind.to_string()).or_insert(0) += 1;
     let t = diag.started.elapsed();
     let in_window = !diag.window_ended && t < Duration::from_secs(15);
@@ -250,9 +252,7 @@ fn log_pointer_event(kind: &str, x: f64, y: f64, osd: Option<(i64, i64)>) -> boo
             }
             _ => {
                 diag.dropped += 1;
-                eprintln!(
-                    "[mpv-pointer] t+{t:?} kind={kind} xy=({x:.3},{y:.3}) osd=0x0 DROPPED"
-                );
+                eprintln!("[mpv-pointer] t+{t:?} kind={kind} xy=({x:.3},{y:.3}) osd=0x0 DROPPED");
             }
         }
     } else if !diag.window_ended {
@@ -1445,10 +1445,14 @@ pub fn mpv_page_snapshot(
     {
         linux::page_snapshot(&app, engine_id(id)?, x, y, w, h, keep.unwrap_or_default())
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
+    {
+        win32::page_snapshot(&app, engine_id(id)?, x, y, w, h, keep.unwrap_or_default())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     {
         let _ = (app, keep);
-        Err("page-UI overlay snapshots are Linux-only for now".to_string())
+        Err("page-UI overlay snapshots are Linux/Windows-only for now".to_string())
     }
 }
 
