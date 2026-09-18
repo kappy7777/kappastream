@@ -66,6 +66,7 @@
   import { formatCompact, formatAge } from './lib/format'
   import { effectiveQualities, mpvQualities, qualityLabel } from './lib/qualities'
   import { stripBitmap, renderInfoBlock } from './lib/osd-bitmaps'
+  import { fitContentRect } from './lib/video-fit'
   import kappaUrl from './assets/kappa.png'
 
   // Tauri v2 webview origin differs by engine, and that changes whether a
@@ -225,6 +226,11 @@
   // True while a stream is actually loaded on the native engine — drives the
   // page's transparent "video hole" (CSS at the bottom) and the rect pusher.
   let nativeVideoActive = $state(false)
+  // Intrinsic display aspect (width/height) of the CURRENT stream. NaN until
+  // the active backend reports dimensions (hls: the <video>'s metadata;
+  // mpv: video-params via mpv://aspect). Feeds the shared content rect
+  // below — 16/9 until known, reset by teardownPlayer.
+  let videoAspect = $state(Number.NaN)
 
   // The playback backend every state read / transport write goes through
   // (VideoBackend in lib/video-backend.ts): the native backend while it is
@@ -798,6 +804,13 @@
     playerError = backend.lastError ?? 'native engine error'
   }
 
+  // Intrinsic dimensions arrived/changed (element 'resize'/'loadedmetadata',
+  // or mpv's aspect mirror which emits the same signal). Re-read the value
+  // so the shared content rect re-fits.
+  function onVideoAspectChange(): void {
+    videoAspect = videoBackend?.aspect ?? Number.NaN
+  }
+
   // A user scrub (or a programmatic seek). The `seeking` event fires ONLY for
   // real seeks, not normal 1x playback, so it is the clean signal to discard
   // the replay buffer and refetch at the new offset. Rapid scrubbing collapses
@@ -823,6 +836,8 @@
       backend.on('timeupdate', onVideoTimeUpdate),
       backend.on('seeking', onVideoSeeking),
       backend.on('error', onVideoError),
+      backend.on('loadedmetadata', onVideoAspectChange),
+      backend.on('resize', onVideoAspectChange),
     ]
     return () => {
       for (const u of unsubs) u()
@@ -865,48 +880,48 @@
     }
   })
 
-  // ---- Native surface geometry ---------------------------------------------
-  // While the native engine is active, the native surface must track the
-  // .player SECTION — the 16:9 rect the video surface covers exactly. The
-  // native controls strip below it is page chrome the surface must never
-  // cover, and mpv letterboxes inside its own surface.
-  // Tracking: a ResizeObserver for size changes, the scroll container for
-  // position changes (the stage scrolls inside .video-scroll), and the
-  // probe-measured zoom factor for UI-scale changes (which move/resize the
-  // stage in visual pixels WITHOUT a layout change the observer would see).
-  // Coalesced to one push per animation frame.
+  // ---- Video content rect (shared source of truth) --------------------------
+  // The .player SECTION is a 16:9-aspected box that goes WIDER than 16:9
+  // whenever the available height binds (short window, chat open): the video
+  // letterboxes inside it and the box shows themed bars on the sides. Every
+  // consumer that must align to the video PICTURE — the mpv surface rect,
+  // the OSD overlay fractions, the pointer normalization, the control bar
+  // and the in-video banners via the --video-* CSS custom properties — reads
+  // the ONE fitted content rect computed here (lib/video-fit.ts), never its
+  // own fit: two computations with different rounding could desync the OSD
+  // bar from the HTML controls by a pixel.
+  //
+  // playerBox is the .player rect in VISUAL px (getBoundingClientRect inside
+  // the zoomed subtree — exactly what the .zoom-probe measurement relies
+  // on); GDK logical px == webview visual px, so the same numbers also map
+  // 1:1 onto the native window coordinates mpv_set_rect expects. Tracking:
+  // a ResizeObserver for size changes, the scroll container for position
+  // changes (the stage scrolls inside .video-scroll), and the probe-measured
+  // zoom factor for UI-scale changes (which move/resize the stage in visual
+  // pixels WITHOUT a layout change the observer would see). Coalesced to one
+  // measure per animation frame; engine-independent (the hls overlays need
+  // the rect as much as the native surface does).
   let playerVideoEl = $state<HTMLElement | null>(null)
+  let playerBox = $state({ x: 0, y: 0, w: 0, h: 0 })
   $effect(() => {
-    if (!nativeVideoActive) return
     const stage = playerVideoEl
     if (!stage) return
     void zoomK
     const scroll = videoScrollEl
     let frame = 0
-    let lastKey = ''
-    const push = () => {
+    const measure = () => {
       frame = 0
       if (!stage.isConnected) return
       const r = stage.getBoundingClientRect()
       if (r.width < 2 || r.height < 2) return
-      // getBoundingClientRect inside the zoomed subtree returns VISUAL px
-      // (that is exactly what the .zoom-probe measurement relies on), and
-      // GDK logical px == webview visual px — so the rect maps 1:1 onto the
-      // native window coordinates mpv_set_rect expects. Do NOT multiply by
-      // the zoom factor again. Identical pushes are skipped (the Rust side
-      // dedupes too; this also saves the IPC round-trip).
-      const key = `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)}`
-      if (key === lastKey) return
-      lastKey = key
-      void invoke('mpv_set_rect', {
-        x: Math.round(r.left),
-        y: Math.round(r.top),
-        w: Math.round(r.width),
-        h: Math.round(r.height),
-      }).catch(() => {})
+      // Identity-stable writes: the push effect below re-fires on every
+      // playerBox replacement, so skip no-op measures (scroll ticks land
+      // here every frame while the fold is being scrolled).
+      if (r.left === playerBox.x && r.top === playerBox.y && r.width === playerBox.w && r.height === playerBox.h) return
+      playerBox = { x: r.left, y: r.top, w: r.width, h: r.height }
     }
     const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(push)
+      if (!frame) frame = requestAnimationFrame(measure)
     }
     const ro = new ResizeObserver(schedule)
     ro.observe(stage)
@@ -918,6 +933,40 @@
       ro.disconnect()
       scroll?.removeEventListener('scroll', schedule)
     }
+  })
+
+  // The fitted content rect as .player CSS custom properties (percentages of
+  // the box — they survive window resizes and the UI-scale zoom without a JS
+  // round-trip, and are consumed by .controls/.theater-info here and in
+  // PlayerControls, the playback banner, and the resume bar). Zero-rect box
+  // (not measured yet) keeps every var at 0% — the historical full-box
+  // behavior.
+  const videoRectStyle = $derived.by(() => {
+    const b = playerBox
+    if (b.w < 1 || b.h < 1) return ''
+    const c = fitContentRect(b.w, b.h, videoAspect)
+    const pct = (v: number): string => `${+(v * 100).toFixed(4)}%`
+    return (
+      `--video-left: ${pct(c.x / b.w)}; ` +
+      `--video-right: ${pct((b.w - c.x - c.w) / b.w)}; ` +
+      `--video-top: ${pct(c.y / b.h)}; ` +
+      `--video-bottom: ${pct((b.h - c.y - c.h) / b.h)}`
+    )
+  })
+
+  // The native surface still tracks the full .player BOX (the content-rect
+  // switch lands with the mpv consumer changes); same visual-px space as
+  // before, now re-pushed from the shared tracker.
+  $effect(() => {
+    if (!nativeVideoActive) return
+    const r = playerBox
+    if (r.w < 2 || r.h < 2) return
+    void invoke('mpv_set_rect', {
+      x: Math.round(r.x),
+      y: Math.round(r.y),
+      w: Math.round(r.w),
+      h: Math.round(r.h),
+    }).catch(() => {})
   })
 
   // ---- Native surface pointer forwarding (mpv OSC) --------------------------
@@ -1701,6 +1750,10 @@
     // the shared session now.
     playbackSession.teardown(videoEl)
     nativeVideoActive = false
+    // The next stream's aspect arrives with its own metadata / video-params;
+    // until then the shared content rect falls back to 16/9 (a 9:16 VOD
+    // must not impose its shape on the next stream's first frames).
+    videoAspect = Number.NaN
   }
 
   // Centralized video-only disconnect: tears down HLS + the <video> element and
@@ -3154,11 +3207,18 @@
                 {@render playbackBanner(false, playback.title)}
               {/if}
               <div class="player-fold">
-                <!-- The .player section is the native video RECT (the rect
-                     pusher tracks it): in native mode mpv's surface covers
-                     exactly this 16:9 area — nothing page-rendered may
-                     overlay it. -->
-                <section class="player" class:player--active={playerActive} bind:this={playerVideoEl}>
+                <!-- The .player section is the video BOX (a 16:9-aspected
+                     flex item that goes wider than 16:9 when height binds).
+                     The --video-* custom properties on it carry the fitted
+                     content rect so every overlay can align to the video
+                     picture; in native mode the mpv surface tracks that
+                     same content rect (see the geometry section). -->
+                <section
+                  class="player"
+                  class:player--active={playerActive}
+                  style={videoRectStyle}
+                  bind:this={playerVideoEl}
+                >
                   {#if playerActive}
                     <video bind:this={videoEl} class="video" autoplay muted playsinline></video>
                     {#if !nativeVideoActive}

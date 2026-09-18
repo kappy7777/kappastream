@@ -35,6 +35,12 @@ export type VideoBackendEvent =
   | 'durationchange'
   | 'volumechange'
   | 'progress'
+  // Intrinsic-dimension signals: the element fires `resize` whenever
+  // videoWidth/videoHeight change (and `loadedmetadata` when they first
+  // become known). The native backend emits `resize` when mpv's
+  // video-params report a (new) display aspect.
+  | 'loadedmetadata'
+  | 'resize'
 
 export interface VideoBackend {
   /** Playback position in seconds (0 when unknown). */
@@ -48,6 +54,13 @@ export interface VideoBackend {
   readonly muted: boolean
   /** Seconds of buffered playback (end of the buffered range); 0 when none. */
   readonly buffered: number
+  /**
+   * Intrinsic DISPLAY aspect (width/height) of the current video; NaN while
+   * unknown. The hls path reads videoWidth/videoHeight; the native path
+   * mirrors mpv's video-params (rotation-normalized Rust-side). Consumers
+   * fall back to 16/9 until this is a positive finite number.
+   */
+  readonly aspect: number
 
   play(): Promise<void>
   pause(): void
@@ -104,6 +117,11 @@ export class HtmlVideoBackend implements VideoBackend {
     } catch {
       return 0
     }
+  }
+  get aspect(): number {
+    const v = this.element.videoWidth
+    const h = this.element.videoHeight
+    return v > 0 && h > 0 ? v / h : Number.NaN
   }
 
   play(): Promise<void> {
@@ -183,6 +201,13 @@ interface MpvVolumeEvent {
   muted: boolean
 }
 
+/** `mpv://aspect` payload — display aspect of the current video (None while
+ *  no video params are configured: the consumer falls back to 16/9). */
+interface MpvAspectEvent {
+  id: number
+  aspect: number | null
+}
+
 /** `mpv://action` payload — an OSD button press on engine `id`. */
 export interface MpvActionEvent {
   id: number
@@ -236,6 +261,7 @@ export class MpvBackend implements VideoBackend {
   private isPaused = true
   private vol = 1
   private mut = false
+  private asp = Number.NaN
   private readonly unlisteners: Array<() => void> = []
   private readonly subs = new Map<VideoBackendEvent, Set<() => void>>()
   private disposed = false
@@ -263,6 +289,13 @@ export class MpvBackend implements VideoBackend {
     track<MpvVolumeEvent>('mpv://volume', (v) => {
       if (v.id !== this.id) return
       this.onVolume(v)
+    })
+    track<MpvAspectEvent>('mpv://aspect', (a) => {
+      if (a.id !== this.id) return
+      this.asp = a.aspect !== null && Number.isFinite(a.aspect) && a.aspect > 0 ? a.aspect : Number.NaN
+      // `resize` is the element-level name for "intrinsic dimensions
+      // changed" — consumers key their aspect re-reads off it.
+      this.emit('resize')
     })
     track<MpvIdEvent>('mpv://seeking', (pid) => {
       if (pid !== this.id) return
@@ -348,6 +381,9 @@ export class MpvBackend implements VideoBackend {
   }
   get buffered(): number {
     return 0
+  }
+  get aspect(): number {
+    return this.asp
   }
 
   play(): Promise<void> {

@@ -433,6 +433,14 @@ struct ActionPayload {
     action: String,
 }
 
+/// `mpv://aspect` — the display aspect of the current video, or None while
+/// no video params exist (the consumer falls back to 16/9).
+#[derive(Serialize, Clone)]
+struct AspectPayload {
+    id: u32,
+    aspect: Option<f64>,
+}
+
 /// The derived playback state, or None when nothing is loaded (idle — never
 /// emitted; it just stops the state events).
 type DerivedState = Option<(&'static str, Option<String>)>;
@@ -464,12 +472,30 @@ fn emit_state(id: u32, app: &AppHandle, state: DerivedState) {
     }
 }
 
+/// The display aspect (width/height) of the current video, normalized for
+/// presentation. `video-params/aspect` IS the display aspect (DAR) — chosen
+/// over dwidth/dheight, which would add two reads and a division for the
+/// same number and become (un)available at exactly the same moments.
+/// Rotation is applied at presentation, so 90/270 swap the displayed axes.
+/// Returns None while no video is configured (callers fall back to 16/9).
+fn video_display_aspect(mpv: &Mpv) -> Option<f64> {
+    let a = mpv.get_property::<f64>("video-params/aspect").ok()?;
+    if !a.is_finite() || a <= 0.0 {
+        return None;
+    }
+    match mpv.get_property::<i64>("video-params/rotate").unwrap_or(0) {
+        90 | 270 => Some(1.0 / a),
+        _ => Some(a),
+    }
+}
+
 fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
     std::thread::spawn(move || {
         let mut last_time_emit = Instant::now() - TIME_EMIT_INTERVAL;
         let mut duration = 0f64;
         let mut last_state: DerivedState = None;
         let mut state_dirty = true;
+        let mut last_aspect: Option<f64> = None;
         loop {
             let event = mpv.wait_event(-1.0);
             let Some(event) = event else { continue };
@@ -553,6 +579,22 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                     // Normal ends surface via eof-reached/idle-active; an
                     // ERRORED end-file arrives as the Err arm below.
                     state_dirty = true;
+                }
+                Ok(Event::VideoReconfig) => {
+                    // The display aspect drives the shared content rect (the
+                    // mpv surface rect AND every page overlay aligned to the
+                    // video). Read it fresh on every reconfig instead of
+                    // observing the property: an observed property's
+                    // "became unavailable" change arrives with a NULL payload
+                    // that libmpv2 maps to NO event, so observation could
+                    // never see the params disappear — but a reconfig always
+                    // fires when video appears, changes shape, or goes away.
+                    // Deduped: reconfigs burst during startup.
+                    let aspect = video_display_aspect(mpv);
+                    if aspect != last_aspect {
+                        last_aspect = aspect;
+                        let _ = app.emit("mpv://aspect", AspectPayload { id, aspect });
+                    }
                 }
                 Ok(Event::ClientMessage(args)) => {
                     // ks-osc button actions (see ks-osc.lua), relayed to the
