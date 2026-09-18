@@ -54,15 +54,6 @@ agents.md
 # Local SSH agent sockets (environment-specific, e.g. AUR push forwarding)
 ssh-agent.sock
 
-# macOS libmpv bundling (packaging/macos/bundle-libmpv.sh staging, produced
-# by beforeBundleCommand on Darwin builds; shipped as bundle resources)
-mac-mpv-libs/
-
 # Windows bundled-streamlink staging (release.yml build-windows; shipped as
 # bundle resources via tauri.windows.conf.json)
 streamlink-bundle/
-
-# Windows libmpv staging (release.yml build-windows: shinchiro mpv-dev
-# archive extracted here; libmpv-2.dll ships as a bundle resource and
-# mpv.lib feeds the linker)
-mpv-dev/

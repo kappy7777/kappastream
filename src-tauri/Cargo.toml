@@ -73,21 +73,12 @@ url = "2"
 # Cargo feature is intentionally NOT enabled so production/release builds do
 # not ship the web inspector. See tauri.conf.json window `devtools` field.
 #
-# `macos-private-api` enables wry's transparent-WKWebView path, required by
-# the mpv-embed engine on macOS (the video NSView sits BELOW the webview —
-# see src/mpv/macos.rs; the flag itself lives in the per-platform overlays,
-# see below). Semantically inert on the other targets (the feature is
-# cfg-gated to macOS inside wry), but enabled UNCONDITIONALLY in this shared
-# [dependencies] entry: tauri-build's allowlist check (its src/manifest.rs)
-# requires this manifest's tauri features to EXACTLY equal the merged
-# platform config's app.features() on EVERY build target, and one static
-# manifest can only satisfy that if every target's config carries the same
-# flag. Cargo dependency features also cannot be made per-target in a way
-# the check accepts (target-table entries are checked against the CURRENT
-# target's expectation too — verified empirically both directions,
-# 2026-09-17). That is why ALL THREE overlays (tauri.{linux,windows,macos}
-# .conf.json) set macOSPrivateApi:true while the base config stays clean.
-tauri = { version = "2.11.3", features = ["tray-icon", "macos-private-api"] }
+# (Historical: the removed mpv macOS surface once required wry's
+# `macos-private-api` transparent-WKWebView path, carried in every
+# per-target config overlay to satisfy tauri-build's exact feature-equality
+# check. The engine is Linux-only since 2026-09-18 and needs no transparency
+# anywhere — do not re-add the feature or the overlays without an owner task.)
+tauri = { version = "2.11.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-notification = "2.3.3"
 # Single-instance guard: a second launch (e.g. clicking the dock/AppImage

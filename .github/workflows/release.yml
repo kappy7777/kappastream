@@ -408,48 +408,6 @@ jobs:
           fi
           echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
 
-      # The embedded-libmpv engine is a default Cargo feature, so the Windows
-      # build LINKS against libmpv and the installer must SHIP libmpv-2.dll.
-      # Source: shinchiro mpv-winbuild's dev package (pinned release + sha256;
-      # the DLL statically contains the whole FFmpeg stack, so no companion
-      # DLLs are needed). The archive's import library is GCC-format
-      # (libmpv.dll.a, unusable by MSVC link.exe), so we generate mpv.lib from
-      # the committed packaging/windows/mpv.def via VS's lib.exe. The DLL then
-      # rides the bundle through tauri.windows.conf.json's `resources` entry
-      # (copied next to kappastream.exe inside the NSIS install dir; Windows
-      # resolves DLLs from the app dir first).
-      - name: Fetch libmpv and build MSVC import library
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $url = "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260903/mpv-dev-x86_64-20260903-git-69e63f425a.7z"
-          $expected = "fac135c68a35b7639e39d72c0c365104edbaebdea39a0dfdd8c36e8c8e80faef"
-          Invoke-WebRequest -Uri $url -OutFile mpv-dev.7z
-          $actual = (Get-FileHash mpv-dev.7z -Algorithm SHA256).Hash.ToLower()
-          if ($actual -ne $expected) { throw "libmpv archive sha256 mismatch: $actual" }
-          $sevenZip = (Get-Command 7z -ErrorAction SilentlyContinue).Source
-          if (-not $sevenZip) { $sevenZip = "C:\Program Files\7-Zip\7z.exe" }
-          & $sevenZip x -y mpv-dev.7z -ompv-dev | Out-Null
-          if (-not (Test-Path "mpv-dev/libmpv-2.dll")) { throw "libmpv-2.dll missing after extract" }
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $lib = & $vswhere -latest -products * -find "VC\Tools\MSVC\*\bin\Hostx64\x64\lib.exe" | Select-Object -First 1
-          if (-not $lib) { throw "lib.exe not found via vswhere" }
-          & $lib /def:packaging/windows/mpv.def /name:libmpv-2.dll /out:mpv-dev/mpv.lib /machine:X64
-          if (-not (Test-Path "mpv-dev/mpv.lib")) { throw "mpv.lib not produced" }
-          "libmpv staged: $((Get-Item mpv-dev/libmpv-2.dll).Length) bytes dll + mpv.lib"
-
-      # lib.exe /def: builds mpv.lib from the .def ALONE — the DLL is never
-      # opened. A symbol listed in the .def but not exported by the pinned
-      # DLL therefore links cleanly and kills the app at PROCESS LOAD (before
-      # main(), no window, no message). Gate the .def against the DLL's real
-      # export table (stdlib-only PE parser, same script runs on any host).
-      # Fails the job on any .def name absent from the DLL; DLL-only names
-      # are fine (we import a subset). Against the pinned 20260903 archive
-      # this is an exact 206/206 match.
-      - name: Verify mpv.def against the pinned DLL's exports
-        shell: pwsh
-        run: python scripts/check-mpv-def.py mpv-dev/libmpv-2.dll packaging/windows/mpv.def
-
       # Bundle streamlink (the URL resolver this app spawns) so a fresh
       # Windows install needs ZERO external tools: streamlink's own portable
       # build (embedded Python + deps) from the streamlink/windows-builds
@@ -483,23 +441,21 @@ jobs:
       # NSIS is the reliable, cross-platform-capable Windows target and the
       # one the test checklist depends on, so it GATES this job. It must
       # always produce a downloadable *-setup.exe. The signing env makes
-      # tauri-cli emit `*-setup.exe.sig` for the updater. RUSTFLAGS points
-      # the linker at mpv.lib (see the libmpv step above).
+      # tauri-cli emit `*-setup.exe.sig` for the updater.
       - name: Build NSIS setup .exe
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          RUSTFLAGS: "-L native=${{ github.workspace }}\\mpv-dev"
         run: npm run tauri -- build --bundles nsis
 
-      # libmpv-2.dll rides the installer via tauri.windows.conf.json's
-      # `resources` entry. The resources table is the ONLY thing that puts it
-      # there (a path typo would ship an installer that dies at launch like a
-      # bad .def import would), so inspect the actual NSIS payload: 7z lists
-      # the install tree inside the setup exe; the job fails unless
-      # libmpv-2.dll is in it. The bundled streamlink tree is counted as
-      # informational output.
-      - name: Verify libmpv-2.dll ships in the NSIS install tree
+      # The bundled streamlink tree rides the installer via
+      # tauri.windows.conf.json's `resources` entry — the resources table is
+      # the ONLY thing that puts it there, so inspect the actual NSIS payload
+      # (7z lists the install tree inside the setup exe): the job fails
+      # unless streamlink.exe is in it. The mpv engine is LINUX-ONLY
+      # (2026-09-18 scope decision): libmpv-2.dll must NEVER appear — its
+      # presence would mean an mpv resource/link crept back in.
+      - name: Verify the NSIS install tree (streamlink in, libmpv out)
         shell: bash
         run: |
           set -euo pipefail
@@ -514,12 +470,16 @@ jobs:
             echo "## Windows NSIS install tree"
             echo '```'
             echo "$exe (${size_mb} MB) — key entries:"
-            grep -E 'kappastream\.exe|libmpv-2\.dll|streamlink\\streamlink\.exe' nsis-tree.txt || true
+            grep -E 'kappastream\.exe|streamlink\\streamlink\.exe' nsis-tree.txt || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          grep -q 'libmpv-2\.dll' nsis-tree.txt \
-            || { echo "ERROR: libmpv-2.dll missing from the NSIS install tree" >&2; exit 1; }
-          echo "OK: libmpv-2.dll present in the NSIS install tree"
+          grep -q 'streamlink\\streamlink\.exe' nsis-tree.txt \
+            || { echo "ERROR: the bundled streamlink tree is missing from the NSIS install tree" >&2; exit 1; }
+          if grep -q 'libmpv' nsis-tree.txt; then
+            echo "ERROR: libmpv payload found in the NSIS install tree — the mpv engine is Linux-only" >&2
+            exit 1
+          fi
+          echo "OK: bundled streamlink present; no libmpv payload"
 
       - name: Stage artifacts
         shell: bash
@@ -566,12 +526,11 @@ jobs:
   # minisign keypair (TAURI_SIGNING_PRIVATE_KEY), completely independent of
   # Apple code signing, and works the same as on Linux/Windows.
   #
-  # mpv: the embedded engine is a default Cargo feature. This job links
-  # Homebrew's libmpv (RUSTFLAGS adds the arm64 brew lib dir to the linker
-  # path) and then BUNDLES libmpv + its whole non-system dependency closure
-  # into the .app via beforeBundleCommand (packaging/macos/bundle-libmpv.sh
-  # + tauri.macos.conf.json resources) — the shipped .app/.dmg run with NO
-  # Homebrew install on the user's machine.
+  # No system-dependency install step: the macos-latest runner ships the Xcode
+  # Command Line Tools (Tauri links the system WebKit/Cocoa frameworks), and
+  # streamlink is a RUNTIME dep, not a build dep. (The embedded-mpv engine is
+  # Linux-only since the 2026-09-18 scope decision — nothing mpv builds or
+  # ships here.)
   build-macos:
     name: build macos (app/dmg) · macos-latest · arm64
     needs: [check]
@@ -588,28 +547,6 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-
-      # mpv is a BUILD dep (the embedded engine is a default Cargo feature):
-      # Homebrew's libmpv.dylib is linked here, and the build's
-      # beforeBundleCommand hook (packaging/macos/bundle-libmpv.sh) collects
-      # libmpv + its dependency closure with dylibbundler, rewrites every
-      # load path to @executable_path/../Resources/mpv-libs/, and ships the
-      # dylibs as bundle resources (tauri.macos.conf.json) — the distributed
-      # .app needs NO Homebrew on the user's machine. RUSTFLAGS adds the
-      # arm64 Homebrew lib dir to the linker search path (ld64 does not
-      # include /opt/homebrew/lib by default).
-      - name: Install libmpv + dylibbundler (Homebrew)
-        run: |
-          brew install mpv dylibbundler
-          echo "RUSTFLAGS=-L /opt/homebrew/lib" >> $GITHUB_ENV
-          # tauri-build validates tauri.macos.conf.json's resources paths
-          # DURING the cargo build — before beforeBundleCommand ever runs —
-          # so mac-mpv-libs/ (gitignored; populated by
-          # packaging/macos/bundle-libmpv.sh between build and bundling)
-          # must exist as an empty dir on a fresh checkout (first exercised
-          # by the 2026-09-17 smoke dispatch). The script rm -rf's and
-          # repopulates it, so the placeholder never ships.
-          mkdir -p mac-mpv-libs
 
       # Separate cache key from the Linux/Windows jobs (aarch64-apple-darwin).
       - name: Cache Cargo (~/.cargo + src-tauri/target)
@@ -636,7 +573,6 @@ jobs:
           fi
           echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
 
-      # `--bundles app,dmg` builds kappastream.app then kappastream.dmg. With
       # `--bundles app,dmg` builds kappastream.app then kappastream.dmg. With
       # createUpdaterArtifacts:true tauri-cli ALSO emits kappastream.app.tar.gz
       # + kappastream.app.tar.gz.sig (the macOS updater payload — distinct
@@ -665,113 +601,6 @@ jobs:
           # fail the step. `basename` is everywhere. The Linux/Windows staging
           # steps keep `-printf` because their runners ship GNU find.
           find staging -maxdepth 1 -type f -exec basename {} \; | sort
-
-      # beforeBundleCommand (during the build step above) recorded the size
-      # AND dylib count of the bundled libmpv closure; surface both in the
-      # run summary so the .app growth from the dylibs is visible per build.
-      - name: Report bundled libmpv size
-        if: always()
-        run: |
-          if [ -f /tmp/ks-mac-mpv-libs-size.txt ]; then
-            {
-              echo "## macOS bundled libmpv"
-              echo '```'
-              cat /tmp/ks-mac-mpv-libs-size.txt
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      # The bundling claim that matters: the shipped .app must run on a
-      # machine with NO Homebrew install. dylibbundler rewrote every load
-      # command of the main binary and the bundled dylibs to
-      # @executable_path/../Resources/mpv-libs/ — if ANY /opt/homebrew path
-      # survives in an image's dependency list, the .app breaks off-brew.
-      # Checked on the shipped binary and the bundled libmpv dylib (the
-      # rewrite is per-image uniform, so these two represent the set).
-      - name: Verify .app runtime deps (otool -L + LC_RPATH, no Homebrew paths)
-        run: |
-          set -euo pipefail
-          app="src-tauri/target/release/bundle/macos/kappastream.app"
-          bin="$app/Contents/MacOS/kappastream"
-          test -x "$bin"
-          mpvlib="$(find "$app/Contents/Resources/mpv-libs" -name 'libmpv*.dylib' | head -n1)"
-          test -n "$mpvlib"
-          {
-            echo "## macOS .app runtime deps (otool -L + LC_RPATH)"
-            echo '```'
-            echo "--- kappastream (binary)"
-            otool -L "$bin"
-            echo
-            echo "--- $(basename "$mpvlib") (bundled)"
-            otool -L "$mpvlib"
-            echo '```'
-            echo "LC_RPATH entries per bundled image (dyld on macOS 26 rejects duplicates at launch):"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-          # Walk EVERY bundled image + the binary: fail on any duplicate
-          # LC_RPATH value, and print each image's rpath count (the shipped
-          # counterpart of bundle-libmpv.sh's staging gate).
-          rpaths_of() { otool -l "$1" | sed -n 's/^ *path \(.*\) (offset .*)$/\1/p'; }
-          dups=0
-          for img in "$bin" $(find "$app/Contents/Resources/mpv-libs" -name '*.dylib' | sort); do
-            n=$(rpaths_of "$img" | grep -c . || true)
-            if [ "$n" -gt 0 ]; then
-              echo "$(basename "$img"): $n LC_RPATH" | tee -a "$GITHUB_STEP_SUMMARY"
-            fi
-            if [ -n "$(rpaths_of "$img" | sort | uniq -d)" ]; then
-              echo "ERROR: duplicate LC_RPATH in $img" >&2
-              dups=$((dups + 1))
-            fi
-          done
-          echo '```' | tee -a "$GITHUB_STEP_SUMMARY"
-          if { otool -L "$bin"; otool -L "$mpvlib"; } | grep -q '/opt/homebrew'; then
-            echo "ERROR: /opt/homebrew load paths remain in the bundled images" >&2
-            exit 1
-          fi
-          if [ "$dups" -gt 0 ]; then
-            echo "ERROR: $dups image(s) in the shipped .app carry duplicate LC_RPATH entries" >&2
-            exit 1
-          fi
-          echo "OK: no /opt/homebrew load paths; no duplicate LC_RPATH in the shipped .app"
-
-      # The signing gate that would have caught the 2026-09-18 hardware
-      # finding: the .app must VERIFY (deep+strict) and its main executable
-      # must carry EXACTLY the intended posture — ad-hoc signed, hardened
-      # runtime ON, and library validation disabled via the
-      # disable-library-validation entitlement (packaging/macos/Entitlements.plist
-      # via bundle.macOS.entitlements). Without the entitlement the ad-hoc
-      # main executable + the separately ad-hoc-signed mpv-libs dylibs fail
-      # library validation and dyld kills the app before main() — a build
-      # like that must never ship as an artifact.
-      - name: Verify .app code signing (adhoc + runtime + disable-library-validation)
-        run: |
-          set -euo pipefail
-          app="src-tauri/target/release/bundle/macos/kappastream.app"
-          test -d "$app"
-          codesign --verify --deep --strict --verbose=2 "$app"
-          info="$(codesign -dvv "$app" 2>&1 || true)"
-          ent="$(codesign -d --entitlements - --xml "$app" 2>/dev/null || true)"
-          {
-            echo "## macOS .app code signing"
-            echo '```'
-            echo "$info"
-            echo "--- entitlements"
-            echo "$ent"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-          flags="$(printf '%s\n' "$info" | grep -io 'flags=[^ ]*' | head -n1 || true)"
-          case "$flags" in
-            *runtime*adhoc*|*adhoc*runtime*) ;;
-            *)
-              echo "ERROR: main executable signing flags are '$flags' — expected adhoc + runtime (ad-hoc identity, hardened runtime on; library validation disabled separately by entitlement)" >&2
-              exit 1
-              ;;
-          esac
-          if ! printf '%s' "$ent" | grep -q 'com.apple.security.cs.disable-library-validation'; then
-            echo "ERROR: the disable-library-validation entitlement is missing from the main executable — the bundled mpv-libs dylibs (separately ad-hoc signed) would be rejected by library validation and the .app cannot launch" >&2
-            exit 1
-          fi
-          echo "OK: .app verifies deep+strict; adhoc+runtime; library validation disabled by entitlement"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v7

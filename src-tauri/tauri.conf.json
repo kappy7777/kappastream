@@ -4,8 +4,7 @@
   "identifier": "dev.kappy.kappastream",
   "build": {
     "frontendDist": "../dist",
-    "beforeBuildCommand": "npm run build",
-    "beforeBundleCommand": "bash packaging/macos/bundle-libmpv.sh"
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [
