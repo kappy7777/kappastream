@@ -137,3 +137,64 @@ jobs:
         run: |
           command -v cargo-audit >/dev/null || cargo install cargo-audit --locked
           cd src-tauri && cargo audit
+
+  # Windows + macOS compile/lint/test parity. The Linux `check` job above
+  # covers the platform where development happens; these two entries compile
+  # and lint the cfg(windows)/cfg(macos) arms that are dead code on Linux
+  # and run the test suite on the platforms the release builds target
+  # (NSIS on windows-latest, the arm64 .app/.dmg on macos-latest).
+  # Bundling stays in release.yml — this job never builds installers.
+  check-os:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      # `dist/` is gitignored but generate_context! embeds it at compile
+      # time (same reason as the Linux job).
+      - name: Build frontend (required by generate_context!)
+        run: npm run build
+
+      - name: Install Rust stable (with clippy)
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          components: clippy
+
+      - name: Cache Cargo (~/.cargo + src-tauri/target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # tauri.windows.conf.json maps ../streamlink-bundle/ as an NSIS
+      # resource and the CLI merges it on every Windows cargo build, so
+      # tauri-build's resource copy (ResourcePaths::from_map) fails when
+      # the directory is absent. Only the bundler needs the real 150 MB
+      # streamlink tree (staged in release.yml); clippy/test just need the
+      # mapped path to exist with at least one file.
+      - name: Windows: streamlink-bundle resource placeholder
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p streamlink-bundle
+          echo "CI placeholder: tauri.windows.conf.json maps this directory as a resource; the release job stages the real streamlink tree here." > streamlink-bundle/README-placeholder
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
