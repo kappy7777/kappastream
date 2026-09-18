@@ -179,7 +179,7 @@ fn gl_lib() -> Result<&'static GlLib, String> {
 /// Page-snapshot coalescing window, PER ENGINE: each snapshot re-renders
 /// the whole page, so requests for the SAME engine inside the window are
 /// skipped. 70 ms ≈ the measured p95 of the WebKit composite itself
-/// (hardware round 2026-09-18, KAPPASTREAM_MPV_LOG: cb-latency p50 48 ms
+/// (measured on hardware 2026-09-18: cb-latency p50 48 ms
 /// / p95 66 ms; the full-viewport snapshot dominates — every later stage
 /// is ≤1.6 ms at p95, and crop size is irrelevant next to it) — set to
 /// roughly that p95, never below, so a fresh composite starts only after
@@ -205,103 +205,6 @@ static PAGE_SNAPSHOT_LAST: std::sync::OnceLock<
 /// measured rationale). The frontend's drop-retry delay must stay
 /// comfortably above this.
 const SNAPSHOT_COALESCE_MS: u64 = 70;
-
-// ---------------------------------------------------------------------------
-// Page-snapshot latency diagnostics (KAPPASTREAM_MPV_LOG)
-//
-// Measures the pipeline the owner's latency task names stage by stage:
-//   cb-latency   page_snapshot() entry -> finish_page_snapshot() callback
-//                (with_webview dispatch wait + WebKit's full-viewport
-//                composite — the stage whose cost scales with window size)
-//   crop-blit    the callback's crop-sized ARGB32 copy (GTK main thread)
-//   convert+mask the worker's un-premultiply + keep-rect alpha mask
-//   store+overlay bitmap store, dedupe, resample + overlay-add re-issue
-//   total        entry -> overlay issued
-// Per-call lines carry the view size (the snapshot surface = viewport at
-// device scale) so numbers are comparable across resolutions; a summary
-// with p50/p95 prints every 20th recorded snapshot. Coalesce DROPS (the
-// 120 ms guard thinning requests) are counted + logged per drop, so the
-// guard's real-world firing rate is measurable instead of assumed. All of
-// it is silent unless KAPPASTREAM_MPV_LOG is set.
-const SNAP_STATS_WINDOW: usize = 512;
-const SNAP_STATS_EVERY: u64 = 20;
-
-#[derive(Default)]
-struct SnapshotStageStats {
-    /// [total, cb_latency, crop_blit, convert_mask, store_overlay] in µs.
-    samples: Vec<[u64; 5]>,
-    drops: u64,
-    recorded: u64,
-}
-
-static SNAP_STATS: std::sync::OnceLock<std::sync::Mutex<SnapshotStageStats>> =
-    std::sync::OnceLock::new();
-
-fn snap_stats() -> &'static std::sync::Mutex<SnapshotStageStats> {
-    SNAP_STATS.get_or_init(|| std::sync::Mutex::new(SnapshotStageStats::default()))
-}
-
-fn snap_percentile(sorted: &[u64], frac: f64) -> f64 {
-    match sorted.len() {
-        0 => 0.0,
-        1 => sorted[0] as f64 / 1000.0,
-        n => {
-            let idx = ((n as f64) * frac).round() as usize;
-            sorted[idx.clamp(1, n) - 1] as f64 / 1000.0
-        }
-    }
-}
-
-/// Record one completed snapshot's stage times (µs) and, every
-/// SNAP_STATS_EVERY recordings, print the running p50/p95 per stage.
-fn record_snapshot_stages(total: u64, cb: u64, blit: u64, conv: u64, store: u64) {
-    let print_summary;
-    {
-        let mut stats = snap_stats().lock().expect("snapshot stats lock poisoned");
-        if stats.samples.len() >= SNAP_STATS_WINDOW {
-            stats.samples.drain(..SNAP_STATS_WINDOW / 2);
-        }
-        stats.samples.push([total, cb, blit, conv, store]);
-        stats.recorded += 1;
-        print_summary = stats.recorded % SNAP_STATS_EVERY == 0;
-        if print_summary {
-            let mut cols: [Vec<u64>; 5] = Default::default();
-            for s in &stats.samples {
-                for (c, v) in s.iter().enumerate() {
-                    cols[c].push(*v);
-                }
-            }
-            for c in &mut cols {
-                c.sort_unstable();
-            }
-            let names = [
-                "total",
-                "cb-latency",
-                "crop-blit",
-                "convert+mask",
-                "store+overlay",
-            ];
-            let parts: Vec<String> = names
-                .iter()
-                .zip(cols.iter())
-                .map(|(n, c)| {
-                    format!(
-                        "{n} {:.1}/{:.1}",
-                        snap_percentile(c, 0.5),
-                        snap_percentile(c, 0.95)
-                    )
-                })
-                .collect();
-            eprintln!(
-                "[mpv-snap] summary n={} drops={} ms p50/p95 per stage (last<={}): {}",
-                stats.recorded,
-                stats.drops,
-                SNAP_STATS_WINDOW,
-                parts.join(" | "),
-            );
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Widget handles across threads
@@ -737,7 +640,6 @@ pub(super) fn page_snapshot(
 ) -> Result<bool, String> {
     use webkit2gtk::WebViewExt;
 
-    let t_request = Instant::now();
     if !super::engines()
         .lock()
         .expect("mpv engines lock poisoned")
@@ -755,24 +657,12 @@ pub(super) fn page_snapshot(
             None => true,
         };
         if !fresh {
-            // Diagnostic gold: how often the guard actually thins requests
-            // in normal use (measured 2026-09-18: 34% of requests during
-            // pointer movement — the Ok(false) retry contract below is
-            // load-bearing, not defensive).
-            if super::debug_log_enabled() {
-                let age = last.get(&id).map(|t| t.elapsed().as_millis()).unwrap_or(0);
-                snap_stats()
-                    .lock()
-                    .expect("snapshot stats lock poisoned")
-                    .drops += 1;
-                eprintln!(
-                    "[mpv-snap] engine {id} request DROPPED by the coalesce guard ({age} ms into the 70 ms window)"
-                );
-            }
             // Coalesced, NOT lost: Ok(false) tells the frontend to retry
             // after the window expires — a dropped FINAL request of a move
             // would otherwise strand the overlay on stale geometry (the
-            // backstop poll dedupes on an unchanged key and never resends).
+            // backstop poll dedupes on an unchanged key and never resends;
+            // the 2026-09-18 hardware round measured 34% of requests
+            // coalesced during pointer movement, so this is load-bearing).
             return Ok(false);
         }
         last.insert(id, Instant::now());
@@ -794,8 +684,6 @@ pub(super) fn page_snapshot(
                 ),
                 rect: (x, y, w, h),
                 keep,
-                t_request,
-                t_dispatch: Some(Instant::now()),
             };
             view.snapshot(
                 webkit2gtk::SnapshotRegion::Visible,
@@ -817,10 +705,6 @@ struct SnapshotMeta {
     alloc: (i32, i32),
     rect: (i32, i32, i32, i32),
     keep: Vec<i32>,
-    /// Stage timestamps for the KAPPASTREAM_MPV_LOG diagnostics (carried
-    /// unconditionally — three `Instant`s; only read under the log gate).
-    t_request: Instant,
-    t_dispatch: Option<Instant>,
 }
 
 /// The crop handed from the GTK main thread to the store worker: the raw
@@ -835,14 +719,6 @@ struct PageCrop {
     keep: Vec<(usize, usize, usize, usize)>,
     id: u32,
     seq: u64,
-    /// The FULL snapshot surface dims (viewport at device scale) — the
-    /// composite's cost driver, logged so runs at different resolutions
-    /// are comparable.
-    view: (usize, usize),
-    t_request: Instant,
-    t_dispatch: Option<Instant>,
-    t_callback: Instant,
-    t_blit: Instant,
 }
 
 /// The snapshot completion (GTK main thread): blit ONLY the crop region off
@@ -859,24 +735,12 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
         alloc: (alloc_w, alloc_h),
         rect: (x, y, w, h),
         keep,
-        t_request,
-        t_dispatch,
     } = meta;
-    let t_callback = Instant::now();
-    let snap_fail = |what: &str| {
-        if super::debug_log_enabled() {
-            eprintln!("[mpv-snap] engine {id} FAILED at {what}");
-        }
-    };
     let surf = match res {
         Ok(surf) => surf,
-        Err(_) => {
-            snap_fail("snapshot callback (webkit error)");
-            return;
-        }
+        Err(_) => return,
     };
     if surf.status().is_err() {
-        snap_fail("snapshot callback (surface status)");
         return;
     }
     // WebKit hands out an ARGB32 image surface, but cairo-rs refuses to
@@ -888,10 +752,7 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
     // ARGB32, borrowable, and never page-sized.
     let img = match cairo::ImageSurface::try_from(surf) {
         Ok(img) => img,
-        Err(_) => {
-            snap_fail("surface borrow (try_from)");
-            return;
-        }
+        Err(_) => return,
     };
     let (sw, sh) = (img.width().max(1) as usize, img.height().max(1) as usize);
     let scale_x = sw as f64 / f64::from(alloc_w);
@@ -903,7 +764,6 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
     let y2 = clamp(f64::from(y + h) * scale_y, sh);
     let (cw, ch) = (x2.saturating_sub(x1), y2.saturating_sub(y1));
     if cw == 0 || ch == 0 {
-        snap_fail("empty crop intersection");
         return;
     }
     let mut owned = match cairo::ImageSurface::create(
@@ -912,32 +772,25 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
         i32::try_from(ch).unwrap_or(i32::MAX),
     ) {
         Ok(c) => c,
-        Err(_) => {
-            snap_fail("crop surface create");
-            return;
-        }
+        Err(_) => return,
     };
     {
         let Ok(ctx) = cairo::Context::new(&owned) else {
-            snap_fail("cairo context");
             return;
         };
         if ctx
             .set_source_surface(&img, -(x1 as f64), -(y1 as f64))
             .is_err()
         {
-            snap_fail("set_source_surface");
             return;
         }
         if ctx.paint().is_err() {
-            snap_fail("crop blit paint");
             return;
         }
     }
     let stride = owned.stride().max(1) as usize;
     let raw = {
         let Ok(data) = owned.data() else {
-            snap_fail("crop surface borrow");
             return;
         };
         data.to_vec()
@@ -976,7 +829,6 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
             e.page_seq
         })
         .unwrap_or(0);
-    let t_blit = Instant::now();
     std::thread::spawn(move || {
         store_page_snapshot(PageCrop {
             raw,
@@ -986,11 +838,6 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
             keep: keep_px,
             id,
             seq,
-            view: (sw, sh),
-            t_request,
-            t_dispatch,
-            t_callback,
-            t_blit,
         })
     });
 }
@@ -1012,13 +859,7 @@ fn store_page_snapshot(crop: PageCrop) {
         keep,
         id,
         seq,
-        view,
-        t_request,
-        t_dispatch,
-        t_callback,
-        t_blit,
     } = crop;
-    let t_worker = Instant::now();
     let mut bgra = super::argb32_crop_to_bgra(
         &raw,
         stride,
@@ -1027,7 +868,6 @@ fn store_page_snapshot(crop: PageCrop) {
         (0, 0, w as usize, h as usize),
     );
     super::mask_keep_rects(&mut bgra, w as usize, h as usize, &keep);
-    let t_converted = Instant::now();
     let mut engines = super::engines().lock().expect("mpv engines lock poisoned");
     let Some(engine) = engines.get_mut(&id) else {
         return;
@@ -1053,29 +893,6 @@ fn store_page_snapshot(crop: PageCrop) {
     if let Some((pos, dims)) = engine.page_geo {
         let _ = engine.show_bitmap(super::OVERLAY_PAGE, "page", 0, pos, dims);
     }
-    let t_done = Instant::now();
-    let (total_us, cb_us, blit_us, conv_us, store_us) = (
-        ((t_done - t_request).as_micros() as u64),
-        ((t_callback - t_request).as_micros() as u64),
-        ((t_blit - t_callback).as_micros() as u64),
-        ((t_converted - t_worker).as_micros() as u64),
-        ((t_done - t_converted).as_micros() as u64),
-    );
-    if super::debug_log_enabled() {
-        eprintln!(
-            "[mpv-snap] engine {id} total {:.1}ms (cb {}.{:03}ms incl. dispatch {:?}, crop-blit {:.2}ms, convert+mask {:.2}ms, store+overlay {:.2}ms) view {}x{} crop {w}x{h}",
-            total_us as f64 / 1000.0,
-            cb_us / 1000,
-            cb_us % 1000,
-            t_dispatch.map(|t| (t - t_request).as_micros() as u64),
-            blit_us as f64 / 1000.0,
-            conv_us as f64 / 1000.0,
-            store_us as f64 / 1000.0,
-            view.0,
-            view.1,
-        );
-    }
-    record_snapshot_stages(total_us, cb_us, blit_us, conv_us, store_us);
 }
 
 /// A 1×1 corner input region. NOT an empty region on purpose: empty is

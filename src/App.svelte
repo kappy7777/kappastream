@@ -121,12 +121,6 @@
     if (!isMacOS) return
     const divisor = zoomDivisor(settings.uiScale)
     document.documentElement.style.setProperty(UI_ZOOM_VAR, String(divisor))
-    // Surface the ACTUAL runtime value (owner mandate: log it, don't reason
-    // about it) — stderr via the mpv debug bridge; check with
-    // KAPPASTREAM_MPV_LOG=1 from a terminal or stderr redirection.
-    void invoke('mpv_debug_log', {
-      line: `ui-zoom: isMacOS=${isMacOS} uiScale=${settings.uiScale} --ui-zoom=${divisor}`,
-    }).catch(() => {})
   })
 
   // Sleep timer expiry = STOP playback completely (not just pause): tear down
@@ -980,17 +974,10 @@
     stage.addEventListener('pointermove', onMove, { passive: true })
     stage.addEventListener('pointerdown', onDown)
     stage.addEventListener('wheel', onWheel, { passive: false })
-    // KAPPASTREAM_MPV_LOG: proves the listeners exist — if no [mpv-pointer]
-    // lines follow on stderr while the pointer moves over the video, the
-    // events never reach the page (the Windows pass-through (a) signature).
-    void invoke('mpv_debug_log', {
-      line: `pointer-forwarding attached to .player (${Math.round(stage.getBoundingClientRect().width)}x${Math.round(stage.getBoundingClientRect().height)} px)`,
-    }).catch(() => {})
     return () => {
       stage.removeEventListener('pointermove', onMove)
       stage.removeEventListener('pointerdown', onDown)
       stage.removeEventListener('wheel', onWheel)
-      void invoke('mpv_debug_log', { line: 'pointer-forwarding detached' }).catch(() => {})
     }
   })
 

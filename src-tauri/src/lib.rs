@@ -186,8 +186,6 @@ pub fn run() {
             mpv::mpv_script_msg,
             #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_set_bitmap,
-            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
-            mpv::mpv_debug_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
