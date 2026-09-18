@@ -186,7 +186,7 @@ jobs:
       # the directory is absent. Only the bundler needs the real 150 MB
       # streamlink tree (staged in release.yml); clippy/test just need the
       # mapped path to exist with at least one file.
-      - name: Windows: streamlink-bundle resource placeholder
+      - name: "Windows: streamlink-bundle resource placeholder"
         if: runner.os == 'Windows'
         shell: bash
         run: |
