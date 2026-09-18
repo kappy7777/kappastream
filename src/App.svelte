@@ -955,12 +955,22 @@
     )
   })
 
-  // The native surface still tracks the full .player BOX (the content-rect
-  // switch lands with the mpv consumer changes); same visual-px space as
-  // before, now re-pushed from the shared tracker.
+  // The fitted content rect in the same visual-px window space as playerBox
+  // — the one rect the native surface, the OSD overlay fractions, and the
+  // pointer normalization must all agree on.
+  const videoContentRect = $derived.by(() => {
+    const c = fitContentRect(playerBox.w, playerBox.h, videoAspect)
+    return { x: playerBox.x + c.x, y: playerBox.y + c.y, w: c.w, h: c.h }
+  })
+
+  // The native surface tracks the CONTENT rect: mpv then fills its surface
+  // edge to edge — no mpv-painted black bars — and the themed page shows
+  // where the bars used to be (identical to the hls path's side bars). The
+  // OSD width IS the surface width now, so ks-osc's bar spans exactly the
+  // video too.
   $effect(() => {
     if (!nativeVideoActive) return
-    const r = playerBox
+    const r = videoContentRect
     if (r.w < 2 || r.h < 2) return
     void invoke('mpv_set_rect', {
       x: Math.round(r.x),
@@ -972,54 +982,76 @@
 
   // ---- Native surface pointer forwarding (mpv OSC) --------------------------
   // mpv's on-screen controller lives INSIDE mpv (OSD, rendered with the
-  // video), so interacting with it means feeding mpv's input queue: every
-  // pointer event over the player rect is forwarded NORMALIZED (0..1 within
-  // the rect — Rust rescales by mpv's own OSD dimensions, so a
-  // webview-devicePixelRatio vs GDK-scale mismatch can never desync the
-  // mapping). mpv's command API is CLICK-ONLY (no down/up), so clicks fire
-  // on pointerdown plus throttled held moves — the OSD script synthesizes
-  // drags from that stream (seek scrub + volume drag; it commits a scrub
-  // when the stream goes quiet, so a release click is not just unneeded —
-  // forwarding one would double-activate buttons on slow presses). Listeners
-  // ride the .player SECTION (the rect anchor) so they cover the
-  // (opacity-0, hit-testable) <video> exactly; the wheel no longer scrolls
-  // the page over the video in native mode — mpv owns that gesture now.
+  // video), so interacting with it means feeding mpv's input queue: pointer
+  // events over the SURFACE (the fitted content rect, not the box) are
+  // forwarded NORMALIZED (0..1 within it — Rust rescales by mpv's own OSD
+  // dimensions, so a webview-devicePixelRatio vs GDK-scale mismatch can
+  // never desync the mapping). mpv's command API is CLICK-ONLY (no down/up),
+  // so clicks fire on pointerdown plus throttled held moves — the OSD script
+  // synthesizes drags from that stream (seek scrub + volume drag; it commits
+  // a scrub when the stream goes quiet, so a release click is not just
+  // unneeded — forwarding one would double-activate buttons on slow
+  // presses). Listeners ride the .player SECTION so they also see the themed
+  // letterbox bars: events OUTSIDE the content rect belong to the page again
+  // (the surface isn't there), so fresh ones are ignored and the wheel only
+  // becomes mpv's over the picture; a held drag that leaves the rect is
+  // CLAMPED to the edge so a scrub keeps streaming instead of dying.
   $effect(() => {
     if (!nativeVideoActive) return
     const stage = playerVideoEl
     if (!stage) return
     let lastClickAt = 0
-    const forward = (e: { clientX: number; clientY: number }, kind: string): void => {
+    // Normalized 0..1 within the content rect, recomputed per event (the
+    // same shared fit the surface pusher used — they can never disagree).
+    const locate = (e: { clientX: number; clientY: number }) => {
       const r = stage.getBoundingClientRect()
-      if (r.width < 1 || r.height < 1) return
-      const x = (e.clientX - r.left) / r.width
-      const y = (e.clientY - r.top) / r.height
+      const c = fitContentRect(r.width, r.height, videoAspect)
+      const w = Math.max(1, c.w)
+      const h = Math.max(1, c.h)
+      const x = (e.clientX - r.left - c.x) / w
+      const y = (e.clientY - r.top - c.y) / h
+      return {
+        x,
+        y,
+        inside: x >= 0 && x <= 1 && y >= 0 && y <= 1,
+        clampX: Math.min(1, Math.max(0, x)),
+        clampY: Math.min(1, Math.max(0, y)),
+      }
+    }
+    const send = (x: number, y: number, kind: string): void => {
       void invoke('mpv_pointer', { x, y, kind }).catch(() => {})
     }
-    const click = (e: PointerEvent): void => {
+    const clickAt = (loc: ReturnType<typeof locate>, clamped = false): void => {
       const now = performance.now()
       if (now - lastClickAt < 50) return
       lastClickAt = now
-      forward(e, 'click')
+      send(clamped ? loc.clampX : loc.x, clamped ? loc.clampY : loc.y, 'click')
     }
     const onMove = (e: PointerEvent): void => {
-      forward(e, 'move')
-      if (e.buttons === 1) click(e)
+      const loc = locate(e)
+      if (!loc.inside && e.buttons !== 1) return
+      // Inside (or mid-drag): send as-is / clamped, and keep the click
+      // stream (the drag synthesizer) alive.
+      send(loc.inside ? loc.x : loc.clampX, loc.inside ? loc.y : loc.clampY, 'move')
+      if (e.buttons === 1) clickAt(loc, !loc.inside)
     }
     const onDown = (e: PointerEvent): void => {
       if (e.button !== 0) return
+      const loc = locate(e)
+      if (!loc.inside) return
       // Pointer capture keeps held-drag streams flowing even when the
-      // pointer leaves the player rect mid-drag.
+      // pointer leaves the content rect mid-drag.
       try {
         stage.setPointerCapture(e.pointerId)
       } catch {
         /* stage gone mid-gesture */
       }
-      click(e)
+      clickAt(loc)
     }
     const onWheel = (e: WheelEvent) => {
+      if (!locate(e).inside) return
       e.preventDefault()
-      forward(e, e.deltaY < 0 ? 'wheel-up' : 'wheel-down')
+      send(0, 0, e.deltaY < 0 ? 'wheel-up' : 'wheel-down')
     }
     stage.addEventListener('pointermove', onMove, { passive: true })
     stage.addEventListener('pointerdown', onDown)
@@ -1113,12 +1145,18 @@
     const setVisible = (visible: boolean): void => {
       void invoke('mpv_set_surface_visible', { visible }).catch(() => {})
     }
-    const intersectsPlayer = (el: HTMLElement, pr: DOMRect): boolean => {
+    // Intersection against the SURFACE (= the fitted content rect): page UI
+    // outside it is live webview (the native window only covers the rect),
+    // so only strips over the picture need compositing.
+    const intersectsSurface = (
+      el: HTMLElement,
+      vr: { left: number; top: number; right: number; bottom: number },
+    ): boolean => {
       const r = el.getBoundingClientRect()
       if (r.width < 2 || r.height < 2) return false
       return (
-        Math.min(r.right, pr.right) - Math.max(r.left, pr.left) >= 1 &&
-        Math.min(r.bottom, pr.bottom) - Math.max(r.top, pr.top) >= 1
+        Math.min(r.right, vr.right) - Math.max(r.left, vr.left) >= 1 &&
+        Math.min(r.bottom, vr.bottom) - Math.max(r.top, vr.top) >= 1
       )
     }
     const recheck = (): void => {
@@ -1126,11 +1164,22 @@
       if (!stage) return
       const pr = stage.getBoundingClientRect()
       if (pr.width < 2 || pr.height < 2) return
+      // The fitted content rect within the freshly measured box (same
+      // shared fit the surface pusher used — never a second computation).
+      const fit = fitContentRect(pr.width, pr.height, videoAspect)
+      const vr = {
+        left: pr.left + fit.x,
+        top: pr.top + fit.y,
+        right: pr.left + fit.x + fit.w,
+        bottom: pr.top + fit.y + fit.h,
+        width: fit.w,
+        height: fit.h,
+      }
       // Full-window modals: hide the surface for as long as one overlaps
-      // the player. While hidden everything is live — no bitmap overlay, no
+      // the video. While hidden everything is live — no bitmap overlay, no
       // snapshots (a stale composited dialog must not survive the duck).
       const hide = Array.from(document.querySelectorAll<HTMLElement>(fullSelector)).some((el) =>
-        intersectsPlayer(el, pr),
+        intersectsSurface(el, vr),
       )
       if (hide !== suppressed) {
         suppressed = hide
@@ -1152,12 +1201,12 @@
       let y2 = -Infinity
       const keeps: number[] = []
       for (const el of document.querySelectorAll<HTMLElement>(snapSelector)) {
-        if (!intersectsPlayer(el, pr)) continue
+        if (!intersectsSurface(el, vr)) continue
         const r = el.getBoundingClientRect()
-        const ax = Math.max(r.left, pr.left)
-        const ay = Math.max(r.top, pr.top)
-        const bx = Math.min(r.right, pr.right)
-        const by = Math.min(r.bottom, pr.bottom)
+        const ax = Math.max(r.left, vr.left)
+        const ay = Math.max(r.top, vr.top)
+        const bx = Math.min(r.right, vr.right)
+        const by = Math.min(r.bottom, vr.bottom)
         keeps.push(Math.round(ax), Math.round(ay), Math.round(bx - ax), Math.round(by - ay))
         x1 = Math.min(x1, ax)
         y1 = Math.min(y1, ay)
@@ -1175,17 +1224,18 @@
       shown = true
       pushedKeeps = keeps
       // Window-space box drives the snapshot crop + the dedupe key;
-      // fractions of the video rect drive the OSD geometry.
-      const key = `${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)},${Math.round(pr.width)}x${Math.round(pr.height)}`
+      // fractions of the video SURFACE (= the content rect the OSD spans)
+      // drive the OSD geometry.
+      const key = `${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)},${Math.round(vr.width)}x${Math.round(vr.height)}`
       if (key === pushed) return
       pushed = key
       sendOsd([
         'ks-page',
         'show',
-        ((x1 - pr.left) / pr.width).toFixed(4),
-        ((y1 - pr.top) / pr.height).toFixed(4),
-        ((x2 - x1) / pr.width).toFixed(4),
-        ((y2 - y1) / pr.height).toFixed(4),
+        ((x1 - vr.left) / vr.width).toFixed(4),
+        ((y1 - vr.top) / vr.height).toFixed(4),
+        ((x2 - x1) / vr.width).toFixed(4),
+        ((y2 - y1) / vr.height).toFixed(4),
       ])
       snapshot(x1, y1, x2 - x1, y2 - y1, keeps)
     }
@@ -1364,6 +1414,10 @@
     const url = showInfo ? st.avatarUrl : undefined
     void settings.theme
     void settings.uiScale
+    // Re-render when the OSD's shape changes: the box (resize, layout
+    // toggles) and the video aspect both feed the fit below.
+    void playerBox
+    void videoAspect
     const cs = getComputedStyle(document.documentElement)
     const text = cs.getPropertyValue('--text-primary').trim()
     const dim = cs.getPropertyValue('--text-secondary').trim()
@@ -1371,7 +1425,11 @@
     let cancelled = false
     const push = (): void => {
       const rect = playerVideoEl?.getBoundingClientRect() ?? null
-      const hOsd = rect ? Math.round(rect.height * dpr) : 0
+      // The OSD spans the fitted content rect (the surface), so its metrics
+      // — and with them the bitmap's scale + max width — are the VIDEO's,
+      // not the box's.
+      const fit = rect ? fitContentRect(rect.width, rect.height, videoAspect) : null
+      const hOsd = fit ? Math.round(fit.h * dpr) : 0
       if ((!title && !extra) || hOsd < 2) {
         sendOsd(['ks-infoblock', '0'])
         return
@@ -1379,7 +1437,7 @@
       // Mirror ks-osc.lua's scale math exactly (its s drives the text sizes
       // this bitmap replaces).
       const s = Math.min(Math.max((hOsd / 720) * settings.uiScale, 0.6), 3.0)
-      const maxWidth = rect ? Math.round(rect.width * dpr - 28 * s) : 800
+      const maxWidth = fit ? Math.round(fit.w * dpr - 28 * s) : 800
       void renderInfoBlock({
         title: title ?? '',
         extra,
@@ -4165,28 +4223,36 @@
   }
 
   /* Experimental native video engine (mpv-embed builds): the native video
-     surface sits ABOVE the (fully opaque) page and covers exactly the .player
-     rect — input-transparent, so clicks/wheel/dblclick over the video still
-     land on the (invisible, hit-testable) <video> below it and the existing
-     HTML handlers keep working. NO transparency anywhere: WebKitGTK cannot
-     render transparent regions correctly on this stack (its webview surface
-     never clears between frames — smears, accumulating tints, laggy holes;
-     every working web-UI-over-mpv app uses Chromium instead). The in-video
-     CONTROLS are mpv's OSD (ks-osc.lua); only the "Back to live" banner and
-     the VOD resume bar render BELOW the video in .native-strip (see the
-     markup). The page's loading/error overlays stay inside .player — the
-     native surface stays hidden until the first frame presents. */
+     surface sits ABOVE the (fully opaque) page and covers exactly the fitted
+     video content rect — input-transparent, so clicks/wheel/dblclick over
+     the video still land on the (invisible, hit-testable) <video> below it
+     and the existing HTML handlers keep working. NO transparency anywhere:
+     WebKitGTK cannot render transparent regions correctly on this stack (its
+     webview surface never clears between frames — smears, accumulating
+     tints, laggy holes; every working web-UI-over-mpv app uses Chromium
+     instead). The in-video CONTROLS are mpv's OSD (ks-osc.lua); only the
+     "Back to live" banner and the VOD resume bar render BELOW the video in
+     .native-strip (see the markup). The page's loading/error overlays stay
+     inside .player — the native surface stays hidden until the first frame
+     presents. */
   .app--native-video .video {
     opacity: 0;
   }
-  /* On Windows/macOS the native surface sits BELOW the webview (a child
-     HWND / NSView under it) — the page must not paint over the video rect,
-     so the player backdrop goes transparent there too. On Linux this is
-     visually a no-op: the surface is ABOVE the page and the parent behind
-     .player paints the same theme color; before the first frame presents
-     the area falls back to that parent background instead of this one. */
+  /* Native-engine mode: the surface covers exactly the fitted content rect
+     (not the box), so the page paints the letterbox bars here — themed, the
+     same side bars the hls path shows. (Historically this was transparent
+     for the Windows/macOS below-webview designs; those are gone — the
+     engine is Linux-only, and on Linux the surface sits ABOVE the page, so
+     an explicit themed backdrop is both safe and required now that the
+     surface no longer fills the box.) */
   .app--native-video .player {
-    background: transparent;
+    background: var(--bg-app);
+  }
+  /* Native fullscreen keeps the hls path's deliberate #000 cinema bars: the
+     surface only covers the content rect there too, so the page must paint
+     the bars black (this overrides the themed backdrop above). */
+  .app--fullscreen.app--native-video .player {
+    background: #000;
   }
   .native-strip {
     flex: 0 0 auto;

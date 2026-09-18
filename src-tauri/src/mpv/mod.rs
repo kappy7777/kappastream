@@ -1185,10 +1185,10 @@ pub fn mpv_set_rect(id: Option<u32>, x: i32, y: i32, w: i32, h: i32) -> Result<(
 /// Forward a pointer event over the native video into mpv's input queue —
 /// the ONLY way to interact with mpv's on-screen controller (the OSC lives
 /// in mpv's OSD; the webview's pointer events land on the page UNDER the
-/// native surface). Coordinates are NORMALIZED within the player rect
-/// (0..1) and rescaled here by mpv's own OSD dimensions (== the render
-/// size), so a webview-vs-GDK scale mismatch can never desync the mapping.
-/// `kind`: "move" | "click" (button 0) | "wheel-up" | "wheel-down".
+/// native surface). Coordinates are NORMALIZED within the video surface
+/// rect (0..1) and rescaled here by mpv's own OSD dimensions (== the
+/// render size), so a webview-vs-GDK scale mismatch can never desync the
+/// mapping. `kind`: "move" | "click" (button 0) | "wheel-up" | "wheel-down".
 #[tauri::command]
 pub fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Result<(), String> {
     with_engine(engine_id(id)?, |e| {
