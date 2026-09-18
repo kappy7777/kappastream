@@ -1130,33 +1130,68 @@
       snapshot(x1, y1, x2 - x1, y2 - y1, keeps)
     }
     recheck()
+    // Coalesce bursts (chat floods, tooltip drag) to one recheck per
+    // animation frame; the recheck itself is querySelectorAll + rects —
+    // cheap, but not free at mutation-storm rates.
+    let raf = 0
+    const schedule = (): void => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        recheck()
+      })
+    }
     const isOverlayNode = (n: Node): boolean =>
       n instanceof HTMLElement && (n.matches(selector) || n.querySelector(selector) !== null)
     const mo = new MutationObserver((muts) => {
-      // Cheap gate — chat mutates constantly; only re-check when a mutation
-      // actually added/removed an overlay subtree (a removal needs the full
-      // re-check because another overlay may still be open). The poll below
-      // catches attribute-only changes (tooltips moving, animations).
-      let relevant = false
-      for (const m of muts) {
-        for (const n of m.addedNodes) {
-          if (isOverlayNode(n)) {
-            relevant = true
-            break
-          }
+      // Cheap relevance gate — chat mutates constantly. childList counts
+      // only added/removed overlay subtrees (a removal needs the full
+      // re-check: another overlay may still be open). attributes count
+      // the strips' own class/style flips (the tooltip moves via
+      // style:left/top; the fav-tooltip reveal is a class flip), plus any
+      // class flip anywhere (sidebar/theater/theme toggles can resize the
+      // player or restyle a strip), plus documentElement style (the
+      // UI-scale zoom repaints everything). characterData counts text
+      // changes inside a strip (tooltip text swap).
+      const relevant = muts.some((m) => {
+        if (m.type === 'childList') {
+          for (const n of m.addedNodes) if (isOverlayNode(n)) return true
+          for (const n of m.removedNodes) if (isOverlayNode(n)) return true
+          return false
         }
-        if (relevant) break
-        for (const n of m.removedNodes) {
-          if (isOverlayNode(n)) {
-            relevant = true
-            break
-          }
+        if (m.type === 'attributes') {
+          const el = m.target
+          if (!(el instanceof Element)) return false
+          if (el === document.documentElement) return true
+          if (m.attributeName === 'class') return true
+          return el.matches(selector)
         }
-      }
-      if (relevant) recheck()
+        if (m.type === 'characterData') {
+          const p = m.target.parentElement
+          return p instanceof Element && p.matches(selector)
+        }
+        return false
+      })
+      if (relevant) schedule()
     })
-    mo.observe(document.body, { childList: true, subtree: true })
+    mo.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style'],
+      characterData: true,
+    })
     window.addEventListener('resize', recheck)
+    // Transition/animation completion inside an overlay schedules a
+    // recheck. In native mode the strips' reveal animations are disabled
+    // (the .app--native-video rules), so what is left are content
+    // transitions (update-banner progress width, hover states); recheck's
+    // geometry dedupe turns these into no-ops when nothing moved.
+    const onSettle = (ev: Event): void => {
+      if (ev.target instanceof Element && ev.target.closest(selector)) schedule()
+    }
+    document.addEventListener('transitionend', onSettle, { capture: true })
+    document.addEventListener('animationend', onSettle, { capture: true })
     // Interaction refresh: clicks/keys/scrolls INSIDE a snapshotted strip
     // (notification-menu toggles, banner buttons, the menu's list scroll)
     // change pixels without moving geometry — one-shot re-snapshots, rate
@@ -1171,18 +1206,27 @@
     }
     const interactTypes = ['pointerdown', 'keyup', 'scroll', 'wheel'] as const
     for (const ty of interactTypes) document.addEventListener(ty, onSnapInteract, { capture: true, passive: true })
-    // Fast poll: catches class-only changes (tooltips revealing/moving),
-    // in-flight transitions, and dialog open/close the MutationObserver
-    // can't see (elements re-used, attributes only). Deliberately NO raw
-    // scroll GEOMETRY listener (every selector element is position:fixed,
-    // page scrolling never moves them, and chat autoscroll would storm the
-    // recheck) and NO periodic pixel refresh (one-shot + settle burst +
-    // interaction refresh are all these strips ever need).
-    const geoIv = setInterval(recheck, 80)
+    // Low-frequency safety poll — the BACKSTOP only. Covered by events:
+    // {#if}-driven show/hide of every strip (childList), the tooltip's
+    // show/hide/move (childList + style attributes + text), class-flip
+    // reveals (fav-tooltip) and any UI-toggle class change, window resize
+    // (explicit listener), transition/animation ends inside overlays. NOT
+    // proven to emit an event: player-rect geometry changes from layout
+    // toggles (sidebar collapse, theater mode, chat resize) when no strip
+    // attribute changes — those land here within 400 ms. Deliberately
+    // kept absent: a raw scroll GEOMETRY listener (every selector element
+    // is position:fixed, page scrolling never moves them, and chat
+    // autoscroll would storm the recheck) and a periodic PIXEL refresh
+    // (recheck re-snapshots only when the union geometry key changes —
+    // idle strips dedupe to no-ops).
+    const geoIv = setInterval(recheck, 400)
     return () => {
       mo.disconnect()
       window.removeEventListener('resize', recheck)
       for (const ty of interactTypes) document.removeEventListener(ty, onSnapInteract, { capture: true })
+      document.removeEventListener('transitionend', onSettle, { capture: true })
+      document.removeEventListener('animationend', onSettle, { capture: true })
+      if (raf) cancelAnimationFrame(raf)
       clearInterval(geoIv)
       // Leaving native mode must not leave a hidden surface or a stale
       // overlay composited.

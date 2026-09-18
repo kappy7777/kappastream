@@ -269,19 +269,58 @@
       if (action === 'hide') pushed.delete(id)
     }
     recheck()
+    // Coalesce bursts to one recheck per animation frame (same as
+    // App.svelte's single-player effect).
+    let raf = 0
+    const schedule = (): void => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        recheck()
+      })
+    }
+    const selector = `${fullSelector}, ${snapSelector}`
+    const isOverlayNode = (n: Node): boolean =>
+      n instanceof HTMLElement && (n.matches(selector) || n.querySelector(selector) !== null)
     const mo = new MutationObserver((muts) => {
-      const selector = `${fullSelector}, ${snapSelector}`
-      const isOverlayNode = (n: Node): boolean =>
-        n instanceof HTMLElement && (n.matches(selector) || n.querySelector(selector) !== null)
-      let relevant = false
-      for (const m of muts) {
-        for (const n of m.addedNodes) if (isOverlayNode(n)) relevant = true
-        for (const n of m.removedNodes) if (isOverlayNode(n)) relevant = true
-      }
-      if (relevant) recheck()
+      // Same relevance gate as App.svelte: childList only counts overlay
+      // subtrees; attributes count strip class/style flips, any class
+      // flip (UI toggles move the player), and documentElement style
+      // (UI-scale zoom); characterData counts text inside a strip.
+      const relevant = muts.some((m) => {
+        if (m.type === 'childList') {
+          for (const n of m.addedNodes) if (isOverlayNode(n)) return true
+          for (const n of m.removedNodes) if (isOverlayNode(n)) return true
+          return false
+        }
+        if (m.type === 'attributes') {
+          const el = m.target
+          if (!(el instanceof Element)) return false
+          if (el === document.documentElement) return true
+          if (m.attributeName === 'class') return true
+          return el.matches(selector)
+        }
+        if (m.type === 'characterData') {
+          const p = m.target.parentElement
+          return p instanceof Element && p.matches(selector)
+        }
+        return false
+      })
+      if (relevant) schedule()
     })
-    mo.observe(document.body, { childList: true, subtree: true })
+    mo.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style'],
+      characterData: true,
+    })
     window.addEventListener('resize', recheck)
+    const onSettle = (ev: Event): void => {
+      if (ev.target instanceof Element && ev.target.closest(selector)) schedule()
+    }
+    document.addEventListener('transitionend', onSettle, { capture: true })
+    document.addEventListener('animationend', onSettle, { capture: true })
     const onSnapInteract = (ev: Event): void => {
       if (pushed.size === 0) return
       if (!(ev.target instanceof Element) || !ev.target.closest(snapSelector)) return
@@ -301,11 +340,17 @@
     // the target being inside a snapshotted element).
     const interactTypes = ['pointerdown', 'keyup', 'scroll', 'wheel'] as const
     for (const ty of interactTypes) document.addEventListener(ty, onSnapInteract, { capture: true, passive: true })
-    const geoIv = setInterval(recheck, 80)
+    // Low-frequency safety poll — backstop only (see App.svelte's effect
+    // for the covered-vs-backstop path list; multi-view adds the tile
+    // grid's own splitters/reorders, which flip classes).
+    const geoIv = setInterval(recheck, 400)
     return () => {
       mo.disconnect()
       window.removeEventListener('resize', recheck)
       for (const ty of interactTypes) document.removeEventListener(ty, onSnapInteract, { capture: true })
+      document.removeEventListener('transitionend', onSettle, { capture: true })
+      document.removeEventListener('animationend', onSettle, { capture: true })
+      if (raf) cancelAnimationFrame(raf)
       clearInterval(geoIv)
       if (suppressed) setVisible(true)
       for (const id of new Set(mpvIds.values())) sendPage(id, 'hide')
