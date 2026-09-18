@@ -184,7 +184,9 @@ fn gl_lib() -> Result<&'static GlLib, String> {
 /// is ≤1.6 ms at p95, and crop size is irrelevant next to it) — set to
 /// roughly that p95, never below, so a fresh composite starts only after
 /// the previous one has very likely finished on this same GTK-main/video
-/// thread. A coalesced request now resolves Ok(false) so the frontend
+/// thread. RE-VALIDATED AT 4K (view 3840x1972, same day, mpvfix63):
+/// cb p50 34 ms / p95 67 ms / max 98 ms — the composite's cost is
+/// resolution-insensitive in this range, so the window holds at 4K too. A coalesced request now resolves Ok(false) so the frontend
 /// can retry it once the window expires. A TIMESTAMP, deliberately not
 /// an in-flight flag — if WebKit ever failed to invoke the completion, a
 /// flag would wedge the path for the whole session while the window
