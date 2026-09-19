@@ -267,6 +267,14 @@
     }
   }
 
+  // Same context-menu suppression as the main window: the native menu's
+  // Reload reloads this webview out from under the pip↔main coordination.
+  onMount(() => {
+    const prevent = (e: MouseEvent): void => e.preventDefault()
+    document.addEventListener('contextmenu', prevent, { capture: true })
+    return () => document.removeEventListener('contextmenu', prevent, { capture: true })
+  })
+
   onMount(async () => {
     if (!isTauri()) {
       errorMsg = t('pip_notInTauri')

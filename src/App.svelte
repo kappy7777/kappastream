@@ -2418,6 +2418,20 @@
     vodCtl.dispose()
   })
 
+  // Suppress the webview's native right-click context menu. It renders as
+  // its own popup whose Reload entry reloads the page out from under the
+  // running app (native mpv surfaces, tray, window state all live on the
+  // Rust side) — observed to take the whole UI down. The app has no
+  // right-click affordance of its own except the favorites remove action,
+  // which preventDefaults and confirms on its own; capture phase makes the
+  // suppression cover every surface including inputs (copy/paste stay on
+  // keyboard shortcuts).
+  onMount(() => {
+    const prevent = (e: MouseEvent): void => e.preventDefault()
+    document.addEventListener('contextmenu', prevent, { capture: true })
+    return () => document.removeEventListener('contextmenu', prevent, { capture: true })
+  })
+
   // Track maximize + fullscreen state so the title-bar control shows
   // restore vs. maximize and the player control shows exit vs. enter
   // fullscreen. Both can change without our buttons (maximize via the OS,
