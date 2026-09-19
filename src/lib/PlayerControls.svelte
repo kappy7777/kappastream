@@ -948,30 +948,36 @@
   }
 
   .menu {
+    /* The menu damps the bar's scale: --ctrl-scale tracks the player WIDTH
+       and sits at its 1.6 clamp on any normal desktop window, while the
+       mpv OSC gear menu (the visual reference) scales with the video
+       height and stays near 1. Cap the menu at 1.25 and share the OSC's
+       170px base width so both menus render the same size. */
+    --menu-scale: min(var(--ctrl-scale, 1), 1.25);
     position: absolute;
     bottom: calc(100% + 6px);
     right: 0;
-    min-width: calc(200px * var(--ctrl-scale));
+    min-width: calc(170px * var(--menu-scale));
     background: var(--bg-panel);
     border: 1px solid var(--border);
-    border-radius: calc(6px * var(--ctrl-scale));
-    padding: calc(6px * var(--ctrl-scale)) 0;
-    box-shadow: 0 calc(8px * var(--ctrl-scale)) calc(24px * var(--ctrl-scale)) rgba(0, 0, 0, 0.5);
+    border-radius: calc(6px * var(--menu-scale));
+    padding: calc(6px * var(--menu-scale)) 0;
+    box-shadow: 0 calc(8px * var(--menu-scale)) calc(24px * var(--menu-scale)) rgba(0, 0, 0, 0.5);
     z-index: 6;
     display: flex;
     flex-direction: column;
-    gap: calc(2px * var(--ctrl-scale));
+    gap: calc(2px * var(--menu-scale));
   }
 
   .menu-section {
     display: flex;
     flex-direction: column;
-    padding: calc(4px * var(--ctrl-scale)) 0;
+    padding: calc(4px * var(--menu-scale)) 0;
   }
 
   .menu-label {
-    padding: calc(4px * var(--ctrl-scale)) calc(12px * var(--ctrl-scale));
-    font-size: calc(11px * var(--ctrl-scale));
+    padding: calc(4px * var(--menu-scale)) calc(12px * var(--menu-scale));
+    font-size: calc(11px * var(--menu-scale));
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--text-secondary);
@@ -982,12 +988,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: calc(8px * var(--ctrl-scale));
-    padding: calc(6px * var(--ctrl-scale)) calc(12px * var(--ctrl-scale));
+    gap: calc(8px * var(--menu-scale));
+    padding: calc(6px * var(--menu-scale)) calc(12px * var(--menu-scale));
     border: none;
     background: transparent;
     color: var(--text-primary);
-    font-size: calc(13px * var(--ctrl-scale));
+    font-size: calc(13px * var(--menu-scale));
     text-align: left;
     cursor: pointer;
     font-family: inherit;
@@ -995,8 +1001,8 @@
   }
 
   .menu-item svg {
-    width: calc(14px * var(--ctrl-scale));
-    height: calc(14px * var(--ctrl-scale));
+    width: calc(14px * var(--menu-scale));
+    height: calc(14px * var(--menu-scale));
   }
 
   .menu-item:hover {
