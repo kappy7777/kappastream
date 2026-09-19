@@ -34,6 +34,7 @@
 // lifetime, failures retried at most once per USER_ID_RETRY_MS window —
 // never per poll.
 
+import { untrack } from 'svelte'
 import { fetchPinnedChatMessages, GQL_REFRESH_INTERVAL_MS, type PinnedChatMessageData } from './gql'
 import { parseBadges, normalizeColor, type BadgeInfo } from './irc'
 import { getTwitchUserId, type EmoteRange } from './emotes'
@@ -204,18 +205,32 @@ export class PinnedChatStore {
    * `userId` is the numeric id the caller already has (single-view passes the
    * favorites status batch's; null makes the controller resolve it once).
    * Safe to call repeatedly — the internal throttle gates actual requests.
+   *
+   * Runs UNTRACKED: callers are effects (App targets the joined channel,
+   * MultiView the active chat tab), and the synchronous prefix of refresh()
+   * reads `settings.chatPinned` and `this.pins` — tracked reads here would
+   * silently make every caller-effect depend on `pins`. During the multi-view
+   * migration App and MultiView disagree about the target for one flush
+   * (App: null because multiView is on; MultiView: the new tile's channel),
+   * so both effects kept re-running — each App run wrote a fresh `pins = []`
+   * (a new array reference re-dirties its readers), re-running the effects,
+   * until Svelte threw effect_update_depth_exceeded uncaught and killed the
+   * component's effect tree (stuck spinner, dead UI, streams playing on).
+   * Untracked, neither effect subscribes to `pins` and the flip settles.
    */
   setTarget(channel: string | null, userId: string | null): void {
-    if (channel !== this.targetChannel) {
-      // Any channel change (including leaving to null) bypasses the throttle
-      // for the next refresh, so returning to a channel re-fetches at once
-      // instead of showing nothing until the next poll.
-      this.lastFetchChannel = null
-      if (!channel) this.pins = []
-    }
-    this.targetChannel = channel
-    this.targetUserId = userId
-    void this.refresh()
+    untrack(() => {
+      if (channel !== this.targetChannel) {
+        // Any channel change (including leaving to null) bypasses the throttle
+        // for the next refresh, so returning to a channel re-fetches at once
+        // instead of showing nothing until the next poll.
+        this.lastFetchChannel = null
+        if (!channel && this.pins.length > 0) this.pins = []
+      }
+      this.targetChannel = channel
+      this.targetUserId = userId
+      void this.refresh()
+    })
   }
 
   /** Favorites-cycle nudge (called from the store's subscribe callback). */
@@ -257,44 +272,52 @@ export class PinnedChatStore {
     this.updateExpiryTicker()
   }
 
+  /**
+   * Untracked for the same reason setTarget is: it reads `settings.chatPinned`
+   * and `this.pins` synchronously, and tick() delivers poll nudges from inside
+   * another component's effect (the favorites subscription). Its own writes
+   * must never feed back into a caller's dependency list.
+   */
   private async refresh(): Promise<void> {
-    const enabled = this.deps.enabled()
-    if (!enabled) {
-      this.wasEnabled = false
-      if (this.pins.length > 0) this.pins = []
+    return untrack(async () => {
+      const enabled = this.deps.enabled()
+      if (!enabled) {
+        this.wasEnabled = false
+        if (this.pins.length > 0) this.pins = []
+        this.updateExpiryTicker()
+        return
+      }
+      if (!this.wasEnabled) {
+        // The toggle just turned on — fetch now rather than at the next cycle.
+        this.lastFetchAt = 0
+        this.lastFetchChannel = null
+      }
+      this.wasEnabled = true
+      const channel = this.targetChannel
+      if (!channel || this.inFlight) return
+      if (channel === this.lastFetchChannel && this.deps.now() - this.lastFetchAt < this.deps.intervalMs) {
+        return
+      }
+      this.inFlight = true
+      try {
+        const userId = await this.ensureUserId(channel)
+        if (!userId) return // resolution pending — its completion re-calls refresh
+        const raw = await this.deps.fetch(userId)
+        if (this.targetChannel !== channel) return // superseded by a later join
+        this.pins = raw.map(toDisplayPin)
+      } catch {
+        // Transport failure: degrade to the last-known pin (or none) — never
+        // let the failure reach the chat path, never trip any breaker.
+      } finally {
+        this.inFlight = false
+      }
+      // Record the attempt only when a fetch actually happened this pass (the
+      // resolution-pending return above must not count, or the retry it
+      // schedules would be throttled away).
+      this.lastFetchChannel = channel
+      this.lastFetchAt = this.deps.now()
       this.updateExpiryTicker()
-      return
-    }
-    if (!this.wasEnabled) {
-      // The toggle just turned on — fetch now rather than at the next cycle.
-      this.lastFetchAt = 0
-      this.lastFetchChannel = null
-    }
-    this.wasEnabled = true
-    const channel = this.targetChannel
-    if (!channel || this.inFlight) return
-    if (channel === this.lastFetchChannel && this.deps.now() - this.lastFetchAt < this.deps.intervalMs) {
-      return
-    }
-    this.inFlight = true
-    try {
-      const userId = await this.ensureUserId(channel)
-      if (!userId) return // resolution pending — its completion re-calls refresh
-      const raw = await this.deps.fetch(userId)
-      if (this.targetChannel !== channel) return // superseded by a later join
-      this.pins = raw.map(toDisplayPin)
-    } catch {
-      // Transport failure: degrade to the last-known pin (or none) — never
-      // let the failure reach the chat path, never trip any breaker.
-    } finally {
-      this.inFlight = false
-    }
-    // Record the attempt only when a fetch actually happened this pass (the
-    // resolution-pending return above must not count, or the retry it
-    // schedules would be throttled away).
-    this.lastFetchChannel = channel
-    this.lastFetchAt = this.deps.now()
-    this.updateExpiryTicker()
+    })
   }
 
   // Numeric id for channels whose caller has no status batch (multi-view).
