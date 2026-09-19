@@ -95,10 +95,11 @@
         "bundleMediaFramework": true
       },
       "deb": {
-        "depends": ["streamlink", "libmpv2"]
+        "depends": ["streamlink", "libmpv2", "gstreamer1.0-libav"]
       },
       "rpm": {
-        "depends": ["streamlink", "libmpv.so.2()(64bit)"]
+        "depends": ["streamlink", "libmpv.so.2()(64bit)"],
+        "recommends": ["(gstreamer1-plugin-libav or gstreamer-plugins-libav)"]
       }
     },
     "macOS": {
