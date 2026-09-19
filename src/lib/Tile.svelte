@@ -51,6 +51,7 @@
   import {
     tileStore,
     tileAudible,
+    tileControlsIdle,
     planTileMuteToggle,
     planTileVolumeInput,
     applyTileAudio,
@@ -807,18 +808,20 @@
     onNativeArea(tile.id, null)
   })
 
-  // Touch + mouse interaction for control visibility (auto-hide).
-  let lastActivity = $state(Date.now())
+  // Touch + mouse interaction for control visibility (auto-hide). The
+  // activity timestamp is deliberately NOT $state: bump() fires on every
+  // pointermove, and a reactive read would tear the interval down and
+  // recreate it on each move. The tick reads the plain variable directly;
+  // only controlsShown (the reveal) needs reactivity.
+  let lastActivity = Date.now()
   let controlsShown = $state(true)
-  const IDLE_HIDE_MS = 3_500
   function bump(): void {
     lastActivity = Date.now()
     controlsShown = true
   }
   $effect(() => {
-    void lastActivity
     const id = setInterval(() => {
-      if (Date.now() - lastActivity >= IDLE_HIDE_MS) controlsShown = false
+      if (tileControlsIdle(Date.now(), lastActivity)) controlsShown = false
     }, 400)
     return () => clearInterval(id)
   })

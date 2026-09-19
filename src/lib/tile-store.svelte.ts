@@ -61,6 +61,20 @@ export const MAX_TILES = 4
 export type TilePlaybackStatus = 'loading' | 'playing' | 'offline' | 'error'
 
 /**
+ * Controls auto-hide: the overlay (label, drag handle, control bar) hides
+ * once this long has passed without pointer activity on the tile. The
+ * timestamp itself stays a PLAIN (non-$state) variable in Tile.svelte —
+ * bump() fires on every pointermove, and a reactive read would rebuild the
+ * idle interval on each move.
+ */
+export const TILE_IDLE_HIDE_MS = 3_500
+
+/** The idle-hide tick's predicate: true when the controls should hide. */
+export function tileControlsIdle(now: number, lastActivity: number): boolean {
+  return now - lastActivity >= TILE_IDLE_HIDE_MS
+}
+
+/**
  * The audibility rule for a tile (the audio-authority pattern mirrored from
  * src/lib/pip-controller.svelte.ts). Exported as a PURE function so the exact
  * rule — "the authority tile is audible by default; a non-authority tile is

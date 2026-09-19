@@ -697,3 +697,20 @@ describe('authority and chat pointers are always resolvable while tiles exist', 
     expect(store.activeChat!.channel).toBe('newchannel')
   })
 })
+
+describe('tileControlsIdle — the controls auto-hide predicate (3.5 s)', () => {
+  it('hides only once the full idle window has elapsed', () => {
+    const t0 = 1_000_000
+    expect(S.tileControlsIdle(t0, t0)).toBe(false)
+    expect(S.tileControlsIdle(t0 + S.TILE_IDLE_HIDE_MS - 1, t0)).toBe(false)
+    expect(S.tileControlsIdle(t0 + S.TILE_IDLE_HIDE_MS, t0)).toBe(true)
+    expect(S.tileControlsIdle(t0 + S.TILE_IDLE_HIDE_MS + 5_000, t0)).toBe(true)
+  })
+
+  it('a fresh activity timestamp restarts the window', () => {
+    const t0 = 1_000_000
+    const bumped = t0 + S.TILE_IDLE_HIDE_MS + 1
+    expect(S.tileControlsIdle(bumped, t0)).toBe(true)
+    expect(S.tileControlsIdle(bumped, bumped)).toBe(false)
+  })
+})
