@@ -1376,6 +1376,7 @@
   $effect(() => {
     if (!nativeVideoActive) return
     let un: (() => void) | undefined
+    let disposed = false
     void listen<MpvActionEvent>('mpv://action', (e) => {
       // Engine 0 = the single player's OSD; the tile engines' OSDs are
       // disabled (their controls are the HTML strips).
@@ -1383,10 +1384,14 @@
       onNativeOsdAction(e.payload.action)
     })
       .then((u) => {
-        un = u
+        if (disposed) u()
+        else un = u
       })
       .catch(() => {})
-    return () => un?.()
+    return () => {
+      disposed = true
+      un?.()
+    }
   })
 
   // The info block as a WEBVIEW-RENDERED BITMAP: libass cannot select
