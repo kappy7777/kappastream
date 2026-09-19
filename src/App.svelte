@@ -70,6 +70,7 @@
   import { fitContentRect } from './lib/video-fit'
   import { startPageOverlayManager } from './lib/page-overlay'
   import { CHAT_SIZE_MAX, CHAT_SIZE_MIN, nextChatSize } from './lib/chat-size'
+  import { mentionMatcher } from './lib/mention'
   import kappaUrl from './assets/kappa.png'
 
   // Tauri v2 webview origin differs by engine, and that changes whether a
@@ -2694,16 +2695,12 @@
       })
   }
 
-  function escapeRegex(s: string): string {
-    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  }
-
   function fireMentionNotification(raw: string, username: string, _color: string): void {
     const target = settings.mentionUsername
     if (!target) return
     if (username.toLowerCase() === target) return
-    const re = new RegExp('(?:^|\\s)@' + escapeRegex(target) + '(?![a-z0-9_])', 'i')
-    if (!re.test(raw)) return
+    const re = mentionMatcher(target)
+    if (!re || !re.test(raw)) return
     const channel = channelJoined ? '#' + channelJoined : 'chat'
     const preview = raw.replace(/\s+/g, ' ').trim().slice(0, 120)
     notifications.record(
