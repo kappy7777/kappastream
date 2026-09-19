@@ -197,10 +197,13 @@ function readMpvHwdec(): MpvHwdec {
 }
 
 function readCloseToTray(): boolean {
-  // Default ON: the whole point of the tray is background notifications,
-  // so close-to-tray is the expected behavior out of the box. Users who
-  // want close-to-quit disable it in Settings.
-  return safeRead(STORAGE_KEYS.closeToTray) !== 'false'
+  // Default OFF: closing the window quits, which is what most apps do and
+  // what a fresh install should do. Running in the tray is opt-in via
+  // Settings for users who want background notifications. The toggle
+  // writes explicit values both ways, so an install that opted in under
+  // the old default-on reading keeps its stored 'true'; junk falls back
+  // to the default.
+  return safeRead(STORAGE_KEYS.closeToTray) === 'true'
 }
 
 function readCheckUpdates(): boolean {
