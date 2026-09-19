@@ -18,6 +18,7 @@
   // event and toggles apply retroactively.
 
   import { onDestroy, untrack } from 'svelte'
+  import { SvelteMap } from 'svelte/reactivity'
   import { invoke, isTauri } from '@tauri-apps/api/core'
   import { tileStore } from './tile-store.svelte'
   import { ChatSession } from './chat-session.svelte'
@@ -53,8 +54,10 @@
   }
   const { isWindows, chatSize, onAuthorityVideo, onAuthorityBackend, mpvAvailable }: Props = $props()
 
-  // Per-tile chat sessions. A Svelte reactive Map so `.get()` reads track.
-  let sessions = $state(new Map<string, ChatSession>())
+  // Per-tile chat sessions. A SvelteMap so `.get()` reads genuinely track
+  // (a plain $state(new Map()) does not react to .set()/.delete() — pinned
+  // by map-reactivity.test.ts).
+  const sessions = new SvelteMap<string, ChatSession>()
 
   // Reconcile sessions to the current tiles: create on add, dispose on remove,
   // restart on channel replace (same tile id, different channel).
@@ -67,28 +70,34 @@
   // session for the just-added tile and renders "No streams open" until the user
   // manually switches chat tabs. $effect.pre runs before the update phase, so
   // the session is in the Map by the time `sessions.get(activeChatId)` is read.
+  // All sessions reads stay under untrack: the map is now mutation-reactive,
+  // and a tracked read of state the effect then writes is the classic
+  // read-write-same-state effect loop (same rationale as the mpvIds pool
+  // effect below).
   $effect.pre(() => {
     const tiles = tileStore.tiles
     const ids = new Set(tiles.map((tile) => tile.id))
-    for (const [id, s] of sessions) {
-      if (!ids.has(id)) {
-        s.dispose()
-        sessions.delete(id)
+    untrack(() => {
+      for (const [id, s] of sessions) {
+        if (!ids.has(id)) {
+          s.dispose()
+          sessions.delete(id)
+        }
       }
-    }
-    for (const tile of tiles) {
-      const existing = sessions.get(tile.id)
-      if (!existing) {
-        const s = new ChatSession(tile.channel)
-        sessions.set(tile.id, s)
-        s.start()
-      } else if (existing.channel !== tile.channel) {
-        existing.dispose()
-        const s = new ChatSession(tile.channel)
-        sessions.set(tile.id, s)
-        s.start()
+      for (const tile of tiles) {
+        const existing = sessions.get(tile.id)
+        if (!existing) {
+          const s = new ChatSession(tile.channel)
+          sessions.set(tile.id, s)
+          s.start()
+        } else if (existing.channel !== tile.channel) {
+          existing.dispose()
+          const s = new ChatSession(tile.channel)
+          sessions.set(tile.id, s)
+          s.start()
+        }
       }
-    }
+    })
   })
 
   // Defence-in-depth: dispose every chat session + close its socket when
@@ -154,9 +163,10 @@
   })
 
   // Per-tile native video areas (registered by Tile via onNativeArea). A
-  // reactive Map so the overlay manager below re-runs when tiles come and
-  // go. Keyed by tile id; the engine id rides along from mpvIds.
-  let nativeAreas = $state(new Map<string, HTMLElement>())
+  // SvelteMap so the overlay manager below genuinely re-runs when tiles come
+  // and go (a plain $state Map is invisible to .set()/.delete()). Keyed by
+  // tile id; the engine id rides along from mpvIds.
+  const nativeAreas = new SvelteMap<string, HTMLElement>()
   function onNativeArea(tileId: string, el: HTMLElement | null): void {
     if (el) nativeAreas.set(tileId, el)
     else nativeAreas.delete(tileId)
@@ -171,7 +181,6 @@
   // overlay path (keep-masked, per-tile ks-page geometry + snapshot).
   $effect(() => {
     if (!tilesNative) return
-    void nativeAreas
     if (nativeAreas.size === 0) return
     const fullSelector =
       '.about-modal, .about-backdrop, .browse-modal, .browse-backdrop, .welcome-modal, .welcome-backdrop, .ct-panel, .ct-backdrop, .settings-modal, .settings-backdrop'
