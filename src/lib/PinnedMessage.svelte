@@ -23,7 +23,6 @@
   import { t } from './i18n/index.svelte'
   import LinkifiedText from './LinkifiedText.svelte'
   import type { PinnedChatPin } from './pinned-chat.svelte'
-  import { tooltip } from './tooltip.ts'
 
   let {
     pin,
@@ -70,7 +69,6 @@
         onclick={() => (expanded = !expanded)}
         aria-expanded={expanded}
         aria-label={expanded ? t('pin_collapse') : t('pin_expand')}
-        use:tooltip={expanded ? t('pin_collapse') : t('pin_expand')}
       >
         <svg
           viewBox="0 0 16 16"
@@ -90,13 +88,7 @@
           {/if}
         </svg>
       </button>
-      <button
-        type="button"
-        class="pin-btn"
-        onclick={() => ondismiss(pin.pinId)}
-        aria-label={t('pin_dismiss')}
-        use:tooltip={t('pin_dismiss')}
-      >
+      <button type="button" class="pin-btn" onclick={() => ondismiss(pin.pinId)} aria-label={t('pin_dismiss')}>
         <svg
           viewBox="0 0 16 16"
           width="12"

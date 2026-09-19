@@ -145,7 +145,6 @@ export const en = {
   tb_hideFavorites: 'Hide favorites',
   tb_showFavorites: 'Show favorites',
   tb_browseChannels: 'Browse channels and categories',
-  tb_sleepTimer: 'Sleep timer {time} — click to cancel',
   tb_sleepTimerAria: 'Sleep timer {time}, click to cancel',
   tb_switchSideBySide: 'Switch to side-by-side layout',
   tb_stackChat: 'Stack chat below video',
@@ -182,12 +181,6 @@ export const en = {
   si_notifyOn: 'Notify on',
   si_notifyOff: 'Notify off',
   si_videos: 'Videos',
-  si_videosClips: 'Videos & Clips',
-  si_removeFavorite: 'Remove {channel} from favorites',
-  si_addFavoriteTooltip: 'Add {channel} to favorites',
-  si_notifBlocked: 'Notifications blocked in browser settings',
-  si_disableNotif: 'Disable live notifications for this channel',
-  si_enableNotif: 'Notify me when this channel goes live',
 
   // ---- App.svelte: chat panel ---------------------------------------------
   chat_resizeChat: 'Resize chat',

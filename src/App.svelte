@@ -55,7 +55,6 @@
   import { VodChatController, fetchVodComments } from './lib/vodchat.svelte.ts'
   import { initBadgeRefresh } from './lib/badges'
   import { notifications } from './lib/notifications.svelte.ts'
-  import { tooltip } from './lib/tooltip.ts'
   import { tooltipState } from './lib/tooltip.svelte.ts'
   import { tileStore } from './lib/tile-store.svelte.ts'
   import MultiView from './lib/MultiView.svelte'
@@ -2585,8 +2584,6 @@
     return channelJoined ? favoritesStore.hasNotifEnabled(channelJoined) : false
   })
 
-  let notifBlocked = $derived(false)
-
   // A twitch.tv link clicked in chat or in the pinned-message banner. CLIP
   // links play IN-APP through the same player path ChannelContent clips use
   // (playClip; back-to-live restores the current channel afterwards); every
@@ -2825,16 +2822,11 @@
           : effectiveSidebarMode === 'icons'
             ? t('tb_hideFavorites')
             : t('tb_showFavorites')}
-        use:tooltip={effectiveSidebarMode === 'full'
-          ? t('tb_minimizeFavorites')
-          : effectiveSidebarMode === 'icons'
-            ? t('tb_hideFavorites')
-            : t('tb_showFavorites')}
       >
         <!-- Direction-neutral panel icon (same glyph in every state — the
              old Unicode triangles '◀'/'⏵'/'▶' had font-metric side bearings
              that made the button look off-center depending on which way
-             they pointed). Tooltip + aria-label carry the state. -->
+             they pointed). The aria-label carries the state. -->
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
           <rect x="2" y="2" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4" />
           <rect x="3.7" y="3.7" width="3.4" height="8.6" rx="0.7" fill="currentColor" />
@@ -2854,7 +2846,6 @@
           type="button"
           class="sleep-chip"
           onclick={() => sleepTimer.cancel()}
-          use:tooltip={t('tb_sleepTimer', { time: formatSleepRemaining(sleepTimer.remainingMs) })}
           aria-label={t('tb_sleepTimerAria', { time: formatSleepRemaining(sleepTimer.remainingMs) })}
         >
           <svg
@@ -3135,11 +3126,7 @@
                         <span class="stream-info-avatar-wrap">
                           <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
                           {#if collab}
-                            <span
-                              class="stream-info-avatar-collab"
-                              use:tooltip={t('streamingTogether')}
-                              aria-hidden="true"
-                            >
+                            <span class="stream-info-avatar-collab" aria-hidden="true">
                               {#if collab.avatar}
                                 <img src={collab.avatar} alt="" loading="lazy" />
                               {:else}
@@ -3157,7 +3144,7 @@
                       <span class="stream-info-badge"
                         >{playback.kind === 'vod' ? t('vod_pastBroadcast') : t('vod_clip')}</span
                       >
-                      <span class="stream-info-title" use:tooltip={playback.title}>{playback.title}</span>
+                      <span class="stream-info-title">{playback.title}</span>
                     </div>
                     <div class="stream-info-row stream-info-row--meta">
                       {#if playback.game}<span class="stream-info-game">{playback.game}</span>{/if}
@@ -3177,11 +3164,7 @@
                         <span class="stream-info-avatar-wrap">
                           <img class="stream-info-avatar" src={activeStatus.avatarUrl} alt="" />
                           {#if collab}
-                            <span
-                              class="stream-info-avatar-collab"
-                              use:tooltip={t('streamingTogether')}
-                              aria-hidden="true"
-                            >
+                            <span class="stream-info-avatar-collab" aria-hidden="true">
                               {#if collab.avatar}
                                 <img src={collab.avatar} alt="" loading="lazy" />
                               {:else}
@@ -3196,12 +3179,8 @@
                           {/if}
                         </span>
                       {/if}
-                      <span class="stream-info-live" use:tooltip={t('live')}
-                        ><span class="stream-info-live-dot"></span>{t('liveBadge')}</span
-                      >
-                      <span class="stream-info-title" use:tooltip={activeStatus.title || t('live')}
-                        >{activeStatus.title || t('live')}</span
-                      >
+                      <span class="stream-info-live"><span class="stream-info-live-dot"></span>{t('liveBadge')}</span>
+                      <span class="stream-info-title">{activeStatus.title || t('live')}</span>
                     </div>
                     <div class="stream-info-row stream-info-row--meta">
                       {#if activeStatus.game}<span class="stream-info-game">{activeStatus.game}</span>{/if}
@@ -3209,7 +3188,7 @@
                       <span class="stream-info-viewers">{formatCompact(activeStatus.viewers)} {t('viewers')}</span>
                       {#if activeStatus.collabViewers != null}
                         <span class="stream-info-dot">·</span>
-                        <span class="stream-info-collab-viewers" use:tooltip={t('streamingTogether')}
+                        <span class="stream-info-collab-viewers"
                           >{formatCompact(activeStatus.collabViewers)} {t('si_collabViewers')}</span
                         >
                       {/if}
@@ -3249,9 +3228,6 @@
                         class:favorite-toggle--on={channelIsFavorite}
                         aria-pressed={channelIsFavorite}
                         onclick={toggleChannelFavorite}
-                        use:tooltip={channelIsFavorite
-                          ? t('si_removeFavorite', { channel: channelJoined })
-                          : t('si_addFavoriteTooltip', { channel: channelJoined })}
                       >
                         <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                           {#if channelIsFavorite}
@@ -3276,11 +3252,6 @@
                         class:notif-toggle--on={channelNotifOn}
                         aria-pressed={channelNotifOn}
                         onclick={toggleChannelNotif}
-                        use:tooltip={notifBlocked
-                          ? t('si_notifBlocked')
-                          : channelNotifOn
-                            ? t('si_disableNotif')
-                            : t('si_enableNotif')}
                       >
                         <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                           {#if channelNotifOn}
@@ -3302,12 +3273,7 @@
                       </button>
                       {#if !stacked}
                         {#if sessionOthers.length > 0}
-                          <button
-                            type="button"
-                            class="notif-toggle"
-                            onclick={openSessionInMultiView}
-                            use:tooltip={t('si_watchTogether')}
-                          >
+                          <button type="button" class="notif-toggle" onclick={openSessionInMultiView}>
                             <svg
                               class="notif-toggle-icon"
                               viewBox="0 0 16 16"
@@ -3323,12 +3289,7 @@
                             <span class="notif-toggle-label">{t('si_watchTogether')}</span>
                           </button>
                         {/if}
-                        <button
-                          type="button"
-                          class="notif-toggle"
-                          onclick={scrollToContent}
-                          use:tooltip={t('si_videosClips')}
-                        >
+                        <button type="button" class="notif-toggle" onclick={scrollToContent}>
                           <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                             <path
                               d="M2 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm1 2h10v8H3V4zm3 1v6l4-3-4-3z"
