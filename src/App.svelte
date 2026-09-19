@@ -71,7 +71,6 @@
   import { startPageOverlayManager } from './lib/page-overlay'
   import { CHAT_SIZE_MAX, CHAT_SIZE_MIN, nextChatSize } from './lib/chat-size'
   import { mentionMatcher } from './lib/mention'
-  import kappaUrl from './assets/kappa.png'
 
   // Tauri v2 webview origin differs by engine, and that changes whether a
   // DIRECT cross-origin XHR (hls.js fetching a live manifest) is allowed:
@@ -2801,7 +2800,7 @@
   <header class="bar" data-tauri-drag-region ondblclick={onTitleDblClick}>
     <div class="bar-left" data-tauri-drag-region>
       <button type="button" class="logo logo-btn" onclick={openAbout} aria-label={t('tb_about')}>
-        <img src={kappaUrl} alt="" />
+        <img src="/kappa.png" alt="" />
       </button>
       <button
         type="button"
