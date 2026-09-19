@@ -663,6 +663,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # The build jobs enforce the same match only on tag pushes, so a manual
+      # publish dispatch (publish=true + a typed-in tag) would otherwise
+      # publish a latest.json whose version comes from the tag while the
+      # artifacts carry package.json's version — every installed client would
+      # update, land on the same build, and be offered the update again
+      # forever. Non-publishing smoke-test dispatches never reach this job,
+      # so they keep the freedom to build an arbitrary tag on a
+      # not-yet-bumped tree.
+      - name: Verify release tag matches package version
+        shell: bash
+        run: |
+          set -eu
+          pkgver="$(node -p "require('./package.json').version")"
+          tagver="${RELEASE_TAG#v}"
+          if [ "$pkgver" != "$tagver" ]; then
+            echo "ERROR: tag '${RELEASE_TAG}' (v-stripped '${tagver}') != package.json version '${pkgver}'" >&2
+            exit 1
+          fi
+          echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
+
       # merge-multiple flattens every artifact into release-staging/ with
       # clean basenames (no per-artifact subdirs), so the release files
       # end up side by side.
