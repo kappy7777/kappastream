@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { invoke, isTauri } from '@tauri-apps/api/core'
   import type { MpvAvailability } from './video-backend'
   import {
@@ -358,10 +358,21 @@
       if (result.invalid > 0) parts.push(t('settings_importInvalid', { n: result.invalid }))
       importStatus = t('settings_importSummary', { summary: parts.join(', ') })
     }
-    setTimeout(() => {
+    if (importStatusTimer) clearTimeout(importStatusTimer)
+    importStatusTimer = setTimeout(() => {
       importStatus = ''
     }, 6000)
   }
+
+  // The three status timers are harmless while Settings lives for the
+  // app's lifetime, but clearing them on destroy keeps the component
+  // conditional-safe (no callbacks firing at a destroyed component).
+  let importStatusTimer: ReturnType<typeof setTimeout> | null = null
+  onDestroy(() => {
+    if (themeImportTimer) clearTimeout(themeImportTimer)
+    if (muteStatusTimer) clearTimeout(muteStatusTimer)
+    if (importStatusTimer) clearTimeout(importStatusTimer)
+  })
 
   $effect(() => {
     if (!open) return
