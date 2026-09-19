@@ -69,6 +69,7 @@
   import { stripBitmap, renderInfoBlock } from './lib/osd-bitmaps'
   import { fitContentRect } from './lib/video-fit'
   import { startPageOverlayManager } from './lib/page-overlay'
+  import { CHAT_SIZE_MAX, CHAT_SIZE_MIN, nextChatSize } from './lib/chat-size'
   import kappaUrl from './assets/kappa.png'
 
   // Tauri v2 webview origin differs by engine, and that changes whether a
@@ -1478,9 +1479,6 @@
   // Chat box size — user-resizable in both layout modes. Persists across
   // sessions/streams via localStorage. The current value is used as the
   // default when opening a new stream.
-  const CHAT_SIZE_MIN = 200
-  const CHAT_SIZE_MAX = 1500
-
   function loadChatSize(): number {
     try {
       const v = localStorage.getItem(STORAGE_KEYS.chatSize)
@@ -1532,6 +1530,15 @@
     document.removeEventListener('pointermove', onChatResizerPointerMove)
     document.removeEventListener('pointerup', onChatResizerPointerUp)
     document.removeEventListener('pointercancel', onChatResizerPointerUp)
+  }
+
+  // The resizer is a focusable role="slider" — the keyboard path steps the
+  // same clamped value the pointer drag writes.
+  function onChatResizerKey(e: KeyboardEvent): void {
+    const next = nextChatSize(e.key, chatSize)
+    if (next === null) return
+    e.preventDefault()
+    chatSize = next
   }
 
   $effect(() => {
@@ -3340,6 +3347,7 @@
             class:chat-resizer--stacked={stacked}
             class:chat-resizer--dragging={isChatResizing}
             onpointerdown={onChatResizerPointerDown}
+            onkeydown={onChatResizerKey}
             role="slider"
             aria-orientation={stacked ? 'horizontal' : 'vertical'}
             aria-label={t('chat_resizeChat')}
