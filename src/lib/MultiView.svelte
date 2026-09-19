@@ -113,6 +113,14 @@
     document.removeEventListener('pointermove', onSplitMove)
     document.removeEventListener('pointerup', endSplitDrag)
     document.removeEventListener('pointercancel', endSplitDrag)
+    // Exiting multi-view mid tile-drag must not leave the drag listeners
+    // on document (guarded by the flag so this stays idempotent).
+    if (dragListeners) {
+      document.removeEventListener('pointermove', onDragMove)
+      document.removeEventListener('pointerup', onDragUp)
+      document.removeEventListener('pointercancel', onDragUp)
+      dragListeners = false
+    }
   })
 
   // ---- Native engine (embedded mpv) tiles -----------------------------------
