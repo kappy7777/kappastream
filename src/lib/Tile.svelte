@@ -563,26 +563,35 @@
 
   // ---- native surface geometry ---------------------------------------------
   // The native surface covers the VIDEO AREA (inset by the seam props so
-  // the splitter lines stay visible). Unlike App.svelte's event-driven
-  // pusher (RO + resize + scroll), this one TRACKS CONTINUOUSLY — one rAF
-  // loop per native-active tile that re-measures every frame and pushes
-  // only on change (identical keys skip the invoke; the Rust side dedupes
-  // too). Mirrors how the hls.js tiles are "placed": the compositor
-  // re-positions the video on every frame, so no state transition — a pure
-  // move with no resize, a grid-area re-flow, a missed observer — can ever
-  // leave the native surface stranded at a stale rect: whatever happens,
-  // the next frame corrects it within ~16 ms. The measure is cheap (a
-  // cached-layout getBoundingClientRect when nothing moved).
+  // the splitter lines stay visible). Event-driven like App.svelte's
+  // single-player pusher, coalesced to one measure per animation frame;
+  // identical keys skip the invoke (the Rust side dedupes too).
+  // Which signal covers which motion source:
+  //  - the ResizeObserver on the video area: every SIZE change — splitter
+  //    drags (the grid template is inline style), window resizes, tile
+  //    add/close re-flows, sidebar and chat resizes (the grid container
+  //    resizes with them);
+  //  - the gridArea / seams prop reads: POSITION-only moves — a tile swap
+  //    or ◀/▶ reorder at a symmetric split moves the surface without
+  //    resizing it, and a tile-count change re-insets the seams;
+  //  - the documentElement observer + the settings.uiScale read: a zoom
+  //    change moves the stage in visual px without the CSS-px size change
+  //    the stage observer would report.
   $effect(() => {
     if (!nativeActive) return
     const stage = areaEl
     if (!stage) return
-    let stopped = false
+    const id = mpvId
+    void gridArea
+    void seams.top
+    void seams.right
+    void seams.bottom
+    void seams.left
+    void settings.uiScale
     let frame = 0
     let lastKey = ''
     const push = (): void => {
-      if (stopped) return
-      frame = requestAnimationFrame(push)
+      frame = 0
       if (!stage.isConnected) return
       const r = stage.getBoundingClientRect()
       if (r.width < 2 || r.height < 2) return
@@ -599,17 +608,23 @@
       if (key === lastKey) return
       lastKey = key
       void invoke('mpv_set_rect', {
-        id: mpvId,
+        id,
         x,
         y,
         w,
         h,
       }).catch(() => {})
     }
-    frame = requestAnimationFrame(push)
+    const schedule = (): void => {
+      if (!frame) frame = requestAnimationFrame(push)
+    }
+    const ro = new ResizeObserver(schedule)
+    ro.observe(stage)
+    ro.observe(document.documentElement)
+    schedule()
     return () => {
-      stopped = true
       if (frame) cancelAnimationFrame(frame)
+      ro.disconnect()
     }
   })
 
