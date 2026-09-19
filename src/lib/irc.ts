@@ -445,7 +445,10 @@ export function parseIrcLine(line: string): ParsedMessage | null {
 }
 
 function parseTags(raw: string): Record<string, string> {
-  const out: Record<string, string> = {}
+  // Null prototype: tag names arrive from the IRC wire, and a plain object
+  // would either silently no-op a `__proto__` tag or shadow inherited keys
+  // in ways later lookups must not rely on.
+  const out: Record<string, string> = Object.create(null)
   for (const part of raw.split(';')) {
     if (!part) continue
     const eq = part.indexOf('=')
@@ -530,12 +533,21 @@ export function resolveBadgeImageUrl(
   badge: Pick<BadgeInfo, 'id' | 'version' | 'imageUrl'>,
   override: Record<string, Record<string, string>> | null,
 ): string | null {
-  const ov = override?.[badge.id]?.[badge.version]
+  // hasOwn guards throughout: the keys come from the IRC wire / GQL, and an
+  // inherited `constructor`/`toString` would survive the truthy checks and
+  // produce a broken `.../badges/v1/<function>/1` URL.
+  const byVer = override ? ownValue(override, badge.id) : undefined
+  const ov = byVer ? ownValue(byVer, badge.version) : undefined
   return ov ? badgeImageUrl(ov) : badge.imageUrl
 }
 
+/** Own-property lookup: inherited members read as undefined. */
+function ownValue<T>(obj: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(obj, key) ? obj[key] : undefined
+}
+
 function badgeUrl(id: string, version: string): string | null {
-  const meta = globalBadges[id]
+  const meta = ownValue(globalBadges, id)
   if (!meta) return null
   // The IRC badge `version` selects the per-version UUID above. The trailing
   // path segment on static-cdn is the image SIZE index (1 = 18px NORMAL,
@@ -544,15 +556,15 @@ function badgeUrl(id: string, version: string): string | null {
   // predictions/blue-3 …), so tiered badges silently failed to render via the
   // <img> onerror hide. GQL's imageURL(size: NORMAL) is .../v1/<uuid>/1,
   // confirming the format; the version is already encoded in the UUID.
-  const uuid = (version && meta.perVersion?.[version]) || meta.uuid
+  const uuid = (version && ownValue(meta.perVersion ?? {}, version)) || meta.uuid
   return badgeImageUrl(uuid)
 }
 
 function badgeLabel(id: string, version: string): string {
-  const meta = globalBadges[id]
+  const meta = ownValue(globalBadges, id)
   if (!meta) return id
-  if (version && meta.perVersionLabel?.[version]) return meta.perVersionLabel[version]
-  return meta.label
+  const perLabel = version ? ownValue(meta.perVersionLabel ?? {}, version) : undefined
+  return perLabel || meta.label
 }
 
 export function parseBadges(raw: string[]): BadgeInfo[] {

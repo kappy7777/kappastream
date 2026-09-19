@@ -496,6 +496,32 @@ describe('parseBadges (global chat badges via PRIVMSG badges tag)', () => {
     expect(b[0].imageUrl).toBe('https://static-cdn.jtvnw.net/badges/v1/09d93036-e7ce-431c-9a9e-7044297133f2/1')
     expect(b[0].label).toBe('100 bits')
   })
+
+  it('prototype-member badge ids yield no badge, not a broken URL', () => {
+    // `constructor`/`toString` are inherited Object.prototype members: a
+    // plain [] lookup survives the truthy meta check and used to produce a
+    // .../badges/v1/undefined/1 image. Own-property lookups drop them.
+    expect(badgesOf('constructor/1')).toHaveLength(0)
+    expect(badgesOf('toString/1')).toHaveLength(0)
+    expect(badgesOf('hasOwnProperty/1')).toHaveLength(0)
+    // Normal badges still resolve alongside them.
+    const b = badgesOf('constructor/1,broadcaster/1,toString/1')
+    expect(b.map((x) => x.id)).toEqual(['broadcaster'])
+  })
+
+  it('resolveBadgeImageUrl applies only OWN override keys', () => {
+    const url = 'https://static-cdn.jtvnw.net/badges/v1/5527c58c-fb7d-422d-b71b-f309dcb85cc1/1'
+    // An override without the badge's id must not hit an inherited member.
+    expect(resolveBadgeImageUrl({ id: 'constructor', version: '1', imageUrl: url }, {})).toBe(url)
+    expect(
+      resolveBadgeImageUrl(
+        { id: 'subscriber', version: '1', imageUrl: 'x' },
+        {
+          subscriber: { '1': '11111111-1111-1111-1111-111111111111' },
+        },
+      ),
+    ).toBe('https://static-cdn.jtvnw.net/badges/v1/11111111-1111-1111-1111-111111111111/1')
+  })
 })
 
 /*
