@@ -68,6 +68,7 @@
   import { effectiveQualities, mpvQualities, qualityLabel } from './lib/qualities'
   import { stripBitmap, renderInfoBlock } from './lib/osd-bitmaps'
   import { fitContentRect } from './lib/video-fit'
+  import { startPageOverlayManager } from './lib/page-overlay'
   import kappaUrl from './assets/kappa.png'
 
   // Tauri v2 webview origin differs by engine, and that changes whether a
@@ -1065,286 +1066,35 @@
   })
 
   // ---- Native surface ducking + page overlays ---------------------------------
-  // Page UI that must appear ABOVE the video renders in the webview —
-  // UNDER the native video window. WebKitGTK can't punch a transparency
-  // hole, GDK visual shapes are a no-op on Wayland, and the
-  // rasterize-and-composite fallback (webkit snapshots re-drawn as mpv
-  // overlays) is too laggy — WebKit's own full-page composite per
-  // snapshot dominates and can't be avoided through that API. So
-  // overlapping UI is handled in two grades:
-  //
-  //  - Full-window modals (About/shortcuts, Browse, welcome/what's-new,
-  //    Settings, theme editor — the backdrop families): they cover the whole
-  //    player anyway, so the surface HIDES entirely (mpv_set_surface_visible).
-  //    The live webview shows through at full frame rate; mpv keeps playing
-  //    audio; the video returns when the modal stops overlapping.
-  //
-  //  - Small STRIPS (update banner, tooltips, toasts, the notification
-  //    menu, the search dropdown): must not duck a playing video for a
-  //    sliver of UI — they keep the snapshot overlay (positioned against
-  //    the video rect), one-shot per geometry change plus interaction
-  //    refreshes (typing/scrolling inside the overlaid element). The
-  //    bitmap is MASKED to the element rects (keep rects), so the union
-  //    crop carries no dark empty-player padding between/around elements.
-  //    Their reveal animations are disabled in native mode (see the
-  //    .app--native-video rules), so the first snapshot is already the
-  //    final frame — no settle burst needed.
-  //
-  // This effect owns WHEN: it polls the player rect against the classes
-  // (DOM changes, resizes, a short tick for moving tooltips). New dialogs
-  // must be classified explicitly into one of the two lists.
+  // The shared page-overlay manager (lib/page-overlay.ts) drives this single
+  // surface and MultiView's per-tile surfaces with the same machinery: full
+  // modals hide the surface, small strips are composited over the video as
+  // masked snapshots. THIS side contributes the geometry — the FITTED
+  // CONTENT rect of the player (same shared fit the surface pusher used —
+  // never a second computation), re-read on every manager recheck so the
+  // player element and the video aspect stay live effect dependencies.
   $effect(() => {
     if (!nativeVideoActive) return
-    const fullSelector =
-      '.about-modal, .about-backdrop, .browse-modal, .browse-backdrop, .welcome-modal, .welcome-backdrop, .ct-panel, .ct-backdrop, .settings-modal, .settings-backdrop'
-    // Snapshotted strips: small/static/transient UI — a one-shot bitmap
-    // with interaction + drop-retry refreshes, never a duck.
-    const snapSelector = '.update-banner, .global-tooltip, .notif-toast, .fav-tooltip, .notify-panel, .search-dropdown'
-    const selector = `${fullSelector}, ${snapSelector}`
-    let suppressed = false // the native surface is fully hidden
-    let shown = false // a snapshot overlay is currently composited
-    let pushed = '' // last geometry pushed (window-space box; '' = hidden)
-    let pushedKeeps: number[] = [] // keep rects (flat CSS px) for `pushed`
-    let lastInteractSnap = 0
-    let retryTimers: ReturnType<typeof setTimeout>[] = []
-    const clearRetries = (): void => {
-      for (const tm of retryTimers) clearTimeout(tm)
-      retryTimers = []
-    }
-    // The command resolves false when the per-engine coalesce guard
-    // DROPPED the request (the guard thins, it doesn't queue — measured
-    // 34% of requests during pointer movement). Retry once the 70 ms
-    // window has comfortably expired: a dropped FINAL request of a move
-    // must not strand the overlay on stale geometry (the backstop poll
-    // dedupes on an unchanged key and never resends). A redundant retry
-    // is cheap — identical pixels dedupe in the Rust store.
-    const onSnapshotDropped = (): void => {
-      retryTimers.push(
-        setTimeout(() => {
-          if (shown && pushed) snapshotPushed()
-        }, 140),
-      )
-    }
-    const snapshot = (x: number, y: number, w: number, h: number, keeps: number[]): void => {
-      void invoke<boolean>('mpv_page_snapshot', {
-        x: Math.round(x),
-        y: Math.round(y),
-        w: Math.round(w),
-        h: Math.round(h),
-        keep: keeps,
-      })
-        .then((accepted) => {
-          if (accepted === false) onSnapshotDropped()
-        })
-        .catch(() => {})
-    }
-    const snapshotPushed = (): void => {
-      if (!shown || !pushed) return
-      const [x, y, x2, y2] = pushed.split(',').slice(0, 4).map(Number)
-      snapshot(x, y, x2 - x, y2 - y, pushedKeeps)
-    }
-    const setVisible = (visible: boolean): void => {
-      void invoke('mpv_set_surface_visible', { visible }).catch(() => {})
-    }
-    // Intersection against the SURFACE (= the fitted content rect): page UI
-    // outside it is live webview (the native window only covers the rect),
-    // so only strips over the picture need compositing.
-    const intersectsSurface = (
-      el: HTMLElement,
-      vr: { left: number; top: number; right: number; bottom: number },
-    ): boolean => {
-      const r = el.getBoundingClientRect()
-      if (r.width < 2 || r.height < 2) return false
-      return (
-        Math.min(r.right, vr.right) - Math.max(r.left, vr.left) >= 1 &&
-        Math.min(r.bottom, vr.bottom) - Math.max(r.top, vr.top) >= 1
-      )
-    }
-    const recheck = (): void => {
+    return startPageOverlayManager(() => {
       const stage = playerVideoEl
-      if (!stage) return
+      if (!stage) return []
       const pr = stage.getBoundingClientRect()
-      if (pr.width < 2 || pr.height < 2) return
-      // The fitted content rect within the freshly measured box (same
-      // shared fit the surface pusher used — never a second computation).
+      if (pr.width < 2 || pr.height < 2) return []
       const fit = fitContentRect(pr.width, pr.height, videoAspect)
-      const vr = {
-        left: pr.left + fit.x,
-        top: pr.top + fit.y,
-        right: pr.left + fit.x + fit.w,
-        bottom: pr.top + fit.y + fit.h,
-        width: fit.w,
-        height: fit.h,
-      }
-      // Full-window modals: hide the surface for as long as one overlaps
-      // the video. While hidden everything is live — no bitmap overlay, no
-      // snapshots (a stale composited dialog must not survive the duck).
-      const hide = Array.from(document.querySelectorAll<HTMLElement>(fullSelector)).some((el) =>
-        intersectsSurface(el, vr),
-      )
-      if (hide !== suppressed) {
-        suppressed = hide
-        setVisible(!suppressed)
-        if (suppressed && shown) {
-          shown = false
-          pushed = ''
-          sendOsd(['ks-page', 'hide'])
-        }
-      }
-      if (suppressed) return
-      // Snapshotted strips: union of their overlap with the video rect.
-      // Each element's clamped rect also becomes a KEEP rect — the bitmap
-      // is masked to exactly these, so the union crop carries no dark
-      // empty-player padding between or around them.
-      let x1 = Infinity
-      let y1 = Infinity
-      let x2 = -Infinity
-      let y2 = -Infinity
-      const keeps: number[] = []
-      for (const el of document.querySelectorAll<HTMLElement>(snapSelector)) {
-        if (!intersectsSurface(el, vr)) continue
-        const r = el.getBoundingClientRect()
-        const ax = Math.max(r.left, vr.left)
-        const ay = Math.max(r.top, vr.top)
-        const bx = Math.min(r.right, vr.right)
-        const by = Math.min(r.bottom, vr.bottom)
-        keeps.push(Math.round(ax), Math.round(ay), Math.round(bx - ax), Math.round(by - ay))
-        x1 = Math.min(x1, ax)
-        y1 = Math.min(y1, ay)
-        x2 = Math.max(x2, bx)
-        y2 = Math.max(y2, by)
-      }
-      if (x2 <= x1) {
-        if (shown) {
-          shown = false
-          pushed = ''
-          sendOsd(['ks-page', 'hide'])
-        }
-        return
-      }
-      shown = true
-      pushedKeeps = keeps
-      // Window-space box drives the snapshot crop + the dedupe key;
-      // fractions of the video SURFACE (= the content rect the OSD spans)
-      // drive the OSD geometry.
-      const key = `${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)},${Math.round(vr.width)}x${Math.round(vr.height)}`
-      if (key === pushed) return
-      pushed = key
-      sendOsd([
-        'ks-page',
-        'show',
-        ((x1 - vr.left) / vr.width).toFixed(4),
-        ((y1 - vr.top) / vr.height).toFixed(4),
-        ((x2 - x1) / vr.width).toFixed(4),
-        ((y2 - y1) / vr.height).toFixed(4),
-      ])
-      snapshot(x1, y1, x2 - x1, y2 - y1, keeps)
-    }
-    recheck()
-    // Coalesce bursts (chat floods, tooltip drag) to one recheck per
-    // animation frame; the recheck itself is querySelectorAll + rects —
-    // cheap, but not free at mutation-storm rates.
-    let raf = 0
-    const schedule = (): void => {
-      if (raf) return
-      raf = requestAnimationFrame(() => {
-        raf = 0
-        recheck()
-      })
-    }
-    const isOverlayNode = (n: Node): boolean =>
-      n instanceof HTMLElement && (n.matches(selector) || n.querySelector(selector) !== null)
-    const mo = new MutationObserver((muts) => {
-      // Cheap relevance gate — chat mutates constantly. childList counts
-      // only added/removed overlay subtrees (a removal needs the full
-      // re-check: another overlay may still be open). attributes count
-      // the strips' own class/style flips (the tooltip moves via
-      // style:left/top; the fav-tooltip reveal is a class flip), plus any
-      // class flip anywhere (sidebar/theater/theme toggles can resize the
-      // player or restyle a strip), plus documentElement style (the
-      // UI-scale zoom repaints everything). characterData counts text
-      // changes inside a strip (tooltip text swap).
-      const relevant = muts.some((m) => {
-        if (m.type === 'childList') {
-          for (const n of m.addedNodes) if (isOverlayNode(n)) return true
-          for (const n of m.removedNodes) if (isOverlayNode(n)) return true
-          return false
-        }
-        if (m.type === 'attributes') {
-          const el = m.target
-          if (!(el instanceof Element)) return false
-          if (el === document.documentElement) return true
-          if (m.attributeName === 'class') return true
-          return el.matches(selector)
-        }
-        if (m.type === 'characterData') {
-          const p = m.target.parentElement
-          return p instanceof Element && p.matches(selector)
-        }
-        return false
-      })
-      if (relevant) schedule()
+      return [
+        {
+          id: 0,
+          box: {
+            left: pr.left + fit.x,
+            top: pr.top + fit.y,
+            right: pr.left + fit.x + fit.w,
+            bottom: pr.top + fit.y + fit.h,
+            width: fit.w,
+            height: fit.h,
+          },
+        },
+      ]
     })
-    mo.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['class', 'style'],
-      characterData: true,
-    })
-    window.addEventListener('resize', recheck)
-    // Transition/animation completion inside an overlay schedules a
-    // recheck. In native mode the strips' reveal animations are disabled
-    // (the .app--native-video rules), so what is left are content
-    // transitions (update-banner progress width, hover states); recheck's
-    // geometry dedupe turns these into no-ops when nothing moved.
-    const onSettle = (ev: Event): void => {
-      if (ev.target instanceof Element && ev.target.closest(selector)) schedule()
-    }
-    document.addEventListener('transitionend', onSettle, { capture: true })
-    document.addEventListener('animationend', onSettle, { capture: true })
-    // Interaction refresh: clicks/keys/scrolls INSIDE a snapshotted strip
-    // (notification-menu toggles, banner buttons, the menu's list scroll)
-    // change pixels without moving geometry — one-shot re-snapshots, rate
-    // limited, gated on the event target actually being in the strip.
-    const onSnapInteract = (ev: Event): void => {
-      if (!shown || !pushed) return
-      if (!(ev.target instanceof Element) || !ev.target.closest(snapSelector)) return
-      const now = performance.now()
-      if (now - lastInteractSnap < 150) return
-      lastInteractSnap = now
-      snapshotPushed()
-    }
-    const interactTypes = ['pointerdown', 'keyup', 'scroll', 'wheel'] as const
-    for (const ty of interactTypes) document.addEventListener(ty, onSnapInteract, { capture: true, passive: true })
-    // Low-frequency safety poll — the BACKSTOP only. Covered by events:
-    // {#if}-driven show/hide of every strip (childList), the tooltip's
-    // show/hide/move (childList + style attributes + text), class-flip
-    // reveals (fav-tooltip) and any UI-toggle class change, window resize
-    // (explicit listener), transition/animation ends inside overlays. NOT
-    // proven to emit an event: player-rect geometry changes from layout
-    // toggles (sidebar collapse, theater mode, chat resize) when no strip
-    // attribute changes — those land here within 400 ms. Deliberately
-    // kept absent: a raw scroll GEOMETRY listener (every selector element
-    // is position:fixed, page scrolling never moves them, and chat
-    // autoscroll would storm the recheck) and a periodic PIXEL refresh
-    // (recheck re-snapshots only when the union geometry key changes —
-    // idle strips dedupe to no-ops).
-    const geoIv = setInterval(recheck, 400)
-    return () => {
-      mo.disconnect()
-      window.removeEventListener('resize', recheck)
-      for (const ty of interactTypes) document.removeEventListener(ty, onSnapInteract, { capture: true })
-      document.removeEventListener('transitionend', onSettle, { capture: true })
-      document.removeEventListener('animationend', onSettle, { capture: true })
-      if (raf) cancelAnimationFrame(raf)
-      clearInterval(geoIv)
-      clearRetries()
-      // Leaving native mode must not leave a hidden surface or a stale
-      // overlay composited.
-      if (suppressed) setVisible(true)
-      if (shown) sendOsd(['ks-page', 'hide'])
-    }
   })
 
   // ---- Native OSD (ks-osc) wiring --------------------------------------------

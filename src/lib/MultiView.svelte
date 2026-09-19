@@ -28,6 +28,7 @@
   import PinnedMessage from './PinnedMessage.svelte'
   import { pinnedChat } from './pinned-chat.svelte'
   import { activeRoomModes } from './irc'
+  import { startPageOverlayManager } from './page-overlay'
   import ChatModesPill from './ChatModesPill.svelte'
   import {
     singleChatEntries,
@@ -173,217 +174,25 @@
   }
 
   // ---- Page UI vs the native tile surfaces ----------------------------------
-  // A trimmed mirror of App.svelte's single-player overlay guard, driven
-  // against EVERY native tile area instead of the one player rect: full
-  // modals (Settings/About/…) hide ALL surfaces (mpv_set_surface_visible
+  // The shared page-overlay manager (lib/page-overlay.ts), driven against
+  // EVERY native tile area instead of the one player rect: full modals
+  // (Settings/About/…) hide ALL surfaces (mpv_set_surface_visible
   // broadcasts), and small strips (tooltips, the update banner, toasts) are
   // composited OVER each intersecting tile via the same page-snapshot
-  // overlay path (keep-masked, per-tile ks-page geometry + snapshot).
+  // overlay path (keep-masked, per-tile ks-page geometry + snapshot). THIS
+  // side contributes the per-tile geometry — the grid cell rects, with the
+  // engine ids riding along from mpvIds; tile page UI over the native
+  // surfaces rides mpv's own OSC (the tiles feed it per engine id).
   $effect(() => {
     if (!tilesNative) return
     if (nativeAreas.size === 0) return
-    const fullSelector =
-      '.about-modal, .about-backdrop, .browse-modal, .browse-backdrop, .welcome-modal, .welcome-backdrop, .ct-panel, .ct-backdrop, .settings-modal, .settings-backdrop'
-    // Tile page UI over the native surfaces rides mpv's own OSC (the tiles
-    // feed it per engine id) — only genuinely page-side strips are snap-
-    // shotted over the tiles here.
-    const snapSelector = '.update-banner, .global-tooltip, .notif-toast, .fav-tooltip, .notify-panel, .search-dropdown'
-    let suppressed = false
-    // engine id -> pushed geometry key ('' = nothing shown for that engine)
-    const pushed = new Map<number, string>()
-    const pushedKeeps = new Map<number, number[]>()
-    let lastInteractSnap = 0
-    const setVisible = (visible: boolean): void => {
-      void invoke('mpv_set_surface_visible', { visible }).catch(() => {})
-    }
-    // Drop-retry: the command resolves false when the per-engine coalesce
-    // guard dropped the request; retry once the window has comfortably
-    // expired so a dropped FINAL request of a move can't strand the
-    // overlay on stale geometry (same rationale as App.svelte).
-    const retryTimers: ReturnType<typeof setTimeout>[] = []
-    const onSnapshotDropped = (id: number): void => {
-      retryTimers.push(
-        setTimeout(() => {
-          const key = pushed.get(id)
-          if (key === undefined) return
-          const [x, y, x2, y2] = key.split(',').slice(0, 4).map(Number)
-          snapshot(id, x, y, x2 - x, y2 - y, pushedKeeps.get(id) ?? [])
-        }, 140),
-      )
-    }
-    const snapshot = (id: number, x: number, y: number, w: number, h: number, keeps: number[]): void => {
-      void invoke<boolean>('mpv_page_snapshot', {
-        id,
-        x: Math.round(x),
-        y: Math.round(y),
-        w: Math.round(w),
-        h: Math.round(h),
-        keep: keeps,
-      })
-        .then((accepted) => {
-          if (accepted === false) onSnapshotDropped(id)
-        })
-        .catch(() => {})
-    }
-    const intersects = (el: HTMLElement, r2: DOMRect): boolean => {
-      const r = el.getBoundingClientRect()
-      if (r.width < 2 || r.height < 2) return false
-      return (
-        Math.min(r.right, r2.right) - Math.max(r.left, r2.left) >= 1 &&
-        Math.min(r.bottom, r2.bottom) - Math.max(r.top, r2.top) >= 1
-      )
-    }
-    const recheck = (): void => {
-      const areas = [...nativeAreas.entries()]
-        .map(([tileId, el]) => ({ id: mpvIds.get(tileId), el }))
-        .filter((a): a is { id: number; el: HTMLElement } => a.id !== undefined && a.el.isConnected)
-      if (areas.length === 0) return
-      // Full-window modals duck every native surface at once.
-      const hide = Array.from(document.querySelectorAll<HTMLElement>(fullSelector)).some((el) =>
-        areas.some((a) => intersects(el, a.el.getBoundingClientRect())),
-      )
-      if (hide !== suppressed) {
-        suppressed = hide
-        setVisible(!suppressed)
-        if (suppressed) {
-          for (const a of areas) sendPage(a.id, 'hide')
-        }
-      }
-      if (suppressed) return
-      // Per-tile strip overlays: each intersecting tile composites the part
-      // of the strip UI over ITS rect (fractions relative to that tile).
-      for (const a of areas) {
-        const pr = a.el.getBoundingClientRect()
-        let x1 = Infinity
-        let y1 = Infinity
-        let x2 = -Infinity
-        let y2 = -Infinity
-        const keeps: number[] = []
-        for (const el of document.querySelectorAll<HTMLElement>(snapSelector)) {
-          if (!intersects(el, pr)) continue
-          const r = el.getBoundingClientRect()
-          const ax = Math.max(r.left, pr.left)
-          const ay = Math.max(r.top, pr.top)
-          const bx = Math.min(r.right, pr.right)
-          const by = Math.min(r.bottom, pr.bottom)
-          keeps.push(Math.round(ax), Math.round(ay), Math.round(bx - ax), Math.round(by - ay))
-          x1 = Math.min(x1, ax)
-          y1 = Math.min(y1, ay)
-          x2 = Math.max(x2, bx)
-          y2 = Math.max(y2, by)
-        }
-        if (x2 <= x1) {
-          sendPage(a.id, 'hide')
-          continue
-        }
-        const key = `${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)},${Math.round(pr.width)}x${Math.round(pr.height)}`
-        if (key === (pushed.get(a.id) ?? '')) continue
-        pushed.set(a.id, key)
-        pushedKeeps.set(a.id, keeps)
-        sendPage(
-          a.id,
-          'show',
-          ((x1 - pr.left) / pr.width).toFixed(4),
-          ((y1 - pr.top) / pr.height).toFixed(4),
-          ((x2 - x1) / pr.width).toFixed(4),
-          ((y2 - y1) / pr.height).toFixed(4),
-        )
-        snapshot(a.id, x1, y1, x2 - x1, y2 - y1, keeps)
-      }
-    }
-    const sendPage = (id: number, action: 'show' | 'hide', ...fracs: string[]): void => {
-      const args = action === 'show' ? ['ks-page', 'show', ...fracs] : ['ks-page', 'hide']
-      void invoke('mpv_script_msg', { id, args }).catch(() => {})
-      if (action === 'hide') pushed.delete(id)
-    }
-    recheck()
-    // Coalesce bursts to one recheck per animation frame (same as
-    // App.svelte's single-player effect).
-    let raf = 0
-    const schedule = (): void => {
-      if (raf) return
-      raf = requestAnimationFrame(() => {
-        raf = 0
-        recheck()
-      })
-    }
-    const selector = `${fullSelector}, ${snapSelector}`
-    const isOverlayNode = (n: Node): boolean =>
-      n instanceof HTMLElement && (n.matches(selector) || n.querySelector(selector) !== null)
-    const mo = new MutationObserver((muts) => {
-      // Same relevance gate as App.svelte: childList only counts overlay
-      // subtrees; attributes count strip class/style flips, any class
-      // flip (UI toggles move the player), and documentElement style
-      // (UI-scale zoom); characterData counts text inside a strip.
-      const relevant = muts.some((m) => {
-        if (m.type === 'childList') {
-          for (const n of m.addedNodes) if (isOverlayNode(n)) return true
-          for (const n of m.removedNodes) if (isOverlayNode(n)) return true
-          return false
-        }
-        if (m.type === 'attributes') {
-          const el = m.target
-          if (!(el instanceof Element)) return false
-          if (el === document.documentElement) return true
-          if (m.attributeName === 'class') return true
-          return el.matches(selector)
-        }
-        if (m.type === 'characterData') {
-          const p = m.target.parentElement
-          return p instanceof Element && p.matches(selector)
-        }
-        return false
-      })
-      if (relevant) schedule()
-    })
-    mo.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['class', 'style'],
-      characterData: true,
-    })
-    window.addEventListener('resize', recheck)
-    const onSettle = (ev: Event): void => {
-      if (ev.target instanceof Element && ev.target.closest(selector)) schedule()
-    }
-    document.addEventListener('transitionend', onSettle, { capture: true })
-    document.addEventListener('animationend', onSettle, { capture: true })
-    const onSnapInteract = (ev: Event): void => {
-      if (pushed.size === 0) return
-      if (!(ev.target instanceof Element) || !ev.target.closest(snapSelector)) return
-      const now = performance.now()
-      if (now - lastInteractSnap < 150) return
-      lastInteractSnap = now
-      for (const a of nativeAreas.keys()) {
-        const id = mpvIds.get(a)
-        const key = id !== undefined ? pushed.get(id) : undefined
-        if (!id || !key) continue
-        const [x, y, x2, y2] = key.split(',').slice(0, 4).map(Number)
-        snapshot(id, x, y, x2 - x, y2 - y, pushedKeeps.get(id) ?? [])
-      }
-    }
-    // pointermove/pointerup keep HOVER STATES and the volume-slider drag
-    // fresh in the composited control bars (rate-limited below; gated on
-    // the target being inside a snapshotted element).
-    const interactTypes = ['pointerdown', 'keyup', 'scroll', 'wheel'] as const
-    for (const ty of interactTypes) document.addEventListener(ty, onSnapInteract, { capture: true, passive: true })
-    // Low-frequency safety poll — backstop only (see App.svelte's effect
-    // for the covered-vs-backstop path list; multi-view adds the tile
-    // grid's own splitters/reorders, which flip classes).
-    const geoIv = setInterval(recheck, 400)
-    return () => {
-      mo.disconnect()
-      window.removeEventListener('resize', recheck)
-      for (const ty of interactTypes) document.removeEventListener(ty, onSnapInteract, { capture: true })
-      document.removeEventListener('transitionend', onSettle, { capture: true })
-      document.removeEventListener('animationend', onSettle, { capture: true })
-      if (raf) cancelAnimationFrame(raf)
-      clearInterval(geoIv)
-      for (const tm of retryTimers) clearTimeout(tm)
-      if (suppressed) setVisible(true)
-      for (const id of new Set(mpvIds.values())) sendPage(id, 'hide')
-    }
+    return startPageOverlayManager(() =>
+      [...nativeAreas.entries()].flatMap(([tileId, el]) => {
+        const id = mpvIds.get(tileId)
+        if (id === undefined || !el.isConnected) return []
+        return [{ id, box: el.getBoundingClientRect() }]
+      }),
+    )
   })
 
   // The active chat tab follows tileStore.activeChat (moved by chat-tab clicks
