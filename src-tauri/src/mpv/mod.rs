@@ -971,11 +971,21 @@ fn crop_tile_bgra(
     if row >= rows {
         return None;
     }
-    let x0 = col * tile_w;
-    let mut out = Vec::with_capacity(tile_w as usize * tile_h as usize * 4);
+    let x0 = (col * tile_w) as usize;
+    // All offset math in checked usize: the row-offset product can exceed
+    // u32 for corrupt strip dims, and a wrapped offset would slip a bogus
+    // in-range slice past the src.len() guard below.
+    let tile_len = (tile_w as usize).checked_mul(4)?;
+    let cap = (tile_w as usize)
+        .checked_mul(tile_h as usize)?
+        .checked_mul(4)?;
+    let mut out = Vec::with_capacity(cap);
     for y in 0..tile_h {
-        let base = (((row * tile_h + y) * strip_w + x0) * 4) as usize;
-        let end = base + tile_w as usize * 4;
+        let base = (row as usize * tile_h as usize + y as usize)
+            .checked_mul(strip_w as usize)?
+            .checked_add(x0)?
+            .checked_mul(4)?;
+        let end = base.checked_add(tile_len)?;
         if end > src.len() {
             return None;
         }
@@ -1324,7 +1334,15 @@ pub fn mpv_set_bitmap(
         _ => return Err("grid needs cols >= 1 and rows >= 1".to_string()),
     };
     let bgra = b64_decode(&b64)?;
-    if bgra.len() != w as usize * h as usize * 4 {
+    // The w*h*4 product must be checked, not wrapped: e.g. w == h == 2^31
+    // wraps to exactly 0 on a 64-bit usize, an empty payload then passes
+    // the length check, and the composite-time resample indexes out of
+    // range on the absurd cached dims.
+    let expected = (w as usize)
+        .checked_mul(h as usize)
+        .and_then(|px| px.checked_mul(4))
+        .ok_or_else(|| format!("bitmap '{key}' dims {w}x{h} overflow"))?;
+    if bgra.len() != expected {
         return Err(format!(
             "bitmap '{}' payload {} B does not match {w}x{h} BGRA",
             key,
@@ -1572,6 +1590,39 @@ mod tests {
         assert_eq!(cell(3), src[12..16].to_vec()); // W
         assert!(crop_tile_bgra(&src, 2, 2, 1, 1, 4).is_none()); // past the grid
         assert!(crop_tile_bgra(&src, 2, 2, 0, 1, 0).is_none()); // degenerate tile
+    }
+
+    #[test]
+    fn crop_tile_rejects_offsets_that_wrap_or_exceed_src() {
+        // 1px tiles in a 65536-wide strip: row 16384's true byte offset is
+        // 2^32, which wraps to 0 in u32 arithmetic — the guard must see the
+        // REAL offset and reject, not slice row 0's bytes as if they were
+        // row 16384's.
+        let src = [1u8, 2, 3, 4];
+        assert!(crop_tile_bgra(&src, 65536, 16385, 1, 1, 16384 * 65536).is_none());
+        // Absurd tile dims that overflow the capacity math: rejected, never
+        // a wrapped under-allocation.
+        assert!(crop_tile_bgra(&src, 1 << 31, 1 << 31, 1 << 31, 1 << 31, 0).is_none());
+    }
+
+    #[test]
+    fn set_bitmap_rejects_dimension_products_that_wrap() {
+        // w == h == 2^31 wraps w*h*4 to exactly 0 on a 64-bit usize, so an
+        // empty payload used to pass the length check and hand the absurd
+        // dims to the composite-time resample. The dims themselves must be
+        // rejected up front (the engine-unavailable error would mean the
+        // payload check passed).
+        let err = mpv_set_bitmap(
+            None,
+            "infoblock".into(),
+            String::new(),
+            1 << 31,
+            1 << 31,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("overflow"), "unexpected error: {err}");
     }
 
     /// Reproduces the shipped bug exactly: on any real desktop GTK has set
