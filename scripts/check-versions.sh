@@ -11,6 +11,13 @@
 # `pkgver` is the one place a literal version is expected and must track
 # package.json.)
 #
+# Also cross-checks the Linux runtime deps shared by more than one packaging
+# file (streamlink, libmpv, the deb gst-libav dep, hicolor-icon-theme), so the
+# tauri-bundler-generated deb/rpm metadata and the hand-maintained
+# control.in / spec / AUR definitions cannot drift apart. tauri.conf.json is
+# read with `node -p` (node is already required for package.json above and is
+# installed by CI before this script runs; jq is NOT a dependency here).
+#
 # Exits non-zero with file:line on any mismatch. Wired into CI (ci.yml, before
 # the type-check) and the release checklist (CONTRIBUTING.md).
 #
@@ -167,4 +174,105 @@ for aur_pair in \
     fi
 done
 
-echo "check-versions: OK — package.json, Cargo.toml and Cargo.lock all at $PKG_VER; no stale packaging versions; AUR -git builds are updater-off; AUR template/snapshot pairs identical."
+# Linux runtime-dependency drift check (packaging integrity, like the AUR
+# checks above — runs unconditionally, the invariants hold for every release).
+#
+# The binary's runtime deps are declared in six places that must agree:
+# tauri.conf.json's bundle.linux.{deb,rpm}.depends (what the tauri-bundler
+# deb/rpm carry) and the hand-maintained packaging/ definitions —
+# debian/control.in's Depends: (the Docker-built deb), fedora/kappastream.spec.in's
+# Requires: (the rpmbuild rpm), and the two AUR PKGBUILD depends=() arrays.
+# Distro package names differ (libmpv2 vs libmpv.so.2()(64bit) vs mpv), so the
+# matrix below lists the exact token each file must declare. A miss is drift:
+# the gst-libav deb dep once landed in tauri.conf.json without control.in
+# following, shipping a Docker-built deb without the WebKitGTK media pipeline's
+# H.264 decoder.
+#
+# Deliberately NOT in the matrix:
+#   - the codec-provider declarations (tauri.conf.json's rpm `recommends`
+#     boolean, the spec's ffmpeg-libs, the AUR gst-plugins-* set) — which
+#     package set provides H.264 is a per-distro decision tracked separately;
+#   - the linked webkit/gtk/glib/soup libs — control.in and the PKGBUILDs
+#     declare them by hand, the spec relies on rpmbuild's soname
+#     auto-detection (see its header comment), and tauri-bundler resolves its
+#     own from the binary, so their presence legitimately differs per build
+#     pipeline.
+tauri_deb_deps() {
+    node -p '(require("./src-tauri/tauri.conf.json").bundle.linux.deb.depends || []).join("\n")'
+}
+tauri_rpm_deps() {
+    node -p '(require("./src-tauri/tauri.conf.json").bundle.linux.rpm.depends || []).join("\n")'
+}
+control_depends() {
+    sed -n 's/^Depends:[[:space:]]*//p' packaging/debian/control.in \
+        | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+spec_requires() {
+    # BuildRequires: never matches — the anchor requires the line to start
+    # (after indentation) with literal `Requires:`.
+    sed -n 's/^[[:space:]]*Requires:[[:space:]]*//p' packaging/fedora/kappastream.spec.in \
+        | tr ',' '\n' | sed -e 's/[[:space:]]//g' -e '/^$/d'
+}
+aur_depends() {
+    # $1 = PKGBUILD path. Prints each single-quoted depends=() entry, one per
+    # line. grep -oE is line-scoped, so an apostrophe inside an array comment
+    # cannot pair across lines.
+    sed -n '/^depends=(/,/^[[:space:]]*)/p' "$1" | grep -oE "'[^']+'" | tr -d "'"
+}
+dep_list_for() {
+    case $1 in
+      tauri-deb) tauri_deb_deps ;;
+      tauri-rpm) tauri_rpm_deps ;;
+      control)   control_depends ;;
+      spec)      spec_requires ;;
+      aur-git)   aur_depends packaging/aur/PKGBUILD ;;
+      aur-bin)   aur_depends packaging/aur/PKGBUILD-bin ;;
+      *)         fail "dependency matrix references unknown slot '$1'" ;;
+    esac
+}
+dep_file_for() {
+    case $1 in
+      tauri-deb) echo "src-tauri/tauri.conf.json (bundle.linux.deb.depends)" ;;
+      tauri-rpm) echo "src-tauri/tauri.conf.json (bundle.linux.rpm.depends)" ;;
+      control)   echo "packaging/debian/control.in (Depends:)" ;;
+      spec)      echo "packaging/fedora/kappastream.spec.in (Requires:)" ;;
+      aur-git)   echo "packaging/aur/PKGBUILD (depends)" ;;
+      aur-bin)   echo "packaging/aur/PKGBUILD-bin (depends)" ;;
+      *)         fail "dependency matrix references unknown slot '$1'" ;;
+    esac
+}
+
+# One line per expected occurrence: <dep>|<slot>|<exact package token>.
+cat <<'EOF' | while IFS='|' read -r dep slot pkg; do
+streamlink|tauri-deb|streamlink
+streamlink|tauri-rpm|streamlink
+streamlink|control|streamlink
+streamlink|spec|streamlink
+streamlink|aur-git|streamlink
+streamlink|aur-bin|streamlink
+libmpv|tauri-deb|libmpv2
+libmpv|control|libmpv2
+libmpv|tauri-rpm|libmpv.so.2()(64bit)
+libmpv|spec|libmpv.so.2()(64bit)
+libmpv|aur-git|mpv
+libmpv|aur-bin|mpv
+gst-libav|tauri-deb|gstreamer1.0-libav
+gst-libav|control|gstreamer1.0-libav
+hicolor-icon-theme|control|hicolor-icon-theme
+hicolor-icon-theme|spec|hicolor-icon-theme
+hicolor-icon-theme|aur-git|hicolor-icon-theme
+hicolor-icon-theme|aur-bin|hicolor-icon-theme
+EOF
+    if ! dep_list_for "$slot" | grep -Fxq -- "$pkg"; then
+        echo "$(dep_file_for "$slot"): missing '$pkg' (runtime dep '$dep')" >> "$failures"
+    fi
+done
+
+if [ -s "$failures" ]; then
+    echo "check-versions: ERROR: Linux runtime-dependency drift detected:" >&2
+    sed 's/^/    /' "$failures" >&2
+    echo "    (every file in the matrix must declare its distro's name for the dep)" >&2
+    exit 1
+fi
+
+echo "check-versions: OK — package.json, Cargo.toml and Cargo.lock all at $PKG_VER; no stale packaging versions; AUR -git builds are updater-off; AUR template/snapshot pairs identical; Linux runtime deps present in every packaging file."
