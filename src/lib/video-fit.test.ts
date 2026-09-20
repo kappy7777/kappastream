@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_VIDEO_ASPECT, fitContentRect } from './video-fit'
+import { DEFAULT_VIDEO_ASPECT, clipRectTop, fitContentRect } from './video-fit'
 
 describe('fitContentRect', () => {
   it('height-bound box: full height, centered side bars', () => {
@@ -62,5 +62,36 @@ describe('fitContentRect', () => {
         expect(c.y + c.h).toBeLessThanOrEqual(h + 1e-9)
       }
     }
+  })
+})
+
+describe('clipRectTop', () => {
+  it('leaves a rect at or below the line untouched', () => {
+    expect(clipRectTop(10, 50, 400, 300, 50)).toEqual({ x: 10, y: 50, w: 400, h: 300, hidden: 0 })
+    expect(clipRectTop(10, 120, 400, 300, 50)).toEqual({ x: 10, y: 120, w: 400, h: 300, hidden: 0 })
+  })
+
+  it('clips a partially hidden rect at the line and reports the fraction', () => {
+    // Top 100 of a 400-tall rect sit above the line at y=50.
+    const c = clipRectTop(10, -50, 640, 400, 50)
+    expect(c.x).toBe(10)
+    expect(c.y).toBe(50)
+    expect(c.w).toBe(640)
+    expect(c.h).toBe(300)
+    expect(c.hidden).toBeCloseTo(0.25, 9)
+  })
+
+  it('keeps a 1px sliver for a fully hidden rect, just under the fraction 1', () => {
+    const c = clipRectTop(10, -500, 640, 400, 50)
+    expect(c.h).toBe(1)
+    // The sliver sits at the rect's bottom edge, still above the line.
+    expect(c.y).toBe(-101)
+    expect(c.hidden).toBeLessThan(1)
+    expect(c.hidden).toBeCloseTo(399 / 400, 9)
+  })
+
+  it('zero/degenerate height reports nothing hidden', () => {
+    expect(clipRectTop(0, 0, 0, 0, 50).hidden).toBe(0)
+    expect(clipRectTop(0, -100, 0, -5, 50).hidden).toBe(0)
   })
 })

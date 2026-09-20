@@ -166,6 +166,47 @@ type GlGetIntegervFn = unsafe extern "C" fn(c_int, *mut c_int);
 /// from a GLArea render callback. `None` until then.
 static GL_GET_INTEGERV: std::sync::OnceLock<GlGetIntegervFn> = std::sync::OnceLock::new();
 
+// The GL entry points the scroll-fold presentation path needs (offscreen
+// FBO + blit; see the render closure). Resolved once at surface init like
+// GL_GET_INTEGERV, same thread rules.
+type GlGenFn = unsafe extern "C" fn(c_int, *mut u32);
+type GlDeleteFn = unsafe extern "C" fn(c_int, *const u32);
+type GlBindTextureFn = unsafe extern "C" fn(u32, u32);
+type GlTexImage2DFn =
+    unsafe extern "C" fn(u32, c_int, c_int, c_int, c_int, c_int, u32, u32, *const c_void);
+type GlBindFramebufferFn = unsafe extern "C" fn(u32, u32);
+type GlFramebufferTexture2DFn = unsafe extern "C" fn(u32, u32, u32, u32, c_int);
+type GlBlitFramebufferFn =
+    unsafe extern "C" fn(c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, u32, u32);
+type GlDisableFn = unsafe extern "C" fn(u32);
+
+struct GlFold {
+    gen_textures: GlGenFn,
+    delete_textures: GlDeleteFn,
+    bind_texture: GlBindTextureFn,
+    tex_image_2d: GlTexImage2DFn,
+    gen_framebuffers: GlGenFn,
+    delete_framebuffers: GlDeleteFn,
+    bind_framebuffer: GlBindFramebufferFn,
+    framebuffer_texture_2d: GlFramebufferTexture2DFn,
+    blit_framebuffer: GlBlitFramebufferFn,
+    disable: GlDisableFn,
+}
+
+static GL_FOLD: std::sync::OnceLock<GlFold> = std::sync::OnceLock::new();
+
+const GL_TEXTURE_2D: u32 = 0x0DE1;
+const GL_RGBA8: u32 = 0x8058;
+const GL_RGBA: u32 = 0x1908;
+const GL_UNSIGNED_BYTE: u32 = 0x1401;
+const GL_FRAMEBUFFER: u32 = 0x8D40;
+const GL_READ_FRAMEBUFFER: u32 = 0x8CA8;
+const GL_DRAW_FRAMEBUFFER: u32 = 0x8CA9;
+const GL_COLOR_ATTACHMENT0: u32 = 0x8CE0;
+const GL_COLOR_BUFFER_BIT: u32 = 0x4000;
+const GL_NEAREST: u32 = 0x2600;
+const GL_SCISSOR_TEST: u32 = 0x0C11;
+
 /// The shared GLVND provider (see `GlLib`). Every engine's render context
 /// resolves its symbols through this one dlopen.
 static GL_LIB: std::sync::OnceLock<GlLib> = std::sync::OnceLock::new();
@@ -257,16 +298,115 @@ pub(super) struct LinuxSurface {
     fixed: MainThread<gtk::Fixed>,
     video_box: MainThread<gtk::EventBox>,
     gl_area: MainThread<gtk::GLArea>,
-    /// Last rect pushed by the frontend (-1 = none yet). The frontend
-    /// pushes the rect on every coalesced scroll/resize/zoom tick;
-    /// applying an identical rect would queue a pointless relayout each
-    /// time, so identical pushes are dropped in set_rect.
-    last_rect: std::sync::Arc<std::sync::Mutex<(i32, i32, i32, i32)>>,
+    /// Last rect pushed by the frontend (see `RectWithFold` = no rect yet).
+    /// The frontend pushes the rect on every coalesced scroll/resize/zoom
+    /// tick; applying an identical rect would queue a pointless relayout
+    /// each time, so identical pushes are dropped in set_rect. The FOLD is
+    /// part of the dedup key: the same visible rect can arrive with a
+    /// different fold (scrolling back up past the fold start), and deduping
+    /// on the rect alone would strand the stale fold.
+    last_rect: std::sync::Arc<std::sync::Mutex<RectWithFold>>,
+    /// Rows of the composition hidden above the fold line, logical px.
+    /// Written by set_rect's main-thread dispatch, read by the render
+    /// closure (same thread) to size the offscreen + blit band.
+    fold: std::sync::Arc<std::sync::atomic::AtomicI32>,
     /// Whether the video surface is currently shown. Guards the show path:
     /// the event thread reveals the surface on EVERY PlaybackRestart (seek,
     /// unpause, …), and each show dispatches to the GTK main thread — the
     /// flag collapses the repeats to one dispatch per reveal.
     shown: std::sync::atomic::AtomicBool,
+}
+
+/// (x, y, w, h, fold_top) — the surface rect plus the rows folded above it.
+type RectWithFold = (i32, i32, i32, i32, i32);
+
+/// mpv's private render target: the FULL (unfolded) composition. Reallocated
+/// only when the full size genuinely changes — NEVER while the scroll-fold
+/// slides (the window shrinks and the fold grows by the same amount, so the
+/// sum stays constant), which means mpv's render target — and with it its
+/// picture fit — is untouched by scrolling. The visible band is clipped at
+/// presentation time by the blit in the render closure, on the same frame
+/// the window resized: no mpv property, no reconfig, and structurally no
+/// mis-fitted transitional frame. (The video-crop approach this replaces
+/// could not guarantee that: crop updates are consumed several renders
+/// AFTER the surface resize lands — measured against libmpv 0.40 with the
+/// software render API, where a freshly set crop took 5+ renders to appear,
+/// sometimes not settling within 8 — leaving every scroll tick briefly
+/// showing the old picture fitted into the new window size: the
+/// shrink-then-snap-back shimmer.) Owned by the GLArea's render closure
+/// (main thread only).
+struct OffscreenTarget {
+    fbo: u32,
+    tex: u32,
+    w: i32,
+    h: i32,
+}
+
+impl OffscreenTarget {
+    fn new() -> Self {
+        OffscreenTarget {
+            fbo: 0,
+            tex: 0,
+            w: 0,
+            h: 0,
+        }
+    }
+
+    /// (Re)create the texture+FBO at (w, h). No-op when the size already
+    /// matches. Leaves GL bindings dirty on purpose — the caller rebinds
+    /// for the mpv render / blit right after. Failure keeps fbo == 0 and
+    /// the render closure falls back to rendering straight into the window.
+    fn ensure(&mut self, gl: &GlFold, w: i32, h: i32) {
+        if self.fbo != 0 && self.w == w && self.h == h {
+            return;
+        }
+        unsafe {
+            if self.fbo != 0 {
+                (gl.delete_framebuffers)(1, &self.fbo);
+                self.fbo = 0;
+            }
+            if self.tex != 0 {
+                (gl.delete_textures)(1, &self.tex);
+                self.tex = 0;
+            }
+            let mut tex: u32 = 0;
+            (gl.gen_textures)(1, &mut tex);
+            if tex == 0 {
+                return;
+            }
+            (gl.bind_texture)(GL_TEXTURE_2D, tex);
+            (gl.tex_image_2d)(
+                GL_TEXTURE_2D,
+                0,
+                GL_RGBA8 as c_int,
+                w,
+                h,
+                0,
+                GL_RGBA,
+                GL_UNSIGNED_BYTE,
+                std::ptr::null(),
+            );
+            let mut fbo: u32 = 0;
+            (gl.gen_framebuffers)(1, &mut fbo);
+            if fbo == 0 {
+                (gl.delete_textures)(1, &tex);
+                return;
+            }
+            (gl.bind_framebuffer)(GL_FRAMEBUFFER, fbo);
+            (gl.framebuffer_texture_2d)(
+                GL_FRAMEBUFFER,
+                GL_COLOR_ATTACHMENT0,
+                GL_TEXTURE_2D,
+                tex,
+                0,
+            );
+            (gl.bind_framebuffer)(GL_FRAMEBUFFER, 0);
+            self.fbo = fbo;
+            self.tex = tex;
+            self.w = w;
+            self.h = h;
+        }
+    }
 }
 
 impl VideoSurface for LinuxSurface {
@@ -288,7 +428,7 @@ impl VideoSurface for LinuxSurface {
                     // the reveal lands in place without waiting for the
                     // queued relayout (see set_rect).
                     video_box.show_all();
-                    let (x, y, w, h) = *super::lock_or_recover(&rect);
+                    let (x, y, w, h, _fold) = *super::lock_or_recover(&rect);
                     if x >= 0 && video_box.is_mapped() {
                         if let Some(win) = video_box.window() {
                             if win.parent().is_some() {
@@ -311,18 +451,20 @@ impl VideoSurface for LinuxSurface {
         });
     }
 
-    fn set_rect(&self, x: i32, y: i32, w: i32, h: i32) {
+    fn set_rect(&self, x: i32, y: i32, w: i32, h: i32, fold_top: i32) {
         {
             let mut last = super::lock_or_recover(&self.last_rect);
-            if *last == (x, y, w, h) {
+            if *last == (x, y, w, h, fold_top) {
                 return;
             }
-            *last = (x, y, w, h);
+            *last = (x, y, w, h, fold_top);
         }
         let fixed = MainThread(self.fixed.0.clone());
         let video_box = MainThread(self.video_box.0.clone());
         let area = MainThread(self.gl_area.0.clone());
+        let fold = self.fold.clone();
         let _ = self.app.run_on_main_thread(move || {
+            fold.store(fold_top.max(0), std::sync::atomic::Ordering::Release);
             fixed.with(|fixed| {
                 video_box.with(|video_box| {
                     area.with(|area| {
@@ -500,8 +642,9 @@ fn init_on_main_thread(
     video_box.set_visible(false);
     video_box.set_can_focus(false);
 
-    // Dedupe state for set_rect; (-1, -1, -1, -1) = no rect pushed yet.
-    let last_rect = std::sync::Arc::new(std::sync::Mutex::new((-1, -1, -1, -1)));
+    // Dedupe state for set_rect; (-1, -1, -1, -1, -1) = no rect pushed yet.
+    let last_rect = std::sync::Arc::new(std::sync::Mutex::new((-1, -1, -1, -1, -1)));
+    let fold = std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0));
 
     // Parked at (0,0) until the first set_rect moves it (a hidden Fixed
     // child is simply not allocated — gtk_fixed_size_allocate skips
@@ -520,6 +663,52 @@ fn init_on_main_thread(
     // SAFETY: non-null dlsym result for the documented signature.
     let get_integerv: GlGetIntegervFn = unsafe { std::mem::transmute(get_integerv_ptr) };
     let _ = GL_GET_INTEGERV.set(get_integerv);
+
+    // Same resolution discipline for the fold path's entry points: a null
+    // symbol must never become a fn pointer (see above). All of these are
+    // core GL 3.0 / GLES 3.0 entry points, present on every context that
+    // could run the renderer at all.
+    let resolve = |name: &str| -> Result<*mut c_void, String> {
+        let p = gl.get(name);
+        if p.is_null() {
+            Err(format!("GL provider exports no {name}"))
+        } else {
+            Ok(p)
+        }
+    };
+    // SAFETY: each non-null dlsym result is transmuted to its documented
+    // signature.
+    let gl_fold = unsafe {
+        GlFold {
+            gen_textures: std::mem::transmute::<*mut c_void, GlGenFn>(resolve("glGenTextures")?),
+            delete_textures: std::mem::transmute::<*mut c_void, GlDeleteFn>(resolve(
+                "glDeleteTextures",
+            )?),
+            bind_texture: std::mem::transmute::<*mut c_void, GlBindTextureFn>(resolve(
+                "glBindTexture",
+            )?),
+            tex_image_2d: std::mem::transmute::<*mut c_void, GlTexImage2DFn>(resolve(
+                "glTexImage2D",
+            )?),
+            gen_framebuffers: std::mem::transmute::<*mut c_void, GlGenFn>(resolve(
+                "glGenFramebuffers",
+            )?),
+            delete_framebuffers: std::mem::transmute::<*mut c_void, GlDeleteFn>(resolve(
+                "glDeleteFramebuffers",
+            )?),
+            bind_framebuffer: std::mem::transmute::<*mut c_void, GlBindFramebufferFn>(resolve(
+                "glBindFramebuffer",
+            )?),
+            framebuffer_texture_2d: std::mem::transmute::<*mut c_void, GlFramebufferTexture2DFn>(
+                resolve("glFramebufferTexture2D")?,
+            ),
+            blit_framebuffer: std::mem::transmute::<*mut c_void, GlBlitFramebufferFn>(resolve(
+                "glBlitFramebuffer",
+            )?),
+            disable: std::mem::transmute::<*mut c_void, GlDisableFn>(resolve("glDisable")?),
+        }
+    };
+    let _ = GL_FOLD.set(gl_fold);
 
     // mpv's render context initializes its GL renderer AT CREATION (it does
     // not just resolve symbols — it issues GL calls to probe the context), so
@@ -584,8 +773,17 @@ fn init_on_main_thread(
         });
     }
 
+    // The offscreen mpv renders into + the fold it is clipped by. Both are
+    // read/written only on the GTK main thread (the render closure below
+    // and set_rect's dispatch), so RefCell/Atomics are sufficient.
+    let offscreen = std::rc::Rc::new(std::cell::RefCell::new(OffscreenTarget::new()));
+    let render_fold = fold.clone();
+
     gl_area.connect_render(move |area, _ctx| {
         let Some(get_integerv) = GL_GET_INTEGERV.get() else {
+            return glib::Propagation::Proceed;
+        };
+        let Some(gl_fold) = GL_FOLD.get() else {
             return glib::Propagation::Proceed;
         };
         // Pixel size = allocation × scale factor (the FBO mpv must fill
@@ -594,10 +792,43 @@ fn init_on_main_thread(
         let alloc = area.allocation();
         let w = (alloc.width() * scale).max(1);
         let h = (alloc.height() * scale).max(1);
-        let mut fbo: c_int = 0;
-        unsafe { get_integerv(GL_DRAW_FRAMEBUFFER_BINDING, &mut fbo) };
-        // flip_y: GL renders Y-up, video is Y-down.
-        let _ = render.render::<GlLib>(fbo, w, h, true);
+        // The scroll-fold: rows hidden above the fold line, logical →
+        // physical. mpv always renders the FULL unclipped composition into
+        // the offscreen (its size is constant while the fold slides — see
+        // OffscreenTarget), and the blit below presents only the visible
+        // band, so the clip and the window resize land on the SAME frame.
+        let fold_px = render_fold
+            .load(std::sync::atomic::Ordering::Acquire)
+            .max(0)
+            .saturating_mul(scale);
+        let full_h = h.saturating_add(fold_px);
+        let mut window_fbo: c_int = 0;
+        unsafe { get_integerv(GL_DRAW_FRAMEBUFFER_BINDING, &mut window_fbo) };
+        let mut off = offscreen.borrow_mut();
+        off.ensure(gl_fold, w, full_h);
+        if off.fbo == 0 {
+            // No offscreen (allocation failed — not expected past init):
+            // render straight into the window FBO, folded rows and all,
+            // rather than showing nothing.
+            let _ = render.render::<GlLib>(window_fbo, w, h, true);
+            return glib::Propagation::Stop;
+        }
+        // flip_y: GL renders Y-up, video is Y-down. With the flip, the
+        // offscreen's GL y ∈ [0, h) holds exactly the BOTTOM h rows of the
+        // picture — the part NOT folded under the bar.
+        let _ = render.render::<GlLib>(off.fbo as c_int, w, full_h, true);
+        // Present the visible band into the GLArea's own framebuffer: 1:1
+        // blit, no scaling. Scissor off in case mpv left one armed (the
+        // blit would otherwise be clipped to mpv's last scissor rect); the
+        // read binding is restored afterwards, the draw binding is left on
+        // the window FBO it had on entry.
+        unsafe {
+            (gl_fold.disable)(GL_SCISSOR_TEST);
+            (gl_fold.bind_framebuffer)(GL_READ_FRAMEBUFFER, off.fbo);
+            (gl_fold.bind_framebuffer)(GL_DRAW_FRAMEBUFFER, window_fbo as u32);
+            (gl_fold.blit_framebuffer)(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            (gl_fold.bind_framebuffer)(GL_READ_FRAMEBUFFER, 0);
+        }
         glib::Propagation::Stop
     });
 
@@ -621,6 +852,7 @@ fn init_on_main_thread(
         video_box: MainThread(video_box),
         gl_area: MainThread(gl_area),
         last_rect,
+        fold,
         shown: std::sync::atomic::AtomicBool::new(false),
     })
 }

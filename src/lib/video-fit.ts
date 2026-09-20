@@ -40,3 +40,27 @@ export function fitContentRect(boxW: number, boxH: number, aspect: number): Cont
   const h = boxW / a
   return { x: 0, y: (boxH - h) / 2, w: boxW, h }
 }
+
+export interface ClippedRect {
+  x: number
+  y: number
+  w: number
+  h: number
+  /** The hidden-top fraction of the ORIGINAL height (0 = nothing hidden). */
+  hidden: number
+}
+
+/**
+ * Clip a rect's TOP at `clipTop` (same px space as the rect): what the page's
+ * own overflow hiding would conceal. Feeds the native surface, whose window
+ * sits ABOVE the page and therefore must pre-clip itself where the page
+ * would — the engine folds the hidden rows away at presentation time so the
+ * visible picture fills the clipped surface edge to edge. A rect fully above
+ * the line keeps a 1px sliver at its bottom edge (a zero-height surface is
+ * never pushed) with `hidden` just under 1.
+ */
+export function clipRectTop(x: number, y: number, w: number, h: number, clipTop: number): ClippedRect {
+  if (!(h > 0) || y >= clipTop) return { x, y, w, h, hidden: 0 }
+  const hid = Math.max(0, Math.min(h - 1, clipTop - y))
+  return { x, y: y + hid, w, h: h - hid, hidden: hid / h }
+}

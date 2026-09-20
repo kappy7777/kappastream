@@ -98,11 +98,13 @@ const TIME_EMIT_INTERVAL: Duration = Duration::from_millis(250);
 
 /// The native region under the webview mpv renders into. All rects in
 /// LOGICAL px, window-relative. The implementation marshals to the UI
-/// thread itself; calls are cheap and non-blocking.
+/// thread itself; calls are cheap and non-blocking. `fold_top` is the
+/// number of rows currently hidden ABOVE the rect (the page scrolled the
+/// video under the top bar); the surface clips them at presentation time.
 pub trait VideoSurface: Send + Sync {
     fn show(&self);
     fn hide(&self);
-    fn set_rect(&self, x: i32, y: i32, w: i32, h: i32);
+    fn set_rect(&self, x: i32, y: i32, w: i32, h: i32, fold_top: i32);
 }
 
 struct Engine {
@@ -1168,11 +1170,27 @@ pub fn mpv_set_muted(id: Option<u32>, muted: bool) -> Result<(), String> {
 
 /// Position the surface (logical px, window-relative, zoom-adjusted by the
 /// frontend). Cheap: the surface marshals to the UI thread itself, so this
-/// never blocks the caller.
+/// never blocks the caller. `fold_top` is the number of picture rows hidden
+/// ABOVE the pushed rect: the page scrolled the fold under the top bar, and
+/// the surface — a native window ABOVE the page, blind to the page's
+/// overflow clip — was sized to the still-visible part. The engine clips
+/// those rows at PRESENTATION time (Linux: mpv renders the full unfolded
+/// picture into a constant-size offscreen and a 1:1 blit presents only the
+/// visible band — see OffscreenTarget in linux.rs), so the clip always
+/// lands on the same frame as the window resize: the same pixels the
+/// webview engine shows under the bar, with no mis-fitted transitional
+/// frame.
 #[tauri::command]
-pub fn mpv_set_rect(id: Option<u32>, x: i32, y: i32, w: i32, h: i32) -> Result<(), String> {
+pub fn mpv_set_rect(
+    id: Option<u32>,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    fold_top: Option<i32>,
+) -> Result<(), String> {
     with_engine(engine_id(id)?, |e| {
-        e.surface.set_rect(x, y, w, h);
+        e.surface.set_rect(x, y, w, h, fold_top.unwrap_or(0));
         Ok(())
     })
 }

@@ -66,7 +66,7 @@
   import { formatCompact, formatAge } from './lib/format'
   import { effectiveQualities, mpvQualities, qualityLabel } from './lib/qualities'
   import { stripBitmap, renderInfoBlock } from './lib/osd-bitmaps'
-  import { fitContentRect } from './lib/video-fit'
+  import { clipRectTop, fitContentRect } from './lib/video-fit'
   import { startPageOverlayManager } from './lib/page-overlay'
   import { CHAT_SIZE_MAX, CHAT_SIZE_MIN, nextChatSize } from './lib/chat-size'
   import { mentionMatcher } from './lib/mention'
@@ -905,15 +905,24 @@
   // the rect as much as the native surface does).
   let playerVideoEl = $state<HTMLElement | null>(null)
   let playerBox = $state({ x: 0, y: 0, w: 0, h: 0 })
+  // The scroll viewport's top edge in visual px (== the top bar's bottom):
+  // the line where .video-scroll's overflow clip starts hiding the fold. 0
+  // means "no clip" — the window's own top, which GDK enforces on the
+  // surface natively. Fullscreen lifts the player out of the scroll flow
+  // (position: fixed), so nothing clips there.
+  let stageClipTop = $state(0)
   $effect(() => {
     const stage = playerVideoEl
     if (!stage) return
     void zoomK
+    const fullscreen = isFullscreen
     const scroll = videoScrollEl
     let frame = 0
     const measure = () => {
       frame = 0
       if (!stage.isConnected) return
+      const clip = fullscreen ? 0 : (scroll?.getBoundingClientRect().top ?? 0)
+      if (clip !== stageClipTop) stageClipTop = clip
       const r = stage.getBoundingClientRect()
       if (r.width < 2 || r.height < 2) return
       // Identity-stable writes: the push effect below re-fires on every
@@ -965,6 +974,19 @@
     return { x: playerBox.x + c.x, y: playerBox.y + c.y, w: c.w, h: c.h }
   })
 
+  // The content rect clipped at the scroll viewport's top edge (the top
+  // bar): the native surface window sits ABOVE the page and ignores the
+  // page's overflow clip, so it must pre-clip itself or the video paints
+  // over the bar while the fold is scrolled up. The engine clips the hidden
+  // rows at presentation time (an offscreen render + blit on its side), so
+  // the visible picture fills the clipped surface edge to edge — the same
+  // pixels the hls.js path shows under the bar.
+  const clippedContentRect = $derived.by(() => {
+    const r = videoContentRect
+    const c = clipRectTop(r.x, r.y, r.w, r.h, stageClipTop)
+    return { x: c.x, y: c.y, w: c.w, h: c.h }
+  })
+
   // The native surface tracks the CONTENT rect: mpv then fills its surface
   // edge to edge — no mpv-painted black bars — and the themed page shows
   // where the bars used to be (identical to the hls path's side bars). The
@@ -972,13 +994,22 @@
   // video too.
   $effect(() => {
     if (!nativeVideoActive) return
-    const r = videoContentRect
-    if (r.w < 2 || r.h < 2) return
+    const r = clippedContentRect
+    if (r.w < 2 || r.h < 1) return
+    // Rows hidden above the clip line, in px (not a fraction — the engine
+    // blits an integer band and px keep the mapping exact): the full
+    // content height minus the clipped one, so a video scrolled almost
+    // entirely past the line still folds to at most its own height minus
+    // the 1px sliver the clip keeps. The clip rides the same push as the
+    // rect, and the engine applies both on the same frame, so scrolling
+    // cannot squeeze a mis-fitted frame in between.
+    const fold = Math.max(0, Math.round(videoContentRect.h - r.h))
     void invoke('mpv_set_rect', {
       x: Math.round(r.x),
       y: Math.round(r.y),
       w: Math.round(r.w),
       h: Math.round(r.h),
+      foldTop: fold,
     }).catch(() => {})
   })
 
@@ -1005,6 +1036,11 @@
     let lastClickAt = 0
     // Normalized 0..1 within the content rect, recomputed per event (the
     // same shared fit the surface pusher used — they can never disagree).
+    // While the fold is scrolled under the top bar, the surface (and mpv's
+    // OSD with it) shows only the bottom slice of the picture: the y axis is
+    // remapped into that slice — the same clip the rect pusher applied — so
+    // OSD hit-testing lands where the pointer visibly is. Events over the
+    // hidden slice can't arrive (the page's bar covers it).
     const locate = (e: { clientX: number; clientY: number }) => {
       const r = stage.getBoundingClientRect()
       const c = fitContentRect(r.width, r.height, videoAspect)
@@ -1012,12 +1048,14 @@
       const h = Math.max(1, c.h)
       const x = (e.clientX - r.left - c.x) / w
       const y = (e.clientY - r.top - c.y) / h
+      const f = clipRectTop(0, c.y, c.w, c.h, stageClipTop - r.top).hidden
+      const oy = f > 0 ? (y - f) / (1 - f) : y
       return {
         x,
-        y,
-        inside: x >= 0 && x <= 1 && y >= 0 && y <= 1,
+        y: oy,
+        inside: x >= 0 && x <= 1 && y >= f && y <= 1,
         clampX: Math.min(1, Math.max(0, x)),
-        clampY: Math.min(1, Math.max(0, y)),
+        clampY: Math.min(1, Math.max(0, oy)),
       }
     }
     const send = (x: number, y: number, kind: string): void => {
@@ -1071,8 +1109,11 @@
   // modals hide the surface, small strips are composited over the video as
   // masked snapshots. THIS side contributes the geometry — the FITTED
   // CONTENT rect of the player (same shared fit the surface pusher used —
-  // never a second computation), re-read on every manager recheck so the
-  // player element and the video aspect stay live effect dependencies.
+  // never a second computation), clipped at the scroll viewport's top edge
+  // exactly like the pushed surface rect (the fractions are relative to the
+  // rect the surface ACTUALLY occupies), re-read on every manager recheck
+  // so the player element and the video aspect stay live effect
+  // dependencies.
   $effect(() => {
     if (!nativeVideoActive) return
     return startPageOverlayManager(() => {
@@ -1081,16 +1122,17 @@
       const pr = stage.getBoundingClientRect()
       if (pr.width < 2 || pr.height < 2) return []
       const fit = fitContentRect(pr.width, pr.height, videoAspect)
+      const c = clipRectTop(pr.left + fit.x, pr.top + fit.y, fit.w, fit.h, stageClipTop)
       return [
         {
           id: 0,
           box: {
-            left: pr.left + fit.x,
-            top: pr.top + fit.y,
-            right: pr.left + fit.x + fit.w,
-            bottom: pr.top + fit.y + fit.h,
-            width: fit.w,
-            height: fit.h,
+            left: c.x,
+            top: c.y,
+            right: c.x + c.w,
+            bottom: c.y + c.h,
+            width: c.w,
+            height: c.h,
           },
         },
       ]
