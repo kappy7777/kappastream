@@ -5,8 +5,10 @@
 //!
 //! There are two independent NVIDIA-specific workarounds, each applied only on
 //! the matching session type and only when the user has not already supplied a
-//! value, plus one AppImage-only backend selection (`GDK_BACKEND`, see the
-//! dedicated section below) that is deliberately GPU-independent. AMD, Intel
+//! value; one AppImage-only backend selection (`GDK_BACKEND`, see the
+//! dedicated section below) that is deliberately GPU-independent; and one
+//! AppImage-only pipewire-client swap performed by a one-shot re-exec (also
+//! with its own section below). AMD, Intel
 //! and unknown sessions are never touched by the NVIDIA rules, and the two
 //! workarounds are never both selected during a single session.
 //!
@@ -66,6 +68,46 @@
 //! a hook-supplied `GDK_BACKEND` in the environment and are untouched by
 //! construction.
 //!
+//! ## AppImage — system `libpipewire` via one-shot re-exec
+//!
+//! The bundled `libmpv.so.2` (a Debian build) declares `libpipewire-0.3.so.0`
+//! as a direct dependency, so linuxdeploy copies the build host's pipewire
+//! client into the AppImage — dropping it would fail the loader on systems
+//! without PipeWire, and bundling it is what keeps the image self-contained.
+//! But PipeWire expects the client library and the `spa-0.2` support modules
+//! it loads to match the local server: a client from the build host, running
+//! against the host system's server and modules, periodically stalls the
+//! audio clock. mpv paces video to that clock (`video-sync=audio`), so in the
+//! mpv engine this dropped 4-6 frames per second of 60 (measured with the
+//! render-cadence harness: 55-56 renders/s and 16-23 missed frame-clock ticks
+//! per 5 s window under the bundled client, a flat 60.0 renders/s with zero
+//! missed ticks under the system one, with every other library identical).
+//!
+//! The swap must happen before `DT_NEEDED` resolution, which is before
+//! `main()` — no in-process fix exists. So on an AppImage launch, when a
+//! pipewire client is mapped into the process, the system provides one under
+//! the same basename, and the mapped copy is not that system one,
+//! `configure()` re-execs the binary once with `LD_PRELOAD=<system path>`: a
+//! preloaded object's SONAME satisfies `libmpv`'s dependency before the
+//! AppImage's `LD_LIBRARY_PATH` is searched, so the bundled copy never loads.
+//! If the system has no pipewire, nothing happens and the bundled client
+//! serves — the app keeps working everywhere, just with the old pacing on
+//! PipeWire-less systems. Spawned children never inherit the preload:
+//! `env_spawn::configure`'s AppImage whitelist clears `LD_PRELOAD` from every
+//! subprocess (streamlink resolve, the mpv handoff, URL openers).
+//!
+//! The user override is `KAPPASTREAM_PIPEWIRE_PRELOAD`:
+//!  - absent ⇒ automatic swap (the default above);
+//!  - `0`/`off`/`no`/`false` (any case) or empty ⇒ keep the bundled client;
+//!  - any other value ⇒ an explicit library path, preloaded verbatim.
+//!
+//! `KAPPASTREAM_PIPEWIRE_EXEC_GUARD` is internal, not a user channel: set on
+//! the re-exec and checked before the action is applied again, so a preload
+//! that somehow fails to take effect can never loop the process through
+//! repeated execs (the auto path is additionally self-limiting — after a
+//! successful swap the mapped client IS the system one, which selects no
+//! action — but an explicit-path override needs the guard).
+//!
 //! ## Common rules
 //!
 //! The variables are applied only when ALL hold for their respective path:
@@ -85,6 +127,11 @@ const NV_EXPLICIT_SYNC_VAR: &str = "__NV_DISABLE_EXPLICIT_SYNC";
 const WEBKIT_DMABUF_VAR: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
 const GDK_BACKEND_VAR: &str = "GDK_BACKEND";
 const KAPPASTREAM_GDK_BACKEND_VAR: &str = "KAPPASTREAM_GDK_BACKEND";
+const KAPPASTREAM_PIPEWIRE_PRELOAD_VAR: &str = "KAPPASTREAM_PIPEWIRE_PRELOAD";
+/// Internal once-guard for the pipewire re-exec, NOT a user channel. Set on
+/// the exec'd image; `configure()` refuses to apply the pipewire action again
+/// while it is present. See the module doc's "system libpipewire" section.
+const KAPPASTREAM_PIPEWIRE_EXEC_GUARD_VAR: &str = "KAPPASTREAM_PIPEWIRE_EXEC_GUARD";
 /// Backend list set for AppImage runs on Wayland sessions. GDK tries the
 /// backends in order; the `x11` tail keeps an XWayland path available if the
 /// compositor refuses a Wayland connection. See the module doc's
@@ -172,6 +219,17 @@ struct CompatInputs {
     /// raw like the other user overrides: an empty value still counts as
     /// "user supplied" (and means "don't touch").
     kappastream_gdk_backend: Option<String>,
+    /// Path of the pipewire client currently mapped into the process
+    /// (parsed from `/proc/self/maps`). Probed only on AppImage runs —
+    /// native builds never load a bundled client to swap.
+    pipewire_loaded: Option<String>,
+    /// The system's pipewire client for the same basename (`ldconfig` /
+    /// standard library dirs), if the system has one at all.
+    pipewire_system: Option<String>,
+    /// `KAPPASTREAM_PIPEWIRE_PRELOAD` env value, if the user supplied one —
+    /// the override channel for the pipewire swap. Captured raw: empty
+    /// counts as "user supplied" (and means "keep the bundled client").
+    kappastream_pipewire_preload: Option<String>,
 }
 
 /// The concrete compatibility actions to apply for a given `CompatInputs`.
@@ -185,6 +243,10 @@ struct CompatActions {
     disable_webkit_dmabuf_renderer: bool,
     /// `GDK_BACKEND` value to set, or `None` to leave the environment alone.
     gdk_backend: Option<String>,
+    /// System pipewire client to `LD_PRELOAD` via a one-shot re-exec, or
+    /// `None` to keep the bundled one. See the module doc's
+    /// "AppImage — system libpipewire" section.
+    pipewire_preload: Option<String>,
 }
 
 /// Select the compatibility actions for the given inputs.
@@ -200,6 +262,7 @@ struct CompatActions {
 fn select_actions(inputs: &CompatInputs) -> CompatActions {
     let mut actions = CompatActions {
         gdk_backend: select_gdk_backend(inputs),
+        pipewire_preload: select_pipewire_preload(inputs),
         ..CompatActions::default()
     };
     if !inputs.nvidia_loaded {
@@ -242,8 +305,155 @@ fn select_gdk_backend(inputs: &CompatInputs) -> Option<String> {
     }
 }
 
+/// Select the system pipewire client to preload over the bundled one, or
+/// `None` to leave the process as-is. AppImage-only, like the backend
+/// selection. See the module doc's "AppImage — system libpipewire" section
+/// for the rationale and the override channel.
+fn select_pipewire_preload(inputs: &CompatInputs) -> Option<String> {
+    if !inputs.appimage {
+        return None;
+    }
+    match inputs.kappastream_pipewire_preload.as_deref() {
+        // Auto: swap only when a pipewire client is actually mapped in AND
+        // the system has a DIFFERENT one. If the system copy is already the
+        // one loaded (user preload / identical resolution) there is nothing
+        // to do; if the system has none, the bundled client must serve.
+        None => {
+            let loaded = inputs.pipewire_loaded.as_deref()?;
+            let system = inputs.pipewire_system.as_deref()?;
+            (loaded != system).then(|| system.to_string())
+        }
+        // Present but empty = explicit "leave it alone" (bundled client).
+        Some("") => None,
+        // Explicit opt-out words, any case.
+        Some(v)
+            if matches!(
+                v.to_ascii_lowercase().as_str(),
+                "0" | "off" | "no" | "false"
+            ) =>
+        {
+            None
+        }
+        // Anything else is a user-supplied library path, preloaded verbatim.
+        Some(path) => Some(path.to_string()),
+    }
+}
+
+/// First `libpipewire-*.so.*` mapping in a `/proc/self/maps` dump, as a pure
+/// parser over the file text so the extraction is unit-testable. Maps lines
+/// are `addr perms offset dev inode path`; anonymous mappings have no sixth
+/// field, which `nth(5)` turns into the `None` that skips the line.
+fn pipewire_path_in_maps(maps: &str) -> Option<&str> {
+    maps.lines().find_map(|line| {
+        let path = line.split_whitespace().nth(5)?;
+        let name = Path::new(path).file_name()?.to_str()?;
+        (name.starts_with("libpipewire-") && name.contains(".so")).then_some(path)
+    })
+}
+
+/// Extract the library path for `basename` from `ldconfig -p` output (lines
+/// look like `libpipewire-0.3.so.0 (libc6,x86-64) => /usr/lib/…`). Pure for
+/// the same reason as the maps parser; matching on the FIRST field keeps a
+/// longer library name that merely contains the basename from matching.
+fn ldconfig_path_for(cache: &str, basename: &str) -> Option<String> {
+    cache.lines().find_map(|line| {
+        if line.split_whitespace().next() != Some(basename) {
+            return None;
+        }
+        line.rsplit(" => ")
+            .next()
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+    })
+}
+
+/// The system's pipewire client for the same basename the process already
+/// loaded, if the system has one at all. `ldconfig -p` is authoritative (it
+/// also knows nonstandard prefixes such as NixOS store paths) but the binary
+/// lives in `/sbin` or `/usr/sbin` on merged-/usr systems, which the AppRun
+/// PATH may not include — so probe absolute locations first, then a plain
+/// PATH lookup, then the standard library directories as a last resort.
+fn system_pipewire_path(basename: &str) -> Option<String> {
+    for bin in ["/sbin/ldconfig", "/usr/sbin/ldconfig", "ldconfig"] {
+        if let Ok(out) = std::process::Command::new(bin).arg("-p").output() {
+            if out.status.success() {
+                let cache = String::from_utf8_lossy(&out.stdout);
+                if let Some(path) = ldconfig_path_for(&cache, basename) {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    for dir in [
+        "/usr/lib/x86_64-linux-gnu",
+        "/usr/lib64",
+        "/usr/lib",
+        "/lib/x86_64-linux-gnu",
+        "/lib64",
+        "/lib",
+    ] {
+        let candidate = format!("{dir}/{basename}");
+        if Path::new(&candidate).is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// The pipewire probes for `read_inputs`: the client currently mapped into
+/// this process, and the system's copy of the same basename. Only AppImage
+/// runs bother probing — native builds never load a bundled client to swap.
+fn probe_pipewire() -> (Option<String>, Option<String>) {
+    if !crate::env_spawn::in_appimage() {
+        return (None, None);
+    }
+    let Some(loaded) = std::fs::read_to_string("/proc/self/maps")
+        .ok()
+        .as_deref()
+        .and_then(pipewire_path_in_maps)
+        .map(str::to_string)
+    else {
+        return (None, None);
+    };
+    let basename = Path::new(&loaded)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    (Some(loaded), system_pipewire_path(&basename))
+}
+
+/// Replace the process with itself, preloading `system_pipewire` so its
+/// SONAME satisfies `libmpv`'s dependency ahead of the AppImage's
+/// `LD_LIBRARY_PATH`. Called from the top of `configure()`, before any env
+/// var is applied — a successful exec never reaches those, and the fresh
+/// image's own `configure()` pass performs them with the exec guard set. If
+/// `exec` returns (failure), the process continues unchanged with the
+/// bundled client.
+fn reexec_with_pipewire_preload(system_pipewire: &str) {
+    use std::os::unix::process::CommandExt;
+    let Ok(exe) = std::env::current_exe() else {
+        eprintln!("[compat] pipewire swap: cannot resolve current exe; keeping the bundled client");
+        return;
+    };
+    // Prepend ours so it wins the SONAME even if the user preloaded something.
+    let mut preload = system_pipewire.to_string();
+    if let Ok(existing) = std::env::var("LD_PRELOAD") {
+        if !existing.is_empty() {
+            preload = format!("{system_pipewire}:{existing}");
+        }
+    }
+    let err = std::process::Command::new(exe)
+        .args(std::env::args_os().skip(1))
+        .env("LD_PRELOAD", &preload)
+        .env(KAPPASTREAM_PIPEWIRE_EXEC_GUARD_VAR, "1")
+        .exec();
+    eprintln!("[compat] pipewire swap re-exec failed ({err}); continuing with the bundled client");
+}
+
 /// Gather the real process environment + kernel state into `CompatInputs`.
 fn read_inputs() -> CompatInputs {
+    let (pipewire_loaded, pipewire_system) = probe_pipewire();
     CompatInputs {
         xdg_session_type: std::env::var("XDG_SESSION_TYPE").ok(),
         wayland_display: std::env::var("WAYLAND_DISPLAY").ok(),
@@ -256,6 +466,9 @@ fn read_inputs() -> CompatInputs {
         ),
         appimage: crate::env_spawn::in_appimage(),
         kappastream_gdk_backend: std::env::var(KAPPASTREAM_GDK_BACKEND_VAR).ok(),
+        pipewire_loaded,
+        pipewire_system,
+        kappastream_pipewire_preload: std::env::var(KAPPASTREAM_PIPEWIRE_PRELOAD_VAR).ok(),
     }
 }
 
@@ -270,7 +483,10 @@ fn read_inputs() -> CompatInputs {
 /// creation, WebKitGTK renderer selection and GDK display-open happen later,
 /// during Tauri window/webview setup (inside `tauri::Builder::run`, reached
 /// from `app_lib::run()` in `lib.rs`) — nothing touches EGL, the renderer or
-/// the display before `main()` runs.
+/// the display before `main()` runs. The pipewire re-exec is the FIRST action:
+/// it must land before `DT_NEEDED` resolution (i.e. before `main()`, hence the
+/// exec) and before any env var below is applied — a successful exec replaces
+/// the image and the fresh `configure()` pass applies those itself.
 ///
 /// `std::env::set_var` is safe here because this runs on the single main thread
 /// at process startup, before any other thread or library reads the
@@ -280,6 +496,14 @@ fn read_inputs() -> CompatInputs {
 pub fn configure() {
     let inputs = read_inputs();
     let actions = select_actions(&inputs);
+    if std::env::var(KAPPASTREAM_PIPEWIRE_EXEC_GUARD_VAR).is_err() {
+        // Once-guard: the exec'd image re-runs configure() with the guard
+        // set, and a preload that failed to take effect must not retry
+        // forever. Everything else proceeds normally either way.
+        if let Some(system_pipewire) = &actions.pipewire_preload {
+            reexec_with_pipewire_preload(system_pipewire);
+        }
+    }
     if actions.disable_nvidia_explicit_sync {
         std::env::set_var(NV_EXPLICIT_SYNC_VAR, "1");
     }
@@ -325,6 +549,9 @@ mod tests {
             nvidia_loaded: nvidia,
             appimage: false,
             kappastream_gdk_backend: None,
+            pipewire_loaded: None,
+            pipewire_system: None,
+            kappastream_pipewire_preload: None,
         }
     }
 
@@ -352,6 +579,7 @@ mod tests {
             disable_nvidia_explicit_sync: true,
             disable_webkit_dmabuf_renderer: false,
             gdk_backend: None,
+            pipewire_preload: None,
         }
     }
 
@@ -360,6 +588,7 @@ mod tests {
             disable_nvidia_explicit_sync: false,
             disable_webkit_dmabuf_renderer: true,
             gdk_backend: None,
+            pipewire_preload: None,
         }
     }
 
@@ -372,6 +601,7 @@ mod tests {
             disable_nvidia_explicit_sync: true,
             disable_webkit_dmabuf_renderer: false,
             gdk_backend: Some(APPIMAGE_WAYLAND_GDK_BACKENDS.to_string()),
+            pipewire_preload: None,
         }
     }
 
@@ -730,6 +960,7 @@ mod tests {
                 disable_nvidia_explicit_sync: false,
                 disable_webkit_dmabuf_renderer: false,
                 gdk_backend: Some(APPIMAGE_WAYLAND_GDK_BACKENDS.to_string()),
+                pipewire_preload: None,
             }
         );
     }
@@ -849,5 +1080,172 @@ mod tests {
             )),
             actions_wayland_appimage()
         );
+    }
+
+    // Pipewire-swap test builder: an AppImage run on a Wayland session with
+    // the three pipewire axes explicit. The graphics axes are irrelevant to
+    // the swap and stay at the compat_appimage defaults.
+    fn compat_pipewire(
+        loaded: Option<&str>,
+        system: Option<&str>,
+        preload_override: Option<&str>,
+    ) -> CompatInputs {
+        CompatInputs {
+            pipewire_loaded: loaded.map(String::from),
+            pipewire_system: system.map(String::from),
+            kappastream_pipewire_preload: preload_override.map(String::from),
+            ..compat_appimage(
+                Some("wayland"),
+                Some("wayland-0"),
+                None,
+                None,
+                None,
+                false,
+                None,
+            )
+        }
+    }
+
+    // #25 Non-AppImage runs never preload, even with a bundled-looking
+    //     client mapped and a system copy present — native builds never
+    //     load a bundled client to swap.
+    #[test]
+    fn non_appimage_never_preloads_pipewire() {
+        let inputs = CompatInputs {
+            pipewire_loaded: Some("/appdir/usr/lib/libpipewire-0.3.so.0".into()),
+            pipewire_system: Some("/usr/lib/libpipewire-0.3.so.0".into()),
+            kappastream_pipewire_preload: None,
+            ..compat(Some("wayland"), Some("wayland-0"), None, None, None, true)
+        };
+        assert_eq!(select_actions(&inputs).pipewire_preload, None);
+    }
+
+    // #26 Auto: AppImage run, bundled client mapped, system copy present
+    //     ⇒ preload the system path.
+    #[test]
+    fn appimage_bundled_pipewire_swapped_for_system() {
+        assert_eq!(
+            select_actions(&compat_pipewire(
+                Some("/tmp/.mount_K/usr/lib/libpipewire-0.3.so.0"),
+                Some("/usr/lib/libpipewire-0.3.so.0"),
+                None
+            ))
+            .pipewire_preload,
+            Some("/usr/lib/libpipewire-0.3.so.0".to_string())
+        );
+    }
+
+    // #27 The system copy is already the one mapped (user preload or an
+    //     identical resolution) ⇒ nothing to do. This is also what makes
+    //     the auto path self-limiting after a successful re-exec.
+    #[test]
+    fn appimage_system_pipewire_already_loaded_does_nothing() {
+        assert_eq!(
+            select_actions(&compat_pipewire(
+                Some("/usr/lib/libpipewire-0.3.so.0"),
+                Some("/usr/lib/libpipewire-0.3.so.0"),
+                None
+            ))
+            .pipewire_preload,
+            None
+        );
+    }
+
+    // #28 System without PipeWire keeps the bundled client — removing the
+    //     swap keeps the AppImage self-contained there.
+    #[test]
+    fn appimage_no_system_pipewire_keeps_bundled() {
+        assert_eq!(
+            select_actions(&compat_pipewire(
+                Some("/tmp/.mount_K/usr/lib/libpipewire-0.3.so.0"),
+                None,
+                None
+            ))
+            .pipewire_preload,
+            None
+        );
+    }
+
+    // #29 Nothing pipewire-ish mapped (no libmpv consumer) ⇒ no swap.
+    #[test]
+    fn appimage_no_pipewire_loaded_does_nothing() {
+        assert_eq!(
+            select_actions(&compat_pipewire(
+                None,
+                Some("/usr/lib/libpipewire-0.3.so.0"),
+                None
+            ))
+            .pipewire_preload,
+            None
+        );
+    }
+
+    // #30 Override opt-outs: empty and the 0/off/no/false words (any case)
+    //     keep the bundled client.
+    #[test]
+    fn pipewire_override_opt_outs_keep_bundled() {
+        for value in ["", "0", "off", "OFF", "No", "false"] {
+            assert_eq!(
+                select_actions(&compat_pipewire(
+                    Some("/tmp/.mount_K/usr/lib/libpipewire-0.3.so.0"),
+                    Some("/usr/lib/libpipewire-0.3.so.0"),
+                    Some(value)
+                ))
+                .pipewire_preload,
+                None,
+                "override {value:?} should keep the bundled client"
+            );
+        }
+    }
+
+    // #31 Any other override value is an explicit library path and wins
+    //     verbatim, even when nothing pipewire-ish is mapped.
+    #[test]
+    fn pipewire_override_explicit_path_wins() {
+        assert_eq!(
+            select_actions(&compat_pipewire(
+                None,
+                None,
+                Some("/opt/other/libpipewire-0.3.so.0")
+            ))
+            .pipewire_preload,
+            Some("/opt/other/libpipewire-0.3.so.0".to_string())
+        );
+    }
+
+    // #32 /proc/self/maps parsing: skips anonymous and [stack] mappings,
+    //     ignores non-pipewire libraries, returns the FIRST pipewire
+    //     mapping's full path.
+    #[test]
+    fn maps_parser_finds_first_pipewire_mapping() {
+        let maps = "\
+7f0000000000-7f0000021000 r--p 00000000 103:02 1234567  /usr/lib/libc.so.6
+7f0000040000-7f0000066000 r-xp 00000000 103:02 8912345  /tmp/.mount_K/usr/lib/libpipewire-0.3.so.0
+7f0000066000-7f0000068000 r--p 00051000 103:02 8912345  /tmp/.mount_K/usr/lib/libpipewire-0.3.so.0
+7ffc0000000-7ffc0020000 rw-p 00000000 00:00 0           [stack]
+7f0000080000-7f0000081000 rw-p 00000000 00:00 0
+";
+        assert_eq!(
+            pipewire_path_in_maps(maps),
+            Some("/tmp/.mount_K/usr/lib/libpipewire-0.3.so.0")
+        );
+        assert_eq!(pipewire_path_in_maps(""), None);
+        let no_pipewire = "7f0000000000-7f0000021000 r--p 00000000 103:02 1  /usr/lib/libc.so.6\n";
+        assert_eq!(pipewire_path_in_maps(no_pipewire), None);
+    }
+
+    // #33 ldconfig cache parsing: first-field basename match, path after
+    //     the " => " separator; a present-but-different basename misses.
+    #[test]
+    fn ldconfig_parser_extracts_path_for_basename() {
+        let cache = "        289 libs found in cache `/etc/ld.so.cache'\n\
+                     \tlibpulse.so.0 (libc6,x86-64) => /usr/lib/libpulse.so.0\n\
+                     \tlibpipewire-0.3.so.0 (libc6,x86-64) => /usr/lib/libpipewire-0.3.so.0\n";
+        assert_eq!(
+            ldconfig_path_for(cache, "libpipewire-0.3.so.0"),
+            Some("/usr/lib/libpipewire-0.3.so.0".to_string())
+        );
+        assert_eq!(ldconfig_path_for(cache, "libpipewire-9.so.9"), None);
+        assert_eq!(ldconfig_path_for(cache, ""), None);
     }
 }
