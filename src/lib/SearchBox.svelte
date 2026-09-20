@@ -340,6 +340,13 @@
     animation: none;
   }
 
+  /* Same reasoning for the row highlight: over the video the dropdown is a
+     snapshot bitmap refreshed on hover crossing — a 100 ms background fade
+     would be captured mid-flight. Snap the highlight to its final color. */
+  :global(.app--native-video) .search-opt {
+    transition: none;
+  }
+
   .search-status {
     padding: 8px 10px;
     font-size: 12px;

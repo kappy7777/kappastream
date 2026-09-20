@@ -47,6 +47,14 @@ export interface OverlayBox {
   height: number
 }
 
+/** Min spacing between interaction-driven re-snapshots (the trailing-edge
+ *  timer lands one more this long after the LAST gated event). Kept just
+ *  above the engine's 70 ms snapshot coalesce window (SNAPSHOT_COALESCE_MS
+ *  in linux.rs) so this limiter only smooths event bursts — the engine
+ *  already thins the snapshots themselves — and hover updates feel as
+ *  immediate as the geometry-driven tooltip refreshes. */
+const INTERACT_SNAP_MS = 80
+
 /** One native surface to manage page UI over. `box` null = unmeasurable
  *  this pass (element gone / degenerate box); the surface is skipped. */
 export interface OverlaySurface {
@@ -102,6 +110,7 @@ export function startPageOverlayManager(getSurfaces: () => OverlaySurface[]): ()
   const pushedKeeps = new Map<number, number[]>()
   const seenIds = new Set<number>()
   let lastInteractSnap = 0
+  let interactTail: ReturnType<typeof setTimeout> | null = null
   const retryTimers: ReturnType<typeof setTimeout>[] = []
   const setVisible = (visible: boolean): void => {
     void invoke('mpv_set_surface_visible', { visible }).catch(() => {})
@@ -265,21 +274,37 @@ export function startPageOverlayManager(getSurfaces: () => OverlaySurface[]): ()
   document.addEventListener('transitionend', onSettle, { capture: true })
   document.addEventListener('animationend', onSettle, { capture: true })
   // Interaction refresh: clicks/keys/scrolls INSIDE a snapshotted strip
-  // (notification-menu toggles, banner buttons, the menu's list scroll)
-  // change pixels without moving geometry — one-shot re-snapshots, rate
-  // limited, gated on the event target actually being in the strip.
-  const onSnapInteract = (ev: Event): void => {
-    if (pushed.size === 0) return
-    if (!(ev.target instanceof Element) || !ev.target.closest(SNAP_OVERLAY_SELECTOR)) return
-    const now = performance.now()
-    if (now - lastInteractSnap < 150) return
-    lastInteractSnap = now
+  // (notification-menu toggles, banner buttons, the menu's list scroll) and
+  // the pointer CROSSING between a strip's rows (the search dropdown's
+  // highlight follows the hovered row) change pixels without moving
+  // geometry — one-shot re-snapshots, rate limited with a trailing edge so
+  // a burst still lands its final state, gated on the event target actually
+  // being in the strip.
+  const snapPushedSurfaces = (): void => {
     for (const [id, key] of pushed) {
       const [x, y, x2, y2] = key.split(',').slice(0, 4).map(Number)
       snapshot(id, x, y, x2 - x, y2 - y, pushedKeeps.get(id) ?? [])
     }
   }
-  const interactTypes = ['pointerdown', 'keyup', 'scroll', 'wheel'] as const
+  const onSnapInteract = (ev: Event): void => {
+    if (pushed.size === 0) return
+    if (!(ev.target instanceof Element) || !ev.target.closest(SNAP_OVERLAY_SELECTOR)) return
+    const now = performance.now()
+    const since = now - lastInteractSnap
+    if (since < INTERACT_SNAP_MS) {
+      if (interactTail) clearTimeout(interactTail)
+      interactTail = setTimeout(() => {
+        interactTail = null
+        if (pushed.size === 0) return
+        lastInteractSnap = performance.now()
+        snapPushedSurfaces()
+      }, INTERACT_SNAP_MS - since)
+      return
+    }
+    lastInteractSnap = now
+    snapPushedSurfaces()
+  }
+  const interactTypes = ['pointerdown', 'pointerover', 'keyup', 'scroll', 'wheel'] as const
   for (const ty of interactTypes) document.addEventListener(ty, onSnapInteract, { capture: true, passive: true })
   // Low-frequency safety poll — the BACKSTOP only. Covered by events:
   // {#if}-driven show/hide of every strip (childList), the tooltip's
@@ -303,6 +328,7 @@ export function startPageOverlayManager(getSurfaces: () => OverlaySurface[]): ()
     document.removeEventListener('animationend', onSettle, { capture: true })
     if (raf) cancelAnimationFrame(raf)
     clearInterval(geoIv)
+    if (interactTail) clearTimeout(interactTail)
     for (const tm of retryTimers) clearTimeout(tm)
     // Leaving native mode must not leave a hidden surface or a stale
     // overlay composited.
