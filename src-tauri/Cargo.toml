@@ -110,7 +110,7 @@ tauri-plugin-window-state = "2.4.1"
 # plain `cargo build` there compiles and links nothing mpv.
 [target.'cfg(target_os = "linux")'.dependencies]
 libmpv2 = { version = "6", optional = true }
-libloading = { version = "0.8", optional = true }
+libloading = { version = "0.9", optional = true }
 gtk = { version = "0.18", optional = true }
 glib = { version = "0.18", optional = true }
 gdk = { version = "0.18", optional = true }
