@@ -56,11 +56,19 @@ export interface OverlayBox {
 const INTERACT_SNAP_MS = 80
 
 /** One native surface to manage page UI over. `box` null = unmeasurable
- *  this pass (element gone / degenerate box); the surface is skipped. */
+ * this pass (element gone / degenerate box); the surface is skipped. */
 export interface OverlaySurface {
   /** mpv engine id (0 = the single-view player). */
   id: number
   box: OverlayBox | null
+  /** Fraction of the surface's FULL (unrolled) composition hidden above the
+   *  scroll fold — the single-view player under a partial scroll; absent/0
+   *  for unfolded surfaces (multi-view tiles). `box` is the VISIBLE
+   *  (clipped) rect, but the engine composites in full-composition space
+   *  (osd-size = the offscreen render target = visible + folded rows), so
+   *  the OSD fractions must be remapped or the bitmap lands shifted up and
+   *  stretched by the fold. */
+  hiddenTop?: number
 }
 
 /** Full-window modals: hide every surface entirely while one overlaps. */
@@ -93,11 +101,40 @@ export function keepRect(r: OverlayBox, box: OverlayBox): [number, number, numbe
   return [Math.round(ax), Math.round(ay), Math.round(bx - ax), Math.round(by - ay)]
 }
 
+/** The window-space union box as fractions of the surface's OSD space —
+ * the values the engine's ks-page handler multiplies by the (full,
+ * unrolled) osd size. With a fold (`hiddenTop` > 0) the visible band is the
+ * bottom (1 - hiddenTop) slice of the full composition, so a y fraction of
+ * the VISIBLE rect maps to hiddenTop + fy·(1 - hiddenTop) of the full one
+ * and heights shrink by (1 - hiddenTop); x is never folded. Same remap the
+ * native pointer forwarding applies (App.svelte's locate()). Zero fold is
+ * the identity — unfolded surfaces get their historical fractions. */
+export function osdFractions(
+  box: OverlayBox,
+  hiddenTop: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): [string, string, string, string] {
+  const k = Math.min(1, Math.max(0, hiddenTop))
+  return [
+    ((x - box.left) / box.width).toFixed(4),
+    (k + ((y - box.top) / box.height) * (1 - k)).toFixed(4),
+    (w / box.width).toFixed(4),
+    ((h / box.height) * (1 - k)).toFixed(4),
+  ]
+}
+
 /** The dedupe/geometry key for one surface's pushed overlay: the
- *  window-space union box plus the surface size (a surface resize with an
- *  unchanged union box must still re-push the OSD fractions). */
-export function overlayKey(x1: number, y1: number, x2: number, y2: number, box: OverlayBox): string {
-  return `${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)},${Math.round(box.width)}x${Math.round(box.height)}`
+ * window-space union box plus the surface size (a surface resize with an
+ * unchanged union box must still re-push the OSD fractions) plus the fold
+ * fraction (a simultaneous resize+scroll can change the fold while leaving
+ * box and union identical). Only the FIRST four fields are ever parsed
+ * back (the drop-retry crop) — extra fields are metadata. */
+export function overlayKey(x1: number, y1: number, x2: number, y2: number, box: OverlayBox, hiddenTop = 0): string {
+  const k = Math.min(1, Math.max(0, hiddenTop))
+  return `${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)},${Math.round(box.width)}x${Math.round(box.height)},${Math.round(k * 1e4)}`
 }
 
 /** Run the overlay manager until the returned stop function is called
@@ -152,8 +189,8 @@ export function startPageOverlayManager(getSurfaces: () => OverlaySurface[]): ()
     )
   }
   const recheck = (): void => {
-    const surfaces = getSurfaces().flatMap((s): { id: number; box: OverlayBox }[] =>
-      s.box === null ? [] : [{ id: s.id, box: s.box }],
+    const surfaces = getSurfaces().flatMap((s): { id: number; box: OverlayBox; hiddenTop?: number }[] =>
+      s.box === null ? [] : [{ id: s.id, box: s.box, hiddenTop: s.hiddenTop }],
     )
     if (surfaces.length === 0) return
     for (const s of surfaces) seenIds.add(s.id)
@@ -193,19 +230,15 @@ export function startPageOverlayManager(getSurfaces: () => OverlaySurface[]): ()
         continue
       }
       // Window-space box drives the snapshot crop + the dedupe key;
-      // fractions of the surface rect drive the OSD geometry.
-      const key = overlayKey(x1, y1, x2, y2, pr)
+      // fractions of the FULL composition (fold-remapped) drive the OSD
+      // geometry.
+      const hidden = Math.min(1, Math.max(0, s.hiddenTop ?? 0))
+      const key = overlayKey(x1, y1, x2, y2, pr, hidden)
       if (key === (pushed.get(s.id) ?? '')) continue
       pushed.set(s.id, key)
       pushedKeeps.set(s.id, keeps)
-      sendPage(
-        s.id,
-        'show',
-        ((x1 - pr.left) / pr.width).toFixed(4),
-        ((y1 - pr.top) / pr.height).toFixed(4),
-        ((x2 - x1) / pr.width).toFixed(4),
-        ((y2 - y1) / pr.height).toFixed(4),
-      )
+      const [fx, fy, fw, fh] = osdFractions(pr, hidden, x1, y1, x2 - x1, y2 - y1)
+      sendPage(s.id, 'show', fx, fy, fw, fh)
       snapshot(s.id, x1, y1, x2 - x1, y2 - y1, keeps)
     }
   }

@@ -1134,6 +1134,10 @@
             width: c.w,
             height: c.h,
           },
+          // The fold fraction: under a partial scroll the OSD composites in
+          // the FULL (unrolled) composition's space, so the overlay
+          // fractions must be remapped out of the visible-rect space.
+          hiddenTop: c.hidden,
         },
       ]
     })
