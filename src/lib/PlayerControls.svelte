@@ -5,6 +5,7 @@
   import type { LiveStatus } from './favorites.svelte.ts'
   import type { VodChapter, VodMuteSpan } from './gql'
   import { chapterAt, storyboardThumbAt, type Storyboard } from './vod-extras'
+  import { fitContentRect } from './video-fit'
   import { isTauri } from '@tauri-apps/api/core'
   import type { VideoBackend } from './video-backend'
   import { t } from './i18n/index.svelte'
@@ -179,7 +180,25 @@
     const detachState = subscribeState(backend)
 
     const v: HTMLVideoElement = video
+    // Scroll-to-volume owns the wheel only over the letterboxed PICTURE.
+    // The element fills the whole player box (object-fit: contain draws the
+    // bands INSIDE it), so the box rect must be narrowed to the fitted
+    // content rect — the same shared fit the native surface tracks — or the
+    // wheel swallows the themed side/cinema bars. Over the bars the event
+    // stays unclaimed and scrolls the page, matching the native engine,
+    // where the surface simply isn't there and the page scrolls instead.
+    // Before metadata (videoWidth 0) the fit falls back to 16:9, the shape
+    // the box will almost certainly take.
     const onWheel = (e: WheelEvent) => {
+      const r = v.getBoundingClientRect()
+      const c = fitContentRect(r.width, r.height, v.videoWidth / v.videoHeight)
+      if (
+        e.clientX < r.left + c.x ||
+        e.clientX > r.left + c.x + c.w ||
+        e.clientY < r.top + c.y ||
+        e.clientY > r.top + c.y + c.h
+      )
+        return
       e.preventDefault()
       const dir = e.deltaY < 0 ? 1 : -1
       const current = backend.muted ? 0 : backend.volume
