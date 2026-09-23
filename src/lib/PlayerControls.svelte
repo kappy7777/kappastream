@@ -518,7 +518,16 @@
         aria-label={t('volume')}
       />
 
-      <span class="time" aria-live="off">{formatTime(currentTime)} / {formatTime(duration)}</span>
+      {#if live}
+        <!-- Mirrors the native OSC bar's live badge: a --live dot + bold LIVE
+             in place of the elapsed-time readout (live playback has no
+             meaningful position/duration to show). -->
+        <span class="live-indicator" aria-live="off">
+          <span class="live-dot" aria-hidden="true"></span>LIVE
+        </span>
+      {:else}
+        <span class="time" aria-live="off">{formatTime(currentTime)} / {formatTime(duration)}</span>
+      {/if}
 
       <div class="spacer"></div>
 
@@ -928,6 +937,28 @@
     font-variant-numeric: tabular-nums;
     font-family: 'Inter', system-ui, monospace;
     letter-spacing: 0.02em;
+  }
+
+  /* Dot + bold LIVE in the theme's live red, mirroring the native OSC's
+     badge — one size below the time readout: a badge, not a readout. */
+  .live-indicator {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: calc(4px * var(--ctrl-scale));
+    font-size: calc(11px * var(--ctrl-scale));
+    font-weight: 700;
+    color: var(--live);
+    font-family: 'Inter', system-ui, monospace;
+    letter-spacing: 0.04em;
+  }
+
+  .live-indicator .live-dot {
+    flex: 0 0 auto;
+    width: calc(5px * var(--ctrl-scale));
+    height: calc(5px * var(--ctrl-scale));
+    border-radius: 50%;
+    background: var(--live);
   }
 
   .spacer {
