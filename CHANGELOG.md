@@ -7,6 +7,155 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-09-23
+
+### Linux .deb / .rpm users: update manually this once
+
+**The in-app updater cannot install this release by itself.** v1.0.5's
+Linux packages declare libmpv as a dependency (the .deb additionally
+the GStreamer libav codecs, so fresh installs can play HLS at all) —
+and the updater installs updates with plain `dpkg -i` / `rpm -U`,
+which don't resolve dependencies.
+
+- **rpm:** the update is refused up front. Nothing breaks — the old
+  version keeps running, only the update fails.
+- **deb:** the new files unpack, package configuration then fails, and
+  the app may not start again until libmpv is installed. If an in-app
+  attempt already left the package half-installed,
+  `sudo apt --fix-broken install` finishes the job.
+
+To update, download the package from the releases page and install it
+with the package manager, which pulls the new dependencies in:
+
+    sudo apt install ./kappastream_*_amd64.deb     # .deb
+    sudo dnf install ./kappastream-*_x86_64.rpm    # .rpm (zypper on openSUSE)
+
+This is a one-time break at the 1.0.4 → 1.0.5 boundary: once the
+dependencies are in place, in-app updates install normally again.
+AppImage, AUR, Windows, and macOS updates are not affected.
+
+**Also note the raised system requirements:** the .deb and .rpm are
+built on Debian 12 and need glibc 2.36 or newer (Debian 12+,
+Ubuntu 24.04+, Fedora 40+), and the AppImage is built on a newer
+stack still. Older distributions that ran 1.0.4 — Debian 11,
+Ubuntu 22.04, RHEL 9 — can no longer run either.
+
+### Added
+
+- **Native video engine (mpv) — experimental, Linux only.** A second,
+  opt-in playback engine renders video through an embedded mpv instead
+  of hls.js: flip it on under Settings → Player (off by default), with
+  a hardware-decoding option beneath it. It works in the single view
+  and in multi-view tiles, and its own on-screen control bar matches
+  the hls one — channel avatar, storyboard hover thumbnails included.
+  It ships with every Linux package: bundled in the AppImage, a
+  dependency of the .deb, .rpm, and AUR packages.
+
+  Be aware of what you're opting into. The video plays in a native
+  surface that sits above the web page, and the webview cannot draw on
+  top of it — WebKitGTK offers no transparency on this stack, so a
+  hole in the page is not possible. Page UI that overlaps the video
+  (tooltips, banners, toasts, open panels) is therefore captured as
+  snapshots of the page and composited over the video by mpv. That
+  screenshot round-trip costs tens of milliseconds per update, and
+  rapid changes are coalesced, so overlaid UI can appear a beat late
+  and move less fluidly than in hls.js mode, where the page simply
+  draws everything itself. The video playback is native mpv throughout
+  — it's the page furniture on top that degrades. That trade-off is
+  exactly why hls.js remains the default; treat the engine as the
+  experiment it is.
+
+- **Quality menus list what the stream actually offers.** Joining a
+  channel now probes the channel's real variant ladder, so the quality
+  menus — both engines, single view and tiles alike — show the
+  qualities that actually exist, intermediate rungs like 936p60
+  included, instead of a fixed generic list. (The mpv engine doesn't
+  offer audio-only playback; a stored audio-only preference falls back
+  to best there.)
+
+- **Watch-streak notices.** Twitch's consecutive-watching milestones
+  ("watched N streams in a row") now show in chat, with their own
+  "Watch streaks" toggle under Settings → Chat (on by default, like
+  every notice group).
+
+### Changed
+
+- **Redesigned Settings.** The panel is organized into titled sections
+  — Appearance, General, Playback, Chat, Favorites — UI scale is a
+  draggable scale line (0.5×–4×) with keyboard access, the language
+  picker is an even grid of buttons, and the release log lives in its
+  own Settings section now (the About dialog's Changelog button is
+  gone).
+
+- **Chat-event filters are on by default.** Sub & gift notices, raids,
+  announcements, the chat-mode indicator, moderation actions, and bits
+  no longer need to be enabled first — existing opt-outs survive
+  untouched.
+
+- **Closing the window now quits.** Running in the tray is opt-in via
+  Settings; installs that already enabled close-to-tray keep it.
+
+- **Notifications for every real offline→live transition.** The old
+  10-minute startup grace swallowed genuine transitions inside its
+  window; it's replaced by a state gate — channels that were already
+  live when first seen still stay silent, so launch remains quiet.
+
+- **Controls track the video, not the player box.** The control bar and
+  overlays now align to the fitted video image in both engines, and the
+  scroll wheel over the letterbox bars scrolls the page — the wheel only
+  claims volume over the video itself.
+
+- **Red LIVE badge, no seek bar on live.** On live streams the player
+  bar shows the red dot + LIVE badge instead of an uptime that tracked
+  your session rather than the stream, and the seek scrubber is gone —
+  the live edge is all there is to see. VODs and clips keep their
+  position/duration readout and full scrubber.
+
+- **No minimum window size.** The 960×600 floor from earlier releases
+  is gone — shrink the window as far as your window manager allows.
+
+- **Right-click no longer opens the webview's stock context menu** — the
+  controls it offered (reload, inspector) are gone from release builds
+  anyway.
+
+### Fixed
+
+- **Toggling multi-view with a stream playing no longer freezes the
+  app.** Two feedback loops (pinned-chat bookkeeping and the tile
+  session registries) could wedge the whole UI — streams kept playing
+  under a stuck loading spinner and clicks stopped registering.
+
+- **The PiP window recovers from live stalls.** A buffer underrun used to
+  leave the floating window paused forever until reopened; it now seeks
+  back to the live edge and resumes, and a blocked resume shows the
+  tap-for-sound prompt.
+
+- **Streams play on fresh Linux installs again.** The .deb and .rpm now
+  pull the GStreamer libav codec package — without it, a clean system
+  opened every stream with "HLS playback is not supported".
+
+- **The AppImage runs as a native Wayland client** on Wayland sessions,
+  instead of the forced detour through XWayland — with the NVIDIA
+  explicit-sync workaround applied automatically.
+  `KAPPASTREAM_GDK_BACKEND=x11` restores the old behavior if you need it.
+
+- **Steady 60 fps mpv playback in the AppImage.** The bundled PipeWire
+  client periodically stalled the audio clock against a system PipeWire
+  server, dropping 4–6 frames a second; the system client is now
+  preloaded instead.
+
+- **macOS panels render at the right size under UI scale.** Settings and
+  other panels no longer shrink while their zoom-scaled contents spill
+  out of them.
+
+- **Hardened media and link handling.** Every media URL now passes one
+  shared validator with a Twitch-only host allowlist before any player
+  or the VOD proxy touches it, the mpv engine runs with a private
+  runtime directory and a generic browser user agent, and the Windows
+  link opener no longer routes through cmd.exe.
+
+- **A stale VOD error no longer lands on a freshly started stream.**
+
 ## [1.0.4] - 2026-09-06
 
 ### Added

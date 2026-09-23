@@ -41,6 +41,34 @@ export interface VersionNotes {
 }
 
 export const RELEASE_NOTES: Record<string, VersionNotes> = {
+  '1.0.5': {
+    added: [
+      '🎞️ Experimental native video engine (mpv), Linux only — opt-in under Settings → Player. Video plays through embedded mpv, with its own on-screen bar (avatar and hover thumbnails included), in single view and multi-view alike.',
+      '🪞 In mpv mode, page UI over the video (tooltips, banners, toasts) is snapshot-composited — it can appear a beat late and move less fluidly than in hls.js mode. That trade-off is why hls.js stays the default.',
+      "🎚️ Quality menus list the variants the channel actually offers, intermediate rungs like 936p60 included (audio-only isn't offered in mpv mode).",
+      '🔥 Watch-streak notices ("watched N streams in a row") in chat, with their own "Watch streaks" toggle in Settings → Chat.',
+    ],
+    changed: [
+      '⚙️ Settings, redesigned: titled sections, a draggable UI-scale line (0.5×–4×) with keyboard access, an even language grid — and the changelog now lives there instead of in the About dialog.',
+      '💬 The chat-event filters are on by default.',
+      '🚪 Closing the window now quits — running in the tray is opt-in via Settings.',
+      '🔔 Favorites that go live right after launch now notify; only channels already live at first sight stay silent.',
+      '🎯 Controls track the video itself, and the letterbox bars scroll the page.',
+      '🔴 Live streams show a red LIVE badge instead of the session uptime, and no longer show a seek bar. VODs and clips keep theirs.',
+      '↕️ No minimum window size anymore — shrink the window as far as you like.',
+      "🖱️ Right-click no longer opens the webview's stock context menu.",
+    ],
+    fixed: [
+      '🧊 Toggling multi-view with a stream playing no longer freezes the app.',
+      '🪟 The PiP window recovers from live stalls instead of staying paused forever.',
+      '📦 Fresh Linux installs pull the right codec package — streams play again.',
+      '🖥️ The AppImage runs as a native Wayland client, NVIDIA workaround included.',
+      '🎬 mpv playback in the AppImage holds a steady 60 fps.',
+      '🍎 macOS panels render at the right size under UI scale.',
+      '🔒 Media URLs are validated against Twitch-only hosts; the Windows link opener dropped cmd.exe.',
+      '📼 A stale VOD error no longer lands on a freshly started stream.',
+    ],
+  },
   '1.0.4': {
     added: [
       '🔀 Merge any subset of your multi-view chats into one interleaved stream.',
