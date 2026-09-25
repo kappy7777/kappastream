@@ -50,7 +50,13 @@
     normalizeChannelName,
   } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
-  import { fetchChannelBadges, fetchClipInfo, fetchCollaborators, type Collaborator } from './lib/gql'
+  import {
+    fetchChannelBadges,
+    fetchClipInfo,
+    fetchCollaborators,
+    GQL_REFRESH_INTERVAL_MS,
+    type Collaborator,
+  } from './lib/gql'
   import { VodPlaybackController, formatVodTime } from './lib/vod-playback.svelte.ts'
   import { VodChatController, fetchVodComments } from './lib/vodchat.svelte.ts'
   import { initBadgeRefresh } from './lib/badges'
@@ -2474,6 +2480,27 @@
         /* ignore */
       }
     })()
+    // A favorite's status refreshes with the sidebar's poll batch (the
+    // subscribe below feeds those snapshots in for free). A NON-favorite
+    // would otherwise freeze at the join-time snapshot forever — poll it
+    // directly on the same cadence. The effect's teardown (channel change,
+    // disconnect, or the channel becoming a favorite — `has` is tracked)
+    // clears the loop, and the re-run's token bump strands any in-flight
+    // answer.
+    if (favoritesStore.has(channel)) return
+    const poll = setInterval(() => {
+      const tickToken = ++activeStatusToken
+      void (async () => {
+        try {
+          const s = await fetchLiveStatus(channel)
+          if (tickToken !== activeStatusToken) return
+          activeStatus = s
+        } catch {
+          /* ignore — the next tick retries */
+        }
+      })()
+    }, GQL_REFRESH_INTERVAL_MS)
+    return () => clearInterval(poll)
   })
 
   // The live status bar tracks the favorites poll: a channel's title/game/
