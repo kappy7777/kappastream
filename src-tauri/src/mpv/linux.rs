@@ -176,6 +176,7 @@ type GlTexImage2DFn =
     unsafe extern "C" fn(u32, c_int, c_int, c_int, c_int, c_int, u32, u32, *const c_void);
 type GlBindFramebufferFn = unsafe extern "C" fn(u32, u32);
 type GlFramebufferTexture2DFn = unsafe extern "C" fn(u32, u32, u32, u32, c_int);
+type GlCheckFramebufferStatusFn = unsafe extern "C" fn(u32) -> u32;
 type GlBlitFramebufferFn =
     unsafe extern "C" fn(c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, u32, u32);
 type GlDisableFn = unsafe extern "C" fn(u32);
@@ -189,6 +190,7 @@ struct GlFold {
     delete_framebuffers: GlDeleteFn,
     bind_framebuffer: GlBindFramebufferFn,
     framebuffer_texture_2d: GlFramebufferTexture2DFn,
+    check_framebuffer_status: GlCheckFramebufferStatusFn,
     blit_framebuffer: GlBlitFramebufferFn,
     disable: GlDisableFn,
 }
@@ -203,6 +205,7 @@ const GL_FRAMEBUFFER: u32 = 0x8D40;
 const GL_READ_FRAMEBUFFER: u32 = 0x8CA8;
 const GL_DRAW_FRAMEBUFFER: u32 = 0x8CA9;
 const GL_COLOR_ATTACHMENT0: u32 = 0x8CE0;
+const GL_FRAMEBUFFER_COMPLETE: u32 = 0x8CD5;
 const GL_COLOR_BUFFER_BIT: u32 = 0x4000;
 const GL_NEAREST: u32 = 0x2600;
 const GL_SCISSOR_TEST: u32 = 0x0C11;
@@ -400,6 +403,19 @@ impl OffscreenTarget {
                 tex,
                 0,
             );
+            // An INCOMPLETE framebuffer must fail the whole ensure, not sail
+            // through: rendering into one presents garbage/nothing, while
+            // fbo == 0 makes the render closure take its straight-to-window
+            // fallback (still a correct picture, just without the fold). The
+            // size is deliberately NOT cached on failure so a later frame
+            // re-attempts the allocation (transient OOM can clear).
+            let status = (gl.check_framebuffer_status)(GL_FRAMEBUFFER);
+            if status != GL_FRAMEBUFFER_COMPLETE {
+                (gl.bind_framebuffer)(GL_FRAMEBUFFER, 0);
+                (gl.delete_framebuffers)(1, &fbo);
+                (gl.delete_textures)(1, &tex);
+                return;
+            }
             (gl.bind_framebuffer)(GL_FRAMEBUFFER, 0);
             self.fbo = fbo;
             self.tex = tex;
@@ -702,6 +718,9 @@ fn init_on_main_thread(
             framebuffer_texture_2d: std::mem::transmute::<*mut c_void, GlFramebufferTexture2DFn>(
                 resolve("glFramebufferTexture2D")?,
             ),
+            check_framebuffer_status: std::mem::transmute::<*mut c_void, GlCheckFramebufferStatusFn>(
+                resolve("glCheckFramebufferStatus")?,
+            ),
             blit_framebuffer: std::mem::transmute::<*mut c_void, GlBlitFramebufferFn>(resolve(
                 "glBlitFramebuffer",
             )?),
@@ -804,6 +823,13 @@ fn init_on_main_thread(
         let full_h = h.saturating_add(fold_px);
         let mut window_fbo: c_int = 0;
         unsafe { get_integerv(GL_DRAW_FRAMEBUFFER_BINDING, &mut window_fbo) };
+        if fold_px == 0 {
+            // No fold: the offscreen path would be a 1:1 through-copy of the
+            // window (full_h == h, identity blit). Render straight into the
+            // window FBO — same picture, one full-frame copy saved per frame.
+            let _ = render.render::<GlLib>(window_fbo, w, h, true);
+            return glib::Propagation::Stop;
+        }
         let mut off = offscreen.borrow_mut();
         off.ensure(gl_fold, w, full_h);
         if off.fbo == 0 {
