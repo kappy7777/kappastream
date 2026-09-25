@@ -688,12 +688,15 @@
       }
     } else if (mainStoppedForPip) {
       mainStoppedForPip = false
-      if (channelJoined && status === 'connected') void loadStream(channelJoined, quality)
+      // channelJoined only — the chat socket's state must not gate the
+      // player's recovery (an IRC outage while PiP is open would otherwise
+      // strand the main player stopped).
+      if (channelJoined) void loadStream(channelJoined, quality)
     }
   })
 
   function resumeStream(): void {
-    if (channelJoined && status === 'connected') void loadStream(channelJoined, quality)
+    if (channelJoined) void loadStream(channelJoined, quality)
   }
 
   // Arm the sleep timer against the CURRENT stream identity, so a later channel
@@ -1908,16 +1911,15 @@
     vodCtl.clearExtras()
     disconnect()
 
+    // Record the join and start the video HERE, not on the chat socket: an
+    // unreachable irc-ws.chat.twitch.tv (network filter, IRC outage, or the
+    // reconnect budget exhausted) must not leave the player empty while the
+    // channel is joined — chat reconnects on its own and needs no help from
+    // the player path either way.
+    channelJoined = channel
+    void startStream(channel)
+
     chatSession = new ChatSession(channel, {
-      // The session reports the socket-level JOIN; App couples that to the
-      // player and records the joined channel. A pure reconnect (drop +
-      // resume of the SAME channel) must NOT restart the stream — the player
-      // never dropped.
-      onOpen: (isReconnect) => {
-        const needsInitialStream = !isReconnect || channelJoined !== channel
-        channelJoined = channel
-        if (needsInitialStream) void startStream(channel)
-      },
       onPrivmsg: (ev) => fireMentionNotification(ev.message, ev.displayName, ev.color),
     })
     chatSession.start() // sets status 'connecting' + kicks the emote load

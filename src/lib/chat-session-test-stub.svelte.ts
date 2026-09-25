@@ -7,6 +7,9 @@ export const chatStubControl = {
   // When true, start() schedules a reconnect-style drop (status 'connecting',
   // no further onOpen) shortly after the initial connect.
   dropAfterConnect: false,
+  // When true, the socket NEVER opens: start() stays 'connecting' and onOpen
+  // is never called — the IRC-unreachable scenario.
+  neverConnect: false,
 }
 
 export const chatStubSessions: {
@@ -29,6 +32,10 @@ export class ChatSessionTestStub {
     chatStubSessions.push(this)
   }
   start(): void {
+    if (chatStubControl.neverConnect) {
+      this.status = 'connecting'
+      return
+    }
     this.status = 'connected'
     this.opts.onOpen?.(false)
     if (chatStubControl.dropAfterConnect) {

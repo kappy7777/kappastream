@@ -87,9 +87,10 @@ vi.mock('@tauri-apps/api/window', () => {
 
 vi.mock('./chat-session.svelte', () => {
   // Chat is not under test — a no-op session keeps the app offline (no
-  // sockets, no emote fetches). start() flips to connected and fires onOpen,
-  // mirroring the real socket-open coupling (the stream start + the player
-  // subtree's render gate both hang off it).
+  // sockets, no emote fetches). start() flips to connected and fires onOpen
+  // like the real socket-open coupling; the player no longer hangs off it
+  // (the stream starts in connect() itself), but nothing here depends on
+  // that either way.
   class ChatSession {
     channel: string
     opts: { onOpen?: (isReconnect: boolean) => void }

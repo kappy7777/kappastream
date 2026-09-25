@@ -142,6 +142,7 @@ afterEach(() => {
   if (view) void unmount(view)
   view = null
   chatStubControl.dropAfterConnect = false
+  chatStubControl.neverConnect = false
   chatStubSessions.length = 0
   settings.setMpvEngine(false)
   localStorage.clear()
@@ -184,5 +185,36 @@ describe('single-view player survives a chat reconnect drop', () => {
     // THE PIN: same element, still mounted, still exactly one video.
     expect(document.contains(video)).toBe(true)
     expect(document.querySelectorAll('video.video').length).toBe(1)
+  }, 15000)
+
+  it('the video plays even when the chat socket never opens (IRC unreachable)', async () => {
+    chatStubControl.neverConnect = true
+    localStorage.setItem('app-last-seen-version-v1', '99.0.0')
+    const target = document.createElement('div')
+    document.body.appendChild(target)
+    view = mount(App, { target })
+    await sleep(150)
+
+    q('.add-fav-btn').click()
+    await sleep(30)
+    const input = q('.add-fav-input') as HTMLInputElement
+    input.value = 'chan1'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await sleep(30)
+    ;(q('.add-fav-submit') as HTMLButtonElement).click()
+    await sleep(100)
+    const rows = document.querySelectorAll<HTMLButtonElement>('.fav')
+    rows[0]!.click()
+    await sleep(250)
+
+    // Chat stayed in 'connecting' the whole time — the stream start must
+    // not have waited for it.
+    expect(chatStubSessions[chatStubSessions.length - 1]!.status).toBe('connecting')
+    const video = document.querySelector('video.video')
+    expect(video).toBeTruthy()
+    expect(hlsMock.instances.length).toBeGreaterThan(0)
+    emitManifestParsed()
+    await sleep(120)
+    expect(document.contains(video)).toBe(true)
   }, 15000)
 })
