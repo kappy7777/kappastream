@@ -51,6 +51,11 @@ export class VodPlaybackController {
   private extrasToken = 0
   private resumeBarTimer: ReturnType<typeof setTimeout> | null = null
   private lastSaveAt = 0
+  /** The pending seekable-range wait from restore(): torn down on the next
+   *  restore, on dispose — or by its own success/tries-exhausted paths. A
+   *  stale one left on the element could seek a LATER VOD to the position
+   *  captured for this one. */
+  private pendingRestore: (() => void) | null = null
 
   constructor(
     private readonly opts: {
@@ -65,6 +70,7 @@ export class VodPlaybackController {
   /** Reset the scrub-bar extras. Called on every playback-mode change. */
   clearExtras(): void {
     this.extrasToken++
+    this.dropPendingRestore()
     this.chapters = []
     this.mutedSpans = []
     this.storyboard = null
@@ -125,6 +131,11 @@ export class VodPlaybackController {
    * net for the rare case it does not.
    */
   restore(videoId: string): void {
+    // Any new restore invalidates the previous wait, whatever its state —
+    // the paths below return early when there is nothing to resume, and a
+    // listener left over from an earlier VOD would seek THIS element to the
+    // OLD VOD's captured position.
+    this.dropPendingRestore()
     const saved = vodPositions.get(videoId)
     if (!saved || saved.position < 30) return
     const backend = this.opts.getBackend()
@@ -151,15 +162,25 @@ export class VodPlaybackController {
       this.showResumeBar(videoId, saved.position)
       return
     }
+    const teardown = (): void => {
+      el.removeEventListener('progress', onProgress)
+      if (this.pendingRestore === teardown) this.pendingRestore = null
+    }
     const onProgress = (): void => {
       if (attempt()) {
-        el.removeEventListener('progress', onProgress)
+        teardown()
         this.showResumeBar(videoId, saved.position)
       } else if (++tries > 200) {
-        el.removeEventListener('progress', onProgress)
+        teardown()
       }
     }
     el.addEventListener('progress', onProgress)
+    this.pendingRestore = teardown
+  }
+
+  private dropPendingRestore(): void {
+    this.pendingRestore?.()
+    this.pendingRestore = null
   }
 
   /** Restart the VOD from 0: seek, play, forget the saved position, drop the bar. */
@@ -199,6 +220,7 @@ export class VodPlaybackController {
   /** Drop pending timers (App unmount). */
   dispose(): void {
     this.dismissResumeBar()
+    this.dropPendingRestore()
     this.extrasToken++
   }
 }
