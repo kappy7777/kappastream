@@ -9,16 +9,18 @@ let cachedFor = ''
 let cachedRe: RegExp | null = null
 
 /**
- * The mention matcher for a username: `(?:^|\s)@name(?![a-z0-9_])`, case
- * insensitive. `@name` mid-word or followed by a word character does not
- * count as a mention. Returns null for an empty username; the RegExp is
- * rebuilt only when the username changes.
+ * The mention matcher for a username: `(?:^|\W)@name(?![a-z0-9_])`, case
+ * insensitive. The @ needs a NON-WORD character (or the string start) before
+ * it — whitespace, but also "(@name" or "[@name]" — while `@name` glued to a
+ * word ("email@name") still does not count; nor does a word-character tail
+ * after the name. Returns null for an empty username; the RegExp is rebuilt
+ * only when the username changes.
  */
 export function mentionMatcher(username: string): RegExp | null {
   if (!username) return null
   if (!cachedRe || cachedFor !== username) {
     cachedFor = username
-    cachedRe = new RegExp('(?:^|\\s)@' + escapeRegex(username) + '(?![a-z0-9_])', 'i')
+    cachedRe = new RegExp('(?:^|\\W)@' + escapeRegex(username) + '(?![a-z0-9_])', 'i')
   }
   return cachedRe
 }

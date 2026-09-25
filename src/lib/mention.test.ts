@@ -45,3 +45,18 @@ describe('mentionMatcher', () => {
     expect(bob2.test('hi @bob!')).toBe(true)
   })
 })
+
+describe('mentionMatcher — non-word boundary before the @', () => {
+  it('matches a mention wrapped in punctuation: "(@name", "[@name]"', () => {
+    const re = mentionMatcher('bob')!
+    expect(re.test('(@bob)')).toBe(true)
+    expect(re.test('[@bob]')).toBe(true)
+    expect(re.test('(@bob')).toBe(true)
+  })
+
+  it('still rejects a word character before the @', () => {
+    const re = mentionMatcher('bob')!
+    expect(re.test('email@bob')).toBe(false)
+    expect(re.test('x@bob')).toBe(false)
+  })
+})
