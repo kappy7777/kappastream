@@ -749,6 +749,28 @@
   // the PiP handoff.
   const playbackSession = new PlaybackSession()
 
+  // Load staleness, independent of playbackSession.generation on purpose:
+  // generation is ALSO bumped by the teardownPlayer() that attachMediaHls /
+  // attachClipMp4 run mid-load (an engine-swap bookkeeping bump, not a "user
+  // moved on" bump), so it cannot double as the load token. Every load start
+  // (loadStream / loadVod / playClip) bumps and captures the token; the
+  // leave/stop paths (disconnect / disconnectStream / backToLive) bump it to
+  // invalidate any load still awaiting its resolve or attach. A stale load
+  // must return silently — it may not touch playerStatus, playerError,
+  // nativeVideoActive, pipController or vodCtl, which by then belong to
+  // whatever the user moved on to.
+  let loadToken = 0
+  // Engine-ownership ticket for the native path. attachMpv resolves its
+  // loadfile LATE relative to the caller's awaits, and every App load shares
+  // ONE mpv engine, so "stale" alone cannot say whether stopping is safe: a
+  // NEWER loadfile may already be queued on the same engine (a stop now would
+  // kill it), or nobody may own the engine at all (the stop raced past
+  // teardown, which could not stop a backend it had not armed yet — the
+  // stale load must stop itself). Issuers capture the ticket before the
+  // attachMpv call; after the await, a mismatch means a newer load owns the
+  // engine (leave it alone), a match on a stale load means stop it.
+  let mpvLoadSeq = 0
+
   // Stall self-recovery for live playback (esp. low-latency, whose tiny
   // buffer underruns on any hiccup). Because the live edge keeps advancing
   // while stalled, currentTime falls behind the live window and the element
@@ -1630,6 +1652,7 @@
   // `keepPip` keeps the floating PiP window alive (used when stopping the main
   // player because PiP just became the active player).
   function disconnectStream(keepPip = false): void {
+    loadToken++
     teardownPlayer(keepPip)
     vodChat.stop()
     playerStatus = 'idle'
@@ -1688,6 +1711,7 @@
     q: string,
     url: string,
     generation: number,
+    token: number,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!isCurrentStream(generation, channel, q)) return { ok: false, error: 'stale stream request' }
 
@@ -1696,11 +1720,19 @@
     // HTML path for THIS item (toast + toggle stays on).
     const mpv = mpvSelected ? mpvBackend : null
     if (mpv) {
+      const seq = ++mpvLoadSeq
       const attach = await playbackSession.attachMpv(mpv, {
         url,
         kind: 'live',
         hwdec: settings.mpvHwdec,
       })
+      if (token !== loadToken) {
+        // The load lost the race while the engine was taking our loadfile.
+        // Only stop the engine when no newer load claimed it (see mpvLoadSeq)
+        // — a newer loadfile queued behind ours must not be killed.
+        if (seq === mpvLoadSeq) void mpv.stop()
+        return { ok: false, error: 'stale stream request' }
+      }
       if (attach.ok) {
         nativeVideoActive = true
         return attach
@@ -1708,6 +1740,7 @@
       showNotifToast(t('toast_mpvEngineFailed', { error: attach.error }))
     }
 
+    if (token !== loadToken) return { ok: false, error: 'stale stream request' }
     if (!videoEl) return { ok: false, error: 'no video element' }
 
     // On Windows the live manifest must go through the ksvod proxy (Chromium
@@ -1787,6 +1820,7 @@
 
   async function loadStream(channel: string, q: string): Promise<void> {
     const generation = playbackSession.nextGeneration()
+    const token = ++loadToken
     playerError = ''
     playerStatus = 'resolving'
     playbackSession.clearStallRecover()
@@ -1835,7 +1869,7 @@
     }
 
     playerStatus = 'loading'
-    const attach = await attachStream(channel, q, resolved.url, generation)
+    const attach = await attachStream(channel, q, resolved.url, generation, token)
     if (!isCurrentStream(generation, channel, q)) return
     if (attach.ok) {
       // Hand the resolved playlist URL to the PiP controller. If the floating
@@ -1903,6 +1937,7 @@
   }
 
   function disconnect(): void {
+    loadToken++
     chatSession?.dispose()
     chatSession = null // deriveds (status/emoteStatus/roomState/…) fall back to idle
     disconnectStream()
@@ -2046,7 +2081,16 @@
 
   // Attach an HLS source (VOD playlist) with a non-low-latency config and no
   // live generation coupling. Reuses the live hls.js path's error discipline.
-  async function attachMediaHls(url: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  // The staleness predicate is checked BEFORE the destructive teardownPlayer()
+  // and handed to the session for its async callbacks: a load that lost the
+  // race (user went back to live, opened another VOD, stopped the player)
+  // must not destroy the CURRENT stream's hls instance to make room for a
+  // playlist nobody wants anymore.
+  async function attachMediaHls(
+    url: string,
+    isCurrent: () => boolean,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!isCurrent()) return { ok: false, error: 'stale stream request' }
     if (!videoEl) return { ok: false, error: 'no video element' }
     teardownPlayer()
     if (Hls.isSupported()) {
@@ -2054,7 +2098,7 @@
         video: videoEl,
         url,
         lowLatency: false,
-        isCurrent: () => true,
+        isCurrent,
         // The VOD error taxonomy predates the shared engine and stays: a
         // plain 'media error: <type>', no networkish split, no details
         // suffix.
@@ -2063,14 +2107,21 @@
     }
     if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
       return await playbackSession.attachNative(videoEl, url, {
+        isCurrent,
         errorPrefix: 'playback failed: ',
       })
     }
     return { ok: false, error: 'HLS playback is not supported' }
   }
 
-  // Attach a direct MP4 (clip) — native <video>, no hls.js.
-  async function attachClipMp4(url: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Attach a direct MP4 (clip) — native <video>, no hls.js. Same staleness
+  // discipline as attachMediaHls: the teardown must never run for a load the
+  // user has already moved on from.
+  async function attachClipMp4(
+    url: string,
+    isCurrent: () => boolean,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!isCurrent()) return { ok: false, error: 'stale stream request' }
     if (!videoEl) return { ok: false, error: 'no video element' }
     teardownPlayer()
     try {
@@ -2087,6 +2138,7 @@
   // VodPlaybackController near the top of this file.)
 
   async function loadVod(videoId: string, q: string, startAt?: number): Promise<void> {
+    const token = ++loadToken
     playerError = ''
     playerStatus = 'resolving'
     type ResolveRaw = {
@@ -2100,11 +2152,13 @@
     try {
       raw = (await invoke('resolve_vod', { videoId, quality: q })) as ResolveRaw
     } catch (err) {
+      if (token !== loadToken) return
       const msg = typeof err === 'string' ? err : err instanceof Error ? err.message : JSON.stringify(err)
       playerStatus = 'error'
       playerError = 'invoke failed: ' + msg
       return
     }
+    if (token !== loadToken) return
     if (!raw.ok || !raw.url) {
       playerStatus = 'error'
       const base = raw.error ?? 'failed to load video'
@@ -2120,12 +2174,19 @@
     const mpv = mpvSelected ? mpvBackend : null
     if (mpv) {
       const resume = startAt ?? vodPositions.get(videoId)?.position ?? 0
+      const seq = ++mpvLoadSeq
       const attach = await playbackSession.attachMpv(mpv, {
         url: raw.url,
         kind: 'vod',
         hwdec: settings.mpvHwdec,
         startAt: resume > 0.5 ? resume : undefined,
       })
+      if (token !== loadToken) {
+        // Same ownership rule as attachStream's native branch: stop only
+        // when no newer loadfile claimed the shared engine behind ours.
+        if (seq === mpvLoadSeq) void mpv.stop()
+        return
+      }
       if (attach.ok) {
         playerStatus = 'playing'
         nativeVideoActive = true
@@ -2148,7 +2209,8 @@
     // the manifest resolve against the ksvod base URL automatically. The exact
     // scheme form differs per platform (see toKsvodProxyUrl).
     const proxyUrl = toKsvodProxyUrl(raw.url, isWindows)
-    const attach = await attachMediaHls(proxyUrl)
+    const attach = await attachMediaHls(proxyUrl, () => token === loadToken)
+    if (token !== loadToken) return
     if (attach.ok) {
       playerStatus = 'playing'
       if (channelJoined)
@@ -2186,6 +2248,7 @@
 
   async function playClip(clip: ChannelClip): Promise<void> {
     if (!channelJoined) return
+    const token = ++loadToken
     vodChat.stop()
     vodCtl.clearExtras()
     lastPlayedClip = clip
@@ -2213,11 +2276,13 @@
     try {
       raw = (await invoke('resolve_clip', { slug: clip.slug, quality: 'best' })) as ResolveRaw
     } catch (err) {
+      if (token !== loadToken) return
       const msg = typeof err === 'string' ? err : err instanceof Error ? err.message : JSON.stringify(err)
       playerStatus = 'error'
       playerError = 'invoke failed: ' + msg
       return
     }
+    if (token !== loadToken) return
     if (!raw.ok || !raw.url) {
       playerStatus = 'error'
       const base = raw.error ?? 'failed to load clip'
@@ -2229,11 +2294,17 @@
     // Native engine: the resolved MP4 URL directly.
     const mpv = mpvSelected ? mpvBackend : null
     if (mpv) {
+      const seq = ++mpvLoadSeq
       const attach = await playbackSession.attachMpv(mpv, {
         url: raw.url,
         kind: 'clip',
         hwdec: settings.mpvHwdec,
       })
+      if (token !== loadToken) {
+        // Same ownership rule as attachStream's native branch.
+        if (seq === mpvLoadSeq) void mpv.stop()
+        return
+      }
       if (attach.ok) {
         playerStatus = 'playing'
         nativeVideoActive = true
@@ -2251,7 +2322,8 @@
       }
       showNotifToast(t('toast_mpvEngineFailed', { error: attach.error }))
     }
-    const attach = await attachClipMp4(raw.url)
+    const attach = await attachClipMp4(raw.url, () => token === loadToken)
+    if (token !== loadToken) return
     if (attach.ok) {
       playerStatus = 'playing'
       // isLive is a literal false here by necessity: playClip flow-narrows
@@ -2283,6 +2355,7 @@
 
   // Restore the live stream + chat for the current channel.
   function backToLive(): void {
+    loadToken++
     const ch = channelJoined
     vodChat.stop()
     vodCtl.clearExtras()
