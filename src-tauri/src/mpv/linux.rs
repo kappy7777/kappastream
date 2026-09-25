@@ -1025,8 +1025,10 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
     let clamp = |v: f64, max: usize| -> usize { (v.floor() as i64).clamp(0, max as i64) as usize };
     let x1 = clamp(f64::from(x) * scale_x, sw);
     let y1 = clamp(f64::from(y) * scale_y, sh);
-    let x2 = clamp(f64::from(x + w) * scale_x, sw);
-    let y2 = clamp(f64::from(y + h) * scale_y, sh);
+    // Saturating, matching the keep-rect arithmetic above: an edge-riding
+    // crop against an i32 overflow must clamp, not wrap negative.
+    let x2 = clamp(f64::from(x.saturating_add(w)) * scale_x, sw);
+    let y2 = clamp(f64::from(y.saturating_add(h)) * scale_y, sh);
     let (cw, ch) = (x2.saturating_sub(x1), y2.saturating_sub(y1));
     if cw == 0 || ch == 0 {
         return;
