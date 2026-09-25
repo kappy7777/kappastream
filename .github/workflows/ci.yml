@@ -25,10 +25,13 @@ concurrency:
 jobs:
   check:
     name: check
-    # ubuntu-22.04 is pinned (not ubuntu-latest) so CI matches the oldest
-    # glibc the Tauri AppImage must run on and so the webkit2gtk-4.1 dev
-    # packages resolve consistently. See release.yml for the full rationale.
-    runs-on: ubuntu-22.04
+    # ubuntu-24.04 (not 22.04): the embedded-mpv engine must compile and
+    # link against the libmpv major every release actually ships — libmpv2
+    # (mpv ≥ 0.35, provided by debian:12 / ubuntu-24.04 in release.yml).
+    # Jammy only had libmpv1 (mpv 0.34), so its test binaries exercised a
+    # different ABI than users run. 24.04 also keeps the apt names resolving
+    # exactly like the release workflow's ubuntu-24.04 AppImage job.
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -116,8 +119,19 @@ jobs:
       - name: Clippy (deny warnings)
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
+      - name: Generate comma-decimal locale (mpv engine test)
+        # The one Rust test that creates a real mpv core needs a
+        # comma-decimal locale (de_DE/fr_FR) or it silently skips itself —
+        # and runners ship none. Generating one makes the mechanism test
+        # actually exercise libmpv against the locale that broke it.
+        run: |
+          command -v locale-gen >/dev/null || sudo apt-get install -y locales
+          sudo locale-gen de_DE.UTF-8
+
       - name: Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        # --nocapture so the locale test's "mechanism test skipped" eprintln
+        # (its only ran-vs-skipped signal) is visible in the log.
+        run: cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture
 
       # AUR state parity: the -git PKGBUILD builds with --no-default-features
       # (updater off — pacman owns updates) but re-adds mpv-embed, so the
