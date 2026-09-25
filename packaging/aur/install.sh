@@ -50,7 +50,12 @@ uninstall_files() {
 		"$LIBDIR/kappastream" \
 		"$PREFIX/share/applications/kappastream.desktop" \
 		"$PREFIX/share/metainfo/dev.kappy.kappastream.metainfo.xml"
-	rm -f "$PREFIX/share/icons/hicolor"/{32x32,64x64,128x128,256x256,512x512}/apps/kappastream.png
+	# POSIX for-loop: this script runs under /bin/sh (dash on Debian/Ubuntu),
+	# which does not brace-expand, so a {32x32,...} glob would try to remove a
+	# literally-named file and leave every icon behind.
+	for size in 32x32 64x64 128x128 256x256 512x512; do
+		rm -f "$PREFIX/share/icons/hicolor/$size/apps/kappastream.png"
+	done
 	rmdir "$LIBDIR" 2>/dev/null || true
 	update-desktop-database -q "$PREFIX/share/applications" 2>/dev/null || true
 	gtk-update-icon-cache -q "$PREFIX/share/icons/hicolor" 2>/dev/null || true
