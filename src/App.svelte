@@ -266,7 +266,7 @@
   // stream). 'vod' / 'clip' swap the player source to a past broadcast (HLS via
   // resolve_vod) or a clip (direct MP4 via GQL videoQualities) and STOP live
   // chat — a VOD/clip has no live chat. `playerActive` reuses the player
-  // subtree (which otherwise renders only when chat is connected) so the
+  // subtree (which otherwise renders only while a channel is joined) so the
   // <video> + controls exist in VOD/clip mode too. Restored to 'live' on any
   // channel (re)connect (see connect()).
   type Playback =
@@ -2829,11 +2829,16 @@
   })
 
   const isPlayerBusy = $derived(playerStatus === 'resolving' || playerStatus === 'loading')
-  // The player subtree (video + controls) renders when chat is connected OR a
-  // VOD/clip is playing. Declared alongside the other player deriveds (after
-  // status has been reassigned in connect()/disconnect(), so it is not
-  // control-flow-narrowed to its initial literal).
-  const playerActive = $derived(status === 'connected' || playback.kind !== 'live')
+  // The player subtree (video + controls) renders while a channel is joined
+  // OR a VOD/clip is playing. It is derived from the JOINED CHANNEL, never
+  // the chat socket: an IRC drop flips status to 'connecting' on its way to
+  // a reconnect, and unmounting the <video> for that window pauses the
+  // detached media (WebKit) while the reconnect path deliberately never
+  // restarts the stream — a black player with live controls. Declared
+  // alongside the other player deriveds (after channelJoined has been
+  // reassigned in connect()/disconnect(), so it is not control-flow-narrowed
+  // to its initial literal).
+  const playerActive = $derived(channelJoined !== null || playback.kind !== 'live')
   const showPlayerOverlay = $derived(
     playerStatus === 'resolving' ||
       playerStatus === 'loading' ||
