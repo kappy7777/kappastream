@@ -275,10 +275,18 @@
   // pins nobody sees. The store rides App.svelte's favorites-poll tick; this
   // effect just moves the target when the tab (or the toggle) changes. There
   // is no status batch for tiles, so the store resolves the numeric id once
-  // per channel (memoized), never per poll.
+  // per channel (memoized), never per poll. MultiView is the store's SOLE
+  // writer while mounted — App's own effect stands down for the whole
+  // multi-view window (two writers made the target depend on effect flush
+  // order across the toggle) — and hands the store back cleared on unmount
+  // (Svelte runs the child's destroy before the parent's re-run effects, so
+  // App's re-target lands after this clear, not under it).
   $effect(() => {
     void settings.chatPinned // a toggle flip re-targets at once
     pinnedChat.setTarget(activeSession?.channel ?? null, null)
+  })
+  onDestroy(() => {
+    pinnedChat.setTarget(null, null)
   })
   const activePin = $derived(settings.chatPinned && !mergedView ? pinnedChat.visiblePin : null)
   // Chat modes the floating chat-mode pill renders for the active tile's

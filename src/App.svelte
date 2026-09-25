@@ -2532,13 +2532,16 @@
   // one the status data already carries (activeStatus.userId rides the same
   // GQL batch as the status bar) — it is never re-resolved; until it lands
   // the store simply holds off. MultiView owns the target while multi-view
-  // is on (its active chat tab), hence the null here. With the toggle off
-  // the store issues no request at all (and hides any pin immediately).
+  // is on (its active chat tab): this effect writes NOTHING in that window —
+  // two writers made the store's state depend on which component's effect
+  // flushed first across the toggle. With the toggle off the store issues no
+  // request at all (and hides any pin immediately).
   $effect(() => {
+    if (multiView) return
     void settings.chatPinned // a toggle flip re-targets at once
     const channel = channelJoined
     const s = activeStatus
-    const live = !multiView && playback.kind === 'live'
+    const live = playback.kind === 'live'
     const userId = live && s.state === 'live' ? (s.userId ?? null) : null
     pinnedChat.setTarget(live && userId ? channel : null, userId)
   })
