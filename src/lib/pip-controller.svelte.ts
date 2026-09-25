@@ -196,11 +196,21 @@ class PipController {
     // last rect) on its way out, which drives onPipClosed().
     void emit(EV_DO_CLOSE)
     // Safety net: if the PiP window is unresponsive and never reports closed,
-    // restore main audio so the user is not stuck muted.
+    // destroy it outright and restore main audio. Without the destroy a hung
+    // window would float on forever — always-on-top, undecorated,
+    // skip-taskbar, unreachable — and the NEXT open would fail on the
+    // duplicate label.
     if (this.closeFallbackTimer) clearTimeout(this.closeFallbackTimer)
     this.closeFallbackTimer = setTimeout(() => {
       this.closeFallbackTimer = null
-      if (this.isOpen) void this.onPipClosed()
+      if (!this.isOpen) return
+      void (async () => {
+        // getByLabel is async in the Tauri v2 API; a failed destroy (the
+        // window already dying on its own) must still close the controller.
+        const orphan = await WebviewWindow.getByLabel(PIP_LABEL)
+        if (orphan) void orphan.destroy().catch(() => {})
+        void this.onPipClosed()
+      })()
     }, 1500)
   }
 

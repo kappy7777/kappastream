@@ -22,6 +22,7 @@ const tauri = vi.hoisted(() => ({
   listeners: new Map<string, (e: { payload: unknown }) => void>(),
   tauriEnabled: true,
   windowsCreated: 0,
+  windowsDestroyed: 0,
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -39,16 +40,30 @@ vi.mock('@tauri-apps/api/event', () => ({
     })
   },
 }))
-vi.mock('@tauri-apps/api/webviewWindow', () => ({
-  WebviewWindow: class {
+vi.mock('@tauri-apps/api/webviewWindow', () => {
+  // The created-window registry getByLabel reads from (the pip label is the
+  // only one the controller ever looks up).
+  const created: { destroyed: boolean }[] = []
+  class WebviewWindow {
+    destroyed = false
     once(_event: string, _cb: () => void): void {
       /* pip tests never trigger it */
     }
+    destroy(): Promise<void> {
+      this.destroyed = true
+      tauri.windowsDestroyed++
+      return Promise.resolve()
+    }
     constructor(_label: string, _opts: unknown) {
       tauri.windowsCreated++
+      created.push(this)
     }
-  },
-}))
+    static getByLabel(label: string): Promise<unknown> {
+      return Promise.resolve(label === 'pip' ? (created[created.length - 1] ?? null) : null)
+    }
+  }
+  return { WebviewWindow }
+})
 
 type PipMod = typeof import('./pip-controller.svelte')
 let P: PipMod
@@ -83,6 +98,7 @@ beforeEach(async () => {
   tauri.listeners.clear()
   tauri.tauriEnabled = true
   tauri.windowsCreated = 0
+  tauri.windowsDestroyed = 0
   P = await import('./pip-controller.svelte')
   await flush()
 })
@@ -218,5 +234,31 @@ describe('pip-controller: clearStream + close lifecycle', () => {
     expect(P.pipController.isOpen).toBe(false)
     expect(P.pipController.overridingMainMute).toBe(false)
     expect(el.muted).toBe(false) // resynced to the persisted truth
+  })
+})
+
+describe('pip-controller: hung-window close fallback', () => {
+  it('destroys the orphan window when ks://pip-closed never arrives', async () => {
+    P.pipController.setStream({ url: 'https://x/1.m3u8', channel: 'chan1', quality: 'best' })
+    await P.pipController.toggle()
+    expect(P.pipController.isOpen).toBe(true)
+    expect(tauri.windowsCreated).toBe(1)
+
+    // Close WITHOUT delivering ks://pip-closed — the PiP webview is hung.
+    // After the 1.5 s fallback the orphan must be destroyed (an
+    // always-on-top, undecorated, skip-taskbar window nothing else can
+    // reach, and the next open would fail on the duplicate label) and the
+    // controller must be closed.
+    vi.useFakeTimers()
+    try {
+      const closing = P.pipController.toggle()
+      expect(payloadsOf(EV_DO_CLOSE)).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(1600)
+      expect(tauri.windowsDestroyed).toBe(1)
+      expect(P.pipController.isOpen).toBe(false)
+      await closing
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
