@@ -146,5 +146,20 @@ class UpdateStore {
 
 export const updateStore = new UpdateStore()
 
+/**
+ * The banner's one-line rendering of an update's notes: plain text, trimmed,
+ * whitespace collapsed (the banner is a single line), capped at ~300 chars
+ * with an ellipsis, and hidden (null) when empty or when it is only the
+ * workflow's default "kappastream <version>" placeholder. The value comes
+ * from latest.json on the network, so it must never be rendered as HTML.
+ */
+export function displayUpdateNotes(raw: string | null, version: string | null): string | null {
+  const s = (raw ?? '').replace(/\s+/g, ' ').trim()
+  if (!s) return null
+  if (version && s === `kappastream ${version}`) return null
+  if (s.length > 300) return s.slice(0, 300).trimEnd() + '…'
+  return s
+}
+
 // Re-export for tests / typing only.
 export type { UpdateState }

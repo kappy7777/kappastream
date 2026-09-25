@@ -338,6 +338,7 @@ export const pt: Record<TKey, string> = {
   update_available: 'kappastream v{version} está disponível',
   update_youHave: ' (tens a v{version})',
   update_sigError: 'não foi possível verificar a assinatura da atualização',
+  update_pkgDeps: 'uma dependência do sistema mudou; instale a atualização pelo seu gerenciador de pacotes',
   update_timeout: 'o descarregamento expirou',
   update_network: 'um problema de rede bloqueou o descarregamento',
   update_downloadFailed: 'não foi possível descarregar a atualização',

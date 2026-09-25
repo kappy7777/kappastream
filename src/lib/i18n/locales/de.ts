@@ -341,6 +341,7 @@ export const de: Record<TKey, string> = {
   update_available: 'kappastream v{version} ist verfügbar',
   update_youHave: ' (du hast v{version})',
   update_sigError: 'die Update-Signatur konnte nicht verifiziert werden',
+  update_pkgDeps: 'eine Systemabhängigkeit hat sich geändert; installiere das Update über deine Paketverwaltung',
   update_timeout: 'Zeitüberschreitung beim Download',
   update_network: 'ein Netzwerkproblem hat den Download blockiert',
   update_downloadFailed: 'das Update konnte nicht heruntergeladen werden',

@@ -364,6 +364,7 @@ export const en = {
   update_available: 'kappastream v{version} is available',
   update_youHave: ' (you have v{version})',
   update_sigError: 'the update signature could not be verified',
+  update_pkgDeps: 'a system dependency changed; install the update with your package manager',
   update_timeout: 'the download timed out',
   update_network: 'a network problem blocked the download',
   update_downloadFailed: 'the update could not be downloaded',

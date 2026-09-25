@@ -219,6 +219,36 @@ describe('getters', () => {
   })
 })
 
+describe('displayUpdateNotes (the banner one-line filter)', () => {
+  const display = (raw: string | null, version: string | null = '1.0.5'): string | null =>
+    U.displayUpdateNotes(raw, version)
+
+  it('null/blank bodies stay hidden', () => {
+    expect(display(null)).toBeNull()
+    expect(display('')).toBeNull()
+    expect(display('   \n\t  ')).toBeNull()
+  })
+
+  it('the workflow default "kappastream <version>" stays hidden', () => {
+    expect(display('kappastream 1.0.5')).toBeNull()
+    expect(display('kappastream 1.0.5', '1.0.5')).toBeNull()
+  })
+
+  it('a real note renders trimmed with whitespace collapsed to one line', () => {
+    expect(display('  Breaking: the deb now needs libmpv2.\n  Update via your package manager.  ')).toBe(
+      'Breaking: the deb now needs libmpv2. Update via your package manager.',
+    )
+  })
+
+  it('caps at ~300 characters with an ellipsis', () => {
+    const long = 'x'.repeat(400)
+    const out = display(long)
+    expect(out).not.toBeNull()
+    expect(out!.length).toBe(301) // 300 chars + the ellipsis
+    expect(out!.endsWith('…')).toBe(true)
+  })
+})
+
 describe('apply() — the explicit-click path', () => {
   async function makeAvailable(downloadAndInstall: FakeUpdateOpts['downloadAndInstall']): Promise<void> {
     updater.checkImpl = async () => fakeUpdate({ downloadAndInstall })

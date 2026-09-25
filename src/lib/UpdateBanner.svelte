@@ -3,7 +3,7 @@
   // App.svelte. Driven entirely by `updateStore`. A failed/absent check never
   // shows anything (the store stays `idle`); this component only renders when
   // an update is actually available (or a user-initiated install is in flight).
-  import { updateStore } from './update.svelte'
+  import { updateStore, displayUpdateNotes } from './update.svelte'
   import { t } from './i18n/index.svelte'
 
   function fmtBytes(n: number): string {
@@ -23,6 +23,14 @@
     const s = raw.toLowerCase()
     if (s.includes('minisign') || s.includes('signature') || s.includes('verif')) {
       return t('update_sigError')
+    }
+    // Package-manager install failures (deb/rpm): the updater replaced the
+    // package out from under dpkg/rpm and a dependency changed — the user
+    // must let the package manager perform this one. Matched before the
+    // generic HTTP-status arm, whose bare-number regex would otherwise eat
+    // dpkg/apt-style suffixes like "dependency problems (exit 1)".
+    if (s.includes('failed dependencies') || s.includes('dependency problems') || s.includes('depends on ')) {
+      return t('update_pkgDeps')
     }
     if (s.includes('timeout') || s.includes('timed out')) {
       return t('update_timeout')
@@ -106,6 +114,7 @@
         >
       </div>
     {:else}
+      {@const notes = displayUpdateNotes(updateStore.notes, updateStore.version)}
       <div class="update-banner__main">
         <span class="update-banner__icon" aria-hidden="true">↑</span>
         <span class="update-banner__text">
@@ -116,6 +125,7 @@
           {#if fmtReleased(updateStore.pubDate)}<span class="update-banner__reason">
               · {fmtReleased(updateStore.pubDate)}</span
             >{/if}
+          {#if notes}<span class="update-banner__reason"> — {notes}</span>{/if}
         </span>
         <button type="button" class="update-banner__btn update-banner__btn--primary" onclick={() => updateStore.apply()}
           >{t('update')}</button
