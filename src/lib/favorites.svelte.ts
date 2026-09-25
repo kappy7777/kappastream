@@ -284,13 +284,16 @@ export class FavoritesStore {
       const s = this.statuses.get(e.name)
       if (s) byName.set(e.name, s)
     }
+    // Manual-order lookups keyed by name ONCE: entries.find() inside the
+    // comparator cost a full scan per comparison, O(n² log n) over a sort at
+    // the 1000-favorite cap.
+    const orderByName = new Map<string, number>()
+    for (const e of this.entries) orderByName.set(e.name, e.order ?? 0)
     const arr = Array.from(byName.values())
     arr.sort((a, b) => {
       const aLive = a.status.state === 'live' ? 0 : 1
       const bLive = b.status.state === 'live' ? 0 : 1
       if (aLive !== bLive) return aLive - bLive
-      const ea = this.entries.find((e) => e.name === a.name)
-      const eb = this.entries.find((e) => e.name === b.name)
       if (settings.sortMode === 'auto') {
         if (aLive === 0) {
           // Sort by the COMBINED session viewership when the channel is in a
@@ -301,8 +304,8 @@ export class FavoritesStore {
           if (bv !== av) return bv - av
         }
       } else {
-        const oa = ea?.order ?? 0
-        const ob = eb?.order ?? 0
+        const oa = orderByName.get(a.name) ?? 0
+        const ob = orderByName.get(b.name) ?? 0
         if (oa !== ob) return oa - ob
       }
       return a.name.localeCompare(b.name)
