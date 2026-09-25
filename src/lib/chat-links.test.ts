@@ -117,3 +117,21 @@ describe('chat links: clip URL parsing', () => {
     expect(parseTwitchClipUrl('https://www.twitch.tv/chan9/clip/HappySunnyOtter-x1')).toBe('HappySunnyOtter-x1')
   })
 })
+
+describe('chat links: malformed percent sequences', () => {
+  it('a "%zz" slug rejects instead of throwing URIError out of the click path', () => {
+    // The WHATWG URL parser keeps invalid percent sequences verbatim, and a
+    // bare decodeURIComponent on them throws — synchronously out of
+    // openChatLink, so the click did nothing. Both clip shapes must reject.
+    expect(() => parseTwitchClipUrl('https://clips.twitch.tv/%zz')).not.toThrow()
+    expect(parseTwitchClipUrl('https://clips.twitch.tv/%zz')).toBeNull()
+    expect(parseTwitchClipUrl('https://www.twitch.tv/chan9/clip/%zz')).toBeNull()
+    // A malformed CHANNEL segment rejects too, valid slug or not.
+    expect(parseTwitchClipUrl('https://www.twitch.tv/%zz/clip/HappySunnyOtter-x1')).toBeNull()
+  })
+
+  it('legitimately percent-encoded slugs still decode', () => {
+    expect(parseTwitchClipUrl('https://clips.twitch.tv/Happy%2FSunny-x1')).toBeNull() // '/' is not a valid slug char after decode
+    expect(parseTwitchClipUrl('https://clips.twitch.tv/HappySunnyOtter-x1')).toBe('HappySunnyOtter-x1')
+  })
+})

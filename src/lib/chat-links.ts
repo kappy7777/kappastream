@@ -65,6 +65,19 @@ export function splitTwitchLinks(text: string): TextLinkChunk[] {
  * The slug is validated (isValidClipSlug) so a malformed path can never reach
  * the player or the resolve_clip command.
  */
+// decodeURIComponent throws URIError on malformed percent sequences
+// ("%zz"), and the WHATWG URL parser deliberately keeps such sequences
+// verbatim in the pathname — so a path segment with one must be REJECTED,
+// not thrown out of this synchronous click path (the click would silently
+// do nothing).
+function safeDecode(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return null
+  }
+}
+
 export function parseTwitchClipUrl(url: string): string | null {
   let u: URL
   try {
@@ -77,13 +90,15 @@ export function parseTwitchClipUrl(url: string): string | null {
   const segments = u.pathname.split('/').filter(Boolean)
   // clips.twitch.tv/<slug>
   if (host === 'clips.twitch.tv') {
-    const slug = decodeURIComponent(segments[0] ?? '')
-    return isValidClipSlug(slug) ? slug : null
+    const slug = safeDecode(segments[0] ?? '')
+    return slug !== null && isValidClipSlug(slug) ? slug : null
   }
   // twitch.tv/<channel>/clip/<slug>
-  if (segments.length === 3 && segments[1] === 'clip' && /^[a-zA-Z0-9_]{1,25}$/.test(decodeURIComponent(segments[0]))) {
-    const slug = decodeURIComponent(segments[2])
-    return isValidClipSlug(slug) ? slug : null
+  if (segments.length === 3 && segments[1] === 'clip') {
+    const channel = safeDecode(segments[0])
+    const slug = safeDecode(segments[2])
+    if (channel === null || !/^[a-zA-Z0-9_]{1,25}$/.test(channel)) return null
+    return slug !== null && isValidClipSlug(slug) ? slug : null
   }
   return null
 }
