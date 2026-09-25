@@ -1056,10 +1056,11 @@ pub fn mpv_available(app: AppHandle) -> AvailabilityPayload {
 /// Load a media URL on the engine `id` (0 = single player, 1..=4 = tiles)
 /// and show the surface. The URL is the STREAMLINK-RESOLVED one, passed
 /// THROUGH directly — mpv is not a browser, so no ksvod proxy, no CORS.
-/// `start_at` (VOD resume) becomes mpv's `start` load option; it is cleared
-/// again on FileLoaded. Volume/muted are applied at load (the engine may
-/// have been created by a bare availability probe before the frontend ever
-/// set them).
+/// `start_at` (VOD resume) becomes mpv's `start` load option — written on
+/// every load ("none" without a resume) so a failed load can never leave a
+/// stale offset armed; FileLoaded clears it too. Volume/muted are applied at
+/// load (the engine may have been created by a bare availability probe
+/// before the frontend ever set them).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // the load's full parameter set, mirroring mpv's own loadfile+options
 pub fn mpv_load(
@@ -1096,13 +1097,17 @@ pub fn mpv_load(
         e.mpv
             .set_property("mute", muted)
             .map_err(|err| format!("set mute: {err}"))?;
-        if let Some(start) = start_at {
-            if start.is_finite() && start > 0.5 {
-                e.mpv
-                    .set_property("start", format!("+{start:.3}"))
-                    .map_err(|err| format!("set start: {err}"))?;
-            }
-        }
+        // `start` is set EXPLICITLY on every load, "none" included: the
+        // property is otherwise only cleared on FileLoaded, so a load that
+        // fails before FileLoaded would leave a stale +N armed for the NEXT
+        // loadfile — a live stream inheriting a dead VOD's resume offset.
+        let start_prop = match start_at {
+            Some(s) if s.is_finite() && s > 0.5 => format!("+{s:.3}"),
+            _ => "none".to_string(),
+        };
+        e.mpv
+            .set_property("start", start_prop)
+            .map_err(|err| format!("set start: {err}"))?;
         e.mpv
             .command("loadfile", &[url.as_str(), "replace"])
             .map_err(|err| format!("loadfile: {err}"))?;
