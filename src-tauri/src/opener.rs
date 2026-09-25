@@ -202,11 +202,16 @@ fn run_candidate(name: &str, path: &str, args: &[String], child_path: &str) -> C
             //   means it hung. This is NOT the expected path on Windows
             //   (unlike the KDE case), but detaching is still the right
             //   call rather than killing something that may be mid-launch.
-            // Either way: drop the handle so the child is reparented to
-            // init (Unix) / orphaned but left running (Windows), and report
-            // success.
+            // Either way: hand the handle to a detached reaper thread and
+            // report success. Barely dropping it would leave a ZOMBIE for
+            // every long-lived child (the browser xdg-open exec'd stays
+            // mapped in the process table until something waits on it); the
+            // reaper thread waits it out while the child keeps running
+            // independently either way.
             Ok(None) => {
-                drop(child);
+                thread::spawn(move || {
+                    let _ = child.wait();
+                });
                 break CandidateResult {
                     name: name.to_string(),
                     path: path.to_string(),
