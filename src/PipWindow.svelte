@@ -64,6 +64,13 @@
   function loadSource(url: string, mediaKind: 'hls' | 'mp4' = 'hls', live?: boolean): void {
     if (!videoEl) return
     isLive = live === true
+    // Tear down the PREVIOUS engine before anything else: the mp4 branch
+    // assigns videoEl.src directly, and an hls.js instance left attached to
+    // the element keeps its whole pipeline alive (segment fetches, timers,
+    // the MediaSource) against the swapped source. teardown bumps the
+    // generation itself — running it BEFORE nextGeneration() keeps the new
+    // load's token the authoritative one.
+    playback.teardown(videoEl)
     loading = true
     errorMsg = ''
     needsGesture = false
