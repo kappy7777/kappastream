@@ -92,9 +92,12 @@
 //! AppImage's `LD_LIBRARY_PATH` is searched, so the bundled copy never loads.
 //! If the system has no pipewire, nothing happens and the bundled client
 //! serves — the app keeps working everywhere, just with the old pacing on
-//! PipeWire-less systems. Spawned children never inherit the preload:
-//! `env_spawn::configure`'s AppImage whitelist clears `LD_PRELOAD` from every
-//! subprocess (streamlink resolve, the mpv handoff, URL openers).
+//! PipeWire-less systems. Children spawned through `env_spawn` never inherit
+//! the preload: its AppImage whitelist clears `LD_PRELOAD` from every
+//! subprocess (streamlink resolve, the mpv handoff, URL openers). The
+//! processes that DO inherit it are WebKitGTK's own helper processes and an
+//! updater relaunch — forking/exec'ing from this image, they keep the system
+//! client (intended) and inherit the exec guard too, so neither re-execs.
 //!
 //! The user override is `KAPPASTREAM_PIPEWIRE_PRELOAD`:
 //!  - absent ⇒ automatic swap (the default above);
@@ -104,9 +107,11 @@
 //! `KAPPASTREAM_PIPEWIRE_EXEC_GUARD` is internal, not a user channel: set on
 //! the re-exec and checked before the action is applied again, so a preload
 //! that somehow fails to take effect can never loop the process through
-//! repeated execs (the auto path is additionally self-limiting — after a
-//! successful swap the mapped client IS the system one, which selects no
-//! action — but an explicit-path override needs the guard).
+//! repeated execs. The guard is the actual backstop for the auto path too:
+//! after a successful swap the mapped client IS the system one, but the
+//! maps/ldconfig path SPELLINGS can still differ (resolved versioned name
+//! vs SONAME, symlinked lib dir), so the same-file (dev+ino) check and this
+//! guard — not string equality — are what keep it from re-exec'ing.
 //!
 //! ## Common rules
 //!
@@ -230,6 +235,13 @@ struct CompatInputs {
     /// the override channel for the pipewire swap. Captured raw: empty
     /// counts as "user supplied" (and means "keep the bundled client").
     kappastream_pipewire_preload: Option<String>,
+    /// Whether `pipewire_loaded` and `pipewire_system` resolve to the SAME
+    /// file (same dev+ino through symlinks — `/proc/self/maps` reports the
+    /// resolved versioned path while ldconfig/the directory fallback report
+    /// SONAME and symlinked spellings, so string equality lies on Arch-style
+    /// layouts). `None` = no system copy / metadata unavailable; anything
+    /// but `Some(true)` falls back to the string comparison.
+    pipewire_same_file: Option<bool>,
 }
 
 /// The concrete compatibility actions to apply for a given `CompatInputs`.
@@ -315,13 +327,19 @@ fn select_pipewire_preload(inputs: &CompatInputs) -> Option<String> {
     }
     match inputs.kappastream_pipewire_preload.as_deref() {
         // Auto: swap only when a pipewire client is actually mapped in AND
-        // the system has a DIFFERENT one. If the system copy is already the
-        // one loaded (user preload / identical resolution) there is nothing
-        // to do; if the system has none, the bundled client must serve.
+        // the system's copy is a DIFFERENT FILE. Equality is decided by
+        // dev+ino when both paths stat (same_file injected by read_inputs)
+        // with the string comparison as the fallback: after a re-exec the
+        // maps path is the resolved versioned file while the system probe
+        // reports SONAME/symlink spellings, and string-only comparison
+        // re-selected a swap that only the exec guard stopped.
         None => {
             let loaded = inputs.pipewire_loaded.as_deref()?;
             let system = inputs.pipewire_system.as_deref()?;
-            (loaded != system).then(|| system.to_string())
+            if loaded == system || inputs.pipewire_same_file == Some(true) {
+                return None;
+            }
+            Some(system.to_string())
         }
         // Present but empty = explicit "leave it alone" (bundled client).
         Some("") => None,
@@ -371,16 +389,17 @@ fn ldconfig_path_for(cache: &str, basename: &str) -> Option<String> {
 /// loaded, if the system has one at all. `ldconfig -p` is authoritative (it
 /// also knows nonstandard prefixes such as NixOS store paths) but the binary
 /// lives in `/sbin` or `/usr/sbin` on merged-/usr systems, which the AppRun
-/// PATH may not include — so probe absolute locations first, then a plain
-/// PATH lookup, then the standard library directories as a last resort.
+/// PATH may not include — so probe absolute locations, then a plain PATH
+/// lookup. The FIRST ldconfig that RUNS SUCCESSFULLY is the answer, found or
+/// not: it printed the whole cache, so a miss means the system genuinely has
+/// no such SONAME, and re-asking sibling binaries after a success only
+/// burns execs before the directory fallback below guesses anyway.
 fn system_pipewire_path(basename: &str) -> Option<String> {
     for bin in ["/sbin/ldconfig", "/usr/sbin/ldconfig", "ldconfig"] {
         if let Ok(out) = std::process::Command::new(bin).arg("-p").output() {
             if out.status.success() {
                 let cache = String::from_utf8_lossy(&out.stdout);
-                if let Some(path) = ldconfig_path_for(&cache, basename) {
-                    return Some(path);
-                }
+                return ldconfig_path_for(&cache, basename);
             }
         }
     }
@@ -400,11 +419,30 @@ fn system_pipewire_path(basename: &str) -> Option<String> {
     None
 }
 
+/// Whether two library paths resolve to the same file: `metadata` follows
+/// symlinks, and (dev, ino) equality survives every spelling difference
+/// (versioned vs SONAME name, /usr/lib64 → /usr/lib symlink). False when
+/// either path cannot be stat'ed — the caller treats that as "not proven
+/// same" and falls back to its other evidence.
+fn paths_refer_to_same_file(a: &str, b: &str) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(ma), Ok(mb)) => ma.dev() == mb.dev() && ma.ino() == mb.ino(),
+        _ => false,
+    }
+}
+
 /// The pipewire probes for `read_inputs`: the client currently mapped into
 /// this process, and the system's copy of the same basename. Only AppImage
 /// runs bother probing — native builds never load a bundled client to swap.
+/// The exec'd image skips the probe entirely: the guard variable is the
+/// authority on "the swap already happened", and probing again can only
+/// re-derive a stale swap decision (and costs the ldconfig execs) — never a
+/// useful one.
 fn probe_pipewire() -> (Option<String>, Option<String>) {
-    if !crate::env_spawn::in_appimage() {
+    if !crate::env_spawn::in_appimage()
+        || std::env::var(KAPPASTREAM_PIPEWIRE_EXEC_GUARD_VAR).is_ok()
+    {
         return (None, None);
     }
     let Some(loaded) = std::fs::read_to_string("/proc/self/maps")
@@ -454,6 +492,10 @@ fn reexec_with_pipewire_preload(system_pipewire: &str) {
 /// Gather the real process environment + kernel state into `CompatInputs`.
 fn read_inputs() -> CompatInputs {
     let (pipewire_loaded, pipewire_system) = probe_pipewire();
+    let pipewire_same_file = match (&pipewire_loaded, &pipewire_system) {
+        (Some(loaded), Some(system)) => Some(paths_refer_to_same_file(loaded, system)),
+        _ => None,
+    };
     CompatInputs {
         xdg_session_type: std::env::var("XDG_SESSION_TYPE").ok(),
         wayland_display: std::env::var("WAYLAND_DISPLAY").ok(),
@@ -468,6 +510,7 @@ fn read_inputs() -> CompatInputs {
         kappastream_gdk_backend: std::env::var(KAPPASTREAM_GDK_BACKEND_VAR).ok(),
         pipewire_loaded,
         pipewire_system,
+        pipewire_same_file,
         kappastream_pipewire_preload: std::env::var(KAPPASTREAM_PIPEWIRE_PRELOAD_VAR).ok(),
     }
 }
@@ -551,6 +594,7 @@ mod tests {
             kappastream_gdk_backend: None,
             pipewire_loaded: None,
             pipewire_system: None,
+            pipewire_same_file: None,
             kappastream_pipewire_preload: None,
         }
     }
@@ -1084,7 +1128,8 @@ mod tests {
 
     // Pipewire-swap test builder: an AppImage run on a Wayland session with
     // the three pipewire axes explicit. The graphics axes are irrelevant to
-    // the swap and stay at the compat_appimage defaults.
+    // the swap and stay at the compat_appimage defaults. same_file defaults
+    // to "unknown" (None) — the pure selection table never stats files.
     fn compat_pipewire(
         loaded: Option<&str>,
         system: Option<&str>,
@@ -1136,8 +1181,9 @@ mod tests {
     }
 
     // #27 The system copy is already the one mapped (user preload or an
-    //     identical resolution) ⇒ nothing to do. This is also what makes
-    //     the auto path self-limiting after a successful re-exec.
+    //     identical resolution) ⇒ nothing to do. Equal strings are the
+    //     trivial spelling of "same file"; the same-file flag below covers
+    //     the ones only (dev, ino) can prove.
     #[test]
     fn appimage_system_pipewire_already_loaded_does_nothing() {
         assert_eq!(
@@ -1149,6 +1195,79 @@ mod tests {
             .pipewire_preload,
             None
         );
+    }
+
+    // #27b Same file, DIFFERENT spellings (the post-re-exec reality: maps
+    //      reports the resolved versioned file, the system probe a SONAME
+    //      or symlinked directory path) ⇒ nothing to do. String-only
+    //      comparison re-selected a swap here; only the exec guard stopped
+    //      the loop.
+    #[test]
+    fn appimage_same_file_different_spelling_does_nothing() {
+        let mut inputs = compat_pipewire(
+            Some("/usr/lib/libpipewire-0.3.so.0.1404.0"),
+            Some("/usr/lib64/libpipewire-0.3.so.0"),
+            None,
+        );
+        inputs.pipewire_same_file = Some(true);
+        assert_eq!(select_actions(&inputs).pipewire_preload, None);
+    }
+
+    // #27c Different files by (dev, ino) — the swap genuinely applies even
+    //      when the stat says so, and unknown metadata falls back to the
+    //      string comparison (also a swap: the spellings differ).
+    #[test]
+    fn appimage_proven_different_file_swaps() {
+        let mut inputs = compat_pipewire(
+            Some("/tmp/.mount_K/usr/lib/libpipewire-0.3.so.0"),
+            Some("/usr/lib64/libpipewire-0.3.so.0"),
+            None,
+        );
+        inputs.pipewire_same_file = Some(false);
+        assert_eq!(
+            select_actions(&inputs).pipewire_preload,
+            Some("/usr/lib64/libpipewire-0.3.so.0".to_string())
+        );
+        // Unknown (None) keeps the historical string-difference behavior.
+        inputs.pipewire_same_file = None;
+        assert_eq!(
+            select_actions(&inputs).pipewire_preload,
+            Some("/usr/lib64/libpipewire-0.3.so.0".to_string())
+        );
+    }
+
+    // #27d The (dev, ino) comparison itself, against real files: a symlink
+    //      with a SONAME-style name pointing at a versioned file is the SAME
+    //      file; distinct files are not; an unstat'able path is never
+    //      proven same.
+    #[test]
+    fn same_file_detection_follows_symlinks_and_versioned_names() {
+        let dir = std::env::temp_dir().join(format!("ks-pw-same-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let real = dir.join("libpipewire-0.3.so.0.1404.0");
+        std::fs::write(&real, b"so").unwrap();
+        let soname = dir.join("libpipewire-0.3.so.0");
+        let _ = std::fs::remove_file(&soname);
+        std::os::unix::fs::symlink(&real, &soname).unwrap();
+        assert!(paths_refer_to_same_file(
+            real.to_str().unwrap(),
+            soname.to_str().unwrap()
+        ));
+        assert!(paths_refer_to_same_file(
+            soname.to_str().unwrap(),
+            real.to_str().unwrap()
+        ));
+        let other = dir.join("libpipewire-elsewhere.so");
+        std::fs::write(&other, b"so").unwrap();
+        assert!(!paths_refer_to_same_file(
+            real.to_str().unwrap(),
+            other.to_str().unwrap()
+        ));
+        assert!(!paths_refer_to_same_file(
+            real.to_str().unwrap(),
+            "/definitely/not/there/libpipewire-0.3.so.0"
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // #28 System without PipeWire keeps the bundled client — removing the
