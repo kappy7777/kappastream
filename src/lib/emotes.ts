@@ -353,6 +353,11 @@ export function renderMessage({ message, thirdParty, twitchRanges = [] }: Render
   let cursor = 0
   const parts: RenderedMessagePart[] = []
   for (const r of merged) {
+    // A range overlapping one already rendered is skipped, not stacked: the
+    // practical producer is a third-party emote with the same name as a
+    // Twitch emote. twitchRanges precede the third-party ranges here and the
+    // sort is stable, so Twitch wins any tie.
+    if (r.start < cursor) continue
     if (r.start > cursor) parts.push({ type: 'text', text: message.slice(cursor, r.start) })
     parts.push(renderEmoteAt(message, r))
     cursor = r.end + 1

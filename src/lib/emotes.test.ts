@@ -221,6 +221,42 @@ describe('parseTwitchEmoteTag — code-point → UTF-16 conversion', () => {
   })
 })
 
+describe('renderMessage — overlapping ranges', () => {
+  it('a Twitch emote and a same-name third-party emote render exactly once (Twitch wins)', () => {
+    // Both a tag range 25:0-4 and a 7TV emote named Kappa produce a range
+    // over 0-4; before the overlap skip, both were rendered as stacked emote
+    // parts.
+    const map = E.buildEmoteMap([{ id: '7tvkappa', name: 'Kappa', url: 'u', provider: '7tv' }])
+    const ranges = E.parseTwitchEmoteTag('25:0-4', 'Kappa')
+    const parts = E.renderMessage({ message: 'Kappa', thirdParty: map, twitchRanges: ranges })
+
+    expect(parts).toHaveLength(1)
+    expect(parts[0].type).toBe('emote')
+    if (parts[0].type === 'emote') {
+      expect(parts[0].name).toBe('Kappa')
+      expect(parts[0].provider).toBe('twitch')
+    }
+  })
+
+  it('a third-party range inside an already-rendered Twitch range is skipped', () => {
+    // Twitch range spans the whole word pair; the 7TV Kappa range (2-6) sits
+    // inside it and must not split the Twitch emote into stacked parts.
+    const map = E.buildEmoteMap([{ id: '7tvkappa', name: 'Kappa', url: 'u', provider: '7tv' }])
+    const parts = E.renderMessage({
+      message: 'a Kappa b',
+      thirdParty: map,
+      twitchRanges: [{ start: 0, end: 9, id: '25' }],
+    })
+
+    expect(parts).toHaveLength(1)
+    expect(parts[0].type).toBe('emote')
+    if (parts[0].type === 'emote') {
+      expect(parts[0].name).toBe('a Kappa b')
+      expect(parts[0].provider).toBe('twitch')
+    }
+  })
+})
+
 describe('emoteOnly predicate (mirrors App.svelte handleMessage)', () => {
   // The predicate is inline in App.svelte's handleMessage and not exported,
   // so the test reconstructs the same expression over the parts produced by
