@@ -13,6 +13,7 @@
   import AboutModal from './lib/AboutModal.svelte'
   import ShortcutsHelp from './lib/ShortcutsHelp.svelte'
   import { singleChatEntries } from './lib/merged-chat'
+  import { osdHexColor } from './lib/custom-themes.svelte'
   import { UI_ZOOM_VAR, zoomDivisor } from './lib/ui-zoom'
   import Sidebar from './lib/Sidebar.svelte'
   import PlayerControls from './lib/PlayerControls.svelte'
@@ -1300,7 +1301,10 @@
     if (!nativeVideoActive) return
     void settings.theme
     const cs = getComputedStyle(document.documentElement)
-    const v = (name: string): string => cs.getPropertyValue(name).trim().replace(/^#/, '')
+    // The OSD lua needs exactly 6 hex chars per color (bgr()); a custom
+    // theme's rgba()/short-hex/#rrggbbaa tokens must be converted, or every
+    // OSD color silently falls back to white.
+    const v = (name: string): string => osdHexColor(cs.getPropertyValue(name).trim())
     sendOsd([
       'ks-theme',
       v('--bg-app'),

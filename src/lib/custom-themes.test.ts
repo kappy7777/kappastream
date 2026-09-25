@@ -412,3 +412,18 @@ describe('the 20-property contract', () => {
     expect(grouped.sort()).toEqual([...S.EDITABLE_THEME_PROPS].sort())
   })
 })
+
+describe('osdHexColor — the native OSD 6-hex feed', () => {
+  it('converts every custom-theme token shape to bare RRGGBB', () => {
+    expect(S.osdHexColor('#0e0e10')).toBe('0E0E10')
+    expect(S.osdHexColor('#fff')).toBe('FFFFFF') // short hex
+    expect(S.osdHexColor('#0e0e10ff')).toBe('0E0E10') // #rrggbbaa — alpha dropped
+    expect(S.osdHexColor('rgba(31, 35, 46, 0.5)')).toBe('1F232E')
+    expect(S.osdHexColor('rgb(31, 35, 46)')).toBe('1F232E')
+  })
+
+  it('unparsable tokens pass through minus the hash (the OSD lua whitens them, as before)', () => {
+    expect(S.osdHexColor('#xyz')).toBe('xyz')
+    expect(S.osdHexColor('')).toBe('')
+  })
+})

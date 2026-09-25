@@ -279,6 +279,18 @@ export function normalizeColorToken(v: string): string | null {
   return `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${fmtAlpha(c.a)})`
 }
 
+/** Plain RRGGBB (no '#', alpha DROPPED) for consumers that need bare 6-hex —
+ *  mpv's OSD bgr() renders anything that is not exactly 6 hex chars white.
+ *  Covers every token a custom theme can store (#rgb, #rrggbbaa, rgba())
+ *  plus the built-ins' 6-hex; unparsable input passes through (minus a
+ *  leading '#') so the consumer's own fallback still applies. */
+export function osdHexColor(v: string): string {
+  const c = parseColorToken(v)
+  if (!c) return v.replace(/^#/, '')
+  const hex = (n: number) => Math.round(n).toString(16).padStart(2, '0').toUpperCase()
+  return `${hex(c.r)}${hex(c.g)}${hex(c.b)}`
+}
+
 /**
  * Canonical `0 8px 24px rgba(r, g, b, a)` box-shadow; accepts `0`/`0px` for
  * the first length and percent alpha. Null if it is not exactly one

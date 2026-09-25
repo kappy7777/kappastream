@@ -60,6 +60,7 @@
   import { tooltip } from './tooltip.ts'
   import { nextVolume } from './volume'
   import { effectiveQualities, mpvQualities, qualityLabel } from './qualities'
+  import { osdHexColor } from './custom-themes.svelte'
   import { t } from './i18n/index.svelte'
 
   interface Props {
@@ -203,7 +204,9 @@
     void mpvId // re-feed when the tile is re-homed onto another engine
     void settings.theme
     const cs = getComputedStyle(document.documentElement)
-    const v = (name: string): string => cs.getPropertyValue(name).trim().replace(/^#/, '')
+    // Same 6-hex requirement as App's theme feed: the OSD lua's bgr() turns
+    // any non-6-hex token white, and custom themes store rgba()/short-hex.
+    const v = (name: string): string => osdHexColor(cs.getPropertyValue(name).trim())
     sendOsd([
       'ks-theme',
       v('--bg-app'),
