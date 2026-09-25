@@ -66,7 +66,7 @@
   import { formatCompact, formatAge } from './lib/format'
   import { effectiveQualities, mpvQualities, qualityLabel } from './lib/qualities'
   import { stripBitmap, renderInfoBlock } from './lib/osd-bitmaps'
-  import { clipRectTop, fitContentRect } from './lib/video-fit'
+  import { clipRectTop, fitContentRect, pointerFractions } from './lib/video-fit'
   import { startPageOverlayManager } from './lib/page-overlay'
   import { CHAT_SIZE_MAX, CHAT_SIZE_MIN, nextChatSize } from './lib/chat-size'
   import { mentionMatcher } from './lib/mention'
@@ -1056,29 +1056,17 @@
     const stage = playerVideoEl
     if (!stage) return
     let lastClickAt = 0
-    // Normalized 0..1 within the content rect, recomputed per event (the
+    // Normalized 0..1 within the FULL content rect, recomputed per event (the
     // same shared fit the surface pusher used — they can never disagree).
-    // While the fold is scrolled under the top bar, the surface (and mpv's
-    // OSD with it) shows only the bottom slice of the picture: the y axis is
-    // remapped into that slice — the same clip the rect pusher applied — so
-    // OSD hit-testing lands where the pointer visibly is. Events over the
-    // hidden slice can't arrive (the page's bar covers it).
+    // While the fold is scrolled under the top bar, mpv still composes its
+    // OSD over the FULL unrolled picture (Rust rescales by osd-height, which
+    // includes the fold; the engine folds hidden rows away at presentation
+    // time), so y stays a fraction of the full height — remapping into the
+    // visible slice would land hits above where the pointer visibly is.
+    // Events over the hidden slice can't arrive (the page's bar covers it).
     const locate = (e: { clientX: number; clientY: number }) => {
       const r = stage.getBoundingClientRect()
-      const c = fitContentRect(r.width, r.height, videoAspect)
-      const w = Math.max(1, c.w)
-      const h = Math.max(1, c.h)
-      const x = (e.clientX - r.left - c.x) / w
-      const y = (e.clientY - r.top - c.y) / h
-      const f = clipRectTop(0, c.y, c.w, c.h, stageClipTop - r.top).hidden
-      const oy = f > 0 ? (y - f) / (1 - f) : y
-      return {
-        x,
-        y: oy,
-        inside: x >= 0 && x <= 1 && y >= f && y <= 1,
-        clampX: Math.min(1, Math.max(0, x)),
-        clampY: Math.min(1, Math.max(0, oy)),
-      }
+      return pointerFractions(e.clientX, e.clientY, r.left, r.top, r.width, r.height, videoAspect, stageClipTop - r.top)
     }
     const send = (x: number, y: number, kind: string): void => {
       void invoke('mpv_pointer', { x, y, kind }).catch(() => {})

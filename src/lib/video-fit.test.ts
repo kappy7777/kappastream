@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_VIDEO_ASPECT, clipRectTop, fitContentRect } from './video-fit'
+import { DEFAULT_VIDEO_ASPECT, clipRectTop, fitContentRect, pointerFractions } from './video-fit'
 
 describe('fitContentRect', () => {
   it('height-bound box: full height, centered side bars', () => {
@@ -93,5 +93,53 @@ describe('clipRectTop', () => {
   it('zero/degenerate height reports nothing hidden', () => {
     expect(clipRectTop(0, 0, 0, 0, 50).hidden).toBe(0)
     expect(clipRectTop(0, -100, 0, -5, 50).hidden).toBe(0)
+  })
+})
+
+describe('pointerFractions (native OSC pointer normalization)', () => {
+  // A 640x360 box at 16:9 fills exactly, so the content rect == the box and
+  // fractions read off directly.
+  const box = { left: 100, top: 200, w: 640, h: 360 }
+
+  it('zero fold is the identity: y is the raw content fraction', () => {
+    const mid = pointerFractions(100 + 320, 200 + 180, box.left, box.top, box.w, box.h, 16 / 9, 0)
+    expect(mid.x).toBeCloseTo(0.5, 9)
+    expect(mid.y).toBeCloseTo(0.5, 9)
+    expect(mid.inside).toBe(true)
+    expect(mid.clampY).toBeCloseTo(0.5, 9)
+  })
+
+  it('at a 50% fold the visible top sends 0.5 and the bottom sends 1 (full-rect fractions)', () => {
+    // The fold line sits halfway into the content. The old code remapped the
+    // visible band onto 0..1, so the visible top sent 0 — every hit landed
+    // above where the pointer visibly was (unclickable seek strip).
+    const foldLine = box.top + 180
+    const top = pointerFractions(100 + 320, foldLine, box.left, box.top, box.w, box.h, 16 / 9, 180)
+    expect(top.y).toBeCloseTo(0.5, 9)
+    expect(top.inside).toBe(true)
+    const bottom = pointerFractions(100 + 320, box.top + 360, box.left, box.top, box.w, box.h, 16 / 9, 180)
+    expect(bottom.y).toBeCloseTo(1, 9)
+    expect(bottom.inside).toBe(true)
+  })
+
+  it('events over the hidden band are outside; the drag clamp folds into [f, 1]', () => {
+    const foldLine = box.top + 180
+    const hidden = pointerFractions(100 + 320, box.top + 90, box.left, box.top, box.w, box.h, 16 / 9, 180)
+    expect(hidden.y).toBeCloseTo(0.25, 9)
+    expect(hidden.inside).toBe(false)
+    expect(hidden.clampY).toBeCloseTo(0.5, 9)
+    const below = pointerFractions(100 + 320, box.top + 400, box.left, box.top, box.w, box.h, 16 / 9, 180)
+    expect(below.inside).toBe(false)
+    expect(below.clampY).toBeCloseTo(1, 9)
+  })
+
+  it('x is never folded and clamps to [0, 1]', () => {
+    const foldLine = box.top + 180
+    const left = pointerFractions(100 - 50, box.top + 270, box.left, box.top, box.w, box.h, 16 / 9, 180)
+    expect(left.x).toBeCloseTo(-50 / 640, 9)
+    expect(left.clampX).toBe(0)
+    expect(left.inside).toBe(false)
+    const right = pointerFractions(100 + 700, box.top + 270, box.left, box.top, box.w, box.h, 16 / 9, 180)
+    expect(right.clampX).toBe(1)
   })
 })

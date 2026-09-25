@@ -64,3 +64,50 @@ export function clipRectTop(x: number, y: number, w: number, h: number, clipTop:
   const hid = Math.max(0, Math.min(h - 1, clipTop - y))
   return { x, y: y + hid, w, h: h - hid, hidden: hid / h }
 }
+
+export interface PointerFractions {
+  /** Position as a fraction of the FULL content rect (the unrolled picture). */
+  x: number
+  y: number
+  /** True within the VISIBLE band only — rows hidden above the fold line sit
+   * under the page's top bar and can never receive events. */
+  inside: boolean
+  clampX: number
+  /** Drag clamp folds into the visible band, never the hidden rows. */
+  clampY: number
+}
+
+/**
+ * Normalize a pointer position (client space) against the fitted content
+ * rect, for forwarding into mpv's OSD. `y` is a fraction of the FULL content
+ * height on purpose: the engine composes its OSD over the unrolled picture
+ * (osd-height includes the fold; hidden rows are folded away at presentation
+ * time), and the Rust side rescales by exactly that osd-height — so sending
+ * a fraction of the VISIBLE slice would land every hit above where the
+ * pointer visibly is once the player is partially scrolled under the top
+ * bar. `clipTop` is the fold line in the same px space as `boxTop`.
+ */
+export function pointerFractions(
+  pointX: number,
+  pointY: number,
+  boxLeft: number,
+  boxTop: number,
+  boxW: number,
+  boxH: number,
+  aspect: number,
+  clipTop: number,
+): PointerFractions {
+  const c = fitContentRect(boxW, boxH, aspect)
+  const w = Math.max(1, c.w)
+  const h = Math.max(1, c.h)
+  const x = (pointX - boxLeft - c.x) / w
+  const y = (pointY - boxTop - c.y) / h
+  const f = clipRectTop(0, c.y, c.w, c.h, clipTop).hidden
+  return {
+    x,
+    y,
+    inside: x >= 0 && x <= 1 && y >= f && y <= 1,
+    clampX: Math.min(1, Math.max(0, x)),
+    clampY: Math.min(1, Math.max(f, y)),
+  }
+}

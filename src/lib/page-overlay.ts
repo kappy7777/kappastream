@@ -106,9 +106,10 @@ export function keepRect(r: OverlayBox, box: OverlayBox): [number, number, numbe
  * unrolled) osd size. With a fold (`hiddenTop` > 0) the visible band is the
  * bottom (1 - hiddenTop) slice of the full composition, so a y fraction of
  * the VISIBLE rect maps to hiddenTop + fy·(1 - hiddenTop) of the full one
- * and heights shrink by (1 - hiddenTop); x is never folded. Same remap the
- * native pointer forwarding applies (App.svelte's locate()). Zero fold is
- * the identity — unfolded surfaces get their historical fractions. */
+ * and heights shrink by (1 - hiddenTop); x is never folded. The native
+ * pointer forwarding sends positions in this same full-composition space
+ * (pointerFractions in video-fit.ts). Zero fold is the identity — unfolded
+ * surfaces get their historical fractions. */
 export function osdFractions(
   box: OverlayBox,
   hiddenTop: number,
