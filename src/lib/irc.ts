@@ -185,14 +185,18 @@ function buildPrivmsg(frame: IrcFrame): (ParsedMessage & { type: 'PRIVMSG' }) | 
   const displayName = tags['display-name'] || username || t('irc_user')
   const color = normalizeColor(tags.color)
   const id = tags.id ?? ''
-  const twitchEmotes = parseTwitchEmoteTag(tags.emotes, messageBody)
-
   let text = messageBody
   let isAction = false
   if (text.startsWith(ACTION_PREFIX) && text.endsWith('\u0001')) {
     isAction = true
     text = text.slice(ACTION_PREFIX.length, -1)
   }
+  // Twitch indexes the emotes tag into the text WITHOUT the CTCP ACTION
+  // wrapper (verified against live traffic: an ACTION message's emote range
+  // resolves against the stripped text), so the code-point→UTF-16 conversion
+  // inside parseTwitchEmoteTag must run on the same stripped string the
+  // renderer later slices.
+  const twitchEmotes = parseTwitchEmoteTag(tags.emotes, text)
 
   return {
     type: 'PRIVMSG',

@@ -183,6 +183,44 @@ describe('renderMessage — trailing punctuation', () => {
   })
 })
 
+describe('parseTwitchEmoteTag — code-point → UTF-16 conversion', () => {
+  it('an emoji before an emote shifts the tag range into UTF-16 units', () => {
+    // '😀 Kappa hi': the emoji is 1 code point but 2 UTF-16 units, so the
+    // tag's code-point range 2-6 must land on units 3-7.
+    const ranges = E.parseTwitchEmoteTag('25:2-6', '😀 Kappa hi')
+    expect(ranges).toEqual([{ start: 3, end: 7, id: '25' }])
+    const parts = E.renderMessage({ message: '😀 Kappa hi', thirdParty: new Map(), twitchRanges: ranges })
+    expect(parts).toHaveLength(3)
+    expect(parts[0]).toEqual({ type: 'text', text: '😀 ' })
+    expect(parts[1].type).toBe('emote')
+    if (parts[1].type === 'emote') expect(parts[1].name).toBe('Kappa')
+    expect(parts[2]).toEqual({ type: 'text', text: ' hi' })
+  })
+
+  it('an emoji between two emotes shifts only the later one', () => {
+    // 'Kappa 😀 Pog': Kappa at code points 0-4, Pog at 8-10 (past the
+    // 2-unit emoji) → UTF-16 units 9-11. Distinct emote ids are '/'-separated
+    // in the tag (',' separates ranges of the SAME emote).
+    const ranges = E.parseTwitchEmoteTag('25:0-4/305954156:8-10', 'Kappa 😀 Pog')
+    expect(ranges).toEqual([
+      { start: 0, end: 4, id: '25' },
+      { start: 9, end: 11, id: '305954156' },
+    ])
+    const parts = E.renderMessage({ message: 'Kappa 😀 Pog', thirdParty: new Map(), twitchRanges: ranges })
+    expect(parts.filter((p) => p.type === 'emote').map((p) => (p as { name: string }).name)).toEqual(['Kappa', 'Pog'])
+  })
+
+  it('keeps ASCII-only messages byte-identical (identity conversion)', () => {
+    expect(E.parseTwitchEmoteTag('25:0-4', 'Kappa')).toEqual([{ start: 0, end: 4, id: '25' }])
+  })
+
+  it('drops ranges that fall outside the message or are inverted', () => {
+    expect(E.parseTwitchEmoteTag('25:5-9', 'Kappa')).toEqual([])
+    expect(E.parseTwitchEmoteTag('25:4-2', 'Kappa')).toEqual([])
+    expect(E.parseTwitchEmoteTag('25:0-4', 'Kappa 😀')).toEqual([{ start: 0, end: 4, id: '25' }])
+  })
+})
+
 describe('emoteOnly predicate (mirrors App.svelte handleMessage)', () => {
   // The predicate is inline in App.svelte's handleMessage and not exported,
   // so the test reconstructs the same expression over the parts produced by

@@ -289,8 +289,25 @@ export interface EmoteRange {
   id: string
 }
 
-export function parseTwitchEmoteTag(tag: string | undefined, _message: string): EmoteRange[] {
+// Twitch's emote-tag positions count Unicode CODE POINTS; every consumer of
+// EmoteRange slices the message in UTF-16 code units. An emoji outside the
+// BMP (1 code point, 2 code units) before an emote shifts each later range by
+// one unit per emoji, slicing the emote mid-glyph. Build the code-point →
+// UTF-16 offset table on the exact string the renderer later slices (callers
+// must pass THAT string, not a wrapped variant like the raw CTCP ACTION
+// trailing) and translate every range through it.
+export function parseTwitchEmoteTag(tag: string | undefined, message: string): EmoteRange[] {
   if (!tag) return []
+  // offsets[i] = UTF-16 index of the i-th code point; for..of iterates code
+  // points, and each yielded string's length is its unit size (2 for an
+  // astral emoji).
+  const offsets: number[] = []
+  let u16 = 0
+  for (const ch of message) {
+    offsets.push(u16)
+    u16 += ch.length
+  }
+  const codePoints = offsets.length
   const ranges: EmoteRange[] = []
   for (const part of tag.split('/')) {
     if (!part) continue
@@ -298,11 +315,18 @@ export function parseTwitchEmoteTag(tag: string | undefined, _message: string): 
     if (!id || !positions) continue
     for (const pos of positions.split(',')) {
       const [a, b] = pos.split('-')
-      const start = Number(a)
-      const end = Number(b)
-      if (Number.isFinite(start) && Number.isFinite(end)) {
-        ranges.push({ start, end, id })
-      }
+      const cpStart = Number(a)
+      const cpEnd = Number(b)
+      if (!Number.isFinite(cpStart) || !Number.isFinite(cpEnd)) continue
+      // Out-of-message or inverted ranges can only be a malformed tag; drop
+      // them rather than clamp (a clamped range would render arbitrary text
+      // as a broken emote).
+      if (cpStart < 0 || cpEnd < cpStart || cpEnd >= codePoints) continue
+      // The UTF-16 end covers both units of a trailing surrogate pair: it is
+      // the offset of the NEXT code point minus one (or the string end).
+      const start = offsets[cpStart]
+      const end = (cpEnd + 1 < codePoints ? offsets[cpEnd + 1] : message.length) - 1
+      ranges.push({ start, end, id })
     }
   }
   ranges.sort((x, y) => x.start - y.start)

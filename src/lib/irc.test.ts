@@ -108,6 +108,23 @@ describe('parseIrcLine baseline (PRIVMSG only)', () => {
   })
 })
 
+describe('PRIVMSG /me (ACTION) emote indices', () => {
+  it('resolves the emotes tag against the stripped text, in UTF-16 units', () => {
+    // Live-verified on real IRC traffic: Twitch indexes an ACTION message's
+    // emotes tag into the text WITHOUT the CTCP wrapper. Stripped text
+    // '😀 Kappa' → code points emoji=0, space=1, Kappa=2-6 → UTF-16 units
+    // 3-7 (the emoji costs two units). Parsing against the raw wrapped
+    // trailing instead would slice into the wrapper garbage.
+    const msg = parseIrcLine(
+      '@emotes=25:2-6;id=abc;tmi-sent-ts=0 :bob!bob@bob.tmi.twitch.tv PRIVMSG #channel :\u0001ACTION 😀 Kappa\u0001',
+    )
+    expect(msg).not.toBeNull()
+    expect(msg!.isAction).toBe(true)
+    expect(msg!.message).toBe('😀 Kappa')
+    expect(msg!.twitchEmotes).toEqual([{ start: 3, end: 7, id: '25' }])
+  })
+})
+
 describe('parseIrcEvent USERNOTICE', () => {
   function usernotice(tags: string, trailing = ''): string {
     const body = trailing ? ' :' + trailing : ''
