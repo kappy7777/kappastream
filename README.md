@@ -114,7 +114,7 @@ The package declares `streamlink` as a dependency.
 
 ### 🐧 Fedora
 
-Twitch streams use H.264 video. Fedora's default `ffmpeg-free` packages do not include the required H.264 decoder, so the **RPM Fusion Free** repository must be enabled first.
+Twitch streams use H.264 video. Fedora's default `ffmpeg-free` packages do not include the required H.264 decoder, so the **RPM Fusion Free** repository must be enabled, and Fedora's codec-stripped ffmpeg replaced with the full one.
 
 Enable RPM Fusion Free once:
 
@@ -122,21 +122,21 @@ Enable RPM Fusion Free once:
 sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
 ```
 
+Swap in the full codecs (the kappastream package does not do this for you):
+
+```bash
+sudo dnf swap ffmpeg-free ffmpeg --allowerasing
+```
+
 Then download the `.rpm` package from the [latest release](../../releases/latest) and install it with:
 
 ```bash
-sudo dnf install --allowerasing ./kappastream-*.x86_64.rpm
+sudo dnf install ./kappastream-*.x86_64.rpm
 ```
 
-The `--allowerasing` option allows DNF to replace Fedora's codec-stripped `ffmpeg-free` libraries with RPM Fusion's `ffmpeg-libs`, which provides H.264 playback. Without the codec, streams may play audio over a black video surface.
+The swap replaces Fedora's `ffmpeg-free` libraries with RPM Fusion's, which provide the H.264 decoder Twitch streams need. Without it, streams may play audio over a black video surface.
 
-The package also declares `streamlink` as a dependency.
-
-If kappastream was installed before the codec dependency was added, repair the existing installation with:
-
-```bash
-sudo dnf swap --allowerasing ffmpeg-free ffmpeg
-```
+The package also declares `streamlink` and `libmpv` as dependencies.
 
 ### 🖥️ Windows
 
