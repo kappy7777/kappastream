@@ -100,19 +100,28 @@
 
   async function loadGameStreams(): Promise<void> {
     if (!activeCategory) return
+    const category = activeCategory
     gameLoading = true
     gameError = false
     gameErrorMessage = ''
     try {
-      const page = await fetchGameStreams(activeCategory.name)
+      const page = await fetchGameStreams(category.name)
+      // A late answer must not fill a DIFFERENT category's page (open A, go
+      // back, open B quickly). Identity, not a token counter: closing the
+      // category view also swaps the target, and the retry button reuses
+      // this same path.
+      if (activeCategory !== category) return
       gameStreams = page.streams
       // Reset the reveal whenever the list is refetched.
       gameStreamsVisible = initialVisible()
     } catch (err) {
+      if (activeCategory !== category) return
       gameError = true
       gameErrorMessage = errorMessage(err)
     } finally {
-      gameLoading = false
+      // A stale load must not clear the spinner of the load that replaced
+      // it — that one clears its own.
+      if (activeCategory === category) gameLoading = false
     }
   }
 
