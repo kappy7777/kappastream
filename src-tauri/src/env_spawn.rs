@@ -60,6 +60,32 @@ pub(crate) fn in_appimage() -> bool {
     std::env::var("APPIMAGE").is_ok()
 }
 
+/// Filter an XDG-style colon-separated search path for forwarding out of an
+/// AppImage: drop every entry that lives inside $APPDIR. The runtime's
+/// apprun-hooks prepend the bundled `usr/` tree to XDG_DATA_DIRS /
+/// XDG_CONFIG_DIRS, and forwarding those entries would re-introduce the
+/// bundled-library pollution the whitelist exists to scrub — but dropping the
+/// variables entirely hides the SYSTEM (and Flatpak-export) share dirs
+/// xdg-open/gio need to find the default browser's desktop file. Returns
+/// None when nothing survives: an empty search path must not shadow the
+/// subsystem's compiled-in defaults, so the variable is omitted entirely.
+pub(crate) fn filter_appimage_path(value: &str, appdir: Option<&str>) -> Option<String> {
+    // No APPDIR: nothing identifiable to scrub, forward verbatim.
+    let Some(dir) = appdir else {
+        return Some(value.to_string());
+    };
+    let inside = |entry: &str| entry == dir || entry.starts_with(&format!("{dir}/"));
+    let kept: Vec<&str> = value
+        .split(':')
+        .filter(|e| !e.is_empty() && !inside(e))
+        .collect();
+    if kept.is_empty() {
+        None
+    } else {
+        Some(kept.join(":"))
+    }
+}
+
 /// Configure the environment of a spawned subprocess.
 ///
 /// Under an AppImage the runtime pollutes the env with bundled-library
@@ -101,6 +127,25 @@ pub fn configure(cmd: &mut Command, path_override: Option<&str>) {
         };
         cmd.env(k, v);
     }
+    // Data/config locations and $BROWSER: on Flatpak-browser systems
+    // (Bazzite, Steam Deck, Silverblue, …) the default browser's desktop
+    // file lives in a Flatpak export dir that only appears in these vars —
+    // scrubbing them left link-opening dead. The *_HOME pair and BROWSER
+    // cannot carry AppImage paths and pass through verbatim; the *_DIRS
+    // pair is filtered of the AppImage's own entries instead.
+    for k in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "BROWSER"] {
+        if let Ok(v) = std::env::var(k) {
+            cmd.env(k, v);
+        }
+    }
+    let appdir = std::env::var("APPDIR").ok();
+    for k in ["XDG_DATA_DIRS", "XDG_CONFIG_DIRS"] {
+        if let Ok(v) = std::env::var(k) {
+            if let Some(filtered) = filter_appimage_path(&v, appdir.as_deref()) {
+                cmd.env(k, filtered);
+            }
+        }
+    }
 }
 
 /// Suppress the console window a Windows GUI app would otherwise pop up for a
@@ -141,7 +186,7 @@ pub fn detach(cmd: &mut Command) {
 
 #[cfg(test)]
 mod tests {
-    use super::SAFE_ENV_VARS;
+    use super::{filter_appimage_path, SAFE_ENV_VARS};
 
     #[test]
     fn safe_env_vars_carry_session_identity_but_not_appimage_pollution() {
@@ -156,8 +201,11 @@ mod tests {
             assert!(SAFE_ENV_VARS.contains(&var), "{var} missing from whitelist");
         }
         // The AppImage runtime's apprun-hooks rewrite these; forwarding the
-        // rewritten values into children would re-introduce the
-        // bundled-library pollution the whitelist exists to scrub.
+        // rewritten values VERBATIM into children would re-introduce the
+        // bundled-library pollution the whitelist exists to scrub. The XDG
+        // *_DIRS pair is instead forwarded through filter_appimage_path,
+        // which strips the AppImage's own entries — it stays out of the
+        // verbatim whitelist.
         for var in [
             "XDG_DATA_DIRS",
             "LD_LIBRARY_PATH",
@@ -169,5 +217,59 @@ mod tests {
         ] {
             assert!(!SAFE_ENV_VARS.contains(&var), "{var} must stay excluded");
         }
+    }
+
+    #[test]
+    fn filter_appimage_path_removes_only_entries_under_the_mount() {
+        let appdir = "/tmp/.mount_Kappa1234";
+        // System + Flatpak-export entries survive untouched, in order.
+        assert_eq!(
+            filter_appimage_path(
+                "/usr/local/share:/usr/share:/var/lib/flatpak/exports/share",
+                Some(appdir)
+            )
+            .as_deref(),
+            Some("/usr/local/share:/usr/share:/var/lib/flatpak/exports/share")
+        );
+        // The runtime's prepended entries (inside the mount) are stripped;
+        // a sibling path sharing the prefix text is NOT (boundary '/').
+        assert_eq!(
+            filter_appimage_path(
+                &format!("{appdir}/usr/share:/usr/share:{appdir}x/share:{appdir}"),
+                Some(appdir)
+            )
+            .as_deref(),
+            Some("/usr/share:/tmp/.mount_Kappa1234x/share")
+        );
+        // Empty segments never survive either.
+        assert_eq!(
+            filter_appimage_path("::/usr/share:", Some(appdir)).as_deref(),
+            Some("/usr/share")
+        );
+    }
+
+    #[test]
+    fn filter_appimage_path_drops_the_variable_when_nothing_survives() {
+        let appdir = "/tmp/.mount_Kappa1234";
+        assert_eq!(filter_appimage_path(appdir, Some(appdir)), None);
+        assert_eq!(
+            filter_appimage_path(
+                &format!("{appdir}/usr/share:{appdir}/etc/xdg"),
+                Some(appdir)
+            ),
+            None
+        );
+        assert_eq!(filter_appimage_path("", Some(appdir)), None);
+        assert_eq!(filter_appimage_path("::", Some(appdir)), None);
+    }
+
+    #[test]
+    fn filter_appimage_path_without_appdir_passes_through_verbatim() {
+        // No APPDIR (native run, or a hypothetical env without it): nothing
+        // to scrub, the search path forwards as-is.
+        assert_eq!(
+            filter_appimage_path("/usr/share:/etc/xdg", None).as_deref(),
+            Some("/usr/share:/etc/xdg")
+        );
     }
 }
