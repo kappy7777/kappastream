@@ -113,8 +113,7 @@ describe('pointerFractions (native OSC pointer normalization)', () => {
     // The fold line sits halfway into the content. The old code remapped the
     // visible band onto 0..1, so the visible top sent 0 — every hit landed
     // above where the pointer visibly was (unclickable seek strip).
-    const foldLine = box.top + 180
-    const top = pointerFractions(100 + 320, foldLine, box.left, box.top, box.w, box.h, 16 / 9, 180)
+    const top = pointerFractions(100 + 320, box.top + 180, box.left, box.top, box.w, box.h, 16 / 9, 180)
     expect(top.y).toBeCloseTo(0.5, 9)
     expect(top.inside).toBe(true)
     const bottom = pointerFractions(100 + 320, box.top + 360, box.left, box.top, box.w, box.h, 16 / 9, 180)
@@ -123,7 +122,6 @@ describe('pointerFractions (native OSC pointer normalization)', () => {
   })
 
   it('events over the hidden band are outside; the drag clamp folds into [f, 1]', () => {
-    const foldLine = box.top + 180
     const hidden = pointerFractions(100 + 320, box.top + 90, box.left, box.top, box.w, box.h, 16 / 9, 180)
     expect(hidden.y).toBeCloseTo(0.25, 9)
     expect(hidden.inside).toBe(false)
@@ -134,7 +132,6 @@ describe('pointerFractions (native OSC pointer normalization)', () => {
   })
 
   it('x is never folded and clamps to [0, 1]', () => {
-    const foldLine = box.top + 180
     const left = pointerFractions(100 - 50, box.top + 270, box.left, box.top, box.w, box.h, 16 / 9, 180)
     expect(left.x).toBeCloseTo(-50 / 640, 9)
     expect(left.clampX).toBe(0)
