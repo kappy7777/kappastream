@@ -110,7 +110,7 @@ Download the `.deb` package from the [latest release](../../releases/latest), th
 sudo apt install ./kappastream_*_amd64.deb
 ```
 
-The package declares `streamlink` as a dependency.
+The package declares `streamlink`, `libmpv` and the GStreamer libav codecs as dependencies. It is built on Debian 12 and needs **glibc 2.36 or newer** (Debian 12+, Ubuntu 24.04+).
 
 ### 🐧 Fedora
 
