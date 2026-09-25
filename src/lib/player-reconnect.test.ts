@@ -8,8 +8,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount, unmount } from 'svelte'
 
-const chatMock = vi.hoisted(() => ({
-  dropAfterConnect: false,
+const invokeCalls = vi.hoisted(() => ({
+  mpvAvailable: 0,
 }))
 
 const hlsMock = vi.hoisted(() => {
@@ -42,6 +42,7 @@ vi.mock('hls.js', () => {
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
   invoke: vi.fn(async (cmd: string) => {
+    if (cmd === 'mpv_available') invokeCalls.mpvAvailable++
     switch (cmd) {
       case 'target_os':
         return 'linux'
@@ -144,9 +145,28 @@ afterEach(() => {
   chatStubControl.dropAfterConnect = false
   chatStubControl.neverConnect = false
   chatStubSessions.length = 0
+  invokeCalls.mpvAvailable = 0
   settings.setMpvEngine(false)
   localStorage.clear()
   hlsMock.instances.length = 0
+})
+
+describe('mpv engine probe is lazy', () => {
+  it('no probe while the engine is off; opting in probes', async () => {
+    localStorage.setItem('app-last-seen-version-v1', '99.0.0')
+    const target = document.createElement('div')
+    document.body.appendChild(target)
+    view = mount(App, { target })
+    await sleep(150)
+
+    // The probe bootstraps a full libmpv engine — a default-off launch
+    // must not create one.
+    expect(invokeCalls.mpvAvailable).toBe(0)
+
+    settings.setMpvEngine(true)
+    await sleep(100)
+    expect(invokeCalls.mpvAvailable).toBeGreaterThanOrEqual(1)
+  }, 15000)
 })
 
 describe('single-view player survives a chat reconnect drop', () => {

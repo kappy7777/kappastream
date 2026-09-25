@@ -63,6 +63,16 @@
       .catch(() => {
         /* leave empty — the safe pair stays offered */
       })
+  })
+
+  // The mpv_available probe BOOTSTRAPS engine 0 (a libmpv core, a GL context
+  // and the webview reparent) — it must not run merely because this
+  // component (always mounted, hidden until the gear opens) exists. Fire it
+  // on the first panel open; ensure_engine is idempotent for later opens.
+  let mpvProbed = false
+  function probeMpvEngine(): void {
+    if (mpvProbed || !isTauri()) return
+    mpvProbed = true
     void invoke<MpvAvailability>('mpv_available')
       .then((a) => {
         mpvAvailable = a?.available === true
@@ -71,7 +81,7 @@
       .catch(() => {
         mpvAvailable = false // command not registered = default build
       })
-  })
+  }
 
   // ---- Settings window -------------------------------------------------------
   // A centered About-sized modal with a section sidebar — every setting is
@@ -83,6 +93,7 @@
 
   function toggle(): void {
     open = !open
+    if (open) probeMpvEngine()
   }
 
   function closePanel(): void {

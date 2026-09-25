@@ -186,13 +186,16 @@
   let multiView = $state(false)
 
   // ---- Native video engine (experimental, mpv-embed builds) ---------------
-  // Available = the build carries the feature AND the native surface came up
-  // (invoke also bootstraps the engine on first call). In default builds the
-  // mpv_available command does not exist — the rejection maps to false and
-  // every gate below stays closed.
+  // Available = the build carries the feature AND the native surface came up.
+  // In default builds the mpv_available command does not exist — the
+  // rejection maps to false and every gate below stays closed. The probe is
+  // NOT a free read: it bootstraps engine 0 (a libmpv core, a GL context,
+  // and the webview reparent into the shared GtkOverlay), so it only runs
+  // while the engine is opted in — reactively, so flipping the toggle on
+  // probes (and a default-off launch creates no engine at all).
   let mpvAvailable = $state(false)
-  onMount(() => {
-    if (!isTauri()) return
+  $effect(() => {
+    if (!settings.mpvEngine || !isTauri()) return
     void invoke<MpvAvailability>('mpv_available')
       .then((a) => {
         mpvAvailable = a?.available === true
