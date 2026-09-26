@@ -11,12 +11,12 @@ Users install it with `dpkg -i` (or `apt install ./kappastream_*.deb`).
 
 | Distro | Status | Why |
 | --- | --- | --- |
-| Ubuntu 24.04 (noble) | ✅ primary build host | glibc 2.39 — the older floor |
-| Debian 13 (trixie) | ✅ covered by the noble build | glibc 2.40 (newer → runs the noble binary); t64 `Provides` satisfy the non-t64 `Depends` names |
-| Debian 12 (bookworm) | ❌ | only has webkit2gtk-4.0; Tauri 2 needs 4.1. Use the AppImage. |
-| Ubuntu 22.04 (jammy) | ❌ | same — webkit2gtk-4.0 only. Use the AppImage. |
+| Debian 12 (bookworm) | ✅ release build host | the shipped `.deb` is built in a `debian:12` container (release.yml): glibc 2.36, `libmpv2`, webkit2gtk-4.1 |
+| Debian 13 (trixie) | ✅ covered by the bookworm build | newer glibc runs the bookworm binary; t64 `Provides` satisfy the non-t64 `Depends` names |
+| Ubuntu 24.04 (noble) | ✅ runs the release `.deb` | glibc 2.39 ≥ the 2.36 floor; also the base of the local Docker build below |
+| Ubuntu 22.04 (jammy) | ❌ | glibc 2.35 is below the 2.36 floor, and jammy ships only libmpv1 (mpv 0.34, SONAME `.so.1`) while the package depends on `libmpv2`. Use the AppImage. |
 
-If a trixie box ever fails dependency resolution on the noble-built `.deb`,
+If a trixie box ever fails dependency resolution on the bookworm-built `.deb`,
 rebuild inside a `debian:trixie` container (its native toolchain is recent
 enough that no rustup/nodesource is needed) and ship that `.deb` for trixie.
 

@@ -41,6 +41,16 @@ hand — do **not** hand-declare `webkit2gtk3`/`webkit2gtk4.1` by name, or the
 
 The spec also hard-`Requires: ffmpeg-libs` — see "H.264 video" below.
 
+**This spec builds the local rpmbuild package only.** The RELEASED `.rpm`
+(built by tauri-bundler in release.yml, metadata from `tauri.conf.json`)
+deliberately does **not** hard-require `ffmpeg-libs` — it only *recommends*
+the GStreamer libav plugin. An RPM Fusion hard requirement would fail
+outright on systems without that repo enabled and force-erase the
+`libav*-free` split, so the released package leaves the codec swap to the
+user (the top-level README documents the manual `dnf swap ffmpeg-free
+ffmpeg` step). A locally rpmbuilt `.rpm` from this directory behaves
+differently: with RPM Fusion enabled it pulls the full codecs automatically.
+
 ## H.264 video (why streams would otherwise be black)
 
 Twitch streams are H.264, and **Fedora ships no H.264 decoder by default**

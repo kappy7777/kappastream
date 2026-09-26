@@ -87,8 +87,9 @@ it. Build it from the prebuilt binary first:
 # from the repo root — produces packaging/aur/dist/kappastream-<ver>-x86_64.tar.gz:
 bash packaging/aur/build-release-tarball.sh
 
-# then build the -bin package (point _release at the local file:// URL, or
-# publish the tarball to a release and use the real URL):
+# then build the -bin package. PKGBUILD-bin's source=() fetches the tarball
+# from the GitHub release (`${_repo}/releases/download/v${pkgver}/…`), so it
+# must be published as a release asset first:
 cd packaging/aur
 makepkg -p PKGBUILD-bin -si
 kappastream
@@ -106,18 +107,18 @@ The AUR is a per-package git repo. You push the `PKGBUILD` (+ `.SRCINFO`), not a
 git clone ssh://aur@aur.archlinux.org/kappastream-git.git
 cd kappastream-git
 
-# Copy in your reviewed files:
+# Copy in your reviewed files. The PKGBUILD installs the desktop entry,
+# metainfo and launcher wrapper from the cloned source checkout
+# (packaging/shared/ inside the repo it builds), so the AUR repo itself
+# carries only the recipe and docs:
 cp /path/to/packaging/aur/PKGBUILD .
 cp /path/to/packaging/aur/README.md .
 cp /path/to/packaging/aur/.gitignore .
-cp /path/to/packaging/shared/kappastream.desktop .
-cp /path/to/packaging/shared/dev.kappy.kappastream.metainfo.xml .
-cp /path/to/packaging/shared/kappastream.sh .
 
 # Generate .SRCINFO (AUR indexes from this, not the PKGBUILD):
 makepkg --printsrcinfo > .SRCINFO
 
-git add .gitignore PKGBUILD .SRCINFO README.md kappastream.desktop kappastream.sh dev.kappy.kappastream.metainfo.xml
+git add .gitignore PKGBUILD .SRCINFO README.md
 git commit -m "Initial import: kappastream-git <version>"
 git push origin master
 ```
@@ -134,7 +135,7 @@ Needs a published release tarball (attached to a GitHub release) so
 git clone ssh://aur@aur.archlinux.org/kappastream-bin.git
 cd kappastream-bin
 cp /path/to/packaging/aur/PKGBUILD-bin PKGBUILD   # AUR expects the file named PKGBUILD
-# fill in _release (real URL prefix) + the sha256sum (makepkg -g)
+# bump the sha256sums entry to the published tarball's hash (makepkg -g prints it)
 makepkg --printsrcinfo > .SRCINFO
 git add PKGBUILD .SRCINFO
 git commit -m "Initial import: kappastream-bin <version>"
@@ -143,9 +144,9 @@ git push origin master
 
 ## Updating on a new release
 
-1. Tag the release in the source repo (`git tag v<version>`).
-2. (Optional) switch `pkgver()` to the `git describe` variant noted in the PKGBUILD.
-3. In the AUR repo: update the `PKGBUILD` (bump `pkgrel` to 1, adjust anything that changed), regenerate `.SRCINFO`, commit, push.
+1. Tag the release in the source repo (`git tag v<version>`) — `pkgver()`
+   derives from `git describe`, so the tag alone moves the -git pkgver.
+2. In the AUR repo: update the `PKGBUILD` (bump `pkgrel` to 1, adjust anything that changed), regenerate `.SRCINFO`, commit, push.
 
 ## Notes
 
