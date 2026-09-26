@@ -5,10 +5,12 @@
 # with the shared desktop/metainfo/wrapper assets, icons, and license into a
 # single self-contained archive the -bin PKGBUILD fetches via source=().
 #
-# Input binary: src-tauri/target/release/kappastream by default (build it
-# first via the AppImage flow, `npx tauri build`, or
-# `cargo build --release --features tauri/custom-protocol`). Override with
-# KAPPASTREAM_PREBUILT_BINARY=/path for an already-built binary.
+# Input binary: src-tauri/target/release/kappastream by default. Build it
+# the way CI does (the AUR must never register the in-app updater, so the
+# default `updater` feature is off; the embedded-mpv engine is re-added):
+#   npm run build && (cd src-tauri && cargo build --release --locked \
+#     --no-default-features --features "mpv-embed,tauri/custom-protocol")
+# Override with KAPPASTREAM_PREBUILT_BINARY=/path for an already-built binary.
 #
 # Output: packaging/aur/dist/kappastream-<version>-x86_64.tar.gz
 # Includes install.sh (a `sudo ./install.sh` convenience for manual-tarball
@@ -33,9 +35,21 @@ OUT="${ARCHIVE_STEM}.tar.gz"
 BIN="${KAPPASTREAM_PREBUILT_BINARY:-$REPO_ROOT/src-tauri/target/release/${PKG}}"
 if [ ! -x "$BIN" ]; then
 	echo "error: prebuilt binary not found at $BIN" >&2
-	echo "       build it first:  npm run build &&" >&2
-	echo "       (cd src-tauri && cargo build --release --features tauri/custom-protocol)" >&2
+	echo "       build it first (frontend, then the updater-off binary):" >&2
+	echo "         npm run build" >&2
+	echo "         cd src-tauri && cargo build --release --locked --no-default-features --features \"mpv-embed,tauri/custom-protocol\"" >&2
 	echo "       or set KAPPASTREAM_PREBUILT_BINARY=/path" >&2
+	exit 1
+fi
+
+# Refuse a binary that carries the in-app updater: pacman owns updates on
+# Arch, so an AUR install must never see an update prompt. The marker is an
+# error string that only the Rust-side tauri-plugin-updater embeds — the
+# frontend's updater JS (invoke("plugin:updater|…")) is compiled into EVERY
+# build through the embedded dist/, so it proves nothing either way.
+if grep -aq 'Updater does not have any endpoints set.' "$BIN"; then
+	echo "error: $BIN was built with the updater feature ON" >&2
+	echo "       rebuild with --no-default-features --features \"mpv-embed,tauri/custom-protocol\"" >&2
 	exit 1
 fi
 
