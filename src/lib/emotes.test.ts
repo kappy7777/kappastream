@@ -139,8 +139,8 @@ describe('7TV PERSONAL/LISTED state', () => {
 
     const emotes = await E.loadChannelEmotes('somenick')
     const map = E.buildEmoteMap(emotes)
-    expect(map.has('catkitty')).toBe(true)
-    expect(map.get('catkitty')?.id).toBe('xyz')
+    expect(map.has('CatKitty')).toBe(true)
+    expect(map.get('CatKitty')?.id).toBe('xyz')
   })
 })
 
@@ -165,8 +165,56 @@ describe('FFZ global default_sets', () => {
 
     const emotes = await E.loadGlobalEmotes()
     const map = E.buildEmoteMap(emotes)
-    expect(map.has('globalone')).toBe(true)
-    expect(map.has('nondefault')).toBe(false)
+    expect(map.has('GlobalOne')).toBe(true)
+    expect(map.has('NonDefault')).toBe(false)
+  })
+})
+
+describe('renderMessage — exact-case emote codes', () => {
+  // Provider codes (7TV/BTTV/FFZ) match case-sensitively: "ez" is NOT the
+  // emote registered as "EZ", and a code carrying edge punctuation or
+  // non-ASCII can only match as the whole word.
+  it('"ez ok lul" with EZ/OK/LuL registered renders NO emotes', () => {
+    const map = E.buildEmoteMap([
+      { id: 'ez', name: 'EZ', url: 'u', provider: '7tv' },
+      { id: 'ok', name: 'OK', url: 'u', provider: '7tv' },
+      { id: 'lul', name: 'LuL', url: 'u', provider: 'bttv' },
+    ])
+    const parts = E.renderMessage({ message: 'ez game ok lul', thirdParty: map })
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toEqual({ type: 'text', text: 'ez game ok lul' })
+  })
+
+  it('a punctuation-bearing code matches as the whole word ("D:")', () => {
+    const map = E.buildEmoteMap([{ id: 'd', name: 'D:', url: 'u', provider: 'bttv' }])
+    const parts = E.renderMessage({ message: 'oh D: no', thirdParty: map })
+    const emotes = parts.filter((p) => p.type === 'emote')
+    expect(emotes).toHaveLength(1)
+    if (emotes[0]!.type === 'emote') expect(emotes[0]!.name).toBe('D:')
+  })
+
+  it('"EZ!" renders the EZ emote plus "!" as text', () => {
+    const map = E.buildEmoteMap([{ id: 'ez', name: 'EZ', url: 'u', provider: '7tv' }])
+    const parts = E.renderMessage({ message: 'EZ!', thirdParty: map })
+    expect(parts).toHaveLength(2)
+    expect(parts[0].type).toBe('emote')
+    if (parts[0].type === 'emote') expect(parts[0].name).toBe('EZ')
+    expect(parts[1].type).toBe('text')
+    if (parts[1].type === 'text') expect(parts[1].text).toBe('!')
+  })
+
+  it('Pog and POG stay distinct emotes (no case-collapsed dedupe)', () => {
+    const map = E.buildEmoteMap([
+      { id: 'pog1', name: 'Pog', url: 'u', provider: '7tv' },
+      { id: 'pog2', name: 'POG', url: 'u', provider: 'ffz' },
+    ])
+    expect(map.has('Pog')).toBe(true)
+    expect(map.has('POG')).toBe(true)
+    const parts = E.renderMessage({ message: 'Pog POG', thirdParty: map })
+    const emotes = parts.filter((p) => p.type === 'emote')
+    expect(emotes).toHaveLength(2)
+    if (emotes[0]!.type === 'emote') expect(emotes[0]!.name).toBe('Pog')
+    if (emotes[1]!.type === 'emote') expect(emotes[1]!.name).toBe('POG')
   })
 })
 

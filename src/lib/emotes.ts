@@ -102,8 +102,10 @@ function sevenTvEmote(setEmote: SevenTvSetEmote): Emote | null {
 
 function uniquePush(list: Emote[], emote: Emote | null) {
   if (!emote) return
-  const key = emote.name.toLowerCase()
-  if (list.some((e) => e.name.toLowerCase() === key)) return
+  // Provider codes are CASE-SENSITIVE (7TV/BTTV/FFZ match the exact string a
+  // chatter typed), so dedupe on the exact name — lowercasing here collapsed
+  // Pog and POG into one entry.
+  if (list.some((e) => e.name === emote.name)) return
   list.push(emote)
 }
 
@@ -270,15 +272,16 @@ export async function loadGlobalEmotes(signal?: AbortSignal): Promise<Emote[]> {
     fetchFFZGlobal(signal),
   ])
   // FFZ appended last so channel emotes (which already won earlier in
-  // buildEmoteMap's first-write-wins on the lowercased name) keep winning.
+  // buildEmoteMap's first-write-wins on the exact name) keep winning.
   return [...seventv, ...bttv, ...ffz]
 }
 
 export function buildEmoteMap(emotes: Emote[]): Map<string, Emote> {
+  // Keys are the EXACT provider codes: 7TV/BTTV/FFZ match case-sensitively,
+  // so "Pog" and "POG" are distinct emotes and must both resolve.
   const map = new Map<string, Emote>()
   for (const e of emotes) {
-    const key = e.name.toLowerCase()
-    if (!map.has(key)) map.set(key, e)
+    if (!map.has(e.name)) map.set(e.name, e)
   }
   return map
 }
@@ -380,18 +383,24 @@ function thirdPartyRanges(message: string, thirdParty: Map<string, Emote>): Emot
       i++
     }
     const word = message.slice(start, i)
+    // Provider codes match case-sensitively. Try the WHOLE word first — that
+    // is the only way punctuation-bearing ("D:", ":tf:", "(ditto)") and
+    // non-ASCII codes can ever match, since the strip below removes exactly
+    // those characters. Then the edge-punctuation-stripped token, still
+    // exactly, so "ez" never renders the emote registered as "EZ".
+    const whole = thirdParty.get(word)
     const stripped = word.replace(/^[^A-Za-z0-9_]+|[^A-Za-z0-9_]+$/g, '')
-    if (!stripped) continue
-    const emote = thirdParty.get(stripped.toLowerCase())
+    const emote = whole ?? (stripped && stripped !== word ? thirdParty.get(stripped) : undefined)
     if (!emote) continue
-    // The lookup uses the punctuation-stripped token, but the emitted range
-    // must cover only the stripped token — not the full word — so trailing
-    // punctuation ("omE!") stays as text instead of being absorbed into the
-    // emote span. indexOf gives the stripped token's offset within the word.
-    const offset = word.indexOf(stripped)
+    // The emitted range must cover only the matched span — not the full
+    // word — so edge punctuation ("EZ!") stays as text instead of being
+    // absorbed into the emote span. indexOf gives the match's offset within
+    // the word.
+    const matched = whole ? word : stripped
+    const offset = word.indexOf(matched)
     ranges.push({
       start: start + offset,
-      end: start + offset + stripped.length - 1,
+      end: start + offset + matched.length - 1,
       id: emote.id + '|' + emote.provider,
     })
   }
