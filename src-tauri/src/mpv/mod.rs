@@ -518,10 +518,8 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                             );
                         }
                     }
-                    ("duration", PropertyData::Double(d)) => {
-                        if d.is_finite() && d > 0.0 {
-                            duration = d;
-                        }
+                    ("duration", PropertyData::Double(d)) if d.is_finite() && d > 0.0 => {
+                        duration = d;
                     }
                     // OSC-driven volume/mute (dragging mpv's own in-video
                     // slider) mirrors back into the app. Read BOTH fresh so
