@@ -490,8 +490,18 @@ export class FavoritesStore {
     return { added, skipped, invalid }
   }
 
+  // Idempotent: the FIRST call polls + schedules; later calls do nothing. The
+  // owner is App's onMount (the poll must run even when the Sidebar is not
+  // mounted — theater mode or a persisted 'hidden' sidebar — or nothing would
+  // ever refresh favorites, fire go-live notifications, or nudge the pinned-
+  // chat store). Component remounts must not re-fire an immediate full-list
+  // poll on top of the running cadence.
+  private started = false
+
   start(): void {
     if (this.disposed) return
+    if (this.started) return
+    this.started = true
     // Initial pass: one GQL request classifies the whole favorites list. On a
     // transport failure the breaker trips and a backoff retry is scheduled.
     if (this.entries.length > 0) void this.pollOnce()

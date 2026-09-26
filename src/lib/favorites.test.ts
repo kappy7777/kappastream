@@ -171,6 +171,22 @@ describe('GQL batch resolves the whole list', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
   })
 
+  it('start() is idempotent — a second call never re-polls', async () => {
+    // start() is owned by App's onMount; component remounts (the Sidebar
+    // cycling through its modes, theater toggles) used to re-fire an
+    // immediate full-list poll each time.
+    seedFavorites(['alpha'])
+    gql.handler = gqlStatusHandler({ alpha: { live: false } })
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(gql.calls).toHaveLength(1)
+    store.start()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(gql.calls).toHaveLength(1)
+  })
+
   it('resolves every favorite from a SINGLE GQL request', async () => {
     seedFavorites(['alpha', 'beta', 'gamma'])
     gql.handler = gqlStatusHandler({

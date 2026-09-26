@@ -2515,6 +2515,13 @@
   // fetchLiveStatus above covers the initial freshen (incl. channels that aren't
   // favorites, which the poll won't cover).
   onMount(() => {
+    // The favorites poll is owned HERE, not by the Sidebar: the sidebar is not
+    // mounted in theater mode or with a persisted 'hidden' sidebar, and in
+    // those states a sidebar-owned poll would never start — no go-live
+    // notifications, no status refresh for a joined favorite, no pinned-chat
+    // ticks for the whole session. start() is idempotent, so remounts are
+    // covered too.
+    favoritesStore.start()
     const unsubscribe = favoritesStore.subscribe((snapshot) => {
       // Pinned messages ride the SAME 150s poll cadence (no second timer):
       // every favorites cycle nudges the store, whose internal throttle caps

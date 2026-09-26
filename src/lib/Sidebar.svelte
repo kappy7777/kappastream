@@ -78,10 +78,12 @@
   }
 
   onMount(() => {
+    // Polling is started once by App's onMount (favorites must refresh even
+    // when the sidebar is not mounted — theater mode / hidden mode); the
+    // sidebar only subscribes to the snapshots here.
     const unsubscribe = store.subscribe((s) => {
       statuses = s
     })
-    store.start()
     return unsubscribe
   })
 
