@@ -301,34 +301,107 @@ jobs:
           fi
           echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
 
-      # tauri-bundler downloads linuxdeploy-plugin-gtk.sh from an UNPINNED
-      # master branch (raw.githubusercontent.com/tauri-apps/
-      # linuxdeploy-plugin-gtk/master/...) the first time it is needed and
-      # then reuses the cached file unchanged (crates/tauri-bundler/src/
-      # bundle/linux/appimage/linuxdeploy.rs in @tauri-apps/cli 2.11.4:
-      # `if !gtk.exists() { download(...) }`, cache dir
-      # $XDG_CACHE_HOME|~/.cache + /tauri). Seeding that cache path with a
-      # commit-pinned copy, gated on a sha256, means CI never performs the
-      # master download and the script that lands in the AppImage is exactly
-      # the one pinned here.
-      - name: Pre-seed the linuxdeploy gtk hook (commit-pinned)
+      # Every program the Build AppImage step below runs is seeded here and
+      # pinned by sha256. That step has the updater signing key in its env,
+      # and tauri-bundler otherwise downloads its AppImage tooling on the
+      # fly from addresses whose content can change (mutable release tags,
+      # raw `master`) — anything downloaded there could read the key and
+      # tamper with the AppImage the workflow then signs and ships.
+      #
+      # tauri-bundler's prepare_tools (crates/tauri-bundler/src/bundle/
+      # linux/appimage/linuxdeploy.rs, v2.9.4 as pulled in by
+      # @tauri-apps/cli 2.11.4) downloads a tool ONLY if it is missing from
+      # ${XDG_CACHE_HOME:-$HOME/.cache}/tauri/, under exactly the file
+      # names seeded below — so a seeded + hash-checked file is never
+      # fetched. A @tauri-apps/cli bump means RE-CHECKING prepare_tools: a
+      # new tool or a renamed cache file would be downloaded unpinned (the
+      # cache check at the end of the Build AppImage step then fails the
+      # job on the unexpected file).
+      #
+      # Sources, all downloaded and hash-verified on 2026-09-27:
+      #   AppRun-x86_64                tauri-apps/binary-releases, release tag `apprun-old` (mutable tag: the hash is the pin)
+      #   linuxdeploy-x86_64.AppImage  tauri-apps/binary-releases, release tag `linuxdeploy` (mutable tag: the hash is the pin)
+      #   linuxdeploy-plugin-gtk.sh    tauri-apps/linuxdeploy-plugin-gtk @ commit b5eb8d05b4c0ed40107fe2158c5d8527f94568ef
+      #   linuxdeploy-plugin-gstreamer.sh  tauri-apps/linuxdeploy-plugin-gstreamer @ commit 2a2e67491c32995a3f279ad0ecbe77abd512b42a
+      #   linuxdeploy-plugin-appimage.AppImage  linuxdeploy/linuxdeploy-plugin-appimage, dated release tag 1-alpha-20250213-1 (NOT `continuous`)
+      #   runtime-x86_64               AppImage/type2-runtime, dated release 20251108 (NOT `continuous`) — the AppImage runtime
+      #     handed to appimagetool via LDAI_RUNTIME_FILE in the build step
+      #
+      # Refreshing a hash: download the URL, `sha256sum` the file, update
+      # the table below. For the two mutable-tag assets treat a hash change
+      # as a review trigger, not a routine bump — content moving under a
+      # pinned tag is exactly what the hash is here to catch. Prefer dated
+      # release tags over `continuous` wherever one exists.
+      - name: Pre-seed the AppImage build tools (sha256-pinned)
         env:
+          APPRUN_URL: https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64
+          APPRUN_SHA256: f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f
+          LINUXDEPLOY_URL: https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage
+          LINUXDEPLOY_SHA256: e762bea85c8eb0d4b3508d46e5c1f037f717d0f9303ae3b4aafc8b04991fa1ef
           GTK_HOOK_URL: https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/b5eb8d05b4c0ed40107fe2158c5d8527f94568ef/linuxdeploy-plugin-gtk.sh
           GTK_HOOK_SHA256: cb379f9b0733e9ad9f8bd78f8c2fa038aef2478523bb7d4c8e64ff6a1ea3501a
+          GSTREAMER_HOOK_URL: https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gstreamer/2a2e67491c32995a3f279ad0ecbe77abd512b42a/linuxdeploy-plugin-gstreamer.sh
+          GSTREAMER_HOOK_SHA256: c107b49d84edbffc6ab226ed1007e0626a4f7aa2c3a36b7782bef62351d49e94
+          APPIMAGE_PLUGIN_URL: https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage
+          APPIMAGE_PLUGIN_SHA256: 992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3
+          RUNTIME_URL: https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+          RUNTIME_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
         run: |
-          set -eu
-          dest="${XDG_CACHE_HOME:-$HOME/.cache}/tauri/linuxdeploy-plugin-gtk.sh"
-          mkdir -p "$(dirname "$dest")"
-          curl -fsSL "$GTK_HOOK_URL" -o "$dest"
-          echo "linuxdeploy-plugin-gtk.sh sha256: $(sha256sum "$dest" | cut -d' ' -f1)"
-          echo "$GTK_HOOK_SHA256  $dest" | sha256sum -c -
-          chmod +x "$dest"
+          set -euo pipefail
+          cache="${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
+          mkdir -p "$cache"
+          seed() {
+            local name="$1" url="$2" sha="$3"
+            curl -fsSL "$url" -o "$cache/$name"
+            echo "$sha  $cache/$name" | sha256sum -c -
+            chmod +x "$cache/$name"
+          }
+          seed AppRun-x86_64 "$APPRUN_URL" "$APPRUN_SHA256"
+          seed linuxdeploy-x86_64.AppImage "$LINUXDEPLOY_URL" "$LINUXDEPLOY_SHA256"
+          seed linuxdeploy-plugin-gtk.sh "$GTK_HOOK_URL" "$GTK_HOOK_SHA256"
+          seed linuxdeploy-plugin-gstreamer.sh "$GSTREAMER_HOOK_URL" "$GSTREAMER_HOOK_SHA256"
+          seed linuxdeploy-plugin-appimage.AppImage "$APPIMAGE_PLUGIN_URL" "$APPIMAGE_PLUGIN_SHA256"
+          seed runtime-x86_64 "$RUNTIME_URL" "$RUNTIME_SHA256"
+          echo "Seeded tauri tool cache:"
+          ls -la "$cache"
 
       - name: Build AppImage
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npm run tauri -- build --bundles appimage
+        run: |
+          set -euo pipefail
+          # Pin the AppImage runtime: without this, the appimagetool inside
+          # linuxdeploy-plugin-appimage fetches type2-runtime `continuous`
+          # at build time and that download becomes the head of the shipped
+          # AppImage. The plugin maps LDAI_RUNTIME_FILE to appimagetool's
+          # --runtime-file; the seeded, hash-checked copy is used instead.
+          export LDAI_RUNTIME_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/tauri/runtime-x86_64"
+          npm run tauri -- build --bundles appimage 2>&1 | tee appimage-build.log
+          # The runtime must come only from the seeded file. If anything
+          # downloaded a runtime mid-build, the pin was not honored.
+          if grep -q 'Downloading runtime file' appimage-build.log; then
+            echo "ERROR: appimagetool downloaded its runtime during the build — LDAI_RUNTIME_FILE was not honored" >&2
+            exit 1
+          fi
+          # And the tool cache must contain nothing but the six seeded
+          # files: a tauri-cli bump that adds or renames a tool would have
+          # downloaded it unpinned. Name-based on purpose — prepare_tools
+          # legitimately patches the cached linuxdeploy AppImage in place,
+          # so its content differs from the seeded hash after a build.
+          cache="${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
+          for f in "$cache"/*; do
+            [ -e "$f" ] || continue
+            case "$(basename "$f")" in
+              AppRun-x86_64|linuxdeploy-x86_64.AppImage|linuxdeploy-plugin-gtk.sh|linuxdeploy-plugin-gstreamer.sh|linuxdeploy-plugin-appimage.AppImage|runtime-x86_64) ;;
+              *)
+                echo "ERROR: unexpected file in the tauri tool cache: $f" >&2
+                echo "       a tauri-cli bump may have added a tool — pin it in the pre-seed step" >&2
+                exit 1
+                ;;
+            esac
+          done
+          echo "OK: pinned tools only; no runtime download"
 
       # Measure the actual highest GLIBC_* requirement across every ELF file
       # bundled into the AppImage, so the compatibility window is documented
