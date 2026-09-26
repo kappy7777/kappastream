@@ -9,22 +9,26 @@
 # build can never produce a partially-published release.
 #
 # ┌───────────────────────────────────────────────────────────────────────┐
-# │ WHY TWO DIFFERENT UBUNTU VERSIONS (intentional, do not "normalize")   │
+# │ WHY THE NATIVE AND APPIMAGE BUILDS DIVERGE (intentional, do not       │
+# │ "normalize")                                                          │
 # │                                                                       │
-# │  • Native packages (.deb / .rpm / AUR -bin tarball) are built on      │
-# │    ubuntu-22.04 to keep their glibc (2.35) compatibility window as    │
-# │    wide as possible. These packages do NOT bundle WebKitGTK/GStreamer │
-# │    — they link the host's system libraries at runtime — so the build  │
-# │    baseline only affects the compiled binary's glibc requirement.     │
+# │  • Native packages (.deb / .rpm / AUR -bin tarball) are built in a    │
+# │    debian:12 container. It provides libmpv.so.2 (the SONAME the       │
+# │    embedded engine links) and glibc 2.36 — the widest floor that      │
+# │    ships it (Debian 12+, Ubuntu 24.04+, Fedora 40+). These packages   │
+# │    do NOT bundle WebKitGTK/GStreamer — they link the host's system    │
+# │    libraries at runtime — so the build baseline only affects the      │
+# │    compiled binary's glibc requirement.                               │
 # │                                                                       │
 # │  • The AppImage is built on ubuntu-24.04 to bundle the newer          │
 # │    WebKitGTK 2.44 + GStreamer stack, which is dramatically smoother   │
-# │    on modern NVIDIA/Wayland systems than the 22.04-bundled stack.     │
-# │    bundleMediaFramework:true still copies the 24.04 GStreamer codec   │
-# │    .so files (incl. libgstlibav → avdec_h264 for H.264) into the      │
-# │    AppImage. This RAISES the AppImage's glibc requirement vs 22.04;   │
-# │    the build-appimage job measures and reports the actual highest     │
-# │    GLIBC_* requirement, and it is recorded in the release notes.      │
+# │    on modern NVIDIA/Wayland systems than what an older baseline       │
+# │    bundles. bundleMediaFramework:true still copies the 24.04          │
+# │    GStreamer codec .so files (incl. libgstlibav → avdec_h264 for      │
+# │    H.264) into the AppImage. This RAISES the AppImage's glibc         │
+# │    requirement vs the debian-12 native packages; the build-appimage   │
+# │    job measures and reports the actual highest GLIBC_* requirement    │
+# │    on the job summary.                                                │
 # │                                                                       │
 # │  Native packages and the AppImage therefore intentionally diverge in  │
 # │  build baseline. Only the AppImage is allowed to use the newer stack. │
@@ -79,9 +83,9 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   # ── Native packages: .deb + .rpm + the AUR -bin tarball ───────────────
-  # ubuntu-22.04 (glibc 2.35) keeps the widest native-package compatibility.
-  # The AUR tarball reuses THIS job's compiled binary, so it inherits the same
-  # 22.04 baseline. No AppImage is built here.
+  # Built in the debian:12 container below (glibc 2.36, libmpv2). The AUR
+  # tarball reuses THIS job's compiled binary, so it inherits the same
+  # baseline. No AppImage is built here.
   build-native-packages:
     name: build native (deb/rpm/aur) · debian-12 container
     needs: [check]
@@ -406,7 +410,7 @@ jobs:
       # Measure the actual highest GLIBC_* requirement across every ELF file
       # bundled into the AppImage, so the compatibility window is documented
       # honestly (not guessed from the runner name). Surfaced on the run page
-      # via the job summary and carried into the release notes.
+      # via the job summary.
       - name: Measure AppImage glibc requirement
         shell: bash
         run: |
@@ -433,9 +437,6 @@ jobs:
             cat glibc-report.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          # Single highest-requirement token (e.g. GLIBC_2.34) for the notes.
-          grep -oE 'GLIBC_[0-9]+\.[0-9]+' glibc-report.txt | sort -V | tail -n1 \
-            > staging/appimage-glibc-requirement.txt
 
       - name: Stage AppImage
         run: |
@@ -797,11 +798,6 @@ jobs:
           assert_one '*.app.tar.gz' 'macOS app updater tarball'
           assert_one '*.app.tar.gz.sig' 'macOS app signature'
           assert_one '*.dmg' 'macOS disk image'
-          # The glibc-requirement token produced by build-appimage must exist.
-          if [ ! -s appimage-glibc-requirement.txt ]; then
-            echo "ERROR: appimage-glibc-requirement.txt missing or empty" >&2
-            exit 1
-          fi
           echo "=== All expected artifacts present exactly once ==="
 
       # Build the tauri-plugin-updater manifest from the actual signed artifacts

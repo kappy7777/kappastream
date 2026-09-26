@@ -30,11 +30,17 @@ if [ -d "$target" ]; then
 elif [ -f "$target" ]; then
 	workdir="$(mktemp -d)"
 	trap 'rm -rf "$workdir"' EXIT
-	# `--appimage-extract` writes squashfs-root/ next to the cwd it runs in.
-	# Some AppImage runtimes exit non-zero even after a successful extraction
+	# `--appimage-extract` writes squashfs-root/ next to the cwd the
+	# AppImage runs in, and the AppImage must be EXECUTED — its runtime
+	# interprets the argument (running the ELF through an interpreter dies
+	# with exit 126, "cannot execute binary file"). Copy it into the temp
+	# dir first so the input needs no +x bit and is never modified. Some
+	# AppImage runtimes exit non-zero even after a successful extraction
 	# (and a missing FUSE/device can abort it outright), so judge success by
 	# whether squashfs-root/ was actually produced, not by the exit code.
-	( cd "$workdir" && bash "$target" --appimage-extract >/dev/null 2>&1 ) || true
+	cp "$target" "$workdir/appimage"
+	chmod +x "$workdir/appimage"
+	( cd "$workdir" && ./appimage --appimage-extract >/dev/null 2>&1 ) || true
 	root="$workdir/squashfs-root"
 	if [ ! -d "$root" ]; then
 		echo "error: --appimage-extract produced no squashfs-root/ for $target" >&2
