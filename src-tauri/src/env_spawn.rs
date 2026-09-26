@@ -48,6 +48,19 @@ pub const SAFE_ENV_VARS: &[&str] = &[
     "DESKTOP_SESSION",
     "KDE_FULL_SESSION",
     "KDE_SESSION_VERSION",
+    // Proxy configuration, both spellings: children differ on which case
+    // they read (curl-style lowercase, most Go/Rust clients uppercase).
+    // The app's own HTTP (reqwest) keeps the parent env under the AppImage
+    // and honors the proxy, so without these the spawned streamlink and
+    // the external-player handoff would silently bypass it.
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
 ];
 
 /// True when the app was launched from a Type-2 AppImage (the runtime
@@ -216,6 +229,26 @@ mod tests {
             "GST_PLUGIN_PATH",
         ] {
             assert!(!SAFE_ENV_VARS.contains(&var), "{var} must stay excluded");
+        }
+    }
+
+    #[test]
+    fn safe_env_vars_carry_proxy_configuration() {
+        // Both cases must be present: children read whichever spelling
+        // they implement (curl: lowercase, most others: uppercase), and a
+        // half-forwarded pair would send some children through the proxy
+        // while their siblings connect directly.
+        for var in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "no_proxy",
+        ] {
+            assert!(SAFE_ENV_VARS.contains(&var), "{var} missing from whitelist");
         }
     }
 
