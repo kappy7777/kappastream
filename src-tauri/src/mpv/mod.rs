@@ -362,6 +362,16 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
             init.set_property("scripts", osc_script.as_str())?;
             init.set_property("ytdl", false)?;
             init.set_property("input-default-bindings", false)?;
+            // The render signal runs on the GTK main thread (WebKitGTK's UI
+            // thread, also where every sync invoke lands). mpv_render_context_
+            // render() blocks until a frame's target display time unless this
+            // option is 0 (render.h's documented remedy for render-API
+            // embedders — MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME defaults to
+            // enabled, and libmpv2's render() wrapper passes no override), so
+            // with the default 50 ms headroom every frame parks the whole UI
+            // until its display time — up to a full frame interval per render
+            // at video FPS, once per tile.
+            init.set_property("video-timing-offset", 0.0)?;
             Ok(())
         })
         .map_err(|e| format!("mpv init failed: {e}"))?,
