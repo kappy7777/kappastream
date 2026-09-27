@@ -215,6 +215,19 @@ describe('store membership is reactive', () => {
       ),
     ).toBeGreaterThan(1)
   })
+
+  it('notification opt-ins for non-favorites are dropped on load', () => {
+    // Go-live notifications fire only from the favorites batch; an opt-in
+    // for a non-favorite can never fire, and the bell UI only renders for
+    // favorites — so the persisted entry is dead weight.
+    seedFavorites(['alpha'])
+    localStorage.setItem('fav-notif-channels-v1', JSON.stringify(['alpha', 'ghostchan']))
+    const store = new F.FavoritesStore()
+    expect(store.hasNotifEnabled('alpha')).toBe(true)
+    expect(store.hasNotifEnabled('ghostchan')).toBe(false)
+    // Pruned from storage too, not just memory.
+    expect(JSON.parse(localStorage.getItem('fav-notif-channels-v1')!)).toEqual(['alpha'])
+  })
 })
 
 describe('GQL batch resolves the whole list', () => {

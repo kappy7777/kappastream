@@ -269,6 +269,19 @@ export class FavoritesStore {
 
   constructor() {
     this.notifChannels = new SvelteSet(loadNotifChannels())
+    // Go-live notifications fire ONLY from the favorites batch, so an opt-in
+    // for a channel that is no longer favorited is dead weight (it can never
+    // fire). Drop those entries on load — the bell UI only exists for
+    // favorites now, so nothing could turn them off otherwise.
+    const favoriteNames = new Set(this.entries.map((e) => e.name))
+    let prunedNotifs = false
+    for (const name of [...this.notifChannels]) {
+      if (!favoriteNames.has(name)) {
+        this.notifChannels.delete(name)
+        prunedNotifs = true
+      }
+    }
+    if (prunedNotifs) saveNotifChannels(this.notifChannels)
     // No persisted status cache: every channel starts 'unknown' and is
     // resolved fresh by the first GQL poll (~1s after launch). The previous
     // 1h localStorage cache (fav-status-cache-v1 / -ts-v1) was removed — GQL

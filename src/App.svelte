@@ -3393,31 +3393,38 @@
                           >{channelIsFavorite ? t('si_favorite') : t('si_addFavorite')}</span
                         >
                       </button>
-                      <button
-                        type="button"
-                        class="notif-toggle"
-                        class:notif-toggle--on={channelNotifOn}
-                        aria-pressed={channelNotifOn}
-                        onclick={toggleChannelNotif}
-                      >
-                        <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                          {#if channelNotifOn}
-                            <path
-                              d="M8 2a4 4 0 0 0-4 4v3.5L2.5 11h11L12 9.5V6a4 4 0 0 0-4-4zm0 12a1.5 1.5 0 0 0 1.5-1.5h-3A1.5 1.5 0 0 0 8 14z"
-                              fill="currentColor"
-                            />
-                          {:else}
-                            <path
-                              d="M8 2a4 4 0 0 0-4 4v3.5L2.5 11h11L12 9.5V6a4 4 0 0 0-4-4zm0 12a1.5 1.5 0 0 0 1.5-1.5h-3A1.5 1.5 0 0 0 8 14zM3 3l10 10"
-                              stroke="currentColor"
-                              stroke-width="1.5"
-                              fill="none"
-                              stroke-linecap="round"
-                            />
-                          {/if}
-                        </svg>
-                        <span class="notif-toggle-label">{channelNotifOn ? t('si_notifyOn') : t('si_notifyOff')}</span>
-                      </button>
+                      {#if channelIsFavorite}
+                        <!-- Go-live notifications fire from the favorites
+                             batch (fireLiveNotification's only caller), so
+                             the bell is meaningless — and misleading — for a
+                             channel that is not favorited. -->
+                        <button
+                          type="button"
+                          class="notif-toggle"
+                          class:notif-toggle--on={channelNotifOn}
+                          aria-pressed={channelNotifOn}
+                          onclick={toggleChannelNotif}
+                        >
+                          <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                            {#if channelNotifOn}
+                              <path
+                                d="M8 2a4 4 0 0 0-4 4v3.5L2.5 11h11L12 9.5V6a4 4 0 0 0-4-4zm0 12a1.5 1.5 0 0 0 1.5-1.5h-3A1.5 1.5 0 0 0 8 14z"
+                                fill="currentColor"
+                              />
+                            {:else}
+                              <path
+                                d="M8 2a4 4 0 0 0-4 4v3.5L2.5 11h11L12 9.5V6a4 4 0 0 0-4-4zm0 12a1.5 1.5 0 0 0 1.5-1.5h-3A1.5 1.5 0 0 0 8 14zM3 3l10 10"
+                                stroke="currentColor"
+                                stroke-width="1.5"
+                                fill="none"
+                                stroke-linecap="round"
+                              />
+                            {/if}
+                          </svg>
+                          <span class="notif-toggle-label">{channelNotifOn ? t('si_notifyOn') : t('si_notifyOff')}</span
+                          >
+                        </button>
+                      {/if}
                       {#if !stacked}
                         {#if sessionOthers.length > 0}
                           <button type="button" class="notif-toggle" onclick={openSessionInMultiView}>
