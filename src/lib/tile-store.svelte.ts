@@ -414,14 +414,17 @@ export class TileStore {
 
   /**
    * Live metadata for the status bar + the offline-close rule. A genuine
-   * live→offline transition CLOSES the tile (the channel actually went offline).
-   * Any other transition (unknown→live, live→live refresh, error) just updates
-   * the bar; a 'live' with state 'error' (a GQL transport failure) is treated as
-   * transient — the tile keeps its last-known status and is NOT closed.
+   * live→offline transition CLOSES the tile (the channel actually went
+   * offline). Any other transition (unknown→live, live→live refresh) just
+   * updates the bar. A GQL transport failure (state 'error') is IGNORED —
+   * the tile keeps its last-known status — both so a blip never blanks the
+   * bar and because overwriting 'live' with 'error' broke the close rule:
+   * the next offline poll would read wasLive=false and skip the close.
    */
   setLiveStatus(id: string, status: LiveStatus): void {
     const t = this.byId(id)
     if (!t) return
+    if (status.state === 'error') return // transient — keep last-known
     const wasLive = t.liveStatus.state === 'live'
     t.liveStatus = status
     if (wasLive && status.state === 'offline') {

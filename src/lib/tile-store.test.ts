@@ -247,6 +247,26 @@ describe('TileStore.close + offline-close trap', () => {
     expect(store.byId(a.id)!.error).toContain('fragmentLoadError')
   })
 
+  it('live → error → offline still closes the tile (the error keeps last-known live)', () => {
+    // A GQL blip between the live and offline polls must not break the
+    // offline-close rule: storing the transient 'error' made the next poll's
+    // wasLive read false, so the genuine offline transition never closed the
+    // tile.
+    const a = store.addOrReplace('chan1').tile
+    store.setLiveStatus(a.id, { state: 'live', title: 'x', viewers: 1, uptime: '0m', game: '', avatarUrl: '' })
+    store.setLiveStatus(a.id, { state: 'error', message: 'blip' })
+    // The error was ignored — the tile is still considered live.
+    expect(store.byId(a.id)!.liveStatus.state).toBe('live')
+    store.setLiveStatus(a.id, { state: 'offline', avatarUrl: '' })
+    expect(store.tiles.map((t) => t.channel)).toEqual([])
+  })
+
+  it('an error for a never-resolved tile keeps it unknown', () => {
+    const a = store.addOrReplace('chan1').tile
+    store.setLiveStatus(a.id, { state: 'error', message: 'blip' })
+    expect(store.byId(a.id)!.liveStatus.state).toBe('unknown')
+  })
+
   it('offline reported for a tile that was never confirmed live does not auto-close on a refresh', () => {
     // Edge: a brand-new tile starts at liveStatus unknown. If the first poll
     // says offline (channel was already offline at add time), we must NOT close

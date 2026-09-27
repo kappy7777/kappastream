@@ -784,20 +784,17 @@
   // ---- offline-close polling ----
   // Periodically check the channel's live status. A genuine live→offline
   // transition closes the tile (handled by the store); a transient GQL error
-  // (state 'error') is ignored — the tile keeps its last-known status. This is
-  // the authoritative offline signal that distinguishes a real outage from a
-  // transient network/hls hiccup (which only sets status 'error' + retries).
+  // (state 'error') is ignored by the store — the tile keeps its last-known
+  // status. This is the authoritative offline signal that distinguishes a real
+  // outage from a transient network/hls hiccup (which only sets status 'error'
+  // + retries). fetchLiveStatus never throws (it returns state 'error').
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let pollToken = 0
   async function pollOnce(): Promise<void> {
     const my = ++pollToken
-    try {
-      const s = await fetchLiveStatus(tile.channel)
-      if (my !== pollToken) return
-      tileStore.setLiveStatus(tile.id, s)
-    } catch {
-      /* transient — keep last-known status, do not close */
-    }
+    const s = await fetchLiveStatus(tile.channel)
+    if (my !== pollToken) return
+    tileStore.setLiveStatus(tile.id, s)
   }
   $effect(() => {
     pollToken++ // invalidate any in-flight poll from a prior channel

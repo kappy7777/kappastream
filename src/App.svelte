@@ -2462,13 +2462,15 @@
     }
     const myToken = ++activeStatusToken
     void (async () => {
-      try {
-        const s = await fetchLiveStatus(channel)
-        if (myToken !== activeStatusToken) return
-        activeStatus = s
-      } catch {
-        /* ignore */
-      }
+      const s = await fetchLiveStatus(channel)
+      if (myToken !== activeStatusToken) return
+      // A failed fetch NEVER overwrites the last known status: fetchLiveStatus
+      // resolves {state:'error'} instead of throwing, and assigning it would
+      // blank the bar (title/viewers render only for live/offline) and drop
+      // the pinned-chat target until the next good poll. Keep the cached /
+      // placeholder status instead.
+      if (s.state === 'error') return
+      activeStatus = s
     })()
     // A favorite's status refreshes with the sidebar's poll batch (the
     // subscribe below feeds those snapshots in for free). A NON-favorite
@@ -2484,13 +2486,12 @@
     const poll = setInterval(() => {
       const tickToken = ++activeStatusToken
       void (async () => {
-        try {
-          const s = await fetchLiveStatus(channel)
-          if (tickToken !== activeStatusToken) return
-          activeStatus = s
-        } catch {
-          /* ignore — the next tick retries */
-        }
+        const s = await fetchLiveStatus(channel)
+        if (tickToken !== activeStatusToken) return
+        // Same rule as the join-time fetch: an error result keeps the last
+        // known status (the next tick retries).
+        if (s.state === 'error') return
+        activeStatus = s
       })()
     }, GQL_REFRESH_INTERVAL_MS)
     return () => clearInterval(poll)
