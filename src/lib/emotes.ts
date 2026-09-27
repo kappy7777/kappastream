@@ -9,6 +9,19 @@ export interface Emote {
   provider: EmoteProvider
 }
 
+/**
+ * A load's outcome: the emotes that resolved plus whether EVERY provider
+ * request failed (network/timeout/5xx). A definitive "no emotes" (404, empty
+ * payload) is a SUCCESS — `emotes` is just empty and `allFailed` is false.
+ * Consumers use `allFailed` to distinguish "channel has no third-party
+ * emotes" from "the emote providers are unreachable" (the latter deserves an
+ * error banner and a retry on the next join).
+ */
+export interface EmoteLoadResult {
+  emotes: Emote[]
+  allFailed: boolean
+}
+
 interface ProviderCache {
   seventv: Emote[]
   bttv: Emote[]
@@ -17,6 +30,13 @@ interface ProviderCache {
 
 const cache = new Map<string, ProviderCache>()
 const FETCH_TIMEOUT_MS = 8_000
+
+/**
+ * null = transient failure (network error, timeout, 5xx) — the caller must
+ * NOT cache the result and may report the outage; a resolved (possibly
+ * empty) array = definitive answer for this request.
+ */
+type ProviderResult = Promise<Emote[] | null>
 
 async function fetchWithTimeout(url: string, signal?: AbortSignal): Promise<Response> {
   const controller = new AbortController()
@@ -109,10 +129,10 @@ function uniquePush(list: Emote[], emote: Emote | null) {
   list.push(emote)
 }
 
-async function fetch7TVChannel(twitchUserId: string, signal?: AbortSignal): Promise<Emote[]> {
+async function fetch7TVChannel(twitchUserId: string, signal?: AbortSignal): ProviderResult {
   try {
     const res = await fetchWithTimeout(`https://7tv.io/v3/users/twitch/${twitchUserId}`, signal)
-    if (!res.ok) return []
+    if (!res.ok) return res.status === 404 ? [] : null
     const data = (await res.json()) as SevenTvUserResponse
     const out: Emote[] = []
 
@@ -130,20 +150,20 @@ async function fetch7TVChannel(twitchUserId: string, signal?: AbortSignal): Prom
 
     return out
   } catch {
-    return []
+    return null
   }
 }
 
-async function fetch7TVGlobal(signal?: AbortSignal): Promise<Emote[]> {
+async function fetch7TVGlobal(signal?: AbortSignal): ProviderResult {
   try {
     const res = await fetchWithTimeout('https://7tv.io/v3/emote-sets/global', signal)
-    if (!res.ok) return []
+    if (!res.ok) return res.status === 404 ? [] : null
     const data = (await res.json()) as SevenTvSet
     const out: Emote[] = []
     for (const e of data.emotes ?? []) uniquePush(out, sevenTvEmote(e))
     return out
   } catch {
-    return []
+    return null
   }
 }
 
@@ -160,10 +180,10 @@ function bttvEmote(e: BttvEmote): Emote {
   return { id: e.id, name: e.code, url: bttvUrl(e.id), provider: 'bttv' }
 }
 
-async function fetchBTTVChannel(twitchUserId: string, signal?: AbortSignal): Promise<Emote[]> {
+async function fetchBTTVChannel(twitchUserId: string, signal?: AbortSignal): ProviderResult {
   try {
     const res = await fetchWithTimeout(`https://api.betterttv.net/3/cached/users/twitch/${twitchUserId}`, signal)
-    if (!res.ok) return []
+    if (!res.ok) return res.status === 404 ? [] : null
     const data = (await res.json()) as BttvUser
     const out: Emote[] = []
     for (const e of data.channelEmotes ?? []) uniquePush(out, bttvEmote(e))
@@ -174,16 +194,16 @@ async function fetchBTTVChannel(twitchUserId: string, signal?: AbortSignal): Pro
   }
 }
 
-async function fetchBTTVGlobal(signal?: AbortSignal): Promise<Emote[]> {
+async function fetchBTTVGlobal(signal?: AbortSignal): ProviderResult {
   try {
     const res = await fetchWithTimeout('https://api.betterttv.net/3/cached/emotes/global', signal)
-    if (!res.ok) return []
+    if (!res.ok) return res.status === 404 ? [] : null
     const data = (await res.json()) as BttvEmote[]
     const out: Emote[] = []
     for (const e of data) uniquePush(out, bttvEmote(e))
     return out
   } catch {
-    return []
+    return null
   }
 }
 
@@ -203,10 +223,10 @@ function ffzEmote(e: FfzEmote): Emote {
   return { id: String(e.id), name: e.name, url: ffzUrl(String(e.id)), provider: 'ffz' }
 }
 
-async function fetchFFZChannel(twitchUserId: string, signal?: AbortSignal): Promise<Emote[]> {
+async function fetchFFZChannel(twitchUserId: string, signal?: AbortSignal): ProviderResult {
   try {
     const res = await fetchWithTimeout(`https://api.frankerfacez.com/v1/user/id/${twitchUserId}`, signal)
-    if (!res.ok) return []
+    if (!res.ok) return res.status === 404 ? [] : null
     const data = (await res.json()) as FfzUser
     const out: Emote[] = []
     for (const set of Object.values(data.sets ?? {})) {
@@ -218,10 +238,10 @@ async function fetchFFZChannel(twitchUserId: string, signal?: AbortSignal): Prom
   }
 }
 
-async function fetchFFZGlobal(signal?: AbortSignal): Promise<Emote[]> {
+async function fetchFFZGlobal(signal?: AbortSignal): ProviderResult {
   try {
     const res = await fetchWithTimeout('https://api.frankerfacez.com/v1/set/global', signal)
-    if (!res.ok) return []
+    if (!res.ok) return res.status === 404 ? [] : null
     const data = (await res.json()) as FfzGlobal
     // Only the sets listed in `default_sets` are the global ones — `sets` may
     // also contain other (e.g. featured) collections, so iterate by id rather
@@ -233,25 +253,24 @@ async function fetchFFZGlobal(signal?: AbortSignal): Promise<Emote[]> {
     }
     return out
   } catch {
-    return []
+    return null
   }
 }
 
-export async function loadChannelEmotes(channel: string, signal?: AbortSignal): Promise<Emote[]> {
+export async function loadChannelEmotes(channel: string, signal?: AbortSignal): Promise<EmoteLoadResult> {
   const key = channel.toLowerCase()
   const cached = cache.get(key)
-  if (cached) return [...cached.seventv, ...cached.bttv, ...cached.ffz]
+  if (cached) return { emotes: [...cached.seventv, ...cached.bttv, ...cached.ffz], allFailed: false }
 
   const userId = await getTwitchUserId(channel, signal)
-  if (signal?.aborted) return []
+  if (signal?.aborted) return { emotes: [], allFailed: false }
   if (!userId) {
     // Do NOT cache the empty result. A null userId is most often a transient
     // GQL failure (getTwitchUserId swallows the error and returns null), and
     // cache is consulted first on the next call — caching [] here would cost
-    // that channel its third-party emotes for the rest of the process while
-    // loadEmotes still reported emoteStatus = 'ready'. Returning [] uncached
-    // lets a later rejoin retry.
-    return []
+    // that channel its third-party emotes for the rest of the process. The
+    // channel side counts as failed so an all-providers outage still reports.
+    return { emotes: [], allFailed: true }
   }
 
   const [seventv, bttv, ffz] = await Promise.all([
@@ -260,20 +279,29 @@ export async function loadChannelEmotes(channel: string, signal?: AbortSignal): 
     fetchFFZChannel(userId, signal),
   ])
 
-  if (signal?.aborted) return []
+  if (signal?.aborted) return { emotes: [], allFailed: false }
+  // A transient provider failure (null) must not poison the cache: the
+  // partial result is returned for THIS join, but nothing is stored, so the
+  // next join refetches every failed provider instead of silently running
+  // without its emotes for the rest of the process.
+  if (seventv === null || bttv === null || ffz === null) {
+    const emotes = [seventv, bttv, ffz].filter((l): l is Emote[] => l !== null).flat()
+    return { emotes, allFailed: seventv === null && bttv === null && ffz === null }
+  }
   cache.set(key, { seventv, bttv, ffz })
-  return [...seventv, ...bttv, ...ffz]
+  return { emotes: [...seventv, ...bttv, ...ffz], allFailed: false }
 }
 
-export async function loadGlobalEmotes(signal?: AbortSignal): Promise<Emote[]> {
+export async function loadGlobalEmotes(signal?: AbortSignal): Promise<EmoteLoadResult> {
   const [seventv, bttv, ffz] = await Promise.all([
     fetch7TVGlobal(signal),
     fetchBTTVGlobal(signal),
     fetchFFZGlobal(signal),
   ])
+  const emotes = [seventv, bttv, ffz].filter((l): l is Emote[] => l !== null).flat()
   // FFZ appended last so channel emotes (which already won earlier in
   // buildEmoteMap's first-write-wins on the exact name) keep winning.
-  return [...seventv, ...bttv, ...ffz]
+  return { emotes, allFailed: seventv === null && bttv === null && ffz === null }
 }
 
 export function buildEmoteMap(emotes: Emote[]): Map<string, Emote> {

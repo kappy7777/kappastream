@@ -82,8 +82,8 @@ describe('7TV set-entry alias', () => {
       throw new Error('unexpected fetch URL: ' + url)
     }
 
-    const emotes = await E.loadChannelEmotes('somenick')
-    const map = E.buildEmoteMap(emotes)
+    const res = await E.loadChannelEmotes('somenick')
+    const map = E.buildEmoteMap(res.emotes)
     expect(map.has('erm')).toBe(true)
     expect(map.has('caterm')).toBe(false)
     expect(map.get('erm')?.id).toBe('abc')
@@ -137,8 +137,8 @@ describe('7TV PERSONAL/LISTED state', () => {
       throw new Error('unexpected fetch URL: ' + url)
     }
 
-    const emotes = await E.loadChannelEmotes('somenick')
-    const map = E.buildEmoteMap(emotes)
+    const res = await E.loadChannelEmotes('somenick')
+    const map = E.buildEmoteMap(res.emotes)
     expect(map.has('CatKitty')).toBe(true)
     expect(map.get('CatKitty')?.id).toBe('xyz')
   })
@@ -163,8 +163,8 @@ describe('FFZ global default_sets', () => {
       throw new Error('unexpected fetch URL: ' + url)
     }
 
-    const emotes = await E.loadGlobalEmotes()
-    const map = E.buildEmoteMap(emotes)
+    const res = await E.loadGlobalEmotes()
+    const map = E.buildEmoteMap(res.emotes)
     expect(map.has('GlobalOne')).toBe(true)
     expect(map.has('NonDefault')).toBe(false)
   })
@@ -215,6 +215,112 @@ describe('renderMessage — exact-case emote codes', () => {
     expect(emotes).toHaveLength(2)
     if (emotes[0]!.type === 'emote') expect(emotes[0]!.name).toBe('Pog')
     if (emotes[1]!.type === 'emote') expect(emotes[1]!.name).toBe('POG')
+  })
+})
+
+describe('transient provider failures are not cached', () => {
+  it('a failed provider is refetched on the next load (nothing cached)', async () => {
+    tauriInvoke.handler = async (cmd: string) => {
+      if (cmd === 'gql_fetch') {
+        return JSON.stringify({ data: { users: [{ id: '12345', login: 'somenick' }] } })
+      }
+      throw new Error('unexpected invoke: ' + cmd)
+    }
+    let seventvFails = true
+    fetchImpl = async (url) => {
+      if (url.startsWith('https://7tv.io/v3/users/twitch/')) {
+        if (seventvFails) throw new Error('network down')
+        return jsonRes({ emote_set: { id: 'set1', emotes: [{ id: 'abc', name: 'erm' }] } })
+      }
+      if (url.startsWith('https://api.betterttv.net/')) return jsonRes({})
+      if (url.startsWith('https://api.frankerfacez.com/')) return jsonRes({})
+      throw new Error('unexpected fetch URL: ' + url)
+    }
+
+    const first = await E.loadChannelEmotes('somenick')
+    expect(first.emotes).toEqual([]) // the failed provider contributed nothing
+    expect(first.allFailed).toBe(false) // BTTV/FFZ answered (empty)
+
+    // The blip heals: the second call refetches 7TV (previously the failed
+    // [] was cached for the whole process).
+    seventvFails = false
+    const second = await E.loadChannelEmotes('somenick')
+    expect(second.emotes.map((e) => e.name)).toEqual(['erm'])
+  })
+
+  it('a 404 is a definitive "no emotes" and IS cached', async () => {
+    tauriInvoke.handler = async (cmd: string) => {
+      if (cmd === 'gql_fetch') {
+        return JSON.stringify({ data: { users: [{ id: '12345', login: 'somenick' }] } })
+      }
+      throw new Error('unexpected invoke: ' + cmd)
+    }
+    let hits = 0
+    fetchImpl = async (url) => {
+      if (url.startsWith('https://7tv.io/v3/users/twitch/')) {
+        hits++
+        return { ok: false, status: 404, json: async () => ({}) }
+      }
+      if (url.startsWith('https://api.betterttv.net/')) return jsonRes({})
+      if (url.startsWith('https://api.frankerfacez.com/')) return jsonRes({})
+      throw new Error('unexpected fetch URL: ' + url)
+    }
+
+    const first = await E.loadChannelEmotes('somenick')
+    expect(first.allFailed).toBe(false)
+    const second = await E.loadChannelEmotes('somenick')
+    expect(hits).toBe(1) // cached — no refetch
+    expect(second.emotes).toEqual([])
+  })
+
+  it('all providers failing marks the result allFailed', async () => {
+    fetchImpl = async () => {
+      throw new Error('network down')
+    }
+    const res = await E.loadGlobalEmotes()
+    expect(res.emotes).toEqual([])
+    expect(res.allFailed).toBe(true)
+  })
+})
+
+describe('ChatSession emoteStatus', () => {
+  it("is 'error' only when every provider request fails", async () => {
+    const { ChatSession } = await import('./chat-session.svelte')
+    tauriInvoke.handler = async (cmd: string) => {
+      if (cmd === 'gql_fetch') throw new Error('gql down')
+      throw new Error('unexpected invoke: ' + cmd)
+    }
+    // Every third-party endpoint (and the GQL id lookup) fails: 7TV/BTTV/FFZ,
+    // channel and global — the unreachable-internet case.
+    fetchImpl = async () => {
+      throw new Error('network down')
+    }
+    const s = new ChatSession('chan4')
+    s.start()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(s.emoteStatus).toBe('error')
+    s.dispose()
+  })
+
+  it("is 'ready' when a provider answers even if others fail", async () => {
+    const { ChatSession } = await import('./chat-session.svelte')
+    tauriInvoke.handler = async (cmd: string) => {
+      if (cmd === 'gql_fetch') {
+        return JSON.stringify({ data: { users: [{ id: '12345', login: 'chan4' }] } })
+      }
+      throw new Error('unexpected invoke: ' + cmd)
+    }
+    fetchImpl = async (url) => {
+      if (url.startsWith('https://7tv.io/v3/users/twitch/')) {
+        return jsonRes({ emote_set: { id: 'set1', emotes: [{ id: 'abc', name: 'erm' }] } })
+      }
+      throw new Error('network down') // BTTV/FFZ + all globals fail
+    }
+    const s = new ChatSession('chan4')
+    s.start()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(s.emoteStatus).toBe('ready')
+    s.dispose()
   })
 })
 

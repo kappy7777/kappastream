@@ -226,13 +226,17 @@ export class ChatSession {
 
   private async loadEmotes(gen: number, signal: AbortSignal): Promise<void> {
     try {
-      const [channelEmotes, globalEmotes] = await Promise.all([
+      const [channelRes, globalRes] = await Promise.all([
         loadChannelEmotes(this.channel, signal),
         loadGlobalEmotes(signal),
       ])
       if (signal.aborted || gen !== this.generation || this.disposed) return
-      this.thirdParty = buildEmoteMap([...channelEmotes, ...globalEmotes])
-      this.emoteStatus = 'ready'
+      this.thirdParty = buildEmoteMap([...channelRes.emotes, ...globalRes.emotes])
+      // 'error' means the emote system is unreachable, not "this channel has
+      // no third-party emotes": a 404 or an empty payload is a SUCCESS (the
+      // providers answered). Only when EVERY provider request — channel and
+      // global — failed does the banner deserve to show.
+      this.emoteStatus = channelRes.allFailed && globalRes.allFailed ? 'error' : 'ready'
     } catch {
       if (!signal.aborted && gen === this.generation && !this.disposed) this.emoteStatus = 'error'
     }
