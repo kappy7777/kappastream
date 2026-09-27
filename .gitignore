@@ -50,6 +50,8 @@ tauri-*.key
 opencode.json
 AGENTS.md
 agents.md
+AGENTS-notes.md
+agents-notes.md
 
 # Local SSH agent sockets (environment-specific, e.g. AUR push forwarding)
 ssh-agent.sock
@@ -57,3 +59,6 @@ ssh-agent.sock
 # Windows bundled-streamlink staging (release.yml build-windows; shipped as
 # bundle resources via tauri.windows.conf.json)
 streamlink-bundle/
+
+# ZCode agent workspace artifacts (session tooling, environment-specific)
+.zcode/
