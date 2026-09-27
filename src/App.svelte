@@ -1072,12 +1072,25 @@
       lastClickAt = now
       send(clamped ? loc.clampX : loc.x, clamped ? loc.clampY : loc.y, 'click')
     }
+    // Moves coalesce to at most one 'move' per animation frame — pointermove
+    // can outpace the display refresh and every one is an IPC hop the Rust
+    // side turns into an mpv input command. Clicks stay immediate (their
+    // own 50 ms throttle paces the OSD's drag synthesizer).
+    let moveRaf = 0
+    let pendingMove: { x: number; y: number } | null = null
+    const flushMove = (): void => {
+      moveRaf = 0
+      const pending = pendingMove
+      pendingMove = null
+      if (pending) send(pending.x, pending.y, 'move')
+    }
     const onMove = (e: PointerEvent): void => {
       const loc = locate(e)
       if (!loc.inside && e.buttons !== 1) return
       // Inside (or mid-drag): send as-is / clamped, and keep the click
       // stream (the drag synthesizer) alive.
-      send(loc.inside ? loc.x : loc.clampX, loc.inside ? loc.y : loc.clampY, 'move')
+      pendingMove = { x: loc.inside ? loc.x : loc.clampX, y: loc.inside ? loc.y : loc.clampY }
+      if (!moveRaf) moveRaf = requestAnimationFrame(flushMove)
       if (e.buttons === 1) clickAt(loc, !loc.inside)
     }
     const onDown = (e: PointerEvent): void => {
@@ -1102,6 +1115,7 @@
     stage.addEventListener('pointerdown', onDown)
     stage.addEventListener('wheel', onWheel, { passive: false })
     return () => {
+      if (moveRaf) cancelAnimationFrame(moveRaf)
       stage.removeEventListener('pointermove', onMove)
       stage.removeEventListener('pointerdown', onDown)
       stage.removeEventListener('wheel', onWheel)

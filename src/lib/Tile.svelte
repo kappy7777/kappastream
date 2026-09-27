@@ -652,21 +652,40 @@
     if (!stage) return
     const id = mpvId
     let lastClickAt = 0
-    const forward = (e: { clientX: number; clientY: number }, kind: string): void => {
-      const r = stage.getBoundingClientRect()
-      if (r.width < 1 || r.height < 1) return
-      const x = (e.clientX - r.left) / r.width
-      const y = (e.clientY - r.top) / r.height
+    // Fractions within the tile, computed in the event and coalesced to at
+    // most one 'move' per animation frame (each forward is an IPC hop that
+    // becomes an mpv input command; pointermove can outpace the display
+    // refresh). Clicks stay immediate — their own 50 ms throttle paces the
+    // OSD's drag synthesizer.
+    const send = (x: number, y: number, kind: string): void => {
       void invoke('mpv_pointer', { id, x, y, kind }).catch(() => {})
+    }
+    const locate = (e: { clientX: number; clientY: number }): { x: number; y: number } | null => {
+      const r = stage.getBoundingClientRect()
+      if (r.width < 1 || r.height < 1) return null
+      return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
+    }
+    let moveRaf = 0
+    let pendingMove: { x: number; y: number } | null = null
+    const flushMove = (): void => {
+      moveRaf = 0
+      const pending = pendingMove
+      pendingMove = null
+      if (pending) send(pending.x, pending.y, 'move')
     }
     const click = (e: PointerEvent): void => {
       const now = performance.now()
       if (now - lastClickAt < 50) return
       lastClickAt = now
-      forward(e, 'click')
+      const loc = locate(e)
+      if (loc) send(loc.x, loc.y, 'click')
     }
     const onMove = (e: PointerEvent): void => {
-      forward(e, 'move')
+      const loc = locate(e)
+      if (loc) {
+        pendingMove = loc
+        if (!moveRaf) moveRaf = requestAnimationFrame(flushMove)
+      }
       if (e.buttons === 1) click(e)
     }
     const onDown = (e: PointerEvent): void => {
@@ -684,7 +703,8 @@
       // mpv owns the wheel in native mode (OSC volume steps) — the page's
       // scroll-volume handler below skips while native.
       e.preventDefault()
-      forward(e, e.deltaY < 0 ? 'wheel-up' : 'wheel-down')
+      const loc = locate(e)
+      if (loc) send(loc.x, loc.y, e.deltaY < 0 ? 'wheel-up' : 'wheel-down')
     }
     // Any click on the native video moves the audio authority here. The
     // pointer capture above RETARGETS the composed click to the stage (the
@@ -701,6 +721,7 @@
     stage.addEventListener('click', onClick)
     stage.addEventListener('wheel', onWheelNative, { passive: false })
     return () => {
+      if (moveRaf) cancelAnimationFrame(moveRaf)
       stage.removeEventListener('pointermove', onMove)
       stage.removeEventListener('pointerdown', onDown)
       stage.removeEventListener('click', onClick)

@@ -1115,8 +1115,9 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
 /// stores happen under the engines lock, so a slow older frame can never
 /// overwrite a newer one. Identical pixels (an idle dialog's periodic
 /// refresh) keep the cached bitmap and generation, which leaves the OSD's
-/// geometry re-issue a dedupe no-op: no resample, no temp-file write, no
-/// mpv upload.
+/// geometry re-issue a dedupe no-op: no resample, no mpv upload. The
+/// resample + overlay-add themselves run OUTSIDE the lock (see OverlayCmd
+/// in mod.rs).
 fn store_page_snapshot(crop: PageCrop) {
     let PageCrop {
         raw,
@@ -1135,30 +1136,40 @@ fn store_page_snapshot(crop: PageCrop) {
         (0, 0, w as usize, h as usize),
     );
     super::mask_keep_rects(&mut bgra, w as usize, h as usize, &keep);
-    let mut engines = super::lock_or_recover(super::engines());
-    let Some(engine) = engines.get_mut(&id) else {
-        return;
-    };
-    if seq < engine.page_seq {
-        return; // a newer frame already stored
-    }
-    if let Some(prev) = engine.bitmaps.get("page") {
-        if prev.w == w && prev.h == h && prev.bgra == bgra {
+    let bgra = std::sync::Arc::new(bgra);
+    // Stage + prepare in one brief locked section; nothing expensive and no
+    // libmpv call runs while it is held.
+    let (mpv, issue) = {
+        let mut engines = super::lock_or_recover(super::engines());
+        let Some(engine) = engines.get_mut(&id) else {
             return;
+        };
+        if seq < engine.page_seq {
+            return; // a newer frame already stored
         }
-    }
-    engine.bitmap_gen += 1;
-    engine.bitmaps.insert(
-        "page".to_string(),
-        super::CachedBitmap {
-            bgra,
-            w,
-            h,
-            grid: None,
-        },
-    );
-    if let Some((pos, dims)) = engine.page_geo {
-        let _ = engine.show_bitmap(super::OVERLAY_PAGE, "page", 0, pos, dims);
+        if let Some(prev) = engine.bitmaps.get("page") {
+            if prev.w == w && prev.h == h && *prev.bgra == *bgra {
+                return;
+            }
+        }
+        engine.bitmap_gen += 1;
+        let gen = engine.bitmap_gen;
+        engine.bitmaps.insert(
+            "page".to_string(),
+            super::CachedBitmap {
+                bgra: std::sync::Arc::clone(&bgra),
+                w,
+                h,
+                grid: None,
+            },
+        );
+        (engine.mpv, engine.prepare_page_reissue(gen))
+    };
+    if let Some(issue) = issue {
+        match super::execute_overlay_issue(mpv, &issue) {
+            Ok(entry) => super::record_overlay(id, issue.id, entry),
+            Err(err) => eprintln!("[mpv] overlay-add: {err}"),
+        }
     }
 }
 

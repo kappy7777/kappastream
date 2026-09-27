@@ -63,7 +63,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use libmpv2::events::{Event, PropertyData};
@@ -109,7 +109,7 @@ pub trait VideoSurface: Send + Sync {
 
 struct Engine {
     mpv: &'static Mpv,
-    surface: Box<dyn VideoSurface>,
+    surface: Arc<dyn VideoSurface>,
     /// While a blocking webview overlay is open (Settings, About, what's
     /// new, … — anything that renders UNDER the native video window), the
     /// surface is hidden and the PlaybackRestart auto-reveal stays
@@ -121,6 +121,13 @@ struct Engine {
     /// the frontend stopped (mpv_stop hides + clears this) would pop a dead
     /// black box over the page.
     active: bool,
+    /// Last observed osd-width/osd-height — the render size mpv_pointer
+    /// rescales normalized pointer coordinates by. OBSERVED by the event
+    /// thread (a property change arrives whenever the render size changes),
+    /// so the command needs no synchronous get_property round-trips per
+    /// pointermove. Cleared on idle, matching the old get_property failure
+    /// mode that dropped events while nothing renders.
+    osd: (i64, i64),
     /// OSD image overlays (info block, storyboard thumbnails, page-UI
     /// snapshots): decoded by
     /// the webview (which already has the sources cached/fetched) into BGRA and
@@ -150,14 +157,41 @@ struct Engine {
 }
 
 /// A BGRA bitmap uploaded by the frontend, keyed ("infoblock", "page", or
-/// "thumb:<n>").
+/// "thumb:<n>"). The pixels are an Arc so the overlay path can clone them
+/// out of the engines lock and resample/issue without holding it.
 struct CachedBitmap {
-    bgra: Vec<u8>,
+    bgra: Arc<Vec<u8>>,
     w: u32,
     h: u32,
     /// Storyboard strips only: the cols × rows tile grid of the image, used
     /// to crop individual thumbnails.
     grid: Option<(u32, u32)>,
+}
+
+/// A cheaply-cloned handle to an engine's mpv core, surface and cached OSD
+/// size, copied out under the engines lock in one brief grab. Callers must
+/// NOT hold the registry lock across a libmpv call or bitmap resampling:
+/// the lock also guards the per-engine event threads (wait_event + overlay
+/// issuing) and the page-snapshot workers, and one synchronous core call
+/// held under it stalls all of them — and, for commands that run on the
+/// GTK main thread, squeezes the render callback's own scheduling window.
+#[derive(Clone)]
+struct EngineHandle {
+    mpv: &'static Mpv,
+    surface: Arc<dyn VideoSurface>,
+    osd: (i64, i64),
+}
+
+fn engine_handle(id: u32) -> Result<EngineHandle, String> {
+    engine_handle_opt(id).ok_or_else(|| "mpv engine unavailable".to_string())
+}
+
+fn engine_handle_opt(id: u32) -> Option<EngineHandle> {
+    lock_or_recover(engines()).get(&id).map(|e| EngineHandle {
+        mpv: e.mpv,
+        surface: Arc::clone(&e.surface),
+        osd: e.osd,
+    })
 }
 
 /// mpv overlay ids we own (client overlays are 0..63; 0 stays unused).
@@ -389,6 +423,10 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
         ("paused-for-cache", libmpv2::Format::Flag),
         ("eof-reached", libmpv2::Format::Flag),
         ("idle-active", libmpv2::Format::Flag),
+        // The OSD/render size, cached for mpv_pointer's coordinate rescale
+        // (observed instead of two get_property calls per pointermove).
+        ("osd-width", libmpv2::Format::Int64),
+        ("osd-height", libmpv2::Format::Int64),
     ] {
         mpv.observe_property(name, format, 0)
             .map_err(|e| format!("observe {name} failed: {e}"))?;
@@ -402,9 +440,10 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
 
     Ok(Engine {
         mpv,
-        surface,
+        surface: Arc::from(surface),
         overlay_suppressed: false,
         active: false,
+        osd: (0, 0),
         page_geo: None,
         page_seq: 0,
         bitmaps: HashMap::new(),
@@ -553,6 +592,19 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                     | ("paused-for-cache", _)
                     | ("eof-reached", _)
                     | ("idle-active", _) => state_dirty = true,
+                    // The cached OSD size mpv_pointer rescales by (observed
+                    // instead of polled — a change arrives with every render
+                    // size change). Brief locked writes only.
+                    ("osd-width", PropertyData::Int64(w)) => {
+                        if let Some(engine) = lock_or_recover(engines()).get_mut(&id) {
+                            engine.osd.0 = w.max(0);
+                        }
+                    }
+                    ("osd-height", PropertyData::Int64(h)) => {
+                        if let Some(engine) = lock_or_recover(engines()).get_mut(&id) {
+                            engine.osd.1 = h.max(0);
+                        }
+                    }
                     _ => {}
                 },
                 Ok(Event::Seek) => {
@@ -569,11 +621,21 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                     // normally instead of being covered by a black box.
                     // Suppressed while a blocking overlay owns the screen
                     // (mpv_set_surface_visible re-shows on its dismissal).
-                    if let Some(engine) = lock_or_recover(engines()).get_mut(&id) {
-                        engine.active = true;
-                        if !engine.overlay_suppressed {
-                            engine.surface.show();
-                        }
+                    // The surface call runs OUTSIDE the lock (it dispatches
+                    // to the GTK main thread).
+                    let reveal = {
+                        let mut engines = lock_or_recover(engines());
+                        engines.get_mut(&id).and_then(|engine| {
+                            engine.active = true;
+                            if engine.overlay_suppressed {
+                                None
+                            } else {
+                                Some(Arc::clone(&engine.surface))
+                            }
+                        })
+                    };
+                    if let Some(surface) = reveal {
+                        surface.show();
                     }
                 }
                 Ok(Event::FileLoaded) => {
@@ -622,11 +684,41 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                         // thumbnails, the info block, the page-UI snapshot
                         // overlay): the OSD's
                         // render math is the single source of layout truth,
-                        // mpv composites via overlay-add. Best-effort — a
-                        // failed overlay is a visual no-op, not an error the
-                        // user can act on.
-                        if let Some(engine) = lock_or_recover(engines()).get_mut(&id) {
-                            let _ = engine.handle_ks_overlay(&args[1..]);
+                        // mpv composites via overlay-add. Two-phase on
+                        // purpose: PREPARE under the engines lock (state
+                        // mutation + pixel clones, no libmpv), then
+                        // resample + overlay-add with NO lock held — a
+                        // synchronous core call under the lock would stall
+                        // every other command and worker behind the OSD's
+                        // 16 Hz message stream. Best-effort — a failed
+                        // overlay is a visual no-op, not an error the user
+                        // can act on.
+                        let cmds = {
+                            let mut engines = lock_or_recover(engines());
+                            match engines.get_mut(&id) {
+                                Some(engine) => {
+                                    engine.prepare_ks_overlay(&args[1..]).unwrap_or_default()
+                                }
+                                None => Vec::new(),
+                            }
+                        };
+                        for cmd in cmds {
+                            match cmd {
+                                OverlayCmd::Issue(issue) => {
+                                    match execute_overlay_issue(mpv, &issue) {
+                                        Ok(entry) => record_overlay(id, issue.id, entry),
+                                        Err(err) => eprintln!("[mpv] overlay-add: {err}"),
+                                    }
+                                }
+                                OverlayCmd::Hide(overlay_id) => {
+                                    let id_s = overlay_id.to_string();
+                                    if let Err(err) =
+                                        mpv.command("overlay-remove", &[id_s.as_str()])
+                                    {
+                                        eprintln!("[mpv] overlay-remove {overlay_id}: {err}");
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -643,10 +735,15 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                 state_dirty = false;
                 let state = compute_state(mpv);
                 // Idle = no file: the engine is no longer an active surface
-                // (a broadcast re-show must not un-hide a stopped engine).
+                // (a broadcast re-show must not un-hide a stopped engine),
+                // and the cached OSD size is stale — clear it so pointer
+                // events drop again until the next render repopulates it
+                // (the observed property sends no "became unavailable"
+                // change; libmpv2 maps the NULL payload to no event).
                 if state.is_none() {
                     if let Some(engine) = lock_or_recover(engines()).get_mut(&id) {
                         engine.active = false;
+                        engine.osd = (0, 0);
                     }
                 }
                 if state != last_state {
@@ -665,16 +762,128 @@ fn clone_state(s: &DerivedState) -> DerivedState {
 // ---------------------------------------------------------------------------
 // OSD image overlays (storyboard thumbnails + webview bitmaps)
 
+/// One overlay action prepared under the engines lock. `Issue` carries the
+/// source pixels as an Arc clone plus the dedupe bookkeeping, so the
+/// resample and the synchronous overlay-add run with NO lock held;
+/// `record_overlay` re-takes it briefly to store the dedupe entry.
+enum OverlayCmd {
+    Issue(OverlayIssue),
+    Hide(u8),
+}
+
+struct OverlayIssue {
+    id: u8,
+    /// Bitmap generation the issue is based on (part of the dedupe key).
+    gen: u64,
+    /// Content tag (thumbnail strip/tile indices); separates same-geometry
+    /// different-content issuances.
+    tag: u64,
+    pos: (i32, i32),
+    dims: (u32, u32),
+    src: Arc<Vec<u8>>,
+    src_dims: (u32, u32),
+}
+
+/// Resample `issue`'s source to the target dims and issue overlay-add —
+/// lock-free by contract (see OverlayCmd). Returns the dedupe entry to
+/// record on success.
+///
+/// overlay-add reads the bitmap straight from OUR memory: the `&<address>`
+/// source (docs: aimed at libmpv embedders). mpv copies it during the
+/// command and holds no reference after it returns — guaranteed since mpv
+/// 0.18.1 and every libmpv we ship against is >= 0.35 (bookworm) — and
+/// libmpv2's command() wraps the SYNCHRONOUS mpv_command, so `scaled` is
+/// guaranteed alive for the whole copy window and free to drop right after.
+/// No bitmap file ever touches disk.
+fn execute_overlay_issue(
+    mpv: &'static Mpv,
+    issue: &OverlayIssue,
+) -> Result<(u64, u64, i32, i32, u32, u32), String> {
+    let OverlayIssue {
+        id,
+        gen,
+        tag,
+        pos: (x, y),
+        dims: (w, h),
+        src,
+        src_dims: (sw, sh),
+    } = issue;
+    let scaled = resample_bgra(src, *sw, *sh, *w, *h);
+    let addr = format!("&{}", scaled.as_ptr() as usize);
+    let args = [
+        id.to_string(),
+        x.to_string(),
+        y.to_string(),
+        addr,
+        "0".to_string(),
+        "bgra".to_string(),
+        w.to_string(),
+        h.to_string(),
+        (w * 4).to_string(),
+    ];
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    mpv.command("overlay-add", &argv)
+        .map_err(|e| format!("overlay-add: {e}"))?;
+    Ok((*gen, *tag, *x, *y, *w, *h))
+}
+
+/// Record a successful overlay issuance in the engine's dedupe map (brief
+/// lock; a vanished engine just drops the entry).
+fn record_overlay(id: u32, overlay_id: u8, entry: (u64, u64, i32, i32, u32, u32)) {
+    if let Some(engine) = lock_or_recover(engines()).get_mut(&id) {
+        engine.overlays.insert(overlay_id, entry);
+    }
+}
+
+/// Dedupe + source lookup for one overlay (re)issuance. Ok(None) = nothing
+/// to do (the OSD's 16 Hz render tick sent identical geometry); Err = the
+/// bitmap is not decoded yet.
+#[allow(clippy::too_many_arguments)] // the issue's full parameter set, mirroring show/issue
+fn prepare_overlay_issue(
+    overlays: &HashMap<u8, (u64, u64, i32, i32, u32, u32)>,
+    bitmaps: &HashMap<String, CachedBitmap>,
+    id: u8,
+    key: &str,
+    tag: u64,
+    pos: (i32, i32),
+    dims: (u32, u32),
+    gen: u64,
+) -> Result<Option<OverlayIssue>, String> {
+    let (x, y) = pos;
+    let (w, h) = dims;
+    if overlays.get(&id) == Some(&(gen, tag, x, y, w, h)) {
+        return Ok(None); // the OSD's 16 Hz render tick sends identical geometry
+    }
+    let bmp = bitmaps
+        .get(key)
+        .ok_or_else(|| format!("no bitmap '{key}' (not decoded yet)"))?;
+    Ok(Some(OverlayIssue {
+        id,
+        gen,
+        tag,
+        pos,
+        dims,
+        src: Arc::clone(&bmp.bgra),
+        src_dims: (bmp.w, bmp.h),
+    }))
+}
+
 impl Engine {
     /// `ks-overlay <thumb|page|infoblock> <show args…|hide>` — see ks-osc.lua.
-    fn handle_ks_overlay(&mut self, p: &[&str]) -> Result<(), String> {
+    /// PREPARE ONLY: mutates engine state and returns the actions to run
+    /// OUTSIDE the engines lock (resample + overlay-add via
+    /// OverlayCmd::Issue; overlay-remove via OverlayCmd::Hide). The one
+    /// piece of pixel work kept in here is the storyboard tile CROP —
+    /// bounded by the tile size (a few hundred KB at most), unlike the
+    /// display-sized resample it feeds.
+    fn prepare_ks_overlay(&mut self, p: &[&str]) -> Result<Vec<OverlayCmd>, String> {
         let geti = |i: usize| -> Result<i64, String> {
             p.get(i)
                 .and_then(|s| s.parse::<i64>().ok())
                 .ok_or_else(|| format!("bad ks-overlay arg {i}: {p:?}"))
         };
         match (p.first().copied(), p.get(1).copied()) {
-            (Some("thumb"), Some("show")) => self.show_thumb(
+            (Some("thumb"), Some("show")) => self.prepare_thumb(
                 geti(2)? as i32,
                 geti(3)? as i32,
                 geti(4)?.max(1) as u32,
@@ -682,94 +891,53 @@ impl Engine {
                 geti(6)?.max(0) as u32,
                 geti(7)?.max(0) as u32,
             ),
-            (Some("thumb"), Some("hide")) => {
-                self.hide_overlay(OVERLAY_THUMB);
-                Ok(())
-            }
+            (Some("thumb"), Some("hide")) => self.prepare_hide(OVERLAY_THUMB),
             (Some("page"), Some("show")) => {
                 let pos = (geti(2)? as i32, geti(3)? as i32);
                 let dims = (geti(4)?.max(1) as u32, geti(5)?.max(1) as u32);
                 self.page_geo = Some((pos, dims));
-                let res = self.show_bitmap(OVERLAY_PAGE, "page", 0, pos, dims);
-                if res.is_err() && !self.bitmaps.contains_key("page") {
+                match prepare_overlay_issue(
+                    &self.overlays,
+                    &self.bitmaps,
+                    OVERLAY_PAGE,
+                    "page",
+                    0,
+                    pos,
+                    dims,
+                    self.bitmap_gen,
+                ) {
                     // Expected ONCE per dialog: the geometry message races
                     // the first snapshot; the snapshot's completion re-issues
                     // from page_geo.
-                    return Ok(());
+                    Err(_) if !self.bitmaps.contains_key("page") => Ok(Vec::new()),
+                    res => res.map(|issue| issue.into_iter().map(OverlayCmd::Issue).collect()),
                 }
-                res
             }
             (Some("page"), Some("hide")) => {
                 self.page_geo = None;
-                self.hide_overlay(OVERLAY_PAGE);
-                Ok(())
+                self.prepare_hide(OVERLAY_PAGE)
             }
             (Some("infoblock"), Some("show")) => {
                 let pos = (geti(2)? as i32, geti(3)? as i32);
                 let dims = (geti(4)?.max(1) as u32, geti(5)?.max(1) as u32);
-                self.show_bitmap(OVERLAY_INFOBLOCK, "infoblock", 0, pos, dims)
+                prepare_overlay_issue(
+                    &self.overlays,
+                    &self.bitmaps,
+                    OVERLAY_INFOBLOCK,
+                    "infoblock",
+                    0,
+                    pos,
+                    dims,
+                    self.bitmap_gen,
+                )
+                .map(|issue| issue.into_iter().map(OverlayCmd::Issue).collect())
             }
-            (Some("infoblock"), Some("hide")) => {
-                self.hide_overlay(OVERLAY_INFOBLOCK);
-                Ok(())
-            }
+            (Some("infoblock"), Some("hide")) => self.prepare_hide(OVERLAY_INFOBLOCK),
             _ => Err(format!("bad ks-overlay: {p:?}")),
         }
     }
 
-    /// Resample the cached `key` bitmap to `dims` and (re)issue overlay-add.
-    /// `tag` separates same-geometry different-content issuances (thumbnail
-    /// tile indices).
-    fn show_bitmap(
-        &mut self,
-        id: u8,
-        key: &str,
-        tag: u64,
-        pos: (i32, i32),
-        dims: (u32, u32),
-    ) -> Result<(), String> {
-        let (x, y) = pos;
-        let (w, h) = dims;
-        let gen = self.bitmap_gen;
-        if self.overlays.get(&id) == Some(&(gen, tag, x, y, w, h)) {
-            return Ok(()); // the OSD's 16 Hz render tick sends identical geometry
-        }
-        let scaled = {
-            let bmp = self
-                .bitmaps
-                .get(key)
-                .ok_or_else(|| format!("no bitmap '{key}' (not decoded yet)"))?;
-            resample_bgra(&bmp.bgra, bmp.w, bmp.h, w, h)
-        };
-        // overlay-add reads the bitmap straight from OUR memory: the
-        // `&<address>` source (docs: aimed at libmpv embedders). mpv copies
-        // it during the command and holds no reference after it returns —
-        // guaranteed since mpv 0.18.1 and every libmpv we ship against is
-        // >= 0.35 (bookworm) — and libmpv2's command() wraps the
-        // SYNCHRONOUS mpv_command, so `scaled` is guaranteed alive for the
-        // whole copy window and free to drop right after. No bitmap file
-        // ever touches disk.
-        let addr = format!("&{}", scaled.as_ptr() as usize);
-        let args = [
-            id.to_string(),
-            x.to_string(),
-            y.to_string(),
-            addr,
-            "0".to_string(),
-            "bgra".to_string(),
-            w.to_string(),
-            h.to_string(),
-            (w * 4).to_string(),
-        ];
-        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-        self.mpv
-            .command("overlay-add", &argv)
-            .map_err(|e| format!("overlay-add: {e}"))?;
-        self.overlays.insert(id, (gen, tag, x, y, w, h));
-        Ok(())
-    }
-
-    fn show_thumb(
+    fn prepare_thumb(
         &mut self,
         x: i32,
         y: i32,
@@ -777,7 +945,7 @@ impl Engine {
         h: u32,
         strip: u32,
         tile: u32,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<OverlayCmd>, String> {
         let key = format!("thumb:{strip}");
         let (cropped, tw, th) = {
             let bmp = self
@@ -791,12 +959,13 @@ impl Engine {
                 .ok_or_else(|| format!("tile {tile} outside strip grid"))?;
             (out, ow, oh)
         };
-        // Stage the crop as a transient bitmap under a private key, then go
-        // through the common resample+issue path.
+        // Stage the crop as a transient bitmap under a private key, then
+        // issue through the common path.
+        let staged = Arc::new(cropped);
         self.bitmaps.insert(
             "thumb:current".to_string(),
             CachedBitmap {
-                bgra: cropped,
+                bgra: Arc::clone(&staged),
                 w: tw,
                 h: th,
                 grid: None,
@@ -805,22 +974,46 @@ impl Engine {
         // Any bitmap insert bumps the generation; make sure THIS one is the
         // latest so the dedupe below sees it as current.
         self.bitmap_gen += 1;
-        self.show_bitmap(
+        prepare_overlay_issue(
+            &self.overlays,
+            &self.bitmaps,
             OVERLAY_THUMB,
             "thumb:current",
             (u64::from(strip) << 32) | u64::from(tile),
             (x, y),
             (w, h),
+            self.bitmap_gen,
         )
+        .map(|issue| issue.into_iter().map(OverlayCmd::Issue).collect())
     }
 
-    fn hide_overlay(&mut self, id: u8) {
-        if self.overlays.remove(&id).is_some() {
-            let id_s = id.to_string();
-            if let Err(e) = self.mpv.command("overlay-remove", &[id_s.as_str()]) {
-                eprintln!("[mpv] overlay-remove {id}: {e}");
-            }
-        }
+    /// Hide bookkeeping: drop the dedupe entry now (so a later show cannot
+    /// dedupe against it) and return the removal action.
+    fn prepare_hide(&mut self, id: u8) -> Result<Vec<OverlayCmd>, String> {
+        Ok(if self.overlays.remove(&id).is_some() {
+            vec![OverlayCmd::Hide(id)]
+        } else {
+            Vec::new()
+        })
+    }
+
+    /// Prepare the page-overlay re-issue a fresh snapshot completes into
+    /// (see linux::store_page_snapshot). Called with the NEW bitmap already
+    /// staged and `gen` set to the generation that insert bumped to.
+    fn prepare_page_reissue(&mut self, gen: u64) -> Option<OverlayIssue> {
+        let (pos, dims) = self.page_geo?;
+        prepare_overlay_issue(
+            &self.overlays,
+            &self.bitmaps,
+            OVERLAY_PAGE,
+            "page",
+            0,
+            pos,
+            dims,
+            gen,
+        )
+        .ok()
+        .flatten()
     }
 }
 
@@ -1095,36 +1288,42 @@ pub fn mpv_load(
     // also work.
     let id = engine_id(id)?;
     ensure_engine(&app, id)?;
-    with_engine(id, |e| {
-        e.mpv
-            .set_property("hwdec", hwdec.as_str())
-            .map_err(|err| format!("set hwdec: {err}"))?;
-        e.mpv
-            .set_property("volume", volume.clamp(0.0, 1.0) * 100.0)
-            .map_err(|err| format!("set volume: {err}"))?;
-        e.mpv
-            .set_property("mute", muted)
-            .map_err(|err| format!("set mute: {err}"))?;
-        // `start` is set EXPLICITLY on every load, "none" included: the
-        // property is otherwise only cleared on FileLoaded, so a load that
-        // fails before FileLoaded would leave a stale +N armed for the NEXT
-        // loadfile — a live stream inheriting a dead VOD's resume offset.
-        let start_prop = match start_at {
-            Some(s) if s.is_finite() && s > 0.5 => format!("+{s:.3}"),
-            _ => "none".to_string(),
-        };
-        e.mpv
-            .set_property("start", start_prop)
-            .map_err(|err| format!("set start: {err}"))?;
-        e.mpv
-            .command("loadfile", &[url.as_str(), "replace"])
-            .map_err(|err| format!("loadfile: {err}"))?;
-        // NOTE: the surface is NOT revealed here — the event thread shows it
-        // on the first PlaybackRestart (first frame presented), so the page's
-        // loading/error overlays aren't covered by a black video box during
-        // load.
-        Ok(())
-    })
+    let engine = engine_handle(id)?;
+    // All libmpv, no registry state: runs WITHOUT the engines lock (the
+    // event thread and the snapshot workers take it too).
+    engine
+        .mpv
+        .set_property("hwdec", hwdec.as_str())
+        .map_err(|err| format!("set hwdec: {err}"))?;
+    engine
+        .mpv
+        .set_property("volume", volume.clamp(0.0, 1.0) * 100.0)
+        .map_err(|err| format!("set volume: {err}"))?;
+    engine
+        .mpv
+        .set_property("mute", muted)
+        .map_err(|err| format!("set mute: {err}"))?;
+    // `start` is set EXPLICITLY on every load, "none" included: the
+    // property is otherwise only cleared on FileLoaded, so a load that
+    // fails before FileLoaded would leave a stale +N armed for the NEXT
+    // loadfile — a live stream inheriting a dead VOD's resume offset.
+    let start_prop = match start_at {
+        Some(s) if s.is_finite() && s > 0.5 => format!("+{s:.3}"),
+        _ => "none".to_string(),
+    };
+    engine
+        .mpv
+        .set_property("start", start_prop)
+        .map_err(|err| format!("set start: {err}"))?;
+    engine
+        .mpv
+        .command("loadfile", &[url.as_str(), "replace"])
+        .map_err(|err| format!("loadfile: {err}"))?;
+    // NOTE: the surface is NOT revealed here — the event thread shows it
+    // on the first PlaybackRestart (first frame presented), so the page's
+    // loading/error overlays aren't covered by a black video box during
+    // load.
+    Ok(())
 }
 
 /// Stop playback and hide the surface (the transparent page region goes back
@@ -1133,8 +1332,12 @@ pub fn mpv_load(
 #[tauri::command]
 pub fn mpv_stop(id: Option<u32>) -> Result<(), String> {
     let id = engine_id(id)?;
-    if let Some(engine) = lock_or_recover(engines()).get_mut(&id) {
-        engine.active = false;
+    // Quiet no-op without an engine (the frontend calls this on every
+    // teardown). The core call and the GTK-side hide run OUTSIDE the lock.
+    if let Some(engine) = engine_handle_opt(id) {
+        if let Some(e) = lock_or_recover(engines()).get_mut(&id) {
+            e.active = false;
+        }
         let _ = engine.mpv.command("stop", &[]);
         engine.surface.hide();
     }
@@ -1143,42 +1346,34 @@ pub fn mpv_stop(id: Option<u32>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn mpv_set_paused(id: Option<u32>, paused: bool) -> Result<(), String> {
-    with_engine(engine_id(id)?, |e| {
-        e.mpv
-            .set_property("pause", paused)
-            .map_err(|err| format!("set pause: {err}"))
-    })
+    let mpv = engine_handle(engine_id(id)?)?.mpv;
+    mpv.set_property("pause", paused)
+        .map_err(|err| format!("set pause: {err}"))
 }
 
 /// Absolute seek in seconds.
 #[tauri::command]
 pub fn mpv_seek(id: Option<u32>, seconds: f64) -> Result<(), String> {
     let target = format!("{:.3}", seconds.max(0.0));
-    with_engine(engine_id(id)?, |e| {
-        e.mpv
-            .command("seek", &[target.as_str(), "absolute"])
-            .map_err(|err| format!("seek: {err}"))
-    })
+    let mpv = engine_handle(engine_id(id)?)?.mpv;
+    mpv.command("seek", &[target.as_str(), "absolute"])
+        .map_err(|err| format!("seek: {err}"))
 }
 
 /// Volume 0..1 (mpv's property is 0..100).
 #[tauri::command]
 pub fn mpv_set_volume(id: Option<u32>, volume: f64) -> Result<(), String> {
     let v = volume.clamp(0.0, 1.0) * 100.0;
-    with_engine(engine_id(id)?, |e| {
-        e.mpv
-            .set_property("volume", v)
-            .map_err(|err| format!("set volume: {err}"))
-    })
+    let mpv = engine_handle(engine_id(id)?)?.mpv;
+    mpv.set_property("volume", v)
+        .map_err(|err| format!("set volume: {err}"))
 }
 
 #[tauri::command]
 pub fn mpv_set_muted(id: Option<u32>, muted: bool) -> Result<(), String> {
-    with_engine(engine_id(id)?, |e| {
-        e.mpv
-            .set_property("mute", muted)
-            .map_err(|err| format!("set mute: {err}"))
-    })
+    let mpv = engine_handle(engine_id(id)?)?.mpv;
+    mpv.set_property("mute", muted)
+        .map_err(|err| format!("set mute: {err}"))
 }
 
 /// Position the surface (logical px, window-relative, zoom-adjusted by the
@@ -1202,10 +1397,11 @@ pub fn mpv_set_rect(
     h: i32,
     fold_top: Option<i32>,
 ) -> Result<(), String> {
-    with_engine(engine_id(id)?, |e| {
-        e.surface.set_rect(x, y, w, h, fold_top.unwrap_or(0));
-        Ok(())
-    })
+    // Pure GTK marshaling (the surface dispatches to the UI thread itself):
+    // a brief lock to clone the surface handle, never held across the call.
+    let surface = engine_handle(engine_id(id)?)?.surface;
+    surface.set_rect(x, y, w, h, fold_top.unwrap_or(0));
+    Ok(())
 }
 
 /// Forward a pointer event over the native video into mpv's input queue —
@@ -1217,39 +1413,41 @@ pub fn mpv_set_rect(
 /// mapping. `kind`: "move" | "click" (button 0) | "wheel-up" | "wheel-down".
 #[tauri::command]
 pub fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Result<(), String> {
-    with_engine(engine_id(id)?, |e| {
-        // 0 until the first render configured the OSD size — nothing to
-        // hit-test yet, drop the event. (Deliberately NOT a fallback to the
-        // window rect: if the vo ever reports 0x0 while rendering, the
-        // CORRECT source has to be established first, not papered over.)
-        let osd_w = e.mpv.get_property::<i64>("osd-width").unwrap_or(0);
-        let osd_h = e.mpv.get_property::<i64>("osd-height").unwrap_or(0);
-        if osd_w <= 0 || osd_h <= 0 {
-            return Ok(());
-        }
-        let ix = (x.clamp(0.0, 1.0) * osd_w as f64).round() as i64;
-        let iy = (y.clamp(0.0, 1.0) * osd_h as f64).round() as i64;
-        // NOTE: mpv 0.40's `mouse` command has ONLY single/double click
-        // modes — down/up don't exist (probed against this exact libmpv:
-        // rejected with invalid-parameter; keydown/keyup MBTN_LEFT dispatch
-        // nothing) — so "click" is a one-shot single; the OSD script
-        // synthesizes drags from the click stream (scrub preview, commit on
-        // stream end).
-        let (cmd, args): (&str, Vec<String>) = match kind.as_str() {
-            "move" => ("mouse", vec![ix.to_string(), iy.to_string()]),
-            "click" => (
-                "mouse",
-                vec![ix.to_string(), iy.to_string(), "0".into(), "single".into()],
-            ),
-            "wheel-up" => ("keypress", vec!["WHEEL_UP".into()]),
-            "wheel-down" => ("keypress", vec!["WHEEL_DOWN".into()]),
-            other => return Err(format!("unknown pointer kind: {other}")),
-        };
-        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-        e.mpv
-            .command(cmd, &argv)
-            .map_err(|err| format!("{cmd}: {err}"))
-    })
+    let id = engine_id(id)?;
+    let engine = engine_handle(id)?;
+    // 0 until the first render configured the OSD size — nothing to
+    // hit-test yet, drop the event. (Deliberately NOT a fallback to the
+    // window rect: if the vo ever reports 0x0 while rendering, the
+    // CORRECT source has to be established first, not papered over.)
+    // The cached osd-width/height (observed by the event thread) replaces
+    // the two get_property calls this used to make per event.
+    let (osd_w, osd_h) = engine.osd;
+    if osd_w <= 0 || osd_h <= 0 {
+        return Ok(());
+    }
+    let ix = (x.clamp(0.0, 1.0) * osd_w as f64).round() as i64;
+    let iy = (y.clamp(0.0, 1.0) * osd_h as f64).round() as i64;
+    // NOTE: mpv 0.40's `mouse` command has ONLY single/double click
+    // modes — down/up don't exist (probed against this exact libmpv:
+    // rejected with invalid-parameter; keydown/keyup MBTN_LEFT dispatch
+    // nothing) — so "click" is a one-shot single; the OSD script
+    // synthesizes drags from the click stream (scrub preview, commit on
+    // stream end).
+    let (cmd, args): (&str, Vec<String>) = match kind.as_str() {
+        "move" => ("mouse", vec![ix.to_string(), iy.to_string()]),
+        "click" => (
+            "mouse",
+            vec![ix.to_string(), iy.to_string(), "0".into(), "single".into()],
+        ),
+        "wheel-up" => ("keypress", vec!["WHEEL_UP".into()]),
+        "wheel-down" => ("keypress", vec!["WHEEL_DOWN".into()]),
+        other => return Err(format!("unknown pointer kind: {other}")),
+    };
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    engine
+        .mpv
+        .command(cmd, &argv)
+        .map_err(|err| format!("{cmd}: {err}"))
 }
 
 /// Hide/show the native video surfaces while a blocking webview overlay
@@ -1264,15 +1462,24 @@ pub fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Result<(), 
 /// unconditionally).
 #[tauri::command]
 pub fn mpv_set_surface_visible(visible: bool) -> Result<(), String> {
-    let mut engines = lock_or_recover(engines());
-    for engine in engines.values_mut() {
-        engine.overlay_suppressed = !visible;
-        if visible {
-            if engine.active {
-                engine.surface.show();
-            }
+    // Under the lock: flip each engine's suppression flag + collect the
+    // show/hide decisions. The surface calls run OUTSIDE it (each dispatches
+    // to the GTK main thread).
+    let actions: Vec<(Arc<dyn VideoSurface>, bool)> = {
+        let mut engines = lock_or_recover(engines());
+        engines
+            .values_mut()
+            .map(|engine| {
+                engine.overlay_suppressed = !visible;
+                (Arc::clone(&engine.surface), visible && engine.active)
+            })
+            .collect()
+    };
+    for (surface, show) in actions {
+        if show {
+            surface.show();
         } else {
-            engine.surface.hide();
+            surface.hide();
         }
     }
     Ok(())
@@ -1287,12 +1494,10 @@ pub fn mpv_script_msg(id: Option<u32>, args: Vec<String>) -> Result<(), String> 
     if args.is_empty() {
         return Err("empty script message".to_string());
     }
-    with_engine(engine_id(id)?, |e| {
-        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-        e.mpv
-            .command("script-message", &argv)
-            .map_err(|err| format!("script-message: {err}"))
-    })
+    let mpv = engine_handle(engine_id(id)?)?.mpv;
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    mpv.command("script-message", &argv)
+        .map_err(|err| format!("script-message: {err}"))
 }
 
 /// Snapshot the webview and composite the page UI that overlaps the video
@@ -1380,9 +1585,19 @@ pub fn mpv_set_bitmap(
             bgra.len()
         ));
     }
+    // A brief locked section stages the bitmap (the generation bump is what
+    // forces the next overlay message to re-issue with the new pixels).
     with_engine(engine_id(id)?, |e| {
         e.bitmap_gen += 1;
-        e.bitmaps.insert(key, CachedBitmap { bgra, w, h, grid });
+        e.bitmaps.insert(
+            key,
+            CachedBitmap {
+                bgra: Arc::new(bgra),
+                w,
+                h,
+                grid,
+            },
+        );
         Ok(())
     })
 }
