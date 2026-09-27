@@ -398,6 +398,12 @@ export class MpvBackend implements VideoBackend {
   }
 
   seek(t: number): void {
+    // Optimistic position mirror: mpv's 'seeking' event fires before the
+    // core reports the new time-pos (and the throttled mpv://time stream
+    // trails it further), so consumers reading currentTime right after a
+    // seek — the VOD-chat resync — would still see the pre-seek spot. The
+    // next mpv://time event overwrites this with the authoritative value.
+    this.curTime = Math.max(0, t)
     void invoke('mpv_seek', { id: this.id, seconds: Math.max(0, t) }).catch(() => {})
   }
 

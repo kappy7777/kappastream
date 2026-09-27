@@ -219,6 +219,22 @@ describe('MpvBackend', () => {
     await b.dispose()
   })
 
+  it('seek updates currentTime optimistically (mpv reports the new position late)', async () => {
+    // libmpv delivers the seek event BEFORE the time-pos change, and the
+    // throttled mpv://time stream trails it further — a consumer reading
+    // currentTime right after seek() (the VOD-chat resync) must see the
+    // target, not the pre-seek spot.
+    const b = new MpvBackend()
+    dispatch('mpv://time', { id: 0, position: 150, duration: 3600 })
+    expect(b.currentTime).toBe(150)
+    b.seek(40)
+    expect(b.currentTime).toBe(40)
+    // The authoritative stream still wins once it arrives.
+    dispatch('mpv://time', { id: 0, position: 40.25, duration: 3600 })
+    expect(b.currentTime).toBe(40.25)
+    await b.dispose()
+  })
+
   it('setVolume/setMuted emit volumechange (the settings round-trip)', async () => {
     const b = new MpvBackend()
     const onVol = vi.fn()

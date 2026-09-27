@@ -166,7 +166,7 @@ describe('VodChatController', () => {
     const { fetchPage, calls } = makeStreamFetcher(stream)
     const c = new VodChatController<StreamMsg>({
       fetchPage,
-      getPlayhead: () => 0,
+      getPlayhead: () => 120,
       getPaused: () => false,
       getChatVisible: () => true,
     })
@@ -174,7 +174,9 @@ describe('VodChatController', () => {
     await settle(10)
     const callsBeforeScrub = calls.length
 
-    // Hammer the bar: 30 seeks within the debounce window.
+    // Hammer the bar: 30 seeks within the debounce window. The playhead
+    // reads the final target (as it does on both engines once the seek
+    // lands), and the debounce re-reads it live.
     for (let i = 0; i < 30; i++) c.seek(120)
     await settle(10)
 
@@ -182,6 +184,38 @@ describe('VodChatController', () => {
     const scrubFetches = calls.slice(callsBeforeScrub)
     const at120 = scrubFetches.filter((o: number) => o === 120).length
     expect(at120).toBe(1)
+    c.stop()
+  })
+
+  it('a backward seek with a stale argument resyncs at the real playhead', async () => {
+    // Native-engine shape: `seeking` fires BEFORE the playhead reports the
+    // new position, so the seek() argument is the OLD offset. The debounce
+    // must re-read the live playhead and resync THERE — a frozen target
+    // left chat refetched at the pre-seek offset and empty (nothing drains
+    // at an offset ahead of the real playhead) until playback crossed back.
+    const stream = buildStream(200)
+    const { fetchPage, calls } = makeStreamFetcher(stream)
+    let playhead = 150
+    const c = new VodChatController<StreamMsg>({
+      fetchPage,
+      getPlayhead: () => playhead,
+      getPaused: () => false,
+      getChatVisible: () => true,
+    })
+    c.start('v1', 150)
+    await settle(10)
+    const callsBefore = calls.length
+
+    // Scrub back to 40 s: the argument arrives stale (150), the playhead
+    // itself has moved to 40 by the time the debounce fires.
+    c.seek(150)
+    playhead = 40
+    await settle(10)
+
+    const after = calls.slice(callsBefore)
+    expect(after[0]).toBe(40)
+    expect(after).not.toContain(150)
+    expect(c.visible.length).toBeGreaterThan(0) // the 40 s region drains
     c.stop()
   })
 

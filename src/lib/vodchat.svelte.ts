@@ -231,15 +231,23 @@ export class VodChatController<M> {
     this.maybeFetch()
   }
 
-  /** A user scrub. Debounced (~500 ms) so dragging the bar = one refetch. */
+  /** A user scrub. Debounced (~500 ms) so dragging the bar = one refetch.
+   * The target is RE-READ from the playhead when the debounce fires: the
+   * argument arrives with the `seeking` signal, and on the native engine
+   * that fires before the playhead reports the new position (libmpv
+   * delivers the seek event ahead of the time-pos change), so freezing the
+   * target at call time would resync a backward seek to the OLD offset and
+   * leave chat empty until playback crossed back over it. A non-finite
+   * playhead (no video) falls back to the argument. */
   seek(seconds: number): void {
     if (this.videoId == null) return
-    const target = Math.max(0, Math.floor(seconds))
+    const arg = Math.max(0, Math.floor(seconds))
     if (this.seekTimer) clearTimeout(this.seekTimer)
     this.seekTimer = setTimeout(() => {
       this.seekTimer = null
       if (this.videoId == null) return
-      this.resync(target)
+      const live = this.deps.getPlayhead()
+      this.resync(Number.isFinite(live) ? Math.max(0, Math.floor(live)) : arg)
     }, SEEK_DEBOUNCE_MS)
   }
 
