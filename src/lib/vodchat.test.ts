@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { VodChatController } from './vodchat.svelte'
+import { defaultNameColor } from './name-color'
 
 /*
  * Unit tests for VOD chat replay (src/lib/vodchat.svelte.ts).
@@ -361,7 +362,10 @@ describe('normalizeVodComment', () => {
     }
     const res = normalizeVodComment(node as never, 'ch')
     expect(res!.pm.message).toBe('hi')
-    expect(res!.pm.color).toBe('#ffffff') // absent color -> default
+    // Absent color -> the deterministic palette default for the (empty)
+    // login — never the old hard-coded #ffffff.
+    expect(res!.pm.color).toBe(defaultNameColor(''))
+    expect(res!.pm.color).not.toBe('#ffffff')
     expect(res!.pm.username).toBe('') // no commenter
     expect(res!.pm.badges.map((b) => b.id)).toEqual(['moderator']) // empty row dropped
     expect(Number.isFinite(res!.pm.timestamp)).toBe(true) // falls back to now

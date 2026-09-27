@@ -23,6 +23,7 @@ import { readFileSync, readdirSync } from 'node:fs'
  */
 
 import { PinnedChatStore, toDisplayPin, isPinExpired, type PinnedChatPin } from './pinned-chat.svelte'
+import { defaultNameColor } from './name-color'
 import type { PinnedChatMessageData } from './gql'
 
 function fixturePin(over: Partial<PinnedChatMessageData> = {}): PinnedChatMessageData {
@@ -332,7 +333,9 @@ describe('pinned chat: display model', () => {
     const pin = toDisplayPin(data)
     expect(pin.pinId).toBe('pin-1')
     expect(pin.messageId).toBe('msg-1')
-    expect(pin.sender.color).toBe('#ffffff') // normalizeColor fallback
+    // Invalid color -> the deterministic per-login palette default.
+    expect(pin.sender.color).toBe(defaultNameColor('chatbot1'))
+    expect(pin.sender.color).not.toBe('#ffffff')
     expect(pin.emoteRanges).toEqual([{ start: 11, end: 15, id: '1712' }])
     // displayBadges go through the IRC badge path (setID/version keys).
     expect(pin.badges.map((b) => b.id + '/' + b.version)).toEqual(['moderator/1'])

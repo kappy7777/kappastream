@@ -34,6 +34,8 @@
     isNoticeVisible,
     DELETED_MESSAGE_CLASS,
   } from './irc'
+  import { parseColorToken } from './custom-themes.svelte'
+  import { compositeOver, readableNameColor } from './name-color'
   import type { ChatEntry } from './merged-chat'
   import { settings } from './settings.svelte.ts'
   import { formatCompact, formatChatTime } from './format'
@@ -154,6 +156,35 @@
     next.add(url)
     erroredEmotes = next
   }
+
+  // ---- readable username colours ----
+  // Usernames paint with the colour the user picked (or the deterministic
+  // default irc.ts substitutes for an empty tag), adjusted at RENDER time so
+  // the name keeps its hue but reaches WCAG AA contrast (4.5:1) against the
+  // chat background of the ACTIVE theme. The background is measured from the
+  // computed --bg-panel whenever the theme changes (custom themes write the
+  // same property), composited over --bg-app when the panel colour is
+  // translucent. The #18181b seed is the dark-panel fallback until the first
+  // measurement lands.
+  let chatBg = $state('#18181b')
+  $effect(() => {
+    void settings.theme
+    const cs = getComputedStyle(document.documentElement)
+    const panel = parseColorToken(cs.getPropertyValue('--bg-panel'))
+    if (!panel) return
+    let c: { r: number; g: number; b: number }
+    if (panel.a >= 1) {
+      c = { r: panel.r, g: panel.g, b: panel.b }
+    } else {
+      const app = parseColorToken(cs.getPropertyValue('--bg-app')) ?? { r: 14, g: 14, b: 16, a: 1 }
+      c = compositeOver(panel, app)
+    }
+    chatBg = `rgb(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)})`
+  })
+
+  function nameColor(raw: string): string {
+    return readableNameColor(raw, chatBg)
+  }
 </script>
 
 <div class="chat-pane-scroll" bind:this={chatEl} onscroll={onChatScroll} style:padding>
@@ -215,7 +246,7 @@
               />
             {/if}
           {/each}
-          <span class="username" style="color: {msg.color}">{msg.username}</span>{#if !msg.isAction}<span
+          <span class="username" style="color: {nameColor(msg.color)}">{msg.username}</span>{#if !msg.isAction}<span
               class="username-sep">:</span
             >{/if}
           {#if msg.isAction}<span class="action-mark"> </span>{/if}

@@ -1,5 +1,6 @@
 import type { EmoteRange } from './emotes'
 import { parseTwitchEmoteTag } from './emotes'
+import { defaultNameColor } from './name-color'
 import { t, type TKey } from './i18n/index.svelte'
 
 export interface ParsedMessage {
@@ -183,7 +184,7 @@ function buildPrivmsg(frame: IrcFrame): (ParsedMessage & { type: 'PRIVMSG' }) | 
 
   const tags = frame.tags
   const displayName = tags['display-name'] || username || t('irc_user')
-  const color = normalizeColor(tags.color)
+  const color = normalizeColor(tags.color, username || 'user')
   const id = tags.id ?? ''
   let text = messageBody
   let isAction = false
@@ -477,9 +478,14 @@ function decodeTagValue(v: string): string {
   )
 }
 
-export function normalizeColor(c: string | undefined): string {
-  if (!c) return '#ffffff'
-  return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#ffffff'
+// Normalize an IRC color tag. Twitch sends an EMPTY tag for users who never
+// picked a colour — a hard-coded near-white was unreadable on the light
+// themes, so the fallback is a deterministic pick from Twitch's own chat
+// palette, keyed by the login (see name-color.ts). `login` only feeds the
+// fallback; a valid tag is returned verbatim.
+export function normalizeColor(c: string | undefined, login: string): string {
+  if (c && /^#[0-9a-fA-F]{6}$/.test(c)) return c
+  return defaultNameColor(login)
 }
 
 export interface BadgeInfo {

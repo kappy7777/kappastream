@@ -91,7 +91,7 @@ export function toDisplayPin(data: PinnedChatMessageData): PinnedChatPin {
     sender: {
       login: msg?.sender.login ?? '',
       displayName: msg?.sender.displayName || msg?.sender.login || '',
-      color: normalizeColor(msg?.sender.chatColor || undefined),
+      color: normalizeColor(msg?.sender.chatColor || undefined, msg?.sender.login ?? ''),
     },
     // displayBadges carries the same setID/version keys the IRC badges tag
     // does — feed them through parseBadges so labels, per-version UUIDs and

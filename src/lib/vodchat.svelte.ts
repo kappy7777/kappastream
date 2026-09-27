@@ -79,7 +79,7 @@ export function normalizeVodComment(node: VodCommentNode, channel: string): VodC
     channel,
     username: commenter?.login ?? '',
     displayName: commenter?.displayName || commenter?.login || '',
-    color: normalizeColor(msg?.userColor ?? undefined),
+    color: normalizeColor(msg?.userColor ?? undefined, commenter?.login ?? ''),
     message: text,
     rawColor: msg?.userColor ?? null,
     isAction: false,
