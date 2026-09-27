@@ -26,7 +26,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const ctxA = { channel: 'alpha', playbackKind: 'live' as const, streamGen: 1 }
+const ctxA = { channel: 'alpha', playbackKind: 'live' as const }
 
 describe('sleep timer fires on expiry', () => {
   it('calls onFire once after the armed duration and disarms', () => {
@@ -78,7 +78,7 @@ describe('sleep timer explicit cancel', () => {
 describe('sleep timer auto-cancels on stream-identity change', () => {
   it('cancelIfStale disarms when the channel changes', () => {
     store.arm(ctxA, 30)
-    store.cancelIfStale('beta', 'live', 1) // different channel
+    store.cancelIfStale('beta', 'live') // different channel
     expect(store.armed).toBe(false)
     vi.advanceTimersByTime(60 * 60_000)
     expect(fired).toBe(0) // never fires against the new stream
@@ -86,26 +86,29 @@ describe('sleep timer auto-cancels on stream-identity change', () => {
 
   it('cancelIfStale disarms when playback-kind changes (live -> vod)', () => {
     store.arm(ctxA, 30)
-    store.cancelIfStale('alpha', 'vod', 1)
+    store.cancelIfStale('alpha', 'vod')
     expect(store.armed).toBe(false)
   })
 
-  it('cancelIfStale disarms when the stream generation changes (teardown)', () => {
+  it('a same-stream reload (new playback generation) does NOT disarm', () => {
+    // A quality switch, a low-latency toggle or the unavailable→best
+    // fallback all reload the SAME channel+kind; the armed timer must
+    // survive them. The generation is no longer part of the identity.
     store.arm(ctxA, 30)
-    store.cancelIfStale('alpha', 'live', 99)
-    expect(store.armed).toBe(false)
+    store.cancelIfStale('alpha', 'live')
+    expect(store.armed).toBe(true)
   })
 
   it('cancelIfStale leaves the timer armed when the identity matches', () => {
     store.arm(ctxA, 30)
-    store.cancelIfStale('alpha', 'live', 1)
+    store.cancelIfStale('alpha', 'live')
     expect(store.armed).toBe(true)
     vi.advanceTimersByTime(30 * 60_000)
     expect(fired).toBe(1)
   })
 
   it('cancelIfStale is a no-op when not armed', () => {
-    store.cancelIfStale('alpha', 'live', 1) // must not throw
+    store.cancelIfStale('alpha', 'live') // must not throw
     expect(store.armed).toBe(false)
   })
 })

@@ -4,12 +4,15 @@
  * is purely a local countdown that, on expiry, asks the host to pause the
  * current <video>.
  *
- * Identity guard: a timer is armed against a specific stream identity
- * {channel, playbackKind, streamGen}. If the user changes channel, switches to
- * a VOD/clip, or the player is torn down, the armed timer is cancelled so it
- * can never fire against a different stream than the one it was set for. The
- * host wires this via cancelIfStale() inside a $effect that watches the stream
- * identity, plus an explicit cancel() on the player going idle/offline/error.
+ * Identity guard: a timer is armed against the stream identity
+ * {channel, playbackKind}. If the user changes channel or switches to a
+ * VOD/clip, the armed timer is cancelled so it can never fire against a
+ * different stream than the one it was set for. The identity deliberately
+ * stops there: a quality switch, a low-latency toggle or a variant fallback
+ * reloads the SAME stream (new playback generation), and those must NOT
+ * cancel an armed timer. The host wires this via cancelIfStale() inside a
+ * $effect that watches the stream identity, plus an explicit cancel() on
+ * the player going idle/offline/error.
  */
 
 export type PlaybackKind = 'live' | 'vod' | 'clip'
@@ -17,7 +20,6 @@ export type PlaybackKind = 'live' | 'vod' | 'clip'
 export interface SleepArmContext {
   channel: string | null
   playbackKind: PlaybackKind
-  streamGen: number
 }
 
 export const SLEEP_PRESETS: ReadonlyArray<number> = [15, 30, 45, 60, 90] as const
@@ -87,14 +89,11 @@ export class SleepTimerStore {
 
   // Cancel only when the current stream identity no longer matches the one the
   // timer was armed against. This is the auto-cancel on channel change /
-  // playback-kind change / stream teardown. A matching identity is left armed.
-  cancelIfStale(channel: string | null, playbackKind: PlaybackKind, streamGen: number): void {
+  // playback-kind change. A matching identity is left armed — including
+  // across a same-stream reload (quality switch, low-latency toggle).
+  cancelIfStale(channel: string | null, playbackKind: PlaybackKind): void {
     if (!this.armed || !this.armCtx) return
-    if (
-      this.armCtx.channel !== channel ||
-      this.armCtx.playbackKind !== playbackKind ||
-      this.armCtx.streamGen !== streamGen
-    ) {
+    if (this.armCtx.channel !== channel || this.armCtx.playbackKind !== playbackKind) {
       this.cancel()
     }
   }

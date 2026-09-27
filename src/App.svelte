@@ -697,13 +697,13 @@
     if (channelJoined) void loadStream(channelJoined, quality)
   }
 
-  // Arm the sleep timer against the CURRENT stream identity, so a later channel
-  // change / VOD switch / teardown cancels it (see the $effect below).
+  // Arm the sleep timer against the CURRENT stream identity (channel +
+  // playback kind), so a later channel change / VOD switch cancels it (see
+  // the $effect below). The generation is deliberately NOT part of the key:
+  // a quality switch, low-latency toggle or variant fallback reloads the
+  // same stream and must not cancel an armed timer.
   function armSleep(minutes: number): void {
-    sleepTimer.arm(
-      { channel: channelJoined, playbackKind: playback.kind, streamGen: playbackSession.generation },
-      minutes,
-    )
+    sleepTimer.arm({ channel: channelJoined, playbackKind: playback.kind }, minutes)
   }
 
   // A stale armed timer must never fire against a different stream than the one
@@ -717,7 +717,7 @@
     if (playerStatus === 'idle' || playerStatus === 'offline' || playerStatus === 'error') {
       sleepTimer.cancel()
     } else {
-      sleepTimer.cancelIfStale(channelJoined, playback.kind, playbackSession.generation)
+      sleepTimer.cancelIfStale(channelJoined, playback.kind)
     }
   })
 
