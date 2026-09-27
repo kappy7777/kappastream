@@ -390,16 +390,20 @@ fn ldconfig_path_for(cache: &str, basename: &str) -> Option<String> {
 /// also knows nonstandard prefixes such as NixOS store paths) but the binary
 /// lives in `/sbin` or `/usr/sbin` on merged-/usr systems, which the AppRun
 /// PATH may not include — so probe absolute locations, then a plain PATH
-/// lookup. The FIRST ldconfig that RUNS SUCCESSFULLY is the answer, found or
-/// not: it printed the whole cache, so a miss means the system genuinely has
-/// no such SONAME, and re-asking sibling binaries after a success only
-/// burns execs before the directory fallback below guesses anyway.
+/// lookup. Only the FIRST ldconfig that RUNS SUCCESSFULLY is asked: a success
+/// printed the whole cache, so sibling binaries cannot know more. A miss does
+/// not end the search, though — the cache can be stale (a library installed
+/// without re-running ldconfig(8)), so the standard directories below are
+/// still probed before giving up.
 fn system_pipewire_path(basename: &str) -> Option<String> {
     for bin in ["/sbin/ldconfig", "/usr/sbin/ldconfig", "ldconfig"] {
         if let Ok(out) = std::process::Command::new(bin).arg("-p").output() {
             if out.status.success() {
                 let cache = String::from_utf8_lossy(&out.stdout);
-                return ldconfig_path_for(&cache, basename);
+                if let Some(path) = ldconfig_path_for(&cache, basename) {
+                    return Some(path);
+                }
+                break;
             }
         }
     }
