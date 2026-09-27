@@ -2397,13 +2397,16 @@
   // with/without --twitch-low-latency and hls.js re-attaches with the matching
   // live-sync config. The prev-value guard ensures this only fires on an actual
   // toggle, not on unrelated channel/quality changes (which load the stream
-  // themselves).
+  // themselves). LIVE only: a VOD/clip keeps `channelJoined` on purpose (the
+  // back-to-live path needs it), and reloading the live stream mid-VOD would
+  // swap the player source while the UI — title, chat replay, position saves —
+  // stays in VOD mode.
   let prevLowLatency = settings.lowLatency
   $effect(() => {
     const ll = settings.lowLatency
     if (ll === prevLowLatency) return
     prevLowLatency = ll
-    if (channelJoined) void loadStream(channelJoined, quality)
+    if (playback.kind === 'live' && channelJoined) void loadStream(channelJoined, quality)
   })
 
   let activeStatusToken = 0
