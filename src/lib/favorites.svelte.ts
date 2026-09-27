@@ -1,4 +1,5 @@
 import { isTauri } from '@tauri-apps/api/core'
+import { SvelteSet } from 'svelte/reactivity'
 import { settings } from './settings.svelte.ts'
 import { notifications } from './notifications.svelte.ts'
 import {
@@ -227,12 +228,20 @@ export interface CollabMemberInfo {
 }
 
 export class FavoritesStore {
-  private entries: FavoriteEntry[] = []
+  // $state.raw: `entries` is ALWAYS reassigned wholesale (add/remove/reorder/
+  // import build new arrays), so reassignment-only reactivity is exact — and
+  // it makes `has()` TRACKED, so $deriveds/$effects reading membership
+  // (App's heart + bell + status-bar gating) re-run on add/remove/import
+  // without manual version-counter bumps.
+  private entries = $state.raw<FavoriteEntry[]>(loadFromStorage())
   private statuses = new Map<string, FavoriteStatus>()
   private listeners = new Set<StatusListener>()
   private pollTimer: ReturnType<typeof setTimeout> | null = null
   private disposed = false
-  private notifChannels: Set<string> = new Set()
+  // SvelteSet so `hasNotifEnabled()` is tracked the same way: the status-bar
+  // bell derived re-runs when a notification opt-in is added/removed from ANY
+  // surface (sidebar, import), not just App's own toggle.
+  private notifChannels = new SvelteSet<string>()
   // Per-channel version counter. Bumped on add/remove/import so a batch GQL
   // response that was snapshotted BEFORE a channel was removed (+ possibly
   // re-added) can be detected and skipped in applyGqlStatuses — the newer
@@ -259,8 +268,7 @@ export class FavoritesStore {
   rateLimited: boolean = $state(false)
 
   constructor() {
-    this.entries = loadFromStorage()
-    this.notifChannels = loadNotifChannels()
+    this.notifChannels = new SvelteSet(loadNotifChannels())
     // No persisted status cache: every channel starts 'unknown' and is
     // resolved fresh by the first GQL poll (~1s after launch). The previous
     // 1h localStorage cache (fav-status-cache-v1 / -ts-v1) was removed — GQL

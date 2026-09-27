@@ -165,6 +165,58 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('store membership is reactive', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  // $state.raw entries + SvelteSet: $deriveds/$effects reading has() /
+  // hasNotifEnabled() re-run on ANY membership change — the old plain fields
+  // left them stale unless the mutating surface bumped a version counter.
+  // The runes helper is imported DYNAMICALLY after F: vi.resetModules gives
+  // the re-imported store a fresh Svelte runtime, and a statically imported
+  // helper would hold the pre-reset one (two signal systems never
+  // interoperating).
+  it('an effect reading has() re-runs on add() and remove()', async () => {
+    const R = await import('./favorites-reactivity.svelte')
+    seedFavorites(['alpha'])
+    gql.handler = gqlStatusHandler({ alpha: { live: false }, beta: { live: false } })
+    const store = new F.FavoritesStore()
+    expect(
+      R.runsAroundMutation(
+        () => store.has('beta'),
+        () => void store.add('beta'),
+      ),
+    ).toBeGreaterThan(1)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(
+      R.runsAroundMutation(
+        () => store.has('beta'),
+        () => store.remove('beta'),
+      ),
+    ).toBeGreaterThan(1)
+  })
+
+  it('an effect reading hasNotifEnabled() re-runs on toggle', async () => {
+    const R = await import('./favorites-reactivity.svelte')
+    seedFavorites(['alpha'])
+    gql.handler = gqlStatusHandler({ alpha: { live: false } })
+    const store = new F.FavoritesStore()
+    expect(
+      R.runsAroundMutation(
+        () => store.hasNotifEnabled('alpha'),
+        () => store.setNotifEnabled('alpha', true),
+      ),
+    ).toBeGreaterThan(1)
+    expect(
+      R.runsAroundMutation(
+        () => store.hasNotifEnabled('alpha'),
+        () => store.setNotifEnabled('alpha', false),
+      ),
+    ).toBeGreaterThan(1)
+  })
+})
+
 describe('GQL batch resolves the whole list', () => {
   beforeEach(() => {
     vi.useFakeTimers()

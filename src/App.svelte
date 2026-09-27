@@ -2473,11 +2473,14 @@
     // A favorite's status refreshes with the sidebar's poll batch (the
     // subscribe below feeds those snapshots in for free). A NON-favorite
     // would otherwise freeze at the join-time snapshot forever — poll it
-    // directly on the same cadence. The effect's teardown (channel change,
-    // disconnect, or the channel becoming a favorite — `has` is tracked)
-    // clears the loop, and the re-run's token bump strands any in-flight
-    // answer.
-    if (favoritesStore.has(channel)) return
+    // directly on the same cadence. The effect reads the membership through
+    // the `channelIsFavorite` DERIVED (not has() inline): the store's entries
+    // are reactive now, and an inline read would re-run this fetch-driving
+    // effect on every favorites change; the boolean only flips when the
+    // JOINED channel's membership actually changes. The effect's teardown
+    // (channel change, disconnect, or that flip) clears the loop, and the
+    // re-run's token bump strands any in-flight answer.
+    if (channelIsFavorite) return
     const poll = setInterval(() => {
       const tickToken = ++activeStatusToken
       void (async () => {
@@ -2716,10 +2719,12 @@
 
   let notifToast = $state<string | null>(null)
   let notifToastTimer: ReturnType<typeof setTimeout> | null = null
-  let notifVersion = $state(0)
 
+  // Channel membership/notification state for the JOINED channel. Both read
+  // the favorites store reactively ($state.raw entries + SvelteSet), so they
+  // flip no matter WHERE the change came from (sidebar, import) — not just
+  // App's own toggles.
   let channelNotifOn = $derived.by(() => {
-    void notifVersion
     return channelJoined ? favoritesStore.hasNotifEnabled(channelJoined) : false
   })
 
@@ -2879,23 +2884,18 @@
     const channel = channelJoined
     if (favoritesStore.hasNotifEnabled(channel)) {
       favoritesStore.setNotifEnabled(channel, false)
-      notifVersion++
       return
     }
     const granted = await ensureNotifPermission()
     if (!granted) {
       showNotifToast(t('toast_notificationsDenied'))
-      notifVersion++
       return
     }
     favoritesStore.setNotifEnabled(channel, true)
-    notifVersion++
     showNotifToast(t('toast_willNotify', { channel }))
   }
 
-  let favVersion = $state(0)
   let channelIsFavorite = $derived.by(() => {
-    void favVersion
     return channelJoined ? favoritesStore.has(channelJoined) : false
   })
 
@@ -2909,7 +2909,6 @@
       const ok = favoritesStore.add(channel)
       showNotifToast(ok ? t('toast_addedFavorite', { channel }) : t('toast_favoritesLimit'))
     }
-    favVersion++
   }
 
   $effect(() => {
