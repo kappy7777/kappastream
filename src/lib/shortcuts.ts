@@ -29,6 +29,8 @@ export interface ShortcutCtx {
   browseOpen: boolean
   helpOpen: boolean
   welcomeOpen: boolean
+  /** The Settings modal (or its custom-theme editor) is open. */
+  settingsOpen: boolean
   isLive: boolean
 }
 
@@ -40,6 +42,16 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   if (el.isContentEditable) return true
   const tag = el.tagName
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+}
+
+// Arrow/Home/End keys that a focused widget handles itself. A role="slider"
+// (the VOD scrubber, the chat resizer, the UI-scale control) is neither
+// editable nor activatable, but its arrow keys step the slider — resolving
+// them to seek/volume on top made the scrubber seek twice (±5 then ±10) and
+// changed the volume from the resizer.
+export function isArrowKeyOwner(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return target.getAttribute('role') === 'slider'
 }
 
 // True when Space/Enter would natively activate the focused element (button,
@@ -72,8 +84,13 @@ const SEEK_STEP = 10
 // Resolve a keydown into a shortcut action, or null if the key is not a
 // shortcut / is suppressed. Escape closes the topmost overlay (help, then
 // about) and works even inside an editable field; everything else is blocked
-// while typing or behind an open modal/overlay.
+// while typing, behind an open modal/overlay, when the event was already
+// handled (defaultPrevented), or when a focused widget owns the key.
 export function resolveShortcut(e: KeyboardEvent, ctx: ShortcutCtx): ShortcutAction | null {
+  // Another handler already claimed this event (a slider's own keydown, a
+  // component that preventDefaults) — never stack a second action on it.
+  if (e.defaultPrevented) return null
+
   if (e.key === 'Escape') {
     if (ctx.welcomeOpen) return { type: 'close-welcome' }
     if (ctx.helpOpen) return { type: 'close-help' }
@@ -90,10 +107,16 @@ export function resolveShortcut(e: KeyboardEvent, ctx: ShortcutCtx): ShortcutAct
 
   // No player shortcuts behind an open modal/overlay (about, browse, help,
   // the first-launch welcome / what's-new overlay, the on-demand changelog —
-  // all fed through welcomeOpen by App.svelte).
-  if (ctx.aboutOpen || ctx.browseOpen || ctx.helpOpen || ctx.welcomeOpen) return null
+  // all fed through welcomeOpen by App.svelte — and the Settings modal /
+  // custom-theme editor).
+  if (ctx.aboutOpen || ctx.browseOpen || ctx.helpOpen || ctx.welcomeOpen || ctx.settingsOpen) return null
 
   const key = e.key
+
+  // A focused slider (scrubber, resizer, scale control) owns its arrow keys.
+  if (isArrowKeyOwner(e.target) && (key.startsWith('Arrow') || key === 'Home' || key === 'End')) {
+    return null
+  }
 
   // Space on a focused button/switch must activate that control, not play/pause.
   if ((key === ' ' || key === 'Spacebar') && isActivatableTarget(e.target)) return null

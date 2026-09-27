@@ -26,7 +26,17 @@
   import CustomThemeEditor from './CustomThemeEditor.svelte'
   import VersionLog from './VersionLog.svelte'
 
-  let { onarmsleep }: { onarmsleep?: (minutes: number) => void } = $props()
+  let {
+    onarmsleep,
+    // Fires whenever "a Settings-owned overlay is open" flips (the panel
+    // itself or the custom-theme editor). App feeds it into the shortcut
+    // resolver so player shortcuts stay suppressed behind it, like about/
+    // browse/help.
+    onoverlay = () => {},
+  }: {
+    onarmsleep?: (minutes: number) => void
+    onoverlay?: (open: boolean) => void
+  } = $props()
 
   // ---- Experimental native video engine (LINUX mpv-embed builds only) ----
   // The engine is Linux-only. The probe
@@ -397,6 +407,12 @@
     return () => {
       document.removeEventListener('keydown', onKey)
     }
+  })
+
+  // Report overlay state (panel OR editor — the editor closes the panel but
+  // is itself an overlay shortcuts must respect).
+  $effect(() => {
+    onoverlay(open || themeEditorFor !== undefined)
   })
 </script>
 

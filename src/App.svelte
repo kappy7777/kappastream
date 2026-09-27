@@ -335,6 +335,10 @@
   const compactViewport = $derived(viewportWidth < SIDEBAR_COMPACT_WIDTH)
   const effectiveSidebarMode = $derived(sidebarMode === 'full' && compactViewport ? 'icons' : sidebarMode)
   let aboutOpen = $state(false)
+  // Whether a Settings-owned overlay (the panel itself or the custom-theme
+  // editor) is open — Settings reports it so player shortcuts stay
+  // suppressed behind it, like about/browse/help.
+  let settingsOverlayOpen = $state(false)
   // (multiView itself is declared near the top — the native-engine selection
   // reads it before this point. Full rationale comment there.)
   // The audio-authority tile's <video>, registered by Tile.svelte so the
@@ -612,6 +616,8 @@
       // The welcome/what's-new overlay must suppress player shortcuts and win
       // the Escape race.
       welcomeOpen: firstLaunch.visible,
+      // Settings reports this (panel or custom-theme editor open).
+      settingsOpen: settingsOverlayOpen,
       isLive: playback.kind === 'live',
     })
     if (!action) return
@@ -3042,7 +3048,7 @@
           <rect x="9" y="9" width="5.5" height="5.5" rx="1" fill="currentColor" />
         </svg>
       </button>
-      <Settings onarmsleep={armSleep} />
+      <Settings onarmsleep={armSleep} onoverlay={(v) => (settingsOverlayOpen = v)} />
       <div class="win-controls">
         <button type="button" class="win-btn" onclick={winMinimize} aria-label={t('tb_minimize')}>
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">

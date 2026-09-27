@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { resolveShortcut, isEditableTarget, isActivatableTarget, type ShortcutCtx } from './shortcuts'
+import { resolveShortcut, isEditableTarget, isActivatableTarget, isArrowKeyOwner, type ShortcutCtx } from './shortcuts'
 
 /*
  * Player keyboard shortcuts. The two load-bearing invariants under test:
  *   1. shortcuts are SUPPRESSED in every editable target (input/textarea/select/
- *      contentEditable) and behind open modals (about/browse/help) — the most
- *      common way this feature ships broken;
+ *      contentEditable), behind open modals (about/browse/help/settings), when
+ *      the event was already handled (defaultPrevented), and on widgets that
+ *      own their keys (sliders) — the most common way this feature ships
+ *      broken;
  *   2. the rest of the map resolves to the right action, including the live vs
  *      VOD split for the arrow keys (seeking is meaningless on live).
  */
@@ -23,6 +25,7 @@ const ctx = (over: Partial<ShortcutCtx> = {}): ShortcutCtx => ({
   browseOpen: false,
   helpOpen: false,
   welcomeOpen: false,
+  settingsOpen: false,
   isLive: true,
   ...over,
 })
@@ -121,6 +124,48 @@ describe('shortcuts are a no-op behind open modals/overlays', () => {
     expect(resolveShortcut(makeKey('f', null), c)).toBeNull()
     expect(resolveShortcut(makeKey('m', null), c)).toBeNull()
     expect(resolveShortcut(makeKey('Escape', null), c)).toEqual({ type: 'close-welcome' })
+  })
+
+  it('Settings modal (or its theme editor) open: player shortcuts suppressed', () => {
+    const c = ctx({ settingsOpen: true })
+    expect(resolveShortcut(makeKey('m', null), c)).toBeNull()
+    expect(resolveShortcut(makeKey('t', null), c)).toBeNull()
+    expect(resolveShortcut(makeKey('f', null), c)).toBeNull()
+    expect(resolveShortcut(makeKey(' ', null), c)).toBeNull()
+  })
+})
+
+describe('already-handled events are never double-acted', () => {
+  it('a defaultPrevented keydown resolves to null (the scrubber seeks once)', () => {
+    // PlayerControls' scrubber handler preventDefaults its ±5s arrow seek;
+    // the global handler must not stack ±10s on top. The cancellation is
+    // applied by a listener DURING dispatch on a cancelable event (a non-
+    // cancelable one ignores preventDefault by DOM definition).
+    const target = el('div')
+    target.addEventListener('keydown', (e) => e.preventDefault())
+    const cancelable = { cancelable: true } as Partial<KeyboardEvent>
+    expect(resolveShortcut(makeKey('ArrowRight', target, cancelable), ctx({ isLive: false }))).toBeNull()
+    expect(resolveShortcut(makeKey('k', target, cancelable), ctx())).toBeNull()
+  })
+})
+
+describe('sliders own their arrow keys', () => {
+  it('a focused role=slider keeps the arrows (no seek/volume on top)', () => {
+    const slider = el('div', { role: 'slider' })
+    expect(isArrowKeyOwner(slider)).toBe(true)
+    for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']) {
+      expect(resolveShortcut(makeKey(key, slider), ctx()), key).toBeNull()
+    }
+  })
+
+  it('non-arrow keys on a slider still resolve normally', () => {
+    const slider = el('div', { role: 'slider' })
+    expect(resolveShortcut(makeKey('m', slider), ctx())).toEqual({ type: 'toggle-mute' })
+    expect(resolveShortcut(makeKey(' ', slider), ctx())).toEqual({ type: 'play-pause' })
+  })
+
+  it('arrows on a plain element still resolve (live volume)', () => {
+    expect(resolveShortcut(makeKey('ArrowLeft', el('div')), ctx())).toEqual({ type: 'volume', delta: -0.05 })
   })
 })
 
