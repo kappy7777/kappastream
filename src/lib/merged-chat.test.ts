@@ -5,6 +5,10 @@ import {
   mergedChatEntries,
   toggleMergedId,
   reconcileMergedIds,
+  planExtraChatAdd,
+  extraChatId,
+  extraChatChannel,
+  isExtraChatId,
   type ChatEntry,
   type MergeSource,
 } from './merged-chat'
@@ -73,21 +77,110 @@ describe('toggleMergedId — merge-group membership', () => {
   it('preserves the order of the remaining members', () => {
     expect(toggleMergedId(['t1', 't2', 't3'], 't1')).toEqual(['t2', 't3'])
   })
+
+  it('adding no-ops at the cap; removal keeps working there', () => {
+    const full = ['t1', 't2', 't3', 't4', 'chat:c5', 'chat:c6']
+    expect(toggleMergedId(full, 'chat:c7')).toBe(full)
+    expect(toggleMergedId(full, 't1')).toEqual(['t2', 't3', 't4', 'chat:c5', 'chat:c6'])
+  })
 })
 
-describe('reconcileMergedIds — keep the group valid as tiles close', () => {
+describe('chat-only member ids (the chat:<channel> pseudo-id form)', () => {
+  it('round-trips a channel through the pseudo-id form', () => {
+    const id = extraChatId('chan1')
+    expect(isExtraChatId(id)).toBe(true)
+    expect(extraChatChannel(id)).toBe('chan1')
+  })
+
+  it('tile ids (UUIDs — hyphens only) are never mistaken for chat-only ids', () => {
+    expect(isExtraChatId('0f0f7c8e-1111-4d2d-9d2a-2b1d5c9e7a33')).toBe(false)
+  })
+
+  it('pseudo-id keys cannot collide with tile-id keys in the view model', () => {
+    const entries = mergedChatEntries([
+      source('t1', 'chan1', [msg('same', 1)]),
+      source(extraChatId('chan2'), 'chan2', [msg('same', 2)]),
+    ])
+    expect(entries.map((e) => e.key)).toEqual(['t1:same', 'chat:chan2:same'])
+  })
+})
+
+describe('reconcileMergedIds — keep the group valid as tiles change', () => {
+  const tiles = (...pairs: Array<[string, string]>): Array<{ id: string; channel: string }> =>
+    pairs.map(([id, channel]) => ({ id, channel }))
+
   it('all members alive → SAME array reference (no redundant state write)', () => {
-    const group = ['t1', 't2', 't3']
-    expect(reconcileMergedIds(group, ['t0', 't1', 't2', 't3'])).toBe(group)
+    const group = ['t1', 't2', 'chat:chan3']
+    expect(reconcileMergedIds(group, tiles(['t0', 'chan0'], ['t1', 'chan1'], ['t2', 'chan2']))).toBe(group)
   })
 
   it('drops closed tiles, keeping the group while two remain', () => {
-    expect(reconcileMergedIds(['t1', 't2', 't3'], ['t1', 't3'])).toEqual(['t1', 't3'])
+    expect(reconcileMergedIds(['t1', 't2', 't3'], tiles(['t1', 'chan1'], ['t3', 'chan3']))).toEqual(['t1', 't3'])
   })
 
   it('collapses to empty when fewer than two members survive', () => {
-    expect(reconcileMergedIds(['t1', 't2'], ['t2'])).toEqual([])
+    expect(reconcileMergedIds(['t1', 't2'], tiles(['t2', 'chan2']))).toEqual([])
     expect(reconcileMergedIds(['t1', 't2'], [])).toEqual([])
+  })
+
+  it('a chat-only member whose channel gets a tile MIGRATES to that tile id', () => {
+    // The group keeps its size, the tile's checkbox shows checked, and the
+    // chat-only session is released instead of doubling the channel through
+    // two connections.
+    expect(reconcileMergedIds(['t1', 'chat:chan2'], tiles(['t1', 'chan1'], ['t2', 'chan2']))).toEqual(['t1', 't2'])
+  })
+
+  it('chat-only members with no matching tile survive reconcile (no tile to die with)', () => {
+    const group = ['chat:chan1', 'chat:chan2']
+    expect(reconcileMergedIds(group, tiles(['t9', 'chan9']))).toBe(group)
+  })
+
+  it('migration is a CHANGE even with no drops (fresh array, not the same reference)', () => {
+    const group = ['chat:chan1', 'chat:chan2']
+    const next = reconcileMergedIds(group, tiles(['t1', 'chan1'], ['t2', 'chan2']))
+    expect(next).toEqual(['t1', 't2'])
+    expect(next).not.toBe(group)
+  })
+
+  it('a channel that was a member twice (chat-only AND its tile) keeps ONE membership', () => {
+    // t2 is chan2's tile and was ticked while chat:chan2 was still a member
+    // — the migration must not leave a doubled id behind.
+    expect(reconcileMergedIds(['t1', 'chat:chan2', 't2'], tiles(['t1', 'chan1'], ['t2', 'chan2']))).toEqual([
+      't1',
+      't2',
+    ])
+  })
+})
+
+describe('planExtraChatAdd — the picker input decision', () => {
+  it('normalizes like the favorites add field: trim, strip #, lowercase', () => {
+    expect(planExtraChatAdd('  #SomeChan ', [], [])).toEqual({ ok: true, next: ['chat:somechan'] })
+  })
+
+  it('rejects names that are not channel logins', () => {
+    expect(planExtraChatAdd('', [], [])).toEqual({ ok: false, reason: 'invalid' })
+    expect(planExtraChatAdd('bad-name', [], [])).toEqual({ ok: false, reason: 'invalid' })
+    expect(planExtraChatAdd('x'.repeat(26), [], [])).toEqual({ ok: false, reason: 'invalid' })
+  })
+
+  it('rejects channels that already have a tile (merge the TILE instead)', () => {
+    expect(planExtraChatAdd('chan1', ['t2'], ['chan1'])).toEqual({ ok: false, reason: 'tile-open' })
+  })
+
+  it('rejects a channel already merged chat-only', () => {
+    expect(planExtraChatAdd('chan1', ['chat:chan1'], [])).toEqual({ ok: false, reason: 'already-merged' })
+  })
+
+  it('rejects past the group cap', () => {
+    const full = ['t1', 't2', 't3', 't4', 'chat:c5', 'chat:c6']
+    expect(planExtraChatAdd('chan7', full, [])).toEqual({ ok: false, reason: 'full' })
+  })
+
+  it('appends the pseudo-id, preserving member order', () => {
+    expect(planExtraChatAdd('chan3', ['t1', 'chat:c2'], ['chan1'])).toEqual({
+      ok: true,
+      next: ['t1', 'chat:c2', 'chat:chan3'],
+    })
   })
 })
 

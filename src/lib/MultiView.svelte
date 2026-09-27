@@ -35,9 +35,16 @@
     mergedChatEntries,
     toggleMergedId,
     reconcileMergedIds,
+    planExtraChatAdd,
+    extraChatId,
+    extraChatChannel,
+    isExtraChatId,
+    MAX_MERGED_SOURCES,
     type ChatEntry,
+    type ExtraChatAddReason,
     type MergeSource,
   } from './merged-chat'
+  import { fetchLiveStatus } from './favorites.svelte'
   import { formatCompact } from './format'
   import { tooltip } from './tooltip.ts'
   import { t } from './i18n/index.svelte'
@@ -112,6 +119,9 @@
   onDestroy(() => {
     for (const [, s] of sessions) s.dispose()
     sessions.clear()
+    for (const [, s] of extraSessions) s.dispose()
+    extraSessions.clear()
+    extraAvatars.clear()
     onAuthorityVideo(null)
     onAuthorityBackend(null)
     onAuthorityControls(null)
@@ -214,16 +224,23 @@
   const activeSession = $derived(activeChatId ? (sessions.get(activeChatId) ?? null) : null)
 
   // ---- merged chats ---------------------------------------------------------
-  // Any subset of the open tiles' chats can be MERGED into one interleaved
-  // stream (picked via the merge button at the left of the tab strip). Pure
-  // group + view-model logic lives in merged-chat.ts (unit-tested there);
-  // this is the session-only UI state — never persisted, like multi-view
-  // itself and the splitter positions.
+  // Any subset of the open tiles' chats — plus CHAT-ONLY channels picked via
+  // the picker's input (a stream you follow in chat without giving it a
+  // tile) — can be MERGED into one interleaved stream (picked via the merge
+  // button at the left of the tab strip). Pure group + view-model logic
+  // lives in merged-chat.ts (unit-tested there); this is the session-only UI
+  // state — never persisted, like multi-view itself and the splitter
+  // positions.
   let mergedIds = $state<string[]>([])
   // Whether the pane displays the merged stream (vs the active chat tab's
   // own session).
   let mergedView = $state(false)
   let mergePickerOpen = $state(false)
+  // Picker input for chat-only members. Group members are tile ids or
+  // `chat:<channel>` pseudo-ids (see merged-chat.ts) — the input's plan
+  // decides which, so this stays plain form state.
+  let mergeAddValue = $state('')
+  let mergeAddError = $state<ExtraChatAddReason | null>(null)
 
   function toggleMerged(id: string): void {
     mergedIds = toggleMergedId(mergedIds, id)
@@ -232,16 +249,94 @@
     mergedView = mergedIds.length >= 2
   }
 
-  // Keep the group valid as tiles close: drop gone ids, collapse a group
-  // smaller than two (reconcileMergedIds returns the same reference when
-  // nothing changed, so this never writes redundant state).
-  $effect(() => {
-    const next = reconcileMergedIds(
+  function onMergeAdd(e: SubmitEvent): void {
+    e.preventDefault()
+    const plan = planExtraChatAdd(
+      mergeAddValue,
       mergedIds,
-      tileStore.tiles.map((tile) => tile.id),
+      tileStore.tiles.map((tile) => tile.channel),
     )
+    if (!plan.ok) {
+      mergeAddError = plan.reason
+      return
+    }
+    mergeAddError = null
+    mergeAddValue = ''
+    mergedIds = plan.next
+    // Joining the group jumps to the merged stream, exactly like a ticked
+    // checkbox (toggleMerged above).
+    mergedView = mergedIds.length >= 2
+  }
+
+  const mergeAddErrorText = $derived.by(() => {
+    switch (mergeAddError) {
+      case 'invalid':
+        return t('mv_mergeAddInvalid')
+      case 'tile-open':
+        return t('mv_mergeAddTileOpen')
+      case 'already-merged':
+        return t('mv_mergeAddDuplicate')
+      case 'full':
+        return t('mv_mergeAddFull', { max: MAX_MERGED_SOURCES })
+      default:
+        return ''
+    }
+  })
+
+  // Keep the group valid as tiles change: drop gone tile ids, migrate a
+  // chat-only member whose channel got a tile to that tile's id, collapse a
+  // group smaller than two (reconcileMergedIds returns the same reference
+  // when nothing changed, so this never writes redundant state).
+  $effect(() => {
+    const next = reconcileMergedIds(mergedIds, tileStore.tiles)
     if (next !== mergedIds) mergedIds = next
     if (mergedIds.length < 2 && mergedView) mergedView = false
+  })
+
+  // Chat-only members' channels (NOT gated on the >= 2 view gate: a pending
+  // one-member group still holds its session).
+  const mergedExtras = $derived(mergedIds.filter(isExtraChatId).map(extraChatChannel))
+
+  // Chat-only members: channels merged WITHOUT a tile. Each gets a headless
+  // IRC session (ChatSession is player-free — socket + emote/badge fetches
+  // only) and a fire-and-forget avatar. SvelteMaps for the same reactivity
+  // reason as `sessions` above. Keyed by channel.
+  const extraSessions = new SvelteMap<string, ChatSession>()
+  const extraAvatars = new SvelteMap<string, string>()
+
+  // The chat-only twin of the tile-session reconcile: a member's session is
+  // created the moment it joins the group (a pending one-member group
+  // included — history must accrue from the join, like a ticked tile's) and
+  // disposed the moment it leaves (unticked, group collapse, or migration to
+  // a tile — mergedExtras then no longer lists the channel; because the
+  // mergedIds reconcile above is a plain $effect, that release lands one
+  // flush after the migration, which only shortens the session's life).
+  // $effect.pre + untrack for the same reasons as the tile reconcile.
+  $effect.pre(() => {
+    const wanted = new Set(mergedExtras)
+    untrack(() => {
+      for (const [channel, s] of extraSessions) {
+        if (wanted.has(channel)) continue
+        s.dispose()
+        extraSessions.delete(channel)
+        extraAvatars.delete(channel)
+      }
+      for (const channel of wanted) {
+        if (extraSessions.has(channel)) continue
+        const s = new ChatSession(channel)
+        extraSessions.set(channel, s)
+        s.start()
+        // Never throws; a miss (channel gone, GQL down) just keeps the
+        // initial fallback. Guarded so a late resolve can't resurrect the
+        // avatar of a member that was removed meanwhile.
+        void fetchLiveStatus(channel).then((st) => {
+          if (!untrack(() => extraSessions.has(channel))) return
+          if ((st.state === 'live' || st.state === 'offline') && st.avatarUrl) {
+            extraAvatars.set(channel, st.avatarUrl)
+          }
+        })
+      }
+    })
   })
 
   // Any move of the active-chat pointer (chat-tab click, opening a channel
@@ -272,6 +367,25 @@
   const mergedTiles = $derived(
     mergedIds.length >= 2 ? tileStore.tiles.filter((tile) => mergedIds.includes(tile.id)) : [],
   )
+
+  // The merged tab's avatar stack + tooltip: EVERY member — merged tiles in
+  // grid order, then chat-only channels — as one avatar-or-initial list so
+  // a single loop renders both member kinds. Keyed by the group id form
+  // (tile id / `chat:<channel>` pseudo-id), unique across both kinds.
+  const mergedStack = $derived.by(() => {
+    if (mergedIds.length < 2) return []
+    const tiles = mergedTiles.map((tile) => {
+      const s = tile.liveStatus
+      const avatar = (s.state === 'live' || s.state === 'offline') && s.avatarUrl ? s.avatarUrl : null
+      return { key: tile.id, channel: tile.channel, avatar }
+    })
+    const extras = mergedExtras.map((channel) => ({
+      key: extraChatId(channel),
+      channel,
+      avatar: extraAvatars.get(channel) ?? null,
+    }))
+    return [...tiles, ...extras]
+  })
 
   // ---- Pinned chat messages (multi-view) ------------------------------------
   // Pins are fetched for the ACTIVE CHAT TAB ONLY, not every open tile: the
@@ -316,6 +430,20 @@
         const s = sessions.get(tile.id)
         if (s) sources.push({ tileId: tile.id, channel: s.channel, override: s.badgeOverride, messages: s.messages })
       }
+      // Chat-only members interleave through the same view model; their
+      // pseudo-id namespaces keys exactly like a tile id (tile ids are
+      // UUIDs and can never collide with the 'chat:' form).
+      for (const channel of mergedExtras) {
+        const s = extraSessions.get(channel)
+        if (s) {
+          sources.push({
+            tileId: extraChatId(channel),
+            channel: s.channel,
+            override: s.badgeOverride,
+            messages: s.messages,
+          })
+        }
+      }
       return mergedChatEntries(sources)
     }
     const s = activeSession
@@ -358,10 +486,13 @@
   // each entry carries its origin session's per-channel art, so channel A's
   // custom subscriber badge never bleeds onto channel B's messages.
 
-  // The merged view needs no per-channel avatar URL state of its own — the
-  // tile's polled liveStatus already carries it (fallback initial otherwise).
-  function mergeAvatarUrl(tileId: string): string | null {
-    const s = tileStore.tiles.find((tile) => tile.id === tileId)?.liveStatus
+  // The merged view needs no per-channel avatar URL state of its own for
+  // TILES — the tile's polled liveStatus already carries it. Chat-only
+  // members have no tile, so their avatar comes from the picker's one-shot
+  // fetch (fallback initial otherwise).
+  function mergeAvatarUrl(id: string): string | null {
+    if (isExtraChatId(id)) return extraAvatars.get(extraChatChannel(id)) ?? null
+    const s = tileStore.tiles.find((tile) => tile.id === id)?.liveStatus
     return s && (s.state === 'live' || s.state === 'offline') ? s.avatarUrl : null
   }
 
@@ -730,10 +861,12 @@
 
       <!-- Tab strip row: the MERGE button (left) + the chat tabs. Merging
            combines any subset of the open chats into one interleaved stream
-           (see merged-chat.ts); merged chats appear as ONE tab with their
-           avatars stacked, and stop getting individual tabs. -->
+           (see merged-chat.ts) — including chat-only channels added through
+           the picker's input, which need no tile of their own; merged chats
+           appear as ONE tab with their avatars stacked, and stop getting
+           individual tabs. -->
       <div class="mv-chat-tabs-row">
-        {#if tileStore.tiles.length >= 2}
+        {#if tileStore.tiles.length >= 1}
           <div class="mv-merge-wrap">
             <button
               type="button"
@@ -773,6 +906,7 @@
                     class="mv-merge-row"
                     class:mv-merge-row--checked={checked}
                     aria-pressed={checked}
+                    disabled={!checked && mergedIds.length >= MAX_MERGED_SOURCES}
                     onclick={() => toggleMerged(tile.id)}
                   >
                     <span class="mv-tab-avatar-wrap">
@@ -793,6 +927,52 @@
                     <span class="mv-merge-check" aria-hidden="true">{checked ? '✓' : ''}</span>
                   </button>
                 {/each}
+                <!-- Chat-only members (added via the input below): always
+                     checked — they exist only AS members. Unticking removes
+                     them, which the session reconcile answers by disposing
+                     their headless IRC connection. -->
+                {#each mergedExtras as channel (channel)}
+                  {@const av = extraAvatars.get(channel)}
+                  <button
+                    type="button"
+                    class="mv-merge-row mv-merge-row--checked"
+                    aria-pressed="true"
+                    title={t('mv_mergeChatOnly')}
+                    onclick={() => toggleMerged(extraChatId(channel))}
+                  >
+                    <span class="mv-tab-avatar-wrap">
+                      {#if av}
+                        <img class="mv-tab-avatar" src={av} alt="" />
+                      {:else}
+                        <span class="mv-tab-avatar mv-tab-avatar--fallback" aria-hidden="true"
+                          >{channel.charAt(0).toUpperCase()}</span
+                        >
+                      {/if}
+                    </span>
+                    <span class="mv-merge-name">{channel}</span>
+                    <span class="mv-merge-check" aria-hidden="true">✓</span>
+                  </button>
+                {/each}
+                <!-- Join a chat WITHOUT opening a stream for it. Enter
+                     submits; a rejected name shows why below the field. -->
+                <form class="mv-merge-add" onsubmit={onMergeAdd}>
+                  <input
+                    class="mv-merge-add-input"
+                    type="text"
+                    placeholder={t('mv_mergeAddPlaceholder')}
+                    aria-label={t('mv_mergeAdd')}
+                    bind:value={mergeAddValue}
+                    autocomplete="off"
+                    spellcheck="false"
+                    maxlength="32"
+                  />
+                  <button type="submit" class="mv-merge-add-btn" title={t('mv_mergeAdd')} aria-label={t('mv_mergeAdd')}>
+                    +
+                  </button>
+                </form>
+                {#if mergeAddError}
+                  <div class="mv-merge-error" role="alert">{mergeAddErrorText}</div>
+                {/if}
               </div>
             {/if}
           </div>
@@ -811,7 +991,7 @@
              bare overflow-x:auto strip would only scroll via shift+wheel, which
              reads as "the right tabs are unreachable". -->
         <div class="mv-chat-tabs" role="tablist" onwheel={onTabsWheel}>
-          {#if mergedTiles.length >= 2}
+          {#if mergedStack.length >= 2}
             <button
               type="button"
               class="mv-chat-tab"
@@ -819,18 +999,17 @@
               role="tab"
               aria-selected={mergedView}
               onclick={() => (mergedView = true)}
-              title={mergedTiles.map((tile) => tile.channel).join(', ')}
+              title={mergedStack.map((m) => m.channel).join(', ')}
               aria-label={t('mv_mergeChats')}
             >
               <span class="mv-tab-avatar-stack">
-                {#each mergedTiles as tile (tile.id)}
-                  {@const s = tile.liveStatus}
+                {#each mergedStack as m (m.key)}
                   <span class="mv-tab-stack-item">
-                    {#if (s.state === 'live' || s.state === 'offline') && s.avatarUrl}
-                      <img class="mv-tab-avatar mv-tab-avatar--stack" src={s.avatarUrl} alt="" />
+                    {#if m.avatar}
+                      <img class="mv-tab-avatar mv-tab-avatar--stack" src={m.avatar} alt="" />
                     {:else}
                       <span class="mv-tab-avatar mv-tab-avatar--stack mv-tab-avatar--fallback" aria-hidden="true"
-                        >{tile.channel.charAt(0).toUpperCase()}</span
+                        >{m.channel.charAt(0).toUpperCase()}</span
                       >
                     {/if}
                   </span>
@@ -1303,9 +1482,69 @@
     color: var(--accent);
     font-weight: 700;
   }
+  /* Unticked rows grey out at the group cap (adding is capped in BOTH
+     paths — the row simply makes the checkbox path's no-op visible). */
+  .mv-merge-row:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .mv-merge-row:disabled:hover {
+    background: transparent;
+    color: var(--text-secondary);
+  }
+  /* Chat-only member input: join a channel's chat without a tile. Sits
+     below the member rows, separated by a hairline. */
+  .mv-merge-add {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+  }
+  .mv-merge-add-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 12px;
+  }
+  .mv-merge-add-input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .mv-merge-add-input::placeholder {
+    color: var(--text-dim);
+  }
+  .mv-merge-add-btn {
+    flex: 0 0 auto;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-hover-faint);
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 0 9px;
+  }
+  .mv-merge-add-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .mv-merge-error {
+    padding: 4px 6px 2px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text-secondary);
+  }
 
-  /* Stacked avatar cluster for the merged tab (up to 4 tiles): overlapping
-     circles, each ringed in the strip background so they read separately. */
+  /* Stacked avatar cluster for the merged tab (tiles + chat-only members,
+     MAX_MERGED_SOURCES circles at most): overlapping circles, each ringed in
+     the strip background so they read separately. */
   .mv-tab-avatar-stack {
     display: inline-flex;
     align-items: center;

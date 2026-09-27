@@ -1,14 +1,44 @@
-// Pure logic for MERGED multi-view chats: any subset of the open tiles'
-// chats combined into one interleaved stream. The UI state (the merge
-// group, whether the merged stream is displayed, the picker dropdown)
-// lives in MultiView.svelte; these helpers are the testable core, in the
-// same spirit as tile-store.svelte.ts.
+// Pure logic for MERGED multi-view chats: any subset of the open tiles' chats
+// — plus CHAT-ONLY channels with no tile of their own — combined into one
+// interleaved stream. The UI state (the merge group, whether the merged
+// stream is displayed, the picker dropdown) lives in MultiView.svelte; these
+// helpers are the testable core, in the same spirit as
+// tile-store.svelte.ts.
 //
 // Merging is session-only state (never persisted), exactly like multi-view
 // itself and the splitter positions — restoring a merge across restarts
 // would resurrect tiles the user closed.
 
 import type { ChatMessage } from './chat-session.svelte'
+import { isValidChannelName, normalizeChannelName } from './channel-name'
+
+/**
+ * Ceiling on the merge group's size (tiles + chat-only channels combined).
+ * Every member is a live IRC connection whose 500-entry buffer feeds one
+ * interleaved, timestamp-sorted render pass, so cost grows linearly per
+ * source; six covers a full 2×2 grid plus two chat-only channels.
+ */
+export const MAX_MERGED_SOURCES = 6
+
+/**
+ * Chat-only members are encoded in the merge group as `chat:<channel>`
+ * pseudo-ids. Tile ids are UUIDs (hyphens only, never ':'), so the forms can
+ * never collide, and every consumer that only needs a unique key/namespace
+ * can treat both shapes identically.
+ */
+const EXTRA_CHAT_ID_PREFIX = 'chat:'
+
+export function extraChatId(channel: string): string {
+  return EXTRA_CHAT_ID_PREFIX + channel
+}
+
+export function isExtraChatId(id: string): boolean {
+  return id.startsWith(EXTRA_CHAT_ID_PREFIX)
+}
+
+export function extraChatChannel(id: string): string {
+  return id.slice(EXTRA_CHAT_ID_PREFIX.length)
+}
 
 /**
  * One renderable chat entry. In the merged view every entry carries its
@@ -73,31 +103,94 @@ export function mergedChatEntries(sources: MergeSource[]): ChatEntry[] {
 }
 
 /**
- * Toggle one tile's membership in the merge group. ADDING always persists
- * (a one-member group is a pending selection — the first tick must stick
- * for a second to join it); REMOVING collapses anything smaller than two
- * members to the empty group, because a one-member "merge" left over from
- * removals is not a selection, it is a stale leftover. The merged VIEW is
- * gated on length >= 2 by the caller.
+ * Toggle one member's membership in the merge group (a tile id or a
+ * `chat:<channel>` pseudo-id). ADDING always persists (a one-member group is
+ * a pending selection — the first tick must stick for a second to join it)
+ * but no-ops once the group is at `cap`: the merged stream's cost grows
+ * linearly per source, so neither path (checkbox or picker input) may push
+ * past it. REMOVING collapses anything smaller than two members to the empty
+ * group, because a one-member "merge" left over from removals is not a
+ * selection, it is a stale leftover. The merged VIEW is gated on length >= 2
+ * by the caller.
  */
-export function toggleMergedId(current: string[], tileId: string): string[] {
-  if (current.includes(tileId)) {
-    const next = current.filter((x) => x !== tileId)
+export function toggleMergedId(current: string[], id: string, cap = MAX_MERGED_SOURCES): string[] {
+  if (current.includes(id)) {
+    const next = current.filter((x) => x !== id)
     return next.length >= 2 ? next : []
   }
-  return [...current, tileId]
+  if (current.length >= cap) return current
+  return [...current, id]
 }
 
 /**
  * Reconcile the merge group against the live tiles (a tile was closed or
- * replaced-by-close): gone ids are dropped, and a group smaller than two
- * collapses to empty. Returns the SAME array reference when nothing
- * changed so callers (an $effect) can skip a redundant state write.
+ * replaced-by-close): gone tile ids are dropped. A `chat:<channel>` member
+ * whose channel LATER got a tile of its own MIGRATES to that tile's id —
+ * the group keeps its size, the tile's checkbox shows checked, and the
+ * chat-only session is released instead of doubling the channel's messages
+ * through two connections. Other chat-only members are kept (they have no
+ * tile to die with). A group smaller than two collapses to empty. Returns
+ * the SAME array reference when nothing changed so callers (an $effect) can
+ * skip a redundant state write.
  */
-export function reconcileMergedIds(current: string[], liveTileIds: string[]): string[] {
-  const next = current.filter((id) => liveTileIds.includes(id))
-  if (next.length === current.length) return current
-  return next.length >= 2 ? next : []
+export function reconcileMergedIds(
+  current: string[],
+  liveTiles: ReadonlyArray<{ id: string; channel: string }>,
+): string[] {
+  const tileByChannel = new Map(liveTiles.map((tile) => [tile.channel, tile.id]))
+  const liveIds = new Set(liveTiles.map((tile) => tile.id))
+  const kept: string[] = []
+  let changed = false
+  const seen = new Set<string>()
+  for (const id of current) {
+    let mapped = id
+    if (isExtraChatId(id)) {
+      // A channel with a live tile joins through the tile from now on.
+      mapped = tileByChannel.get(extraChatChannel(id)) ?? id
+    } else if (!liveIds.has(id)) {
+      mapped = ''
+    }
+    if (mapped === '') {
+      changed = true
+      continue
+    }
+    if (mapped !== id) changed = true
+    if (seen.has(mapped)) {
+      // The channel was a member twice (chat-only, then its tile got checked
+      // before the migration ran) — one membership survives.
+      changed = true
+      continue
+    }
+    seen.add(mapped)
+    kept.push(mapped)
+  }
+  if (!changed) return current
+  return kept.length >= 2 ? kept : []
+}
+
+export type ExtraChatAddReason = 'invalid' | 'tile-open' | 'already-merged' | 'full'
+export type ExtraChatAddPlan = { ok: true; next: string[] } | { ok: false; reason: ExtraChatAddReason }
+
+/**
+ * Decide a picker-input submission: normalize the typed name (trim / strip a
+ * leading '#' / lowercase, exactly like the favorites add field), then reject
+ * names that are not channel logins, channels that already have a tile
+ * (merge the TILE instead — two connections to one channel would double
+ * every message), channels already in the group, and submissions past the
+ * group cap. Pure so the whole rejection matrix is unit-testable; the caller
+ * only maps the reason to an i18n string.
+ */
+export function planExtraChatAdd(
+  rawName: string,
+  mergedIds: string[],
+  tileChannels: ReadonlyArray<string>,
+): ExtraChatAddPlan {
+  const channel = normalizeChannelName(rawName)
+  if (!isValidChannelName(channel)) return { ok: false, reason: 'invalid' }
+  if (tileChannels.includes(channel)) return { ok: false, reason: 'tile-open' }
+  if (mergedIds.includes(extraChatId(channel))) return { ok: false, reason: 'already-merged' }
+  if (mergedIds.length >= MAX_MERGED_SOURCES) return { ok: false, reason: 'full' }
+  return { ok: true, next: [...mergedIds, extraChatId(channel)] }
 }
 
 /**

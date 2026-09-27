@@ -25,7 +25,10 @@ vi.mock('@tauri-apps/api/event', () => ({
 }))
 vi.mock('./chat-session.svelte', () => {
   // Chat is not under test here — a no-op session keeps the mount cheap and
-  // offline (no sockets, no emote fetches).
+  // offline (no sockets, no emote fetches). Constructed channels are recorded
+  // so the merge test can assert a headless session spawns for a chat-only
+  // member (a channel with no tile).
+  const constructed: string[] = []
   class ChatSession {
     channel: string
     messages: unknown[] = []
@@ -36,11 +39,12 @@ vi.mock('./chat-session.svelte', () => {
     thirdParty = new Map()
     constructor(channel: string) {
       this.channel = channel
+      constructed.push(channel)
     }
     start(): void {}
     dispose(): void {}
   }
-  return { ChatSession }
+  return { ChatSession, __constructed: constructed }
 })
 
 if (!('ResizeObserver' in globalThis)) {
@@ -52,6 +56,9 @@ if (!('ResizeObserver' in globalThis)) {
 }
 
 const MultiView = (await import('./MultiView.svelte')).default
+// The mocked ChatSession's constructed-channel log (extra export the mock
+// factory adds; the real module has none).
+const chatMock = (await import('./chat-session.svelte')) as unknown as { __constructed: string[] }
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 let view: ReturnType<typeof mount> | null = null
@@ -137,5 +144,42 @@ describe('MultiView mount (effect-loop regression)', () => {
     expect(Math.min(...distinct)).toBeGreaterThanOrEqual(1)
     expect(Math.max(...distinct)).toBeLessThanOrEqual(4)
     expect(tileStore.count).toBe(3)
+  })
+
+  // The merge picker's input joins a chat WITHOUT a tile: the typed channel
+  // gets a headless session (the mocked ChatSession), appears as a member
+  // row, and the merged tab covers both members — all without wedging the
+  // effect tree.
+  it('merge picker: a typed channel joins the merge with no tile of its own', async () => {
+    settings.setMpvEngine(false)
+    mountView(false)
+    await sleep(60)
+    tileStore.addOrReplace('chan1', 'best', 1)
+    tileStore.addOrReplace('chan2', 'best', 1)
+    await sleep(200)
+    expect(tileStore.count).toBe(2)
+
+    // Open the picker and tick the first tile (the pending member).
+    document.querySelector<HTMLButtonElement>('.mv-merge-btn')!.click()
+    await sleep(30)
+    const panel = document.querySelector<HTMLElement>('.mv-merge-panel')!
+    expect(panel).toBeTruthy()
+    panel.querySelector<HTMLButtonElement>('.mv-merge-row')!.click()
+    await sleep(30)
+
+    // Submit a chat-only channel through the input.
+    const input = panel.querySelector<HTMLInputElement>('.mv-merge-add-input')!
+    input.value = 'chan9'
+    input.dispatchEvent(new Event('input'))
+    panel.querySelector<HTMLFormElement>('.mv-merge-add')!.dispatchEvent(new Event('submit', { bubbles: true }))
+    await sleep(80)
+
+    // The channel spawned a headless session, is listed as a member, and the
+    // merged tab names both members (tile first, chat-only after).
+    expect(chatMock.__constructed.filter((c) => c === 'chan9')).toEqual(['chan9'])
+    const names = [...document.querySelectorAll('.mv-merge-panel .mv-merge-name')].map((el) => el.textContent)
+    expect(names).toContain('chan9')
+    const tab = document.querySelector<HTMLButtonElement>('.mv-chat-tab')!
+    expect(tab.getAttribute('title')).toBe('chan1, chan9')
   })
 })

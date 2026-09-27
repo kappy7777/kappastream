@@ -11,6 +11,7 @@ import {
 } from './gql'
 import { t } from './i18n/index.svelte'
 import { STORAGE_KEYS } from './storage-keys'
+import { isValidChannelName, normalizeChannelName } from './channel-name'
 
 export interface FavoriteEntry {
   name: string
@@ -71,15 +72,9 @@ export const MAX_FAVORITES = 1000
 const CIRCUIT_BREAKER_MS = 30_000
 const RETRY_JITTER_MS = 5_000
 
-export const CHANNEL_NAME_RE = /^[a-z0-9_]{1,25}$/
-
-export function normalizeChannelName(raw: string): string {
-  return raw.trim().replace(/^#/, '').toLowerCase()
-}
-
-export function isValidChannelName(name: string): boolean {
-  return CHANNEL_NAME_RE.test(name)
-}
+// Channel-name validation lives in the pure channel-name module; re-exported
+// here so long-standing importers (App, Sidebar, this store) stay untouched.
+export { CHANNEL_NAME_RE, normalizeChannelName, isValidChannelName } from './channel-name'
 
 function loadFromStorage(): FavoriteEntry[] {
   try {
