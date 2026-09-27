@@ -75,6 +75,13 @@
     /** The authority tile's playback BACKEND (native engine tiles): App's
      *  keyboard shortcuts target it instead of the inert <video> element. */
     onAuthorityBackend: (b: VideoBackend | null) => void
+    /** The authority tile's play/pause HANDLE (Tile.togglePlay, which flags
+     *  the TILE session's userPaused so its own stall-recovery watcher
+     *  respects the pause). App's keyboard shortcut routes through this —
+     *  pausing the element from App's session armed the tile's stall
+     *  recovery, which auto-resumed at the live edge ~1 s later. Null when
+     *  this tile is not the authority. */
+    onAuthorityControls: (h: { togglePlay: () => void } | null) => void
     /** Reports this tile's native-video-area element (the rect the mpv
      *  surface must cover + the box MultiView's overlay manager checks
      *  page UI against). Null on unmount. */
@@ -106,6 +113,7 @@
     isDropTarget,
     onAuthorityVideo,
     onAuthorityBackend,
+    onAuthorityControls,
     onNativeArea,
     onTileActivate,
     onTileDragStart,
@@ -741,17 +749,22 @@
   // Report the authority tile's shortcut TARGET to App (keyboard shortcuts
   // follow the AUDIO AUTHORITY, not the active chat tab): the backend while
   // the native engine plays this tile (the <video> is inert then), else the
-  // element.
+  // element — plus the play/pause HANDLE in both cases, so the keyboard
+  // shortcut routes through the TILE's session (its userPaused flag is what
+  // the tile's own stall-recovery watcher respects).
   $effect(() => {
     if (isAuthority && nativeActive && mpvBackend) {
       onAuthorityVideo(null)
       onAuthorityBackend(mpvBackend)
+      onAuthorityControls({ togglePlay })
     } else if (isAuthority && videoEl) {
       onAuthorityVideo(videoEl)
       onAuthorityBackend(null)
+      onAuthorityControls({ togglePlay })
     } else {
       onAuthorityVideo(null)
       onAuthorityBackend(null)
+      onAuthorityControls(null)
     }
   })
 
@@ -808,6 +821,7 @@
     if (pollTimer) clearInterval(pollTimer)
     onAuthorityVideo(null)
     onAuthorityBackend(null)
+    onAuthorityControls(null)
     onNativeArea(tile.id, null)
   })
 

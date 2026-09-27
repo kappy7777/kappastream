@@ -50,10 +50,14 @@
     /** The authority tile's playback BACKEND (native-engine tiles) — the
      *  keyboard-shortcut target App uses instead of the <video> element. */
     onAuthorityBackend: (b: VideoBackend | null) => void
+    /** The authority tile's play/pause handle — the keyboard shortcut routes
+     *  through the tile's own session so its stall-recovery respects it. */
+    onAuthorityControls: (h: { togglePlay: () => void } | null) => void
     /** invoke('mpv_available') result from App (feature build + surface). */
     mpvAvailable: boolean
   }
-  const { isWindows, chatSize, onAuthorityVideo, onAuthorityBackend, mpvAvailable }: Props = $props()
+  const { isWindows, chatSize, onAuthorityVideo, onAuthorityBackend, onAuthorityControls, mpvAvailable }: Props =
+    $props()
 
   // Per-tile chat sessions. A SvelteMap so `.get()` reads genuinely track
   // (a plain $state(new Map()) does not react to .set()/.delete() — pinned
@@ -110,6 +114,7 @@
     sessions.clear()
     onAuthorityVideo(null)
     onAuthorityBackend(null)
+    onAuthorityControls(null)
     document.removeEventListener('pointermove', onSplitMove)
     document.removeEventListener('pointerup', endSplitDrag)
     document.removeEventListener('pointercancel', endSplitDrag)
@@ -561,6 +566,7 @@
             {isWindows}
             {onAuthorityVideo}
             {onAuthorityBackend}
+            {onAuthorityControls}
             {onNativeArea}
             onTileActivate={activateTile}
             onTileDragStart={startDrag}

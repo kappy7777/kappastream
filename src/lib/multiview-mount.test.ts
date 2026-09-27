@@ -72,6 +72,7 @@ function mountView(mpvAvailable: boolean): void {
       chatSize: 300,
       onAuthorityVideo: () => {},
       onAuthorityBackend: () => {},
+      onAuthorityControls: () => {},
       mpvAvailable,
     },
   })

@@ -346,6 +346,12 @@
   // The same tile's playback BACKEND while it runs the native engine (the
   // <video> is inert then — App's shortcuts drive the backend instead).
   let authorityTileBackend = $state<VideoBackend | null>(null)
+  // The same tile's play/pause handle (Tile.togglePlay). The keyboard
+  // shortcut routes through the TILE's session — its userPaused flag is what
+  // the tile's own onPause stall-recovery watcher respects; pausing the
+  // element from App's session looked like a stall and auto-resumed ~1 s
+  // later, so Space/K never stuck on hls tiles.
+  let authorityTileControls = $state<{ togglePlay: () => void } | null>(null)
   let tooltipEl: HTMLElement | undefined = $state()
   let tooltipPos = $state({ left: 0, top: 0 })
   let probeEl: HTMLElement | undefined = $state()
@@ -475,35 +481,11 @@
     // Tiles stay element-driven (they own their own <video>/hls.js) EXCEPT
     // native-engine tiles, whose authority reports a playback BACKEND; the
     // single-stream player always goes through the backend abstraction.
+    // BOTH tile paths go through the authority tile's OWN togglePlay so the
+    // pause lands in the tile's session (see authorityTileControls).
     if (multiView) {
-      const backend = authorityTileBackend
-      if (backend) {
-        if (backend.paused) {
-          playbackSession.userPaused = false
-          void backend.play().catch(() => {
-            /* ignore */
-          })
-        } else {
-          // Flag the user pause BEFORE pausing so the live stall-recovery
-          // watcher doesn't treat it as a stall and auto-resume.
-          playbackSession.userPaused = true
-          backend.pause()
-        }
-        return
-      }
-      const el = authorityTileVideo
-      if (!el) return
-      if (el.paused) {
-        playbackSession.userPaused = false
-        void el.play().catch(() => {
-          /* ignore */
-        })
-      } else {
-        // Flag the user pause BEFORE pausing so the live stall-recovery
-        // watcher doesn't treat it as a stall and auto-resume.
-        playbackSession.userPaused = true
-        el.pause()
-      }
+      const controls = authorityTileControls
+      if (controls) controls.togglePlay()
       return
     }
     const backend = videoBackend
@@ -2052,6 +2034,7 @@
     tileStore.exitAll()
     authorityTileVideo = null
     authorityTileBackend = null
+    authorityTileControls = null
     if (ch) selectChannel(ch)
   }
 
@@ -3146,6 +3129,9 @@
         }}
         onAuthorityBackend={(b) => {
           authorityTileBackend = b
+        }}
+        onAuthorityControls={(h) => {
+          authorityTileControls = h
         }}
       />
     {:else}
