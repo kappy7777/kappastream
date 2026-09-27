@@ -1839,11 +1839,13 @@
         // streamlink rejected the requested quality (e.g. channel doesn't have
         // 720p60 today, only audio_only + 480p). Falling back to "best" gets
         // the user back to a watchable stream without forcing them to switch
-        // channels. We only fall back once per loadStream call so a pathological
-        // failure on "best" itself still surfaces as an error.
+        // channels. FOR THIS LOAD ONLY: unavailability is often transient at
+        // stream start, and persisting 'best' would silently discard the
+        // user's bandwidth-driven choice. We only fall back once per
+        // loadStream call so a pathological failure on "best" itself still
+        // surfaces as an error.
         if (q !== 'best') {
           quality = 'best'
-          if (channelJoined) settings.setQualityFor(channelJoined, 'best')
           showNotifToast(t('toast_qualityFallback', { q, source: t('pc_sourceQuality') }))
           // The probe list just proved stale (it offered a variant that
           // vanished) — re-probe so the menu stops offering it.
