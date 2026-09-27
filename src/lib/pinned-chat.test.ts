@@ -148,6 +148,50 @@ describe('pinned chat: fetch gating', () => {
     expect(h.fetch).toHaveBeenCalledTimes(2)
   })
 
+  it('switching to a failing channel shows NO pin from the previous channel', async () => {
+    // A shows a pin → setTarget(B) with B's fetch failing: A's banner must
+    // not linger (it used to stay until the next good poll — 150 s single
+    // view, longer in multi-view through the id-resolution retry window).
+    const h = makeHarness([[fixturePin()]])
+    h.store.setTarget('chana', '1')
+    await flush()
+    expect(h.store.visiblePin).not.toBeNull()
+    h.fetch.mockRejectedValue(new Error('HTTP 503'))
+    h.store.setTarget('chanb', '2')
+    await flush()
+    expect(h.store.visiblePin).toBeNull()
+  })
+
+  it('a channel switch during an in-flight fetch re-fetches for the new target', async () => {
+    // The switch returns early on inFlight; when the stale pass settles, its
+    // result is dropped AND the current target is finally fetched — the old
+    // code never re-ran, leaving the new channel pinless until the next tick.
+    let releaseA: (() => void) | null = null
+    const h = makeHarness()
+    h.fetch.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseA = () => resolve([fixturePin({ pinId: 'pin-a' })])
+        }),
+    )
+    h.store.setTarget('chana', '1')
+    await flush()
+    expect(h.fetch).toHaveBeenCalledTimes(1)
+
+    h.store.setTarget('chanb', '2') // returns early (inFlight)
+    await flush()
+    expect(h.fetch).toHaveBeenCalledTimes(1)
+
+    releaseA!() // A settles — superseded, dropped
+    await flush()
+    await flush()
+    // B was fetched as soon as A settled (its own promise stays pending in
+    // this test — only the re-fetch matters).
+    expect(h.fetch).toHaveBeenCalledTimes(2)
+    expect(h.fetch).toHaveBeenLastCalledWith('2')
+    expect(h.store.pins).toEqual([]) // A's result never landed
+  })
+
   it('falls back to one memoized login→id resolution for callers without a userId', async () => {
     const h = makeHarness([[fixturePin()]])
     h.resolveUserId.mockClear()

@@ -225,7 +225,11 @@ export class PinnedChatStore {
         // for the next refresh, so returning to a channel re-fetches at once
         // instead of showing nothing until the next poll.
         this.lastFetchChannel = null
-        if (!channel && this.pins.length > 0) this.pins = []
+        // The previous channel's pins never linger either: a stale banner for
+        // channel A while B's fetch is pending (or has failed — up to a full
+        // poll cycle, longer through the id-resolution retry window) is worse
+        // than a briefly empty one.
+        if (this.pins.length > 0) this.pins = []
       }
       this.targetChannel = channel
       this.targetUserId = userId
@@ -299,17 +303,35 @@ export class PinnedChatStore {
         return
       }
       this.inFlight = true
+      let superseded = false
       try {
         const userId = await this.ensureUserId(channel)
-        if (!userId) return // resolution pending — its completion re-calls refresh
+        // Resolution pending (another refresh is already resolving this
+        // channel — ITS pass completes the fetch) or recently failed (the
+        // memoized failure retries after userIdRetryMs, driven by the next
+        // tick).
+        if (!userId) return
         const raw = await this.deps.fetch(userId)
-        if (this.targetChannel !== channel) return // superseded by a later join
-        this.pins = raw.map(toDisplayPin)
+        if (this.targetChannel !== channel) {
+          // Superseded by a later join: drop the result (no `return` — the
+          // re-fetch below must still run).
+          superseded = true
+        } else {
+          this.pins = raw.map(toDisplayPin)
+        }
       } catch {
         // Transport failure: degrade to the last-known pin (or none) — never
         // let the failure reach the chat path, never trip any breaker.
       } finally {
         this.inFlight = false
+      }
+      // A fetch that lost the target race leaves the CURRENT target still
+      // unfetched — the switch that superseded this one returned early on
+      // inFlight above. Re-run AFTER clearing inFlight so the recursive
+      // refresh is not throttled away.
+      if (superseded) {
+        void this.refresh()
+        return
       }
       // Record the attempt only when a fetch actually happened this pass (the
       // resolution-pending return above must not count, or the retry it
