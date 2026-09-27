@@ -108,6 +108,80 @@ const KS_OSC_LUA: &str = include_str!("ks-osc.lua");
 /// Min interval between `mpv://time` emits (~4 Hz).
 const TIME_EMIT_INTERVAL: Duration = Duration::from_millis(250);
 
+/// Leading-edge throttle with a GUARANTEED trailing flush, for the
+/// `mpv://time` stream. The first value of a window emits immediately;
+/// values arriving inside the window are held and the LAST held value
+/// emits when the window expires — without the trailing half, quick seeks
+/// while paused could leave the UI on the pre-seek position forever (the
+/// next time-pos change only comes with further playback; a paused seek
+/// changes time-pos exactly once). Pure decision logic: `now` is fed in,
+/// so the unit tests drive synthetic clocks.
+struct TimeThrottle {
+    interval: Duration,
+    /// When the window opened (the last emit).
+    last_emit: Option<Instant>,
+    /// The most recent value dropped by the window, awaiting its flush.
+    pending: Option<f64>,
+}
+
+impl TimeThrottle {
+    fn new(interval: Duration) -> Self {
+        TimeThrottle {
+            interval,
+            last_emit: None,
+            pending: None,
+        }
+    }
+
+    /// Offer a value; `Some(v)` means emit it now.
+    fn offer(&mut self, now: Instant, v: f64) -> Option<f64> {
+        let window_open = self
+            .last_emit
+            .is_some_and(|t| now.duration_since(t) < self.interval);
+        if window_open {
+            self.pending = Some(v);
+            return None;
+        }
+        self.last_emit = Some(now);
+        self.pending = None;
+        Some(v)
+    }
+
+    /// The trailing flush, driven by the event loop's clock: emits the held
+    /// value once the window has expired. `wait_timeout` tells the loop
+    /// when to come back for it.
+    fn poll_flush(&mut self, now: Instant) -> Option<f64> {
+        let last = self.last_emit?;
+        if now.duration_since(last) < self.interval {
+            return None;
+        }
+        let v = self.pending.take()?;
+        self.last_emit = Some(now);
+        Some(v)
+    }
+
+    /// Emit a held value IMMEDIATELY (PlaybackRestart: a seek just landed
+    /// and the UI needs the position now, not at window expiry).
+    fn force_flush(&mut self, now: Instant) -> Option<f64> {
+        let v = self.pending.take()?;
+        self.last_emit = Some(now);
+        Some(v)
+    }
+
+    /// The `wait_event` timeout to use: while a value is held, at most the
+    /// rest of the window (plus 1 ms so the deadline has certainly passed
+    /// when the wait returns); otherwise block indefinitely (-1.0).
+    fn wait_timeout(&self, now: Instant) -> f64 {
+        match (self.pending.is_some(), self.last_emit) {
+            (true, Some(last)) => {
+                let remaining = self.interval.saturating_sub(now.duration_since(last));
+                remaining.as_secs_f64() + 0.001
+            }
+            _ => -1.0,
+        }
+    }
+}
+
 /// The native region under the webview mpv renders into. All rects in
 /// LOGICAL px, window-relative. The implementation marshals to the UI
 /// thread itself; calls are cheap and non-blocking. `fold_top` is the
@@ -566,28 +640,40 @@ fn video_display_aspect(mpv: &Mpv) -> Option<f64> {
 
 fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
     std::thread::spawn(move || {
-        let mut last_time_emit = Instant::now() - TIME_EMIT_INTERVAL;
+        let mut throttle = TimeThrottle::new(TIME_EMIT_INTERVAL);
         let mut duration = 0f64;
         let mut last_state: DerivedState = None;
         let mut state_dirty = true;
         let mut last_aspect: Option<f64> = None;
+        // The emit helper shared by the property path, the trailing flush
+        // and the PlaybackRestart force-flush (`duration` is passed in so
+        // the closure does not borrow the loop's mutable local).
+        let emit_time = |position: f64, duration: f64| {
+            let _ = app.emit(
+                "mpv://time",
+                TimePayload {
+                    id,
+                    position,
+                    duration,
+                },
+            );
+        };
         loop {
-            let event = mpv.wait_event(-1.0);
-            let Some(event) = event else { continue };
+            // While a throttled value is pending, the wait ends no later
+            // than its flush deadline (wait_event returns None on timeout),
+            // so the trailing emit cannot strand on a quiet core.
+            let event = mpv.wait_event(throttle.wait_timeout(Instant::now()));
+            if let Some(v) = throttle.poll_flush(Instant::now()) {
+                emit_time(v, duration);
+            }
+            let Some(event) = event else {
+                continue;
+            };
             match event {
                 Ok(Event::PropertyChange { name, change, .. }) => match (name, change) {
                     ("time-pos", PropertyData::Double(p)) => {
-                        let now = Instant::now();
-                        if now.duration_since(last_time_emit) >= TIME_EMIT_INTERVAL {
-                            last_time_emit = now;
-                            let _ = app.emit(
-                                "mpv://time",
-                                TimePayload {
-                                    id,
-                                    position: p.max(0.0),
-                                    duration,
-                                },
-                            );
+                        if let Some(v) = throttle.offer(Instant::now(), p.max(0.0)) {
+                            emit_time(v, duration);
                         }
                     }
                     ("duration", PropertyData::Double(d)) if d.is_finite() && d > 0.0 => {
@@ -637,6 +723,24 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                 Ok(Event::PlaybackRestart) => {
                     let _ = app.emit("mpv://seeked", id);
                     state_dirty = true;
+                    // The position must land NOW, not at window expiry: a
+                    // seek changes time-pos exactly once while paused (the
+                    // change arrives just before this event), and the
+                    // leading-edge throttle may have swallowed it — without
+                    // this flush the UI would sit on the pre-seek position
+                    // until playback resumes. force_flush emits the held
+                    // value; if nothing was held (the property change lost
+                    // the race), a fresh read takes its place.
+                    let now = Instant::now();
+                    let flushed = throttle.force_flush(now).or_else(|| {
+                        mpv.get_property::<f64>("time-pos")
+                            .ok()
+                            .filter(|v| v.is_finite())
+                            .map(|v| v.max(0.0))
+                    });
+                    if let Some(p) = flushed {
+                        emit_time(p, duration);
+                    }
                     // First frame presented (also fires on seeks/unpause —
                     // the surface's show path collapses repeats): reveal the
                     // native video surface. Until now it stayed hidden so
@@ -1946,6 +2050,62 @@ mod tests {
         // Absurd tile dims that overflow the capacity math: rejected, never
         // a wrapped under-allocation.
         assert!(crop_tile_bgra(&src, 1 << 31, 1 << 31, 1 << 31, 1 << 31, 0).is_none());
+    }
+
+    #[test]
+    fn time_throttle_leads_immediately_and_holds_the_last_dropped_value() {
+        let t0 = Instant::now();
+        let mut th = TimeThrottle::new(TIME_EMIT_INTERVAL);
+        // The very first value emits immediately.
+        assert_eq!(th.offer(t0, 1.0), Some(1.0));
+        // Values inside the window are held; only the LAST survives.
+        assert_eq!(th.offer(t0 + Duration::from_millis(50), 2.0), None);
+        assert_eq!(th.offer(t0 + Duration::from_millis(100), 3.0), None);
+        assert_eq!(th.offer(t0 + Duration::from_millis(150), 4.0), None);
+        // Still inside the window: nothing to flush.
+        assert_eq!(th.poll_flush(t0 + Duration::from_millis(150)), None);
+        // At expiry the held value emits; a second poll is empty.
+        assert_eq!(th.poll_flush(t0 + TIME_EMIT_INTERVAL), Some(4.0));
+        assert_eq!(th.poll_flush(t0 + TIME_EMIT_INTERVAL * 2), None);
+        // After the window, an offer emits immediately again.
+        assert_eq!(th.offer(t0 + TIME_EMIT_INTERVAL * 2, 5.0), Some(5.0));
+    }
+
+    #[test]
+    fn time_throttle_waits_only_while_a_value_is_pending() {
+        let t0 = Instant::now();
+        let mut th = TimeThrottle::new(TIME_EMIT_INTERVAL);
+        // No emit yet: block indefinitely.
+        assert_eq!(th.wait_timeout(t0), -1.0);
+        th.offer(t0, 1.0);
+        // Emitted immediately, nothing held: still indefinite.
+        assert_eq!(th.wait_timeout(t0 + Duration::from_millis(10)), -1.0);
+        th.offer(t0 + Duration::from_millis(10), 2.0);
+        // Held value: wait at most the rest of the window.
+        let remaining = th.wait_timeout(t0 + Duration::from_millis(60));
+        assert!(
+            remaining > 0.0 && remaining <= 0.191, // window rest + the 1 ms wait epsilon
+            "remaining: {remaining}"
+        );
+        // Once flushed, back to indefinite.
+        assert!(th.poll_flush(t0 + TIME_EMIT_INTERVAL).is_some());
+        assert_eq!(th.wait_timeout(t0 + TIME_EMIT_INTERVAL), -1.0);
+    }
+
+    #[test]
+    fn time_throttle_force_flush_emits_a_held_value_immediately() {
+        // The PlaybackRestart path: a seek while paused lands while the
+        // window is still open; the UI must not wait for the window to
+        // expire.
+        let t0 = Instant::now();
+        let mut th = TimeThrottle::new(TIME_EMIT_INTERVAL);
+        assert_eq!(th.offer(t0, 20.0), Some(20.0));
+        assert_eq!(th.offer(t0 + Duration::from_millis(30), 26.0), None);
+        assert_eq!(th.force_flush(t0 + Duration::from_millis(40)), Some(26.0));
+        // The flush consumed the pending value AND reset the window.
+        assert_eq!(th.force_flush(t0 + Duration::from_millis(45)), None);
+        assert_eq!(th.offer(t0 + Duration::from_millis(50), 27.0), None);
+        assert_eq!(th.force_flush(t0 + Duration::from_millis(60)), Some(27.0));
     }
 
     #[test]
