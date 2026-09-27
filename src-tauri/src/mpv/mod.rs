@@ -7,9 +7,10 @@
 // main player renders through libmpv drawing into a native surface positioned
 // ABOVE the (fully opaque) webview — input-transparent, so the HTML keeps all
 // pointer handling; the in-video controls are mpv's OSD. Multi-view tiles run
-// the SAME engine (one mpv core per tile, ids 1..=4 — the tile's own controls
-// are the app's HTML strip below the video, and their OSD is disabled via
-// ks-osc's ks-disable). The PiP window stays on hls.js (out of scope by
+// the SAME engine (one mpv core per tile, ids 1..=4) with the SAME OSD in
+// ks-osc's trimmed "tile" mode (no app-global buttons; reorder arrows + a
+// close X in the bar, channel label top-left) — the app's HTML control strip
+// renders on hls tiles only. The PiP window stays on hls.js (out of scope by
 // design).
 //
 // (History: the original design drew the video UNDER the webview through a
@@ -102,7 +103,7 @@ const MPV_USER_AGENT: &str = crate::gql::USER_AGENT;
 /// script messages (mpv_script_msg) and button actions come back as
 /// `ks-action` client messages (see the event thread). libmpv loads
 /// scripts from files only, so the engine materializes this at init and
-/// passes it via `scripts-append`.
+/// passes it via the `scripts` list option.
 const KS_OSC_LUA: &str = include_str!("ks-osc.lua");
 
 /// Min interval between `mpv://time` emits (~4 Hz).
@@ -479,11 +480,16 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
             // (same OSD pipeline — rendered through the same render context
             // as the video — but our layout, fed via script messages; see
             // KS_OSC_LUA). libmpv's script defaults differ from the CLI
-            // player, so everything is explicit: scripts on, the STOCK osc
-            // off, ytdl_hook OFF (it would run yt-dlp against every loadfile
+            // player, so everything is explicit: the STOCK osc off,
+            // ytdl_hook OFF (it would run yt-dlp against every loadfile
             // URL), default key bindings OFF (all real input arrives as
             // forwarded pointer events from the webview — mpv_pointer).
-            init.set_property("load-scripts", true)?;
+            // load-scripts=no suppresses every autoload path (the user's
+            // ~/.config/mpv/scripts dir, ytdl_hook's own autoload) — the
+            // explicit `scripts` entry below is NOT gated by it (verified
+            // against libmpv 0.40: with load-scripts=no, a scripts= entry
+            // still loads and dispatches).
+            init.set_property("load-scripts", false)?;
             init.set_property("osc", false)?;
             // NOTE: the CLI's `--scripts-append` is a command-line-only
             // variant — the client API rejects the name ("option not

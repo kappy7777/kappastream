@@ -63,13 +63,16 @@ osd.z = 3
 local state = {
     loaded = false,
     visible = false,
-    -- Never show the bar (multi-view tile engines — see ks-disable). The
-    -- ks-page overlay handler deliberately STAYS live while disabled.
+    -- Never show the bar (ks-disable — kept for optional use; multi-view
+    -- tiles use ks-mode instead). The ks-page overlay handler deliberately
+    -- STAYS live while disabled.
     disabled = false,
-    -- Multi-view TILE mode (ks-mode tile): hides the app-global buttons
-    -- (pip / mpv handoff / theater) — the tile bar keeps play/stop/mute/
-    -- volume/LIVE + quality gear + fullscreen — and draws the tile chrome
-    -- (channel label top-left, move button top-right).
+    -- Multi-view TILE mode (ks-mode tile): the bar stays on but trims to
+    -- play / mute / volume / quality gear plus the reorder arrows (◀/▶)
+    -- and the close X — no stop button, no LIVE/time readout, no
+    -- fullscreen, no app-global buttons (pip / mpv handoff / theater).
+    -- The channel label (ks-label) draws top-left; tile reorder lives in
+    -- the BAR, not a top-right button.
     tile = false,
     -- LIVE playback (tile mode implies it): no seek strip — mpv's HLS
     -- demuxer reports a playlist pseudo-duration even on live streams,
@@ -148,9 +151,10 @@ local function alpha_tag(a)
     return string.format("&H%02X", clamp(math.floor(a), 0, 255))
 end
 
--- Every callback mpv dispatches (key bindings, timers) runs guarded: one
--- uncaught Lua error bricks the script's input dispatch for the whole
--- session on this libmpv, so a bug must degrade to a logged line instead.
+-- Every callback mpv dispatches (key bindings, timers, property observers,
+-- script messages) runs guarded: one uncaught Lua error bricks the script's
+-- input dispatch for the whole session on this libmpv, so a bug must
+-- degrade to a logged line instead.
 local function guard(fn)
     return function(...)
         local ok, err = pcall(fn, ...)
@@ -951,20 +955,20 @@ local function on_idle_change(name, value)
     end
 end
 
-mp.observe_property("pause", "bool", on_pause_change)
-mp.observe_property("duration", "number", on_duration_change)
-mp.observe_property("volume", "number", on_volume_change)
-mp.observe_property("mute", "bool", on_mute_change)
-mp.observe_property("idle-active", "bool", on_idle_change)
+mp.observe_property("pause", "bool", guard(on_pause_change))
+mp.observe_property("duration", "number", guard(on_duration_change))
+mp.observe_property("volume", "number", guard(on_volume_change))
+mp.observe_property("mute", "bool", guard(on_mute_change))
+mp.observe_property("idle-active", "bool", guard(on_idle_change))
 -- Re-render when the OSD surface size changes (window resize).
-mp.observe_property("osd-dimensions", "native", function()
+mp.observe_property("osd-dimensions", "native", guard(function()
     if state.visible then render() end
-end)
+end))
 
 -- ---------------------------------------------------------------------------
 -- script messages (app -> osd)
 
-mp.register_script_message("ks-theme", function(overlay, accent, text, dim, border, live)
+mp.register_script_message("ks-theme", guard(function(overlay, accent, text, dim, border, live)
     theme.overlay = overlay or theme.overlay
     theme.accent = accent or theme.accent
     theme.text = text or theme.text
@@ -972,9 +976,9 @@ mp.register_script_message("ks-theme", function(overlay, accent, text, dim, bord
     theme.border = border or theme.border
     theme.live = live or theme.live
     if state.visible then render() end
-end)
+end))
 
-mp.register_script_message("ks-qualities", function(header, current, ...)
+mp.register_script_message("ks-qualities", guard(function(header, current, ...)
     state.q_header = header or ""
     state.quality = current or ""
     local list = { ... }
@@ -985,9 +989,9 @@ mp.register_script_message("ks-qualities", function(header, current, ...)
         state.popup = false
     end
     if state.visible then render() end
-end)
+end))
 
-mp.register_script_message("ks-chapters", function(n, ...)
+mp.register_script_message("ks-chapters", guard(function(n, ...)
     local args = { ... }
     local list = {}
     local cnt = math.min(tonumber(n) or 0, math.floor(#args / 2))
@@ -996,9 +1000,9 @@ mp.register_script_message("ks-chapters", function(n, ...)
     end
     state.chapters = list
     if state.visible then render() end
-end)
+end))
 
-mp.register_script_message("ks-muted", function(n, ...)
+mp.register_script_message("ks-muted", guard(function(n, ...)
     local args = { ... }
     local list = {}
     local cnt = math.min(tonumber(n) or 0, math.floor(#args / 2))
@@ -1007,9 +1011,9 @@ mp.register_script_message("ks-muted", function(n, ...)
     end
     state.muted = list
     if state.visible then render() end
-end)
+end))
 
-mp.register_script_message("ks-storyboard", function(interval, count, cols, rows, strips, tileW, tileH)
+mp.register_script_message("ks-storyboard", guard(function(interval, count, cols, rows, strips, tileW, tileH)
     local iv = tonumber(interval) or 0
     if iv > 0 then
         state.sb = {
@@ -1025,12 +1029,12 @@ mp.register_script_message("ks-storyboard", function(interval, count, cols, rows
         state.sb = nil
     end
     if state.visible then render() end
-end)
+end))
 
-mp.register_script_message("ks-pip", function(v)
+mp.register_script_message("ks-pip", guard(function(v)
     state.pip = v == "1"
     if state.visible then render() end
-end)
+end))
 
 -- Page-UI overlay: page modules (dialogs, dropdowns, tooltips, toasts)
 -- that overlap the video are re-drawn OVER it by Rust as a snapshot bitmap
@@ -1053,8 +1057,8 @@ end))
 
 -- Info-block bitmap availability (webview-rendered: color emoji). The app
 -- uploads the block under the "infoblock" key and reports its dims; render()
--- then composites it in place of the text path. 0 = unavailable → the
--- libass text fallback (monochrome emoji) draws instead.
+-- composites it in the top-left. 0 = unavailable → NOTHING draws there
+-- (there is no text path — the bitmap is the block's only renderer).
 mp.register_script_message("ks-infoblock", guard(function(on, w, h)
     if on == "1" then
         state.infoblock = {
@@ -1067,42 +1071,43 @@ mp.register_script_message("ks-infoblock", guard(function(on, w, h)
     if state.visible then render() end
 end))
 
-mp.register_script_message("ks-theater", function(v)
+mp.register_script_message("ks-theater", guard(function(v)
     state.theater = v == "1"
     if state.visible then render() end
-end)
+end))
 
-mp.register_script_message("ks-fullscreen", function(v)
+mp.register_script_message("ks-fullscreen", guard(function(v)
     state.fullscreen = v == "1"
     if state.visible then render() end
-end)
+end))
 
--- Multi-view tile engines disable the bar (their controls are the app's
--- HTML strip); entering disabled also clears anything already on screen.
-mp.register_script_message("ks-disable", function(v)
+-- Disable the bar entirely. Kept for optional use — multi-view tiles use
+-- ks-mode (a trimmed bar) instead, so nothing sends this today. Entering
+-- disabled also clears anything already on screen.
+mp.register_script_message("ks-disable", guard(function(v)
     state.disabled = v == "1"
     if state.disabled then hide() end
-end)
+end))
 
 -- Tile MODE (multi-view engines): the bar stays on, but the app-global
 -- buttons (pip / mpv handoff / theater) are hidden — a tile's close X at
 -- the far right closes the tile. Also draws the channel label top-left
 -- (ks-label).
-mp.register_script_message("ks-mode", function(v)
+mp.register_script_message("ks-mode", guard(function(v)
     state.tile = v == "tile"
     state.live = state.tile or v == "live"
     if state.visible then render() end
-end)
+end))
 
 -- Tile chrome label (the channel name, drawn top-left in tile mode).
-mp.register_script_message("ks-label", function(v)
+mp.register_script_message("ks-label", guard(function(v)
     state.label = v or ""
     if state.visible then render() end
-end)
+end))
 
-mp.register_script_message("ks-scale", function(v)
+mp.register_script_message("ks-scale", guard(function(v)
     state.scale = tonumber(v) or 1.0
     if state.scale < 0.5 then state.scale = 0.5 end
     if state.scale > 3.0 then state.scale = 3.0 end
     if state.visible then render() end
-end)
+end))

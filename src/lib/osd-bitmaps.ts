@@ -168,6 +168,9 @@ export async function renderInfoBlock(input: InfoBlockInput): Promise<OsdBitmap 
     if (t2) ctx.fillText(t2, tx, t1 ? Math.round(fs1 * 1.5) : 0)
     return { b64: toBgraBase64(ctx.getImageData(0, 0, w, h).data), w, h }
   } catch {
-    return null // text-only OSD path stays as the fallback
+    // Rasterization failed: return no bitmap — the OSD's info block has no
+    // text path, so nothing draws in the top-left until a later attempt
+    // succeeds (the feed retries on the next layout/theme change).
+    return null
   }
 }

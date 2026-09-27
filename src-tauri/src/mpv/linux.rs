@@ -989,7 +989,8 @@ struct PageCrop {
 /// The snapshot completion (GTK main thread): blit ONLY the crop region off
 /// WebKit's snapshot onto a privately-owned ARGB32 surface and hand the
 /// pixels to a worker thread for everything expensive (un-premultiply,
-/// resample, temp-file write, mpv upload). This thread is the same one
+/// resample, mpv upload — all in memory, nothing touches disk). This thread
+/// is the same one
 /// that scrolls the page, so its per-snapshot budget is one crop-sized
 /// blit plus one memcpy — a full-page owned copy here is what makes
 /// scrolling inside overlaid dialogs janky. Failures are silent: the
