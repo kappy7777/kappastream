@@ -870,9 +870,10 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                 // Idle = no file: the engine is no longer an active surface
                 // (a broadcast re-show must not un-hide a stopped engine),
                 // and the cached OSD size is stale — clear it so pointer
-                // events drop again until the next render repopulates it
-                // (the observed property sends no "became unavailable"
-                // change; libmpv2 maps the NULL payload to no event).
+                // events drop until it is re-established (a property-change
+                // when the render size changes, or the one-shot live read
+                // in mpv_pointer; a reload at an UNCHANGED size re-fires
+                // nothing — libmpv2 maps the NULL payload to no event).
                 if state.is_none() {
                     if let Some(engine) = lock_or_recover(engines()).get_mut(&id) {
                         engine.active = false;
@@ -1598,20 +1599,57 @@ pub fn mpv_set_rect(
 /// rect (0..1) and rescaled here by mpv's own OSD dimensions (== the
 /// render size), so a webview-vs-GDK scale mismatch can never desync the
 /// mapping. `kind`: "move" | "click" (button 0) | "wheel-up" | "wheel-down".
+/// Pointer-normalization size: the cached pair when valid, else the freshly
+/// read one. `None` = unusable, the event drops. Pure, unit-tested.
+fn resolve_osd_dims(cached: (i64, i64), live: Result<(i64, i64), String>) -> Option<(i64, i64)> {
+    if cached.0 > 0 && cached.1 > 0 {
+        return Some(cached);
+    }
+    match live {
+        Ok((w, h)) if w > 0 && h > 0 => Some((w, h)),
+        _ => None,
+    }
+}
+
 #[tauri::command]
 pub async fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Result<(), String> {
     let id = engine_id(id)?;
     let engine = engine_handle(id)?;
-    // 0 until the first render configured the OSD size — nothing to
-    // hit-test yet, drop the event. (Deliberately NOT a fallback to the
-    // window rect: if the vo ever reports 0x0 while rendering, the
-    // CORRECT source has to be established first, not papered over.)
     // The cached osd-width/height (observed by the event thread) replaces
-    // the two get_property calls this used to make per event.
-    let (osd_w, osd_h) = engine.osd;
-    if osd_w <= 0 || osd_h <= 0 {
-        return Ok(());
+    // the two get_property calls this used to make per event. A cache of 0
+    // needs healing, not just dropping: idle clears it, and a reload at an
+    // UNCHANGED render size never re-fires the property (1920→1920 is no
+    // change; the idle NULL payload maps to no event at all) — the first
+    // event after the reload reads the live pair once, and a valid result
+    // caches itself so later events take the cached path again. Both
+    // unavailable = nothing to hit-test yet, drop. (Deliberately NOT a
+    // fallback to the window rect: if the vo ever reports 0x0 while
+    // rendering, the CORRECT source has to be established first, not
+    // papered over.)
+    let mut osd = engine.osd;
+    if osd.0 <= 0 || osd.1 <= 0 {
+        let live = with_core(id, |mpv| {
+            let w = mpv
+                .get_property::<i64>("osd-width")
+                .map_err(|e| e.to_string())?;
+            let h = mpv
+                .get_property::<i64>("osd-height")
+                .map_err(|e| e.to_string())?;
+            Ok((w, h))
+        })
+        .await;
+        match resolve_osd_dims(osd, live) {
+            Some(pair) => {
+                if let Some(e) = lock_or_recover(engines()).get_mut(&id) {
+                    e.osd = pair;
+                }
+                osd = pair;
+            }
+            None => return Ok(()),
+        }
     }
+    let osd_w = osd.0;
+    let osd_h = osd.1;
     let ix = (x.clamp(0.0, 1.0) * osd_w as f64).round() as i64;
     let iy = (y.clamp(0.0, 1.0) * osd_h as f64).round() as i64;
     // NOTE: mpv 0.40's `mouse` command has ONLY single/double click
@@ -1813,6 +1851,25 @@ mod tests {
         assert!(crate::gql::USER_AGENT.starts_with("Mozilla/5.0"));
         assert!(!crate::gql::USER_AGENT.to_lowercase().contains("streamlink"));
         assert!(!crate::gql::USER_AGENT.contains("Kappastream"));
+    }
+
+    #[test]
+    fn osd_dims_prefer_the_cache_and_heal_from_a_live_read() {
+        // Steady state: a valid cache wins without touching the core.
+        assert_eq!(
+            resolve_osd_dims((1920, 1080), Err("engine gone".into())),
+            Some((1920, 1080))
+        );
+        // The stranded-after-reload case: idle cleared the cache, but the
+        // live read still knows the render size — use and re-cache it.
+        assert_eq!(resolve_osd_dims((0, 0), Ok((1280, 720))), Some((1280, 720)));
+        assert_eq!(
+            resolve_osd_dims((1920, 0), Ok((1280, 720))),
+            Some((1280, 720))
+        );
+        // Genuinely nothing to hit-test (fresh engine, never rendered).
+        assert_eq!(resolve_osd_dims((0, 0), Ok((0, 0))), None);
+        assert_eq!(resolve_osd_dims((0, 0), Err("unavailable".into())), None);
     }
 
     #[test]
