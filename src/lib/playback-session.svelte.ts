@@ -328,6 +328,12 @@ export class PlaybackSession {
    */
   scheduleStallRecover(video: HTMLVideoElement, opts?: StallRecoverOptions): void {
     if (this.disposed) return
+    // No active source → nothing to recover: teardown pauses the element
+    // AFTER clearing this.hls and the src, and that async `pause` event used
+    // to re-arm recovery on the torn-down element (the surface's onPause
+    // handler cannot tell it apart). An hls instance OR a currentSrc (the
+    // native-attach fallback keeps one without hls) means playback is real.
+    if (!this.hls && !video.currentSrc) return
     this.clearStallRecover()
     this.stallTimer = setTimeout(() => {
       this.stallTimer = null

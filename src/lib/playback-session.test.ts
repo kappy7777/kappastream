@@ -73,6 +73,9 @@ function makeVideo(): HTMLVideoElement {
     value: { length: 1, end: (i: number) => (i === 0 ? 600 : NaN) },
     configurable: true,
   })
+  // A playing element always has a resolved source URL (the native-attach
+  // fallback path keeps one without any hls instance).
+  Object.defineProperty(el, 'currentSrc', { value: 'https://example.test/live.m3u8', configurable: true })
   return el
 }
 
@@ -316,6 +319,20 @@ describe('PlaybackSession stall recovery', () => {
     // No assertion beyond "did not throw": the rejection is handled, the
     // user can still press play on a surface with a visible control bar.
     expect(video.currentTime).toBe(598.5)
+  })
+
+  it('a torn-down element (no hls instance, no src) never re-arms recovery', async () => {
+    // teardown() pauses the element AFTER clearing hls + the src; that async
+    // `pause` event used to re-arm recovery on the source-less element — the
+    // surface's onPause handler cannot tell a teardown pause apart.
+    const video = makeVideo()
+    const session = new PlaybackSession()
+    session.teardown(video)
+    Object.defineProperty(video, 'currentSrc', { value: '', configurable: true })
+    session.scheduleStallRecover(video)
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(video.currentTime).toBe(0)
+    expect(vi.mocked(video.play)).not.toHaveBeenCalled()
   })
 })
 

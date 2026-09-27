@@ -3,11 +3,10 @@
 //    tabs never loses scrollback and each channel's ROOMSTATE / moderation /
 //    badges are tracked independently.
 //  - App.svelte's single-stream chat runs on ONE session (created per
-//    channel-connect, disposed on disconnect / VOD-clip takeover) and hooks
-//    into it via the constructor options: onOpen couples the socket-level
-//    JOIN to the live-stream start, onPrivmsg drives mention notifications.
-//    This REPLACES the old parallel socket+reconnect+dispatch copy that used
-//    to live in App.svelte — the discipline exists exactly once now.
+//    channel-connect, socket-closed on a VOD/clip takeover via closeSocket,
+//    disposed on disconnect) and hooks into it via the constructor option
+//    onPrivmsg (mention notifications). The player starts in App.connect
+//    itself, so chat status never gates the stream.
 //
 // Generation-coupled socket, exponential reconnect, channel+global emote
 // load, parse-then-store with presentation gated at render time. It reuses
@@ -65,14 +64,6 @@ export interface ChatMessage {
 export type ChatConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected'
 
 export interface ChatSessionOptions {
-  /**
-   * Fires on every socket-level JOIN (after CAP/NICK/JOIN were sent), both
-   * the initial connect and a reconnect after a drop. The single-stream App
-   * uses it to record the joined channel and start the live stream; a
-   * reconnect for the SAME channel must NOT restart the stream (the player
-   * never dropped) — the receiver distinguishes via isReconnect.
-   */
-  onOpen?: (isReconnect: boolean) => void
   /**
    * Fires for every accepted PRIVMSG (after it was buffered). The
    * single-stream App uses it for mention notifications; multi-view passes
@@ -136,7 +127,37 @@ export class ChatSession {
     this.emoteStatus = 'loading'
     void this.loadEmotes(gen, this.emoteAbort.signal)
     void this.loadBadges(gen)
-    this.openSocket(gen, false)
+    this.openSocket(gen)
+  }
+
+  /**
+   * Close the IRC socket and cancel any pending reconnect WITHOUT
+   * invalidating in-flight emote/badge loads. The VOD/clip takeover path
+   * keeps the session referenced precisely so its third-party emote map
+   * (and badge art) keeps feeding the VOD chat renderer once those loads
+   * land — dispose() would abort them, and a VOD opened right after joining
+   * would replay without either.
+   */
+  closeSocket(): void {
+    this.reconnectAttempts = 0
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    if (this.socket) {
+      const ws = this.socket
+      this.socket = null
+      ws.onclose = null
+      ws.onerror = null
+      ws.onmessage = null
+      ws.onopen = null
+      try {
+        ws.close()
+      } catch {
+        /* ignore */
+      }
+    }
+    this.status = 'idle'
   }
 
   dispose(): void {
@@ -144,23 +165,7 @@ export class ChatSession {
     this.generation++ // invalidate any in-flight callback
     this.emoteAbort?.abort()
     this.emoteAbort = null
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
-    if (this.socket) {
-      this.socket.onclose = null
-      this.socket.onerror = null
-      this.socket.onmessage = null
-      this.socket.onopen = null
-      try {
-        this.socket.close()
-      } catch {
-        /* ignore */
-      }
-      this.socket = null
-    }
-    this.status = 'idle'
+    this.closeSocket()
   }
 
   private scheduleReconnect(gen: number): void {
@@ -176,11 +181,11 @@ export class ChatSession {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       if (gen !== this.generation || this.disposed) return
-      this.openSocket(gen, true)
+      this.openSocket(gen)
     }, delay)
   }
 
-  private openSocket(gen: number, isReconnect: boolean): void {
+  private openSocket(gen: number): void {
     if (gen !== this.generation || this.disposed) return
     let ws: WebSocket
     try {
@@ -206,7 +211,6 @@ export class ChatSession {
       ws.send('JOIN #' + this.channel)
       this.reconnectAttempts = 0
       this.status = 'connected'
-      this.opts.onOpen?.(isReconnect)
     }
     ws.onmessage = (ev) => {
       if (gen === this.generation && this.socket === ws && !this.disposed) {
@@ -221,7 +225,6 @@ export class ChatSession {
       this.socket = null
       this.scheduleReconnect(gen)
     }
-    void isReconnect
   }
 
   private async loadEmotes(gen: number, signal: AbortSignal): Promise<void> {

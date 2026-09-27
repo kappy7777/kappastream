@@ -99,3 +99,20 @@ export function reconcileMergedIds(current: string[], liveTileIds: string[]): st
   if (next.length === current.length) return current
   return next.length >= 2 ? next : []
 }
+
+/**
+ * How many entries arrived after the last-seen one — the jump pill's "N new"
+ * count. Keyed by the last-seen entry KEY, not by length: the chat buffer is
+ * capped (500), so once full the length stops growing and a length
+ * difference would report every subsequent message as "not new" (the pill
+ * stuck at 0 forever). When the marker itself has been trimmed away
+ * everything visible is new.
+ */
+export function newChatEntryCount(entries: ChatEntry[], lastSeenKey: string | null): number {
+  if (lastSeenKey === null) return 0
+  if (entries.length === 0) return 0
+  if (entries[entries.length - 1]!.key === lastSeenKey) return 0
+  const idx = entries.findIndex((e) => e.key === lastSeenKey)
+  if (idx === -1) return entries.length
+  return entries.length - idx - 1
+}

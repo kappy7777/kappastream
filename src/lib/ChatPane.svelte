@@ -36,7 +36,7 @@
   } from './irc'
   import { parseColorToken } from './custom-themes.svelte'
   import { compositeOver, readableNameColor } from './name-color'
-  import type { ChatEntry } from './merged-chat'
+  import { newChatEntryCount, type ChatEntry } from './merged-chat'
   import { settings } from './settings.svelte.ts'
   import { formatCompact, formatChatTime } from './format'
   import { tooltip } from './tooltip.ts'
@@ -86,8 +86,16 @@
   let chatEl = $state<HTMLElement | undefined>(undefined)
   let stickyBottom = $state(true)
   let newMessageCount = $state(0)
-  let scrollBaseline = 0
+  // Last entry key the user has SEEN (followed to, or scrolled past). The
+  // new-message count keys off this instead of the buffer LENGTH — the
+  // buffer is capped at 500, so past the cap the length freezes and a
+  // length difference would report nothing new ever again.
+  let scrollBaselineKey: string | null = null
   const SCROLL_BOTTOM_THRESHOLD = 32
+
+  function lastKeyOf(list: ChatEntry[]): string | null {
+    return list.length > 0 ? list[list.length - 1]!.key : null
+  }
 
   function onChatScroll(): void {
     const el = chatEl
@@ -97,9 +105,9 @@
     stickyBottom = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD
     if (stickyBottom) {
       newMessageCount = 0
-      scrollBaseline = entries.length
+      scrollBaselineKey = lastKeyOf(entries)
     } else if (wasSticky && !stickyBottom) {
-      scrollBaseline = entries.length
+      scrollBaselineKey = lastKeyOf(entries)
       newMessageCount = 0
     }
   }
@@ -109,7 +117,7 @@
       chatEl.scrollTop = chatEl.scrollHeight
       stickyBottom = true
       newMessageCount = 0
-      scrollBaseline = entries.length
+      scrollBaselineKey = lastKeyOf(entries)
     }
   }
 
@@ -117,15 +125,16 @@
   // the bottom, otherwise just count what was added.
   $effect(() => {
     const len = entries.length
+    void len
     void tick().then(() => {
       if (!chatEl) return
       if (stickyBottom) {
         chatEl.scrollTop = chatEl.scrollHeight
-        scrollBaseline = len
+        scrollBaselineKey = lastKeyOf(entries)
       } else {
-        const added = len - scrollBaseline
+        const added = newChatEntryCount(entries, scrollBaselineKey)
         if (added > 0) newMessageCount += added
-        scrollBaseline = len
+        scrollBaselineKey = lastKeyOf(entries)
       }
     })
   })
@@ -136,7 +145,7 @@
     void resetKey
     stickyBottom = true
     newMessageCount = 0
-    scrollBaseline = 0
+    scrollBaselineKey = null
   })
 
   // ---- errored-art tracking ----

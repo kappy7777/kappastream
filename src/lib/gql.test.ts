@@ -1140,6 +1140,32 @@ describe('gql pinned chat messages (channel(id:).pinnedChatMessages)', () => {
     expect(pins[0].message?.text.length).toBeLessThanOrEqual(2000)
   })
 
+  it('a single fragment longer than the cap is truncated (not passed whole)', async () => {
+    // The loop's budget check ran BEFORE pushing, so one 5000-char fragment
+    // sailed through uncapped.
+    gql.handler = async () =>
+      ok({
+        channel: {
+          pinnedChatMessages: {
+            edges: [
+              {
+                node: {
+                  ...pinNode,
+                  pinnedMessage: {
+                    ...pinNode.pinnedMessage,
+                    content: { text: 'x'.repeat(5000), fragments: [{ text: 'x'.repeat(5000), content: null }] },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      })
+    const pins = await G.fetchPinnedChatMessages('1')
+    expect(pins[0].message?.fragments).toEqual([{ text: 'x'.repeat(2000), emoteId: null }])
+    expect(pins[0].message?.text).toBe('x'.repeat(2000))
+  })
+
   it('never selects pinnedChatSettings and never paginates (no after/first args)', async () => {
     gql.handler = async () => ok({ channel: { pinnedChatMessages: { edges: [] } } })
     await G.fetchPinnedChatMessages('1')

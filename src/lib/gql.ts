@@ -1486,7 +1486,12 @@ function toPinnedData(node: RawPinnedNode | null | undefined): PinnedChatMessage
   let chars = 0
   for (const f of rawFragments) {
     if (fragments.length >= PINNED_CHAT_MAX_FRAGMENTS || chars >= PINNED_CHAT_MAX_CHARS) break
-    const text = typeof f?.text === 'string' ? f.text : ''
+    // Truncate the fragment to the remaining budget so a single long one
+    // cannot blow past the cap (the loop's guard only checked the budget
+    // BEFORE pushing — one 5000-char fragment sailed through whole).
+    const remaining = PINNED_CHAT_MAX_CHARS - chars
+    if (remaining <= 0) break
+    const text = (typeof f?.text === 'string' ? f.text : '').slice(0, remaining)
     const emoteId = f?.content?.id ?? null
     fragments.push({ text, emoteId })
     chars += text.length

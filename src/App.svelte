@@ -51,13 +51,7 @@
     normalizeChannelName,
   } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
-  import {
-    fetchChannelBadges,
-    fetchClipInfo,
-    fetchCollaborators,
-    GQL_REFRESH_INTERVAL_MS,
-    type Collaborator,
-  } from './lib/gql'
+  import { fetchClipInfo, fetchCollaborators, GQL_REFRESH_INTERVAL_MS, type Collaborator } from './lib/gql'
   import { VodPlaybackController, formatVodTime } from './lib/vod-playback.svelte.ts'
   import { VodChatController, fetchVodComments } from './lib/vodchat.svelte.ts'
   import { initBadgeRefresh } from './lib/badges'
@@ -1474,30 +1468,15 @@
   // Per-channel custom badge override: setID -> { version -> image uuid }.
   // Applied at RENDER time (inside the shared ChatPane, against each entry's
   // override) ON TOP of the global map, so a channel's custom
-  // subscriber/founder art overrides the global default. Reactive: when the
+  // subscriber/founder art overrides the global default. ONE fetch owns it:
+  // the ChatSession's own loadBadges (single view runs exactly one session
+  // per join; multi-view reads the same field per tile). Reactive: when the
   // fetch lands, every buffered message (including ones parsed before it
-  // completed) re-renders with the override. Cleared to null on every channel
-  // change so the previous channel's custom badges can never bleed into the
-  // new one (worse than the global default). Declared BEFORE chatEntries,
+  // completed) re-renders with the override — and the derived falls back to
+  // null the moment the session is swapped, so a previous channel's custom
+  // badges can never bleed into the new one. Declared BEFORE chatEntries,
   // which reads it.
-  let channelBadgeOverride = $state<Record<string, Record<string, string>> | null>(null)
-  let channelBadgeToken = 0
-  $effect(() => {
-    const channel = channelJoined
-    // Clear immediately on any channel change (or leaving a channel).
-    channelBadgeOverride = null
-    if (!channel) return
-    const myToken = ++channelBadgeToken
-    void (async () => {
-      try {
-        const override = await fetchChannelBadges(channel)
-        if (myToken !== channelBadgeToken) return // superseded by a later join
-        channelBadgeOverride = override
-      } catch {
-        /* leave null -> global default badges */
-      }
-    })()
-  })
+  const channelBadgeOverride = $derived(chatSession?.badgeOverride ?? null)
 
   // The single chat render source feeding the shared ChatPane: replay
   // comments while a VOD is playing, the live IRC buffer otherwise. Entry
@@ -1923,7 +1902,9 @@
     void startStream(channel)
 
     chatSession = new ChatSession(channel, {
-      onPrivmsg: (ev) => fireMentionNotification(ev.message, ev.displayName, ev.color),
+      // The self-check compares the LOGIN (the mention username setting is a
+      // login); the display name may differ in case or entirely.
+      onPrivmsg: (ev) => fireMentionNotification(ev.message, ev.username, ev.color),
     })
     chatSession.start() // sets status 'connecting' + kicks the emote load
     channelInput = ''
@@ -2061,14 +2042,15 @@
   // path (backToLive → selectChannel). Stall recovery is live-only.
 
   // Stop the IRC chat connection without clearing `channelJoined` or the video
-  // element (the caller swaps the player source). The disposed session object
-  // stays referenced (chatSession) so its third-party emote map keeps feeding
-  // the VOD chat renderer — replay comments still render the channel's emotes.
-  // The buffer + room modes the callers used to reset on the old local state
-  // are reset on the session here; backToLive creates a fresh session anyway.
+  // element (the caller swaps the player source). Only the SOCKET closes —
+  // the session object stays referenced (chatSession) and its in-flight emote
+  // + badge loads keep running, so their results keep feeding the VOD chat
+  // renderer (replay comments still render the channel's emotes; a VOD
+  // opened right after joining gets them too). The buffer + room modes are
+  // reset here; backToLive creates a fresh session anyway.
   function stopChatOnly(): void {
     if (!chatSession) return
-    chatSession.dispose()
+    chatSession.closeSocket()
     chatSession.messages = []
     chatSession.roomState = {}
   }

@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
+  newChatEntryCount,
   singleChatEntries,
   mergedChatEntries,
   toggleMergedId,
   reconcileMergedIds,
+  type ChatEntry,
   type MergeSource,
 } from './merged-chat'
 import type { ChatMessage } from './chat-session.svelte'
@@ -145,5 +147,42 @@ describe('singleChatEntries — the plain one-session view model', () => {
     const ov = { subscriber: { '1': 'uuid-1' } }
     const entries = singleChatEntries([msg('a', 1)], ov)
     expect(entries[0]!.override).toBe(ov)
+  })
+})
+
+describe('newChatEntryCount — the jump pill count survives the buffer cap', () => {
+  const entriesOf = (ids: string[]): ChatEntry[] =>
+    singleChatEntries(
+      ids.map((id, i) => msg(id, i)),
+      null,
+    )
+
+  it('counts appendees past the last-seen key', () => {
+    const after = entriesOf(['m1', 'm2', 'm3', 'm4', 'm5'])
+    expect(newChatEntryCount(after, 'm3')).toBe(2)
+  })
+
+  it('reports 0 when nothing new arrived', () => {
+    const entries = entriesOf(['m1', 'm2'])
+    expect(newChatEntryCount(entries, 'm2')).toBe(0)
+    expect(newChatEntryCount(entries, null)).toBe(0)
+    expect(newChatEntryCount([], 'm2')).toBe(0)
+  })
+
+  it('past the 500 cap (marker near the end, buffer trimmed) still counts', () => {
+    // THE regression: the buffer trims at 500, so the LENGTH freezes — the
+    // old len-baseline difference returned 0 for every later message and the
+    // pill's count stayed 0 forever while scrolled up.
+    const ids = Array.from({ length: 500 }, (_, i) => 'm' + i)
+    const marker = 'm499'
+    // 3 new messages arrive; the 3 oldest are trimmed; length stays 500.
+    const next = entriesOf([...ids.slice(3), 'n1', 'n2', 'n3'])
+    expect(next.length).toBe(500)
+    expect(newChatEntryCount(next, marker)).toBe(3)
+  })
+
+  it('everything visible counts when the marker was trimmed away entirely', () => {
+    const next = entriesOf(Array.from({ length: 500 }, (_, i) => 'n' + i))
+    expect(newChatEntryCount(next, 'm499')).toBe(500)
   })
 })
