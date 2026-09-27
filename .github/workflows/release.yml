@@ -843,7 +843,9 @@ jobs:
           # .github/update-notes.md (empty between releases). The banner is a
           # single line, so newlines/indentation collapse to spaces; an empty
           # or whitespace-only file falls back to the version-only default.
-          notes="$(tr '\n' ' ' < .github/update-notes.md | tr -s '[:space:]' ' ' | sed 's/^ *//;s/ *$//')"
+          # Read via GITHUB_WORKSPACE: this step runs inside release-staging/,
+          # not the checkout root, so a relative path would not resolve.
+          notes="$(tr '\n' ' ' < "${GITHUB_WORKSPACE}/.github/update-notes.md" | tr -s '[:space:]' ' ' | sed 's/^ *//;s/ *$//')"
           if [ -z "$notes" ]; then notes="kappastream ${version}"; fi
           # Raw .sig content (already base64(armored)); single-decode on the client.
           appsig="$(tr -d '[:space:]' < "${appimage_file}.sig")"
