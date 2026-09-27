@@ -93,6 +93,20 @@
   let scrollBaselineKey: string | null = null
   const SCROLL_BOTTOM_THRESHOLD = 32
 
+  // A wheel gesture is user scroll intent: while one runs (plus a short
+  // grace after the last tick), the follow effect below must NOT snap to
+  // the bottom. WebKitGTK ANIMATES wheel scrolls, and assigning scrollTop
+  // mid-animation cancels it — in a busy merged chat a message arrives
+  // between wheel ticks, every snap killed the in-flight scroll, and the
+  // user could never reach the 32px from the bottom that disengages the
+  // follow in the first place.
+  let userScrollUntil = 0
+  const USER_SCROLL_GRACE_MS = 350
+
+  function onChatWheel(): void {
+    userScrollUntil = performance.now() + USER_SCROLL_GRACE_MS
+  }
+
   function lastKeyOf(list: ChatEntry[]): string | null {
     return list.length > 0 ? list[list.length - 1]!.key : null
   }
@@ -128,7 +142,7 @@
     void len
     void tick().then(() => {
       if (!chatEl) return
-      if (stickyBottom) {
+      if (stickyBottom && performance.now() >= userScrollUntil) {
         chatEl.scrollTop = chatEl.scrollHeight
         scrollBaselineKey = lastKeyOf(entries)
       } else {
@@ -196,7 +210,7 @@
   }
 </script>
 
-<div class="chat-pane-scroll" bind:this={chatEl} onscroll={onChatScroll} style:padding>
+<div class="chat-pane-scroll" bind:this={chatEl} onscroll={onChatScroll} onwheel={onChatWheel} style:padding>
   {#if entries.length === 0}
     <p class="chat-pane-placeholder">{placeholder}</p>
   {:else}
@@ -329,6 +343,15 @@
     overflow-y: auto;
     overflow-x: hidden;
     min-height: 0;
+    /* No visible scrollbar: WebKitGTK scrollbars are classic and reserve
+       layout space, which broke the pane's horizontal symmetry (the message
+       block sat a scrollbar-width off center). Scrolling stays fully
+       available via wheel/keyboard/touch; the jump pill is the way back
+       down. Mirrors .mv-chat-tabs / .video-scroll. */
+    scrollbar-width: none;
+  }
+  .chat-pane-scroll::-webkit-scrollbar {
+    display: none;
   }
 
   .chat-pane-placeholder {
