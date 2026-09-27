@@ -57,6 +57,17 @@
 //     mpv events/property changes into the `mpv://…` webview events (every
 //     payload carries the engine id so the frontend routes them), and
 //     throttles time updates to ~4 Hz in Rust.
+//   - COMMAND THREADING: every command that talks to the mpv core is an
+//     async command, so its libmpv calls run on the Tauri async runtime —
+//     NEVER the GTK main thread, which is the render thread (the GLArea
+//     render callback) and must per libmpv's render.h contract call only
+//     mpv_render_* functions. A per-engine gate (`with_core`) serializes
+//     concurrent commands deterministically. GTK-only commands
+//     (mpv_set_rect, mpv_set_surface_visible, mpv_page_snapshot) and the
+//     state-only mpv_set_bitmap stay sync — running on the main thread is
+//     what they want; the engine bootstrap (widgets + render-context
+//     creation) runs on the main thread inside `with_webview` by
+//     construction.
 //   - The platform surface (the native window region mpv draws into) is
 //     linux.rs behind the `VideoSurface` trait. Rects are LOGICAL (GDK)
 //     pixels, already zoom-adjusted by the frontend.
@@ -69,6 +80,7 @@ use std::time::{Duration, Instant};
 use libmpv2::events::{Event, PropertyData};
 use libmpv2::Mpv;
 use serde::Serialize;
+use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(target_os = "linux")]
@@ -110,6 +122,15 @@ pub trait VideoSurface: Send + Sync {
 struct Engine {
     mpv: &'static Mpv,
     surface: Arc<dyn VideoSurface>,
+    /// Gate serializing this engine's libmpv calls (see `with_core`): async
+    /// commands run on the Tauri async runtime — never the GTK main
+    /// (render) thread — and the gate keeps concurrent commands for one
+    /// engine deterministic (first to reach the gate runs first). The
+    /// strict invoke-order the single-threaded sync commands provided
+    /// still holds where it matters: the frontend awaits every load
+    /// (playback-session's attachMpv), and the fire-and-forget commands
+    /// (pointer, volume, script feeds) are last-wins by design.
+    core_gate: Arc<AsyncMutex<()>>,
     /// While a blocking webview overlay is open (Settings, About, what's
     /// new, … — anything that renders UNDER the native video window), the
     /// surface is hidden and the PlaybackRestart auto-reveal stays
@@ -168,16 +189,18 @@ struct CachedBitmap {
     grid: Option<(u32, u32)>,
 }
 
-/// A cheaply-cloned handle to an engine's mpv core, surface and cached OSD
-/// size, copied out under the engines lock in one brief grab. Callers must
-/// NOT hold the registry lock across a libmpv call or bitmap resampling:
+/// A cheaply-cloned handle to an engine's surface and cached OSD size,
+/// copied out under the engines lock in one brief grab. Callers must NOT
+/// hold the registry lock across a libmpv call or bitmap resampling:
 /// the lock also guards the per-engine event threads (wait_event + overlay
 /// issuing) and the page-snapshot workers, and one synchronous core call
 /// held under it stalls all of them — and, for commands that run on the
 /// GTK main thread, squeezes the render callback's own scheduling window.
+/// (The mpv core itself is deliberately NOT part of this handle: core
+/// calls go through `with_core`, which serializes per engine and runs off
+/// the main thread.)
 #[derive(Clone)]
 struct EngineHandle {
-    mpv: &'static Mpv,
     surface: Arc<dyn VideoSurface>,
     osd: (i64, i64),
 }
@@ -188,7 +211,6 @@ fn engine_handle(id: u32) -> Result<EngineHandle, String> {
 
 fn engine_handle_opt(id: u32) -> Option<EngineHandle> {
     lock_or_recover(engines()).get(&id).map(|e| EngineHandle {
-        mpv: e.mpv,
         surface: Arc::clone(&e.surface),
         osd: e.osd,
     })
@@ -441,6 +463,7 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
     Ok(Engine {
         mpv,
         surface: Arc::from(surface),
+        core_gate: Arc::new(AsyncMutex::new(())),
         overlay_suppressed: false,
         active: false,
         osd: (0, 0),
@@ -1223,6 +1246,33 @@ fn with_engine<R>(id: u32, f: impl FnOnce(&mut Engine) -> Result<R, String>) -> 
     f(engine)
 }
 
+/// Run `f` against the engine's mpv core ON THE CALLING ASYNC-RUNTIME
+/// THREAD — never the GTK main thread, which is the render thread (the
+/// GLArea render callback) and WebKitGTK's UI thread, and per libmpv's
+/// render.h threading contract must not call non-render core APIs or wait
+/// behind threads that do. The per-engine gate serializes concurrent
+/// commands (a tokio Mutex hands out lock() in request order); the strict
+/// invoke-order the sync commands had still holds where it matters because
+/// the frontend awaits every load, while the fire-and-forget commands
+/// (pointer, volume, script feeds) are last-wins. Quick, synchronous
+/// core calls are exactly what async Tauri commands are for; the surface
+/// bootstrap (which needs the main thread) is separate — see
+/// `ensure_engine`.
+async fn with_core<R: Send>(
+    id: u32,
+    f: impl FnOnce(&'static Mpv) -> Result<R, String> + Send,
+) -> Result<R, String> {
+    let (gate, mpv) = {
+        let engines = lock_or_recover(engines());
+        let Some(engine) = engines.get(&id) else {
+            return Err("mpv engine unavailable".to_string());
+        };
+        (Arc::clone(&engine.core_gate), engine.mpv)
+    };
+    let _guard = gate.lock().await;
+    f(mpv)
+}
+
 /// Runtime availability probe result for the frontend. The probe always
 /// RESOLVES — when the surface fails to init the `reason` carries the exact
 /// error so Settings can display it instead of silently hiding the feature.
@@ -1240,16 +1290,26 @@ pub struct AvailabilityPayload {
 /// frontend also treats a missing command as "not available" for good
 /// measure). The engine cannot be force-enabled anywhere it isn't
 /// compiled in — there is no escape hatch by design.
+///
+/// Mixed command: the bootstrap builds GTK widgets + creates the render
+/// context (main-thread work inside `with_webview`, which may block on the
+/// GTK loop), so it runs through `spawn_blocking` instead of parking an
+/// async worker.
 #[tauri::command]
-pub fn mpv_available(app: AppHandle) -> AvailabilityPayload {
-    match ensure_engine(&app, 0) {
-        Ok(_) => AvailabilityPayload {
+pub async fn mpv_available(app: AppHandle) -> AvailabilityPayload {
+    let probe = tauri::async_runtime::spawn_blocking(move || ensure_engine(&app, 0)).await;
+    match probe {
+        Ok(Ok(())) => AvailabilityPayload {
             available: true,
             reason: None,
         },
-        Err(reason) => AvailabilityPayload {
+        Ok(Err(reason)) => AvailabilityPayload {
             available: false,
             reason: Some(reason),
+        },
+        Err(join) => AvailabilityPayload {
+            available: false,
+            reason: Some(format!("engine bootstrap task failed: {join}")),
         },
     }
 }
@@ -1264,7 +1324,7 @@ pub fn mpv_available(app: AppHandle) -> AvailabilityPayload {
 /// before the frontend ever set them).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // the load's full parameter set, mirroring mpv's own loadfile+options
-pub fn mpv_load(
+pub async fn mpv_load(
     app: AppHandle,
     id: Option<u32>,
     url: String,
@@ -1285,109 +1345,126 @@ pub fn mpv_load(
     // The engine (and the surface) must be up; a lazy first call is fine —
     // the frontend probes mpv_available at startup, which normally already
     // built engine 0, but a first-ever load (or a tile's first stream) must
-    // also work.
+    // also work. The bootstrap may block on the GTK main thread (widget
+    // tree + render context), hence spawn_blocking.
     let id = engine_id(id)?;
-    ensure_engine(&app, id)?;
-    let engine = engine_handle(id)?;
-    // All libmpv, no registry state: runs WITHOUT the engines lock (the
-    // event thread and the snapshot workers take it too).
-    engine
-        .mpv
-        .set_property("hwdec", hwdec.as_str())
-        .map_err(|err| format!("set hwdec: {err}"))?;
-    engine
-        .mpv
-        .set_property("volume", volume.clamp(0.0, 1.0) * 100.0)
-        .map_err(|err| format!("set volume: {err}"))?;
-    engine
-        .mpv
-        .set_property("mute", muted)
-        .map_err(|err| format!("set mute: {err}"))?;
-    // `start` is set EXPLICITLY on every load, "none" included: the
-    // property is otherwise only cleared on FileLoaded, so a load that
-    // fails before FileLoaded would leave a stale +N armed for the NEXT
-    // loadfile — a live stream inheriting a dead VOD's resume offset.
-    let start_prop = match start_at {
-        Some(s) if s.is_finite() && s > 0.5 => format!("+{s:.3}"),
-        _ => "none".to_string(),
-    };
-    engine
-        .mpv
-        .set_property("start", start_prop)
-        .map_err(|err| format!("set start: {err}"))?;
-    engine
-        .mpv
-        .command("loadfile", &[url.as_str(), "replace"])
-        .map_err(|err| format!("loadfile: {err}"))?;
-    // NOTE: the surface is NOT revealed here — the event thread shows it
-    // on the first PlaybackRestart (first frame presented), so the page's
-    // loading/error overlays aren't covered by a black video box during
-    // load.
-    Ok(())
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || ensure_engine(&app2, id))
+        .await
+        .map_err(|e| format!("engine bootstrap task failed: {e}"))??;
+    // All libmpv, no registry state: runs on the async runtime thread (off
+    // the GTK main/render thread), FIFO per engine.
+    with_core(id, move |mpv| {
+        mpv.set_property("hwdec", hwdec.as_str())
+            .map_err(|err| format!("set hwdec: {err}"))?;
+        mpv.set_property("volume", volume.clamp(0.0, 1.0) * 100.0)
+            .map_err(|err| format!("set volume: {err}"))?;
+        mpv.set_property("mute", muted)
+            .map_err(|err| format!("set mute: {err}"))?;
+        // `start` is set EXPLICITLY on every load, "none" included: the
+        // property is otherwise only cleared on FileLoaded, so a load that
+        // fails before FileLoaded would leave a stale +N armed for the NEXT
+        // loadfile — a live stream inheriting a dead VOD's resume offset.
+        let start_prop = match start_at {
+            Some(s) if s.is_finite() && s > 0.5 => format!("+{s:.3}"),
+            _ => "none".to_string(),
+        };
+        mpv.set_property("start", start_prop)
+            .map_err(|err| format!("set start: {err}"))?;
+        mpv.command("loadfile", &[url.as_str(), "replace"])
+            .map_err(|err| format!("loadfile: {err}"))?;
+        // NOTE: the surface is NOT revealed here — the event thread shows it
+        // on the first PlaybackRestart (first frame presented), so the page's
+        // loading/error overlays aren't covered by a black video box during
+        // load.
+        Ok(())
+    })
+    .await
 }
 
 /// Stop playback and hide the surface (the transparent page region goes back
 /// to opaque). Safe (and a no-op) when the engine never came up — the
 /// frontend calls this on every teardown.
 #[tauri::command]
-pub fn mpv_stop(id: Option<u32>) -> Result<(), String> {
+pub async fn mpv_stop(id: Option<u32>) -> Result<(), String> {
     let id = engine_id(id)?;
-    // Quiet no-op without an engine (the frontend calls this on every
-    // teardown). The core call and the GTK-side hide run OUTSIDE the lock.
+    // Quiet no-op without an engine. The core call runs on the async
+    // runtime thread; the GTK-side hide marshals itself.
+    if engine_handle_opt(id).is_none() {
+        return Ok(());
+    }
+    if let Some(e) = lock_or_recover(engines()).get_mut(&id) {
+        e.active = false;
+    }
+    // The stop is best-effort like before (teardown paths call this
+    // unconditionally; a core that is already idle must not turn into an
+    // error the frontend would surface).
+    if let Err(err) = with_core(id, move |mpv| {
+        mpv.command("stop", &[]).map_err(|e| e.to_string())
+    })
+    .await
+    {
+        eprintln!("[mpv] stop: {err}");
+    }
     if let Some(engine) = engine_handle_opt(id) {
-        if let Some(e) = lock_or_recover(engines()).get_mut(&id) {
-            e.active = false;
-        }
-        let _ = engine.mpv.command("stop", &[]);
         engine.surface.hide();
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn mpv_set_paused(id: Option<u32>, paused: bool) -> Result<(), String> {
-    let mpv = engine_handle(engine_id(id)?)?.mpv;
-    mpv.set_property("pause", paused)
-        .map_err(|err| format!("set pause: {err}"))
+pub async fn mpv_set_paused(id: Option<u32>, paused: bool) -> Result<(), String> {
+    with_core(engine_id(id)?, move |mpv| {
+        mpv.set_property("pause", paused)
+            .map_err(|err| format!("set pause: {err}"))
+    })
+    .await
 }
 
 /// Absolute seek in seconds.
 #[tauri::command]
-pub fn mpv_seek(id: Option<u32>, seconds: f64) -> Result<(), String> {
+pub async fn mpv_seek(id: Option<u32>, seconds: f64) -> Result<(), String> {
     let target = format!("{:.3}", seconds.max(0.0));
-    let mpv = engine_handle(engine_id(id)?)?.mpv;
-    mpv.command("seek", &[target.as_str(), "absolute"])
-        .map_err(|err| format!("seek: {err}"))
+    with_core(engine_id(id)?, move |mpv| {
+        mpv.command("seek", &[target.as_str(), "absolute"])
+            .map_err(|err| format!("seek: {err}"))
+    })
+    .await
 }
 
 /// Volume 0..1 (mpv's property is 0..100).
 #[tauri::command]
-pub fn mpv_set_volume(id: Option<u32>, volume: f64) -> Result<(), String> {
+pub async fn mpv_set_volume(id: Option<u32>, volume: f64) -> Result<(), String> {
     let v = volume.clamp(0.0, 1.0) * 100.0;
-    let mpv = engine_handle(engine_id(id)?)?.mpv;
-    mpv.set_property("volume", v)
-        .map_err(|err| format!("set volume: {err}"))
+    with_core(engine_id(id)?, move |mpv| {
+        mpv.set_property("volume", v)
+            .map_err(|err| format!("set volume: {err}"))
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn mpv_set_muted(id: Option<u32>, muted: bool) -> Result<(), String> {
-    let mpv = engine_handle(engine_id(id)?)?.mpv;
-    mpv.set_property("mute", muted)
-        .map_err(|err| format!("set mute: {err}"))
+pub async fn mpv_set_muted(id: Option<u32>, muted: bool) -> Result<(), String> {
+    with_core(engine_id(id)?, move |mpv| {
+        mpv.set_property("mute", muted)
+            .map_err(|err| format!("set mute: {err}"))
+    })
+    .await
 }
 
 /// Position the surface (logical px, window-relative, zoom-adjusted by the
 /// frontend). Cheap: the surface marshals to the UI thread itself, so this
-/// never blocks the caller. `fold_top` is the number of picture rows hidden
-/// ABOVE the pushed rect: the page scrolled the fold under the top bar, and
-/// the surface — a native window ABOVE the page, blind to the page's
-/// overflow clip — was sized to the still-visible part. The engine clips
-/// those rows at PRESENTATION time (Linux: mpv renders the full unfolded
-/// picture into a constant-size offscreen and a 1:1 blit presents only the
-/// visible band — see OffscreenTarget in linux.rs), so the clip always
-/// lands on the same frame as the window resize: the same pixels the
-/// webview engine shows under the bar, with no mis-fitted transitional
-/// frame.
+/// never blocks the caller. GTK-ONLY (no libmpv): stays a sync command —
+/// running on the main thread is correct for it. `fold_top` is the number
+/// of picture rows hidden ABOVE the rect: the page scrolled the fold under
+/// the top bar, and the surface — a native window ABOVE the page, blind to
+/// the page's overflow clip — was sized to the still-visible part. The
+/// engine clips those rows at PRESENTATION time (Linux: mpv renders the
+/// full unfolded picture into a constant-size offscreen and a 1:1 blit
+/// presents only the visible band — see OffscreenTarget in linux.rs), so
+/// the clip always lands on the same frame as the window resize: the same
+/// pixels the webview engine shows under the bar, with no mis-fitted
+/// transitional frame.
 #[tauri::command]
 pub fn mpv_set_rect(
     id: Option<u32>,
@@ -1412,7 +1489,7 @@ pub fn mpv_set_rect(
 /// render size), so a webview-vs-GDK scale mismatch can never desync the
 /// mapping. `kind`: "move" | "click" (button 0) | "wheel-up" | "wheel-down".
 #[tauri::command]
-pub fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Result<(), String> {
+pub async fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Result<(), String> {
     let id = engine_id(id)?;
     let engine = engine_handle(id)?;
     // 0 until the first render configured the OSD size — nothing to
@@ -1443,11 +1520,12 @@ pub fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Result<(), 
         "wheel-down" => ("keypress", vec!["WHEEL_DOWN".into()]),
         other => return Err(format!("unknown pointer kind: {other}")),
     };
-    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-    engine
-        .mpv
-        .command(cmd, &argv)
-        .map_err(|err| format!("{cmd}: {err}"))
+    with_core(id, move |mpv| {
+        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+        mpv.command(cmd, &argv)
+            .map_err(|err| format!("{cmd}: {err}"))
+    })
+    .await
 }
 
 /// Hide/show the native video surfaces while a blocking webview overlay
@@ -1459,7 +1537,8 @@ pub fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Result<(), 
 /// suspended while suppressed. The re-show skips engines the frontend
 /// stopped (`active`, e.g. closed tiles) so a broadcast never pops a dead
 /// black box. Quiet no-op without engines (the frontend calls it
-/// unconditionally).
+/// unconditionally). GTK-ONLY (no libmpv): stays a sync command — the
+/// surface calls dispatch to the main thread from wherever they run.
 #[tauri::command]
 pub fn mpv_set_surface_visible(visible: bool) -> Result<(), String> {
     // Under the lock: flip each engine's suppression flag + collect the
@@ -1490,14 +1569,16 @@ pub fn mpv_set_surface_visible(visible: bool) -> Result<(), String> {
 /// the pip/theater/fullscreen highlight states. Args pass through
 /// verbatim; args[0] is the message name ("ks-info", "ks-theme", …).
 #[tauri::command]
-pub fn mpv_script_msg(id: Option<u32>, args: Vec<String>) -> Result<(), String> {
+pub async fn mpv_script_msg(id: Option<u32>, args: Vec<String>) -> Result<(), String> {
     if args.is_empty() {
         return Err("empty script message".to_string());
     }
-    let mpv = engine_handle(engine_id(id)?)?.mpv;
-    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-    mpv.command("script-message", &argv)
-        .map_err(|err| format!("script-message: {err}"))
+    with_core(engine_id(id)?, move |mpv| {
+        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+        mpv.command("script-message", &argv)
+            .map_err(|err| format!("script-message: {err}"))
+    })
+    .await
 }
 
 /// Snapshot the webview and composite the page UI that overlaps the video
@@ -1525,6 +1606,10 @@ pub fn mpv_script_msg(id: Option<u32>, args: Vec<String>) -> Result<(), String> 
 /// expires, so a dropped FINAL request of a move can never strand the
 /// overlay on stale geometry. Ok(true) = accepted (the store dedupes an
 /// identical frame); Ok(false) = coalesced, retry.
+///
+/// GTK/WEBVIEW-ONLY (no libmpv): stays a sync command — on the main
+/// thread, `with_webview` runs its closure inline, which is exactly where
+/// the WebKit snapshot API wants to be called.
 #[tauri::command]
 pub fn mpv_page_snapshot(
     app: AppHandle,
@@ -1551,6 +1636,9 @@ pub fn mpv_page_snapshot(
 /// has (the info block; storyboard strips via the ksvod proxy) — Rust
 /// never fetches anything. ks-osc.lua later drives the actual on-screen
 /// overlay geometry via `ks-overlay` script messages.
+///
+/// STATE-ONLY (no libmpv, no GTK — a decode plus a brief locked insert):
+/// stays a sync command.
 #[tauri::command]
 pub fn mpv_set_bitmap(
     id: Option<u32>,
@@ -1688,11 +1776,12 @@ mod tests {
         // The commands run the bound BEFORE any registry access — an
         // out-of-range id is an error even on the quiet-teardown command
         // (mpv_stop), and never mints an engine; a valid-but-absent id
-        // keeps its existing quiet no-op contract.
-        assert!(mpv_stop(Some(u32::MAX)).is_err());
-        assert!(mpv_stop(Some(5)).is_err());
-        assert!(mpv_stop(Some(MAX_ENGINE_ID)).is_ok());
-        assert!(mpv_stop(None).is_ok());
+        // keeps its existing quiet no-op contract. mpv_stop is async
+        // (off-main-thread core calls) — block_on drives it in tests.
+        assert!(tauri::async_runtime::block_on(mpv_stop(None)).is_ok());
+        assert!(tauri::async_runtime::block_on(mpv_stop(Some(u32::MAX))).is_err());
+        assert!(tauri::async_runtime::block_on(mpv_stop(Some(5))).is_err());
+        assert!(tauri::async_runtime::block_on(mpv_stop(Some(MAX_ENGINE_ID))).is_ok());
     }
 
     #[test]
@@ -1705,8 +1794,8 @@ mod tests {
         assert!(lock_or_recover(engines()).is_empty());
         assert!(with_engine(0, |_| Ok(())).is_err());
         assert!(with_engine(2, |_| Ok(())).is_err());
-        assert!(mpv_stop(None).is_ok());
-        assert!(mpv_stop(Some(3)).is_ok());
+        assert!(tauri::async_runtime::block_on(mpv_stop(None)).is_ok());
+        assert!(tauri::async_runtime::block_on(mpv_stop(Some(3))).is_ok());
         // mpv_set_surface_visible is on the unconditional teardown-adjacent
         // path like mpv_stop: quiet no-op without engines (and a broadcast
         // over zero engines must not panic either). mpv_pointer is only ever
@@ -1717,9 +1806,17 @@ mod tests {
         // mpv_page_snapshot needs a live AppHandle (webview access) — its
         // validation is a three-branch guard; the interesting math
         // (un-premultiply/crop) is pinned by argb32 tests below.
-        assert!(mpv_pointer(None, 0.5, 0.5, "move".to_string()).is_err());
-        assert!(mpv_script_msg(None, Vec::<String>::new()).is_err());
-        assert!(mpv_script_msg(None, vec!["ks-page".to_string()]).is_err());
+        assert!(
+            tauri::async_runtime::block_on(mpv_pointer(None, 0.5, 0.5, "move".to_string()))
+                .is_err()
+        );
+        assert!(
+            tauri::async_runtime::block_on(mpv_script_msg(None, Vec::<String>::new())).is_err()
+        );
+        assert!(
+            tauri::async_runtime::block_on(mpv_script_msg(None, vec!["ks-page".to_string()]))
+                .is_err()
+        );
         assert!(mpv_set_bitmap(
             None,
             "infoblock".into(),
