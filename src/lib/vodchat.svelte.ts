@@ -164,6 +164,10 @@ export interface VodChatDeps<M> {
 const MARGIN_AHEAD_S = 60
 // Cap the rendered (drained) list so a long VOD never accumulates unbounded DOM.
 const VISIBLE_CAP = 500
+// While the pane is scrolled UP reading history, a front trim would slide the
+// visible text away (same WebKit no-scroll-anchoring rationale as ChatSession's
+// held trim) — the cap rises to this ceiling until the pane follows again.
+const VISIBLE_CAP_HELD = 2000
 // Drain cadence. Chat is not frame-precise; 250 ms keeps it smooth and ties
 // draining to real playback progress (the loop reads the live playhead).
 const TICK_MS = 250
@@ -193,6 +197,13 @@ export class VodChatController<M> {
   visible = $state<M[]>([])
   /** True after a fetch failure (429/integrity/network) while backed off. */
   failed = $state(false)
+  /**
+   * Trim hold requested by the rendering pane: true while the user is
+   * scrolled UP reading history, so drain() caps `visible` at
+   * VISIBLE_CAP_HELD instead of VISIBLE_CAP. Plain field on purpose —
+   * imperative plumbing, nothing renders it.
+   */
+  private holdTrim = false
 
   private readonly deps: VodChatDeps<M>
   private buffer: { offset: number; msg: M }[] = []
@@ -315,7 +326,8 @@ export class VodChatController<M> {
   }
 
   // Move buffered comments whose offset has reached the playhead into `visible`,
-  // capped to VISIBLE_CAP (oldest trimmed). Buffer is offset-sorted ascending.
+  // capped to VISIBLE_CAP (VISIBLE_CAP_HELD while the pane holds the trim;
+  // oldest trimmed either way). Buffer is offset-sorted ascending.
   private drain(): void {
     if (this.buffer.length === 0) return
     let i = 0
@@ -325,7 +337,21 @@ export class VodChatController<M> {
     if (i === 0) return
     const ready = this.buffer.splice(0, i)
     const next = this.visible.concat(ready.map((e) => e.msg))
-    this.visible = next.length > VISIBLE_CAP ? next.slice(next.length - VISIBLE_CAP) : next
+    const cap = this.holdTrim ? VISIBLE_CAP_HELD : VISIBLE_CAP
+    this.visible = next.length > cap ? next.slice(next.length - cap) : next
+  }
+
+  /**
+   * The pane reports its follow state here. Releasing the hold trims an
+   * over-cap visible list back to VISIBLE_CAP immediately — the pane is
+   * following the bottom again, so dropping the oldest entries is invisible.
+   */
+  setHoldTrim(hold: boolean): void {
+    if (this.holdTrim === hold) return
+    this.holdTrim = hold
+    if (!hold && this.visible.length > VISIBLE_CAP) {
+      this.visible = this.visible.slice(this.visible.length - VISIBLE_CAP)
+    }
   }
 
   // Fetch guards + margin top-up. Idempotent; called from the tick and after

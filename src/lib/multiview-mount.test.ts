@@ -42,6 +42,7 @@ vi.mock('./chat-session.svelte', () => {
       constructed.push(channel)
     }
     start(): void {}
+    setHoldTrim(_hold: boolean): void {}
     dispose(): void {}
   }
   return { ChatSession, __constructed: constructed }

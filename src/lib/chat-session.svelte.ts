@@ -73,6 +73,11 @@ export interface ChatSessionOptions {
 }
 
 const MAX_BUFFER = 500
+// While the pane is scrolled UP reading history, a front trim would slide the
+// visible text away (WebKitGTK and WKWebView have no scroll anchoring), so the
+// buffer holds the trim at this higher ceiling instead and trims back to
+// MAX_BUFFER once the pane follows the bottom again.
+const MAX_BUFFER_HELD = 2000
 const IRC_URL = 'wss://irc-ws.chat.twitch.tv:443'
 const MAX_RECONNECT_ATTEMPTS = 10
 const RECONNECT_BASE_MS = 1_000
@@ -108,6 +113,16 @@ export class ChatSession {
   // re-resolves when the channel's emotes land (message parts are baked on
   // arrival and are unaffected by the reactivity).
   thirdParty = $state(new Map<string, Emote>())
+  /**
+   * Trim hold requested by the rendering pane: true while the user is
+   * scrolled UP reading history, so push() caps the buffer at
+   * MAX_BUFFER_HELD instead of MAX_BUFFER (a front trim would slide the
+   * visible text up one line per incoming message on the WebKit engines,
+   * which have no scroll anchoring). Plain field on purpose — nothing
+   * renders it; it is imperative plumbing between the pane's follow state
+   * and the socket-driven push path.
+   */
+  holdTrim = false
   private badgeToken = 0
   private disposed = false
 
@@ -375,6 +390,20 @@ export class ChatSession {
 
   private push(m: ChatMessage): void {
     this.messages.push(m)
-    if (this.messages.length > MAX_BUFFER) this.messages.splice(0, this.messages.length - MAX_BUFFER)
+    const cap = this.holdTrim ? MAX_BUFFER_HELD : MAX_BUFFER
+    if (this.messages.length > cap) this.messages.splice(0, this.messages.length - cap)
+  }
+
+  /**
+   * The pane reports its follow state here. Releasing the hold trims an
+   * over-cap buffer back to MAX_BUFFER immediately — the pane is following
+   * the bottom again, so dropping the oldest entries is invisible.
+   */
+  setHoldTrim(hold: boolean): void {
+    if (this.holdTrim === hold) return
+    this.holdTrim = hold
+    if (!hold && this.messages.length > MAX_BUFFER) {
+      this.messages.splice(0, this.messages.length - MAX_BUFFER)
+    }
   }
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import Hls from 'hls.js'
   import { invoke, isTauri } from '@tauri-apps/api/core'
   import { listen } from '@tauri-apps/api/event'
@@ -1521,6 +1521,25 @@
         : t('chat_joinToSee'),
   )
   const chatResetKey = $derived(status === 'idle' ? 'idle' : 'live')
+
+  // The pane's follow state drives the chat buffer's trim. While the user is
+  // scrolled UP reading history, the active buffer — the live session, or the
+  // VOD replay while a VOD plays — must not drop entries from the front: the
+  // WebKit engines have no scroll anchoring, so every trimmed line slides the
+  // visible text up (in a busy channel ~10 rows/s). It holds the trim at a
+  // higher ceiling instead and trims back once the pane follows the bottom
+  // again. The inactive buffer is always released so it keeps the normal cap.
+  let chatFollowing = $state(true)
+  $effect(() => {
+    const following = chatFollowing
+    const kind = playback.kind
+    const session = chatSession
+    untrack(() => {
+      const hold = !following
+      vodChat.setHoldTrim(hold && kind === 'vod')
+      session?.setHoldTrim(hold && kind !== 'vod')
+    })
+  })
 
   let mainEl = $state<HTMLElement | undefined>(undefined)
   let stacked = $state(false)
@@ -3503,6 +3522,7 @@
               placeholder={chatPlaceholder}
               onlink={openChatLink}
               resetKey={chatResetKey}
+              onfollow={(f) => (chatFollowing = f)}
               liftJump={chatModesShown}
             />
             {#if channelJoined}

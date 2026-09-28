@@ -111,6 +111,60 @@ describe('VodChatController', () => {
     c.stop()
   })
 
+  it('caps the drained list at 500 while the pane follows the bottom', async () => {
+    // 1 comment/sec so the offsets map 1:1 to ids (c<i> drains at second i).
+    const stream = Array.from({ length: 2501 }, (_, i) => ({ offset: i, id: `c${i}` }))
+    const { fetchPage } = makeStreamFetcher(stream, { count: 300 })
+    let playhead = 0
+    const c = new VodChatController<StreamMsg>({
+      fetchPage,
+      getPlayhead: () => playhead,
+      getPaused: () => false,
+      getChatVisible: () => true,
+    })
+    c.start('v1', 0)
+    // Walk the playhead like real playback (steps stay inside the 60s ahead
+    // margin so the engine never has to resync), until the whole stream has
+    // drained.
+    for (let t = 0; t <= 2500; t += 50) {
+      playhead = t
+      await settle(1)
+    }
+    expect(c.visible.length).toBe(500)
+    expect(c.visible[0]!.id).toBe('c2001') // oldest trimmed, newest kept
+    expect(c.visible[c.visible.length - 1]!.id).toBe('c2500')
+    c.stop()
+  })
+
+  it('holds the visible trim while the pane is scrolled up, trims back on release', async () => {
+    // Same walk as above, but the pane reports a scroll-up hold first: a
+    // front trim would slide the text being read (no scroll anchoring on the
+    // WebKit engines), so the cap rises to the held ceiling instead.
+    const stream = Array.from({ length: 2501 }, (_, i) => ({ offset: i, id: `c${i}` }))
+    const { fetchPage } = makeStreamFetcher(stream, { count: 300 })
+    let playhead = 0
+    const c = new VodChatController<StreamMsg>({
+      fetchPage,
+      getPlayhead: () => playhead,
+      getPaused: () => false,
+      getChatVisible: () => true,
+    })
+    c.start('v1', 0)
+    c.setHoldTrim(true) // the pane reports: user scrolled up
+    for (let t = 0; t <= 2500; t += 50) {
+      playhead = t
+      await settle(1)
+    }
+    expect(c.visible.length).toBe(2000) // held ceiling, not 500
+    expect(c.visible[0]!.id).toBe('c501')
+    expect(c.visible[c.visible.length - 1]!.id).toBe('c2500')
+
+    c.setHoldTrim(false) // back to the bottom
+    expect(c.visible.length).toBe(500)
+    expect(c.visible[0]!.id).toBe('c2001')
+    c.stop()
+  })
+
   it('respects the bounded-ahead margin (does not fetch the whole VOD up front)', async () => {
     const stream = buildStream(500)
     const { fetchPage, calls } = makeStreamFetcher(stream)

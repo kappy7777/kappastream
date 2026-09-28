@@ -24,7 +24,7 @@
   // the mute list are read from `settings` at RENDER time, so flipping any of
   // them retroactively re-evaluates already-buffered messages.
 
-  import { tick } from 'svelte'
+  import { tick, untrack } from 'svelte'
   import type { Snippet } from 'svelte'
   import LinkifiedText from './LinkifiedText.svelte'
   import {
@@ -52,6 +52,14 @@
     /** Changing this value resets the follow state (new channel / tab switch /
      *  merged-view toggle / chat going idle) — the caller defines the key. */
     resetKey: string | number
+    /**
+     * Fired whenever the follow state flips (following the bottom vs scrolled
+     * up). Callers forward it to the rendered chat buffer so its front-trim is
+     * HELD while the user reads history — the WebKit engines have no scroll
+     * anchoring, so every front-trimmed line would slide the visible text up
+     * one row (a busy channel moves it ~10 rows/s).
+     */
+    onfollow?: (following: boolean) => void
     /** Lift the jump pill above the caller's floating chat-mode pill. */
     liftJump?: boolean
     /** Scroll-container padding — App uses the default, MultiView is tighter. */
@@ -65,6 +73,7 @@
     placeholder,
     onlink,
     resetKey,
+    onfollow,
     liftJump = false,
     padding = '8px 10px',
     attribution,
@@ -160,6 +169,14 @@
     stickyBottom = true
     newMessageCount = 0
     scrollBaselineKey = null
+  })
+
+  // Report follow-state flips so the rendered buffer can hold its front-trim
+  // while the user reads history (see the onfollow prop). The callback runs
+  // untracked: it writes caller state this effect must not depend on.
+  $effect(() => {
+    const following = stickyBottom
+    untrack(() => onfollow?.(following))
   })
 
   // ---- errored-art tracking ----

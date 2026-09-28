@@ -108,6 +108,7 @@ vi.mock('./chat-session.svelte', () => {
       this.status = 'connected'
       this.opts.onOpen?.(false)
     }
+    setHoldTrim(_hold: boolean): void {}
     dispose(): void {}
   }
   return { ChatSession }

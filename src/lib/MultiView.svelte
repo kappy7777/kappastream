@@ -469,6 +469,27 @@
   // both swap the whole rendered buffer.
   const chatResetKey = $derived(`${activeChatId ?? 'none'}:${mergedView ? 'merged' : 'single'}`)
 
+  // The pane's follow state drives the sessions' trim hold: the sessions whose
+  // chat the pane DISPLAYS (the merged group while merged, else the active
+  // tab's) hold their front-trim while the user is scrolled up reading
+  // history — the WebKit engines have no scroll anchoring, so every
+  // front-trimmed line would slide the visible text up. Every other session
+  // keeps the normal cap, and a hold releases the moment its session leaves
+  // the displayed set or the pane follows the bottom again.
+  let chatFollowing = $state(true)
+  $effect(() => {
+    const following = chatFollowing
+    const view = mergedView
+    const group = mergedIds
+    const active = activeChatId
+    untrack(() => {
+      const hold = !following
+      const shown = view ? new Set(group) : active != null ? new Set([active]) : new Set<string>()
+      for (const [id, s] of sessions) s.setHoldTrim(hold && shown.has(id))
+      for (const [channel, s] of extraSessions) s.setHoldTrim(hold && shown.has(extraChatId(channel)))
+    })
+  })
+
   // A twitch.tv link clicked in chat or the pinned banner. Multi-view has no
   // player of its own (each tile owns one, and hijacking a tile for a clip
   // would kill a live stream), so every link — clips included — opens the
@@ -1064,6 +1085,7 @@
           placeholder={placeholderText}
           onlink={openChatLink}
           resetKey={chatResetKey}
+          onfollow={(f) => (chatFollowing = f)}
           liftJump={chatModeKeys.length > 0}
           padding="6px 8px"
           attribution={mergeBadge}

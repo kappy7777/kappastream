@@ -54,5 +54,7 @@ export class ChatSessionTestStub {
   pushPrivmsg(ev: { message: string; username: string; displayName: string; color: string }): void {
     this.opts.onPrivmsg?.(ev)
   }
+  /** Mirrors the real session's trim-hold plumbing (no-op: the stub trims nothing). */
+  setHoldTrim(_hold: boolean): void {}
   dispose(): void {}
 }
