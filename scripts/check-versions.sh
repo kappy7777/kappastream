@@ -12,9 +12,10 @@
 # package.json.)
 #
 # Also cross-checks the Linux runtime deps shared by more than one packaging
-# file (streamlink, libmpv, the deb gst-libav dep, hicolor-icon-theme), so the
-# tauri-bundler-generated deb/rpm metadata and the hand-maintained
-# control.in / spec / AUR definitions cannot drift apart. tauri.conf.json is
+# file (streamlink, libmpv, the deb gst-libav dep, hicolor-icon-theme, the
+# tray's dlopen'd appindicator lib), so the tauri-bundler-generated deb/rpm
+# metadata and the hand-maintained control.in / spec / AUR definitions
+# cannot drift apart. tauri.conf.json is
 # read with `node -p` (node is already required for package.json above and is
 # installed by CI before this script runs; jq is NOT a dependency here).
 #
@@ -197,6 +198,11 @@ done
 #     auto-detection (see its header comment), and tauri-bundler resolves its
 #     own from the binary, so their presence legitimately differs per build
 #     pipeline.
+#
+# The appindicator dep has no tauri-deb/tauri-rpm rows on purpose:
+# tauri-bundler injects it into its own deb/rpm by itself (the tray loads
+# the library via dlopen), so tauri.conf.json legitimately never names it —
+# only the four hand-maintained slots can drift.
 tauri_deb_deps() {
     node -p '(require("./src-tauri/tauri.conf.json").bundle.linux.deb.depends || []).join("\n")'
 }
@@ -258,6 +264,10 @@ libmpv|aur-git|mpv
 libmpv|aur-bin|mpv
 gst-libav|tauri-deb|gstreamer1.0-libav
 gst-libav|control|gstreamer1.0-libav
+appindicator|control|libayatana-appindicator3-1
+appindicator|spec|libayatana-appindicator3.so.1()(64bit)
+appindicator|aur-git|libayatana-appindicator
+appindicator|aur-bin|libayatana-appindicator
 hicolor-icon-theme|control|hicolor-icon-theme
 hicolor-icon-theme|spec|hicolor-icon-theme
 hicolor-icon-theme|aur-git|hicolor-icon-theme

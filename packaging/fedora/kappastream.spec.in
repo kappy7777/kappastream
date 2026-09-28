@@ -36,6 +36,14 @@ Requires:       hicolor-icon-theme
 # mpv-libs and openSUSE's libmpv2 both Provide it; a name-pinned Requires
 # would break on one of them.
 Requires:       libmpv.so.2()(64bit)
+# System-tray icon backend. The tray dlopens
+# libayatana-appindicator3.so.1 at startup (libappindicator-sys runtime
+# loading) and the process exits before a window appears when the library
+# is missing. A dlopen'd library leaves no linker record, so rpmbuild's
+# automatic soname detection never sees it — declare the SONAME capability
+# (provided by libayatana-appindicator-gtk3), the same require the
+# tauri-bundler release rpm emits.
+Requires:       libayatana-appindicator3.so.1()(64bit)
 # Forces the FULL (RPM Fusion free) ffmpeg libraries, which carry the H.264
 # decoder GStreamer's libav plugin exposes as avdec_h264. Fedora ships only
 # ffmpeg-free (patent-stripped — no H.264), and ffmpeg-free Provides: ffmpeg,
