@@ -917,10 +917,17 @@
   // a ResizeObserver for size changes, the scroll container for position
   // changes (the stage scrolls inside .video-scroll), and the probe-measured
   // zoom factor for UI-scale changes (which move/resize the stage in visual
-  // pixels WITHOUT a layout change the observer would see). Coalesced to one
-  // measure per animation frame; engine-independent (the hls overlays need
-  // the rect as much as the native surface does).
+  // pixels WITHOUT a layout change the observer would see). The fold is
+  // observed as well: the player is vertically centered inside .player-fold,
+  // so a status-bar height change (its rows mount on the first join, then
+  // grow when the live status lands) TRANSLATES the player without resizing
+  // it — a move the stage observer cannot see and, at scrollTop 0, neither
+  // can the scroll listener — while the fold's own box resizes in that same
+  // layout pass. Coalesced to one measure per animation frame;
+  // engine-independent (the hls overlays need the rect as much as the native
+  // surface does).
   let playerVideoEl = $state<HTMLElement | null>(null)
+  let playerFoldEl = $state<HTMLElement | null>(null)
   let playerBox = $state({ x: 0, y: 0, w: 0, h: 0 })
   // The scroll viewport's top edge in visual px (== the top bar's bottom):
   // the line where .video-scroll's overflow clip starts hiding the fold. 0
@@ -930,6 +937,7 @@
   let stageClipTop = $state(0)
   $effect(() => {
     const stage = playerVideoEl
+    const fold = playerFoldEl
     if (!stage) return
     void zoomK
     const fullscreen = isFullscreen
@@ -953,6 +961,7 @@
     }
     const ro = new ResizeObserver(schedule)
     ro.observe(stage)
+    if (fold) ro.observe(fold)
     ro.observe(document.documentElement)
     scroll?.addEventListener('scroll', schedule, { passive: true })
     schedule()
@@ -3219,7 +3228,7 @@
               {#if !nativeVideoActive && playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)}
                 {@render playbackBanner(false, playback.title)}
               {/if}
-              <div class="player-fold">
+              <div class="player-fold" bind:this={playerFoldEl}>
                 <!-- The .player section is the video BOX (a 16:9-aspected
                      flex item that goes wider than 16:9 when height binds).
                      The --video-* custom properties on it carry the fitted
