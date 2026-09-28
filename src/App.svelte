@@ -823,6 +823,30 @@
     playerError = backend.lastError ?? 'native engine error'
   }
 
+  // A live source that died mid-playback (fatal hls error) or ran to the end
+  // of its playlist (the broadcast ended — ENDLIST) re-resolves: the
+  // resolve's offline branch lands on the offline state, anything else
+  // reloads the stream at its fresh edge. Without this the player sat black
+  // while still claiming "playing". The kind guard also covers the window
+  // where a VOD/clip load has already flipped `playback` but not yet torn
+  // this stream's generation down.
+  function reloadLiveStream(): void {
+    if (playback.kind !== 'live') return
+    const channel = channelJoined
+    if (!channel) return
+    teardownPlayer()
+    void loadStream(channel, quality)
+  }
+
+  function onVideoEnded(): void {
+    // A LIVE playlist only "ends" when the broadcast did; VODs and clips end
+    // at their authored end — the 'pause' right before 'ended' already
+    // flushed the resume checkpoint, and the frozen last frame is the
+    // expected end state there. Subscribed through the backend, so the
+    // native engine's ended report drives the same reload.
+    reloadLiveStream()
+  }
+
   // Intrinsic dimensions arrived/changed (element 'resize'/'loadedmetadata',
   // or mpv's aspect mirror which emits the same signal). Re-read the value
   // so the shared content rect re-fits.
@@ -855,6 +879,7 @@
       backend.on('timeupdate', onVideoTimeUpdate),
       backend.on('seeking', onVideoSeeking),
       backend.on('error', onVideoError),
+      backend.on('ended', onVideoEnded),
       backend.on('loadedmetadata', onVideoAspectChange),
       backend.on('resize', onVideoAspectChange),
     ]
@@ -1786,6 +1811,12 @@
         onPlayBlocked: () => {
           playerStatus = 'paused'
         },
+        // A playing stream that dies (playlist 404s once the broadcast ends,
+        // network blip, fragment retries exhausted) re-resolves — the same
+        // policy as a live playlist that runs to its ENDLIST.
+        onFatalAfterStart: () => {
+          reloadLiveStream()
+        },
       })
     }
 
@@ -2122,6 +2153,12 @@
         // plain 'media error: <type>', no networkish split, no details
         // suffix.
         formatFatalError: (d) => 'media error: ' + d.type,
+        // A VOD that dies mid-playback does not self-heal — surface it
+        // exactly like a load-time attach failure.
+        onFatalAfterStart: (error) => {
+          playerStatus = 'error'
+          playerError = error
+        },
       })
     }
     if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {

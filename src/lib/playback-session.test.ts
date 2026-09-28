@@ -221,6 +221,126 @@ describe('PlaybackSession.attachHls', () => {
   })
 })
 
+describe('PlaybackSession mid-playback fatal (onFatalAfterStart)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    hlsMock.instances.length = 0
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** Runs an attach to its ok resolution and returns the fake instance. */
+  async function attachAndPlay(
+    session: PlaybackSession,
+    video: HTMLVideoElement,
+    over: Partial<AttachHlsOptions> = {},
+  ): Promise<FakeHlsInstance> {
+    const p = session.attachHls(baseOpts(video, over))
+    const inst = lastInstance()
+    emit(inst, 'hlsManifestParsed', {})
+    expect(await p).toEqual({ ok: true })
+    return inst
+  }
+
+  it('fires onFatalAfterStart with the unified string; the promise keeps its ok resolution', async () => {
+    const video = makeVideo()
+    const session = new PlaybackSession()
+    let fatal: string | null = null
+    const inst = await attachAndPlay(session, video, {
+      onFatalAfterStart: (e) => {
+        fatal = e
+      },
+    })
+    emit(inst, 'hlsError', { fatal: true, type: 'networkError', details: 'levelLoadError' })
+    expect(fatal).toBe('network/manifest error: networkError (levelLoadError)')
+    expect(inst.destroy).toHaveBeenCalled()
+  })
+
+  it('runs the mid-playback fatal through formatFatalError (the VOD taxonomy)', async () => {
+    const video = makeVideo()
+    const session = new PlaybackSession()
+    let fatal: string | null = null
+    const inst = await attachAndPlay(session, video, {
+      formatFatalError: (d) => 'media error: ' + d.type,
+      onFatalAfterStart: (e) => {
+        fatal = e
+      },
+    })
+    emit(inst, 'hlsError', { fatal: true, type: 'mediaError', details: 'bufferStalledError' })
+    expect(fatal).toBe('media error: mediaError')
+  })
+
+  it('fires nothing when the dead attach was superseded (staleness gate)', async () => {
+    const video = makeVideo()
+    const session = new PlaybackSession()
+    const gen = session.nextGeneration()
+    let fired = false
+    const inst = await attachAndPlay(session, video, {
+      isCurrent: () => gen === session.generation,
+      onFatalAfterStart: () => {
+        fired = true
+      },
+    })
+    session.nextGeneration() // the surface moved on before the stream died
+    emit(inst, 'hlsError', { fatal: true, type: 'networkError', details: 'levelLoadError' })
+    expect(fired).toBe(false)
+  })
+
+  it('clears the hls reference: a later attach never destroys the dead instance again', async () => {
+    const video = makeVideo()
+    const session = new PlaybackSession()
+    const inst = await attachAndPlay(session, video)
+    emit(inst, 'hlsError', { fatal: true, type: 'networkError', details: 'levelLoadError' })
+    await attachAndPlay(session, makeVideo())
+    expect(inst.destroy).toHaveBeenCalledTimes(1) // the fatal's own destroy, not a second defensive one
+  })
+
+  it('a manifest-timeout failure also clears the reference for the next attach', async () => {
+    const video = makeVideo()
+    const session = new PlaybackSession()
+    const p = session.attachHls(baseOpts(video))
+    const inst = lastInstance()
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(await p).toEqual({ ok: false, error: 'timeout waiting for manifest' })
+    await attachAndPlay(session, makeVideo())
+    expect(inst.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('a non-fatal ERROR after a successful attach never fires onFatalAfterStart', async () => {
+    const video = makeVideo()
+    const session = new PlaybackSession()
+    let fired = false
+    const inst = await attachAndPlay(session, video, {
+      onFatalAfterStart: () => {
+        fired = true
+      },
+    })
+    emit(inst, 'hlsError', { fatal: false, type: 'mediaError', details: 'bufferStalledError' })
+    expect(fired).toBe(false)
+    expect(inst.destroy).not.toHaveBeenCalled()
+  })
+
+  it('a mid-playback fatal cancels an armed stall recovery', async () => {
+    const video = makeVideo()
+    const session = new PlaybackSession()
+    await attachAndPlay(session, video)
+    session.scheduleStallRecover(video) // the surface's onWaiting armed it
+    const inst = lastInstance()
+    emit(inst, 'hlsError', { fatal: true, type: 'networkError', details: 'levelLoadError' })
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(video.currentTime).toBe(0) // no snap against the emptied element
+    expect(vi.mocked(video.play)).toHaveBeenCalledTimes(1) // only the initial autoplay
+  })
+
+  it('a mid-playback fatal with no onFatalAfterStart callback is swallowed', async () => {
+    const video = makeVideo()
+    const session = new PlaybackSession()
+    const inst = await attachAndPlay(session, video)
+    expect(() => emit(inst, 'hlsError', { fatal: true, type: 'otherError', details: 'unknown' })).not.toThrow()
+  })
+})
+
 describe('PlaybackSession generations & disposal', () => {
   it('teardown bumps the generation so old isCurrent predicates go stale', () => {
     const session = new PlaybackSession()

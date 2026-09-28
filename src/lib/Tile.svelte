@@ -388,6 +388,12 @@
         // <video> is autoplay+muted; the overlay only covers
         // loading/offline/error) — the old local copy did the same.
         onPlayBlocked: () => tileStore.setStatus(tile.id, 'playing'),
+        // Mid-playback death: same policy as the native engine's 'error'
+        // handler. 'error' (not 'offline') because hls.js cannot tell a
+        // 404ing ended playlist from a real network fault — the status
+        // poll's offline-close removes the tile when the channel actually
+        // went offline, so an honest error overlay is the safe default.
+        onFatalAfterStart: (error) => tileStore.setStatus(tile.id, 'error', error),
       })
     }
     if (el.canPlayType('application/vnd.apple.mpegurl')) {
@@ -507,6 +513,13 @@
   // A tile is always live, hence the literal true.
   function onPause(): void {
     if (shouldRecoverStallAfterPause(true, playback.userPaused) && videoEl) playback.scheduleStallRecover(videoEl)
+  }
+  // A live tile that runs to the end of its playlist went offline — same
+  // policy as the native engine's 'ended' handler: uncover the tile so the
+  // offline overlay shows while the status poll's offline-close removes it.
+  function onEnded(): void {
+    playback.teardown(videoEl)
+    tileStore.setStatus(tile.id, 'offline')
   }
 
   // ---- (re)load ONLY on a genuine channel/quality/low-latency/engine change ----
@@ -894,6 +907,7 @@
       onwaiting={onWaiting}
       onplaying={onPlaying}
       onpause={onPause}
+      onended={onEnded}
     ></video>
 
     <button

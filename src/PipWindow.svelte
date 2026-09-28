@@ -49,6 +49,7 @@
   let paused = $state(true)
   let loading = $state(true)
   let errorMsg = $state('')
+  let endedLive = $state(false)
   let needsGesture = $state(false)
   let controlsVisible = $state(true)
   let hideTimer: ReturnType<typeof setTimeout> | null = null
@@ -73,6 +74,7 @@
     playback.teardown(videoEl)
     loading = true
     errorMsg = ''
+    endedLive = false
     needsGesture = false
     // Real staleness guard: the main window drives PiP asynchronously
     // (quality change, channel change, VOD open, back-to-live all re-fire
@@ -112,6 +114,13 @@
           },
           onPlayBlocked: () => {
             needsGesture = true
+          },
+          // A stream that dies mid-playback (the playlist 404s once the
+          // broadcast ends, a network drop) surfaces like a load failure —
+          // PiP shows no raw error strings, same as the branch below.
+          onFatalAfterStart: () => {
+            errorMsg = t('pip_streamError')
+            loading = false
           },
         })
         .then((r) => {
@@ -210,6 +219,18 @@
         },
       })
     }
+  }
+
+  function onVideoEnded(): void {
+    // A live source that runs to its end means the broadcast ended; VODs and
+    // clips end naturally and keep their last frame (the main window owns
+    // navigation either way). The 'pause' just before 'ended' armed the
+    // stall recovery — cancel it, or a second later it would seek the ended
+    // element back into its tail and replay it.
+    if (!isLive) return
+    playback.clearStallRecover()
+    endedLive = true
+    loading = false
   }
 
   async function emitClosedWithRect(): Promise<void> {
@@ -402,6 +423,7 @@
     }}
     onwaiting={onVideoWaiting}
     onplaying={onVideoPlaying}
+    onended={onVideoEnded}
   ></video>
 
   {#if loading}
@@ -409,6 +431,9 @@
   {/if}
   {#if errorMsg}
     <div class="pip-status pip-error" data-tauri-drag-region>{errorMsg}</div>
+  {/if}
+  {#if endedLive && !errorMsg}
+    <div class="pip-status" data-tauri-drag-region>{t('offline')}</div>
   {/if}
   {#if needsGesture && !errorMsg}
     <button type="button" class="pip-gesture" onclick={gesturePlay}>{t('pip_tapForSound')}</button>

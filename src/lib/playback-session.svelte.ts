@@ -113,6 +113,16 @@ export interface AttachHlsOptions {
   onPlayed?: () => void
   /** Fires when play() is blocked and the attach is still current. */
   onPlayBlocked?: () => void
+  /**
+   * Fires when a FATAL error destroys an attach that already resolved ok —
+   * playback started, then the playlist 404'd (the broadcast ended), the
+   * network dropped, or fragment retries ran out. The instance is destroyed
+   * and the session's hls reference cleared before the callback runs;
+   * `error` is the same string a load-time failure would resolve with.
+   * Gated on isCurrent like every other callback: a superseded surface
+   * hears nothing.
+   */
+  onFatalAfterStart?: (error: string) => void
 }
 
 /** Options for scheduleStallRecover — mirrors the attach API's callback names. */
@@ -247,6 +257,19 @@ export class PlaybackSession {
         } catch {
           /* ignore */
         }
+        // The destroyed instance must stop looking alive: a stale reference
+        // here kept stall recovery arming (and seeking) against the emptied
+        // element and made a later attach/teardown destroy it a second time.
+        if (this.hls === instance) this.hls = null
+        this.clearStallRecover()
+        if (done) {
+          // The attach already resolved — a mid-playback death the caller
+          // can only hear about through the after-start callback.
+          if (opts.isCurrent()) {
+            opts.onFatalAfterStart?.(opts.formatFatalError?.(data) ?? formatFatalHlsError(data))
+          }
+          return
+        }
         if (!opts.isCurrent()) {
           finish({ ok: false, error: STALE_STREAM_REQUEST })
           return
@@ -265,6 +288,7 @@ export class PlaybackSession {
           } catch {
             /* ignore */
           }
+          if (this.hls === instance) this.hls = null
           finish({ ok: false, error: 'timeout waiting for manifest' })
         }
       }, MANIFEST_TIMEOUT_MS)
@@ -321,10 +345,11 @@ export class PlaybackSession {
   /**
    * Arm the live stall self-recovery: after the grace period, snap to the
    * live edge (hls.js's liveSyncPosition, else the seekable end) and resume.
-   * Cleared by clearStallRecover() on `playing` and by teardown. A rejected
-   * resume play() is swallowed unless onPlayBlocked surfaces it — surfaces
-   * with a visible control bar don't need it, but a surface whose whole
-   * autoplay story is a gesture prompt (PiP) must not go silently dead.
+   * Cleared by clearStallRecover() on `playing`, by teardown, and by a
+   * fatal error (the recovery target is gone). A rejected resume play() is
+   * swallowed unless onPlayBlocked surfaces it — surfaces with a visible
+   * control bar don't need it, but a surface whose whole autoplay story is a
+   * gesture prompt (PiP) must not go silently dead.
    */
   scheduleStallRecover(video: HTMLVideoElement, opts?: StallRecoverOptions): void {
     if (this.disposed) return
