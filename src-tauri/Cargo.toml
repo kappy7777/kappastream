@@ -112,7 +112,7 @@ tauri-plugin-window-state = "2.4.1"
 libmpv2 = { version = "6", optional = true }
 libloading = { version = "0.9", optional = true }
 gtk = { version = "0.18", optional = true }
-glib = { version = "0.18", optional = true }
+glib = { version = "0.22", optional = true }
 gdk = { version = "0.18", optional = true }
 # mpv-embed only: the webkit2gtk snapshot API takes a gio cancellable.
 # Version matches what gtk already resolves to so the trees unify.
