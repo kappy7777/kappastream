@@ -116,7 +116,7 @@ glib = { version = "0.18", optional = true }
 gdk = { version = "0.18", optional = true }
 # mpv-embed only: the webkit2gtk snapshot API takes a gio cancellable.
 # Version matches what gtk already resolves to so the trees unify.
-gio = { version = "0.18", optional = true }
+gio = { version = "0.22", optional = true }
 webkit2gtk = { version = "2.0", optional = true }
 # mpv-embed only: pin LC_NUMERIC back to "C" before creating the libmpv core
 # (see pin_c_numeric_locale in src/mpv/mod.rs).
