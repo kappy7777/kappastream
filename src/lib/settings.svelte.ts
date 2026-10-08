@@ -324,6 +324,13 @@ class SettingsStore {
   mentionUsername: string = $state(readMentionUsername())
   volume: number = $state(readVolume())
   muted: boolean = $state(readMuted())
+  /**
+   * Last volume above 0 seen this session (in-memory, NOT persisted — no
+   * storage key): "unmute" at volume 0 restores this instead of flipping a
+   * flag that changes nothing audible. Falls back to half when the session
+   * started at 0 and nothing louder was ever set.
+   */
+  private lastNonZeroVolume: number = 0.5
   sortMode: SortMode = $state(readSortMode())
   uiScale: number = $state(readUiScale())
   lowLatency: boolean = $state(readLowLatency())
@@ -348,6 +355,7 @@ class SettingsStore {
   theaterMode: boolean = $state(false)
 
   constructor() {
+    if (this.volume > 0) this.lastNonZeroVolume = this.volume
     this.applyTheme(this.theme)
     this.applyUiScale(this.uiScale)
     try {
@@ -424,11 +432,17 @@ class SettingsStore {
   setVolume(v: number): void {
     const clamped = Math.max(0, Math.min(1, v))
     this.volume = clamped
+    if (clamped > 0) this.lastNonZeroVolume = clamped
     safeWrite(STORAGE_KEYS.volume, String(clamped))
     if (clamped > 0 && this.muted) {
       this.muted = false
       safeWrite(STORAGE_KEYS.muted, 'false')
     }
+  }
+
+  /** The volume an "unmute" at volume 0 should restore to (see the field). */
+  restoreVolume(): number {
+    return this.lastNonZeroVolume > 0 ? this.lastNonZeroVolume : 0.5
   }
 
   setMuted(m: boolean): void {

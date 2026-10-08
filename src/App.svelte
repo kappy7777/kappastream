@@ -518,13 +518,27 @@
   }
   function toggleVideoMute(): void {
     if (multiView) {
-      // The authority tile owns the global mute → M toggles it.
+      // The authority tile owns the global mute → M toggles it. Unmuting at
+      // volume 0 must become audible here too (the tile grid drives the same
+      // persisted volume): restore a level instead of flipping a silent
+      // flag — setVolume also clears the mute on its own.
+      if (settings.volume === 0) {
+        settings.setVolume(settings.restoreVolume())
+        return
+      }
       settings.toggleMuted()
       return
     }
     const backend = videoBackend
     if (!backend) return
-    backend.setMuted(!backend.muted)
+    // Unmuting at volume 0 must become audible — restore the last non-zero
+    // volume instead of flipping a flag that changes nothing.
+    if (backend.muted || backend.volume === 0) {
+      if (backend.volume === 0) backend.setVolume(settings.restoreVolume())
+      backend.setMuted(false)
+      return
+    }
+    backend.setMuted(true)
   }
   function toggleVideoFullscreen(): void {
     if (multiView && !authorityTileBackend) {

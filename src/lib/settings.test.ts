@@ -360,3 +360,25 @@ describe('mute list persistence + input validation', () => {
     expect(S.settings.mutedUsers).toEqual(['troll'])
   })
 })
+
+describe('restoreVolume (unmute at volume 0)', () => {
+  it('tracks the last non-zero volume set this session', async () => {
+    const { settings } = await import('./settings.svelte')
+    settings.setVolume(0.7)
+    expect(settings.restoreVolume()).toBe(0.7)
+    settings.setVolume(0)
+    expect(settings.volume).toBe(0)
+    expect(settings.restoreVolume()).toBe(0.7)
+  })
+
+  it('falls back to the persisted launch volume, then half', async () => {
+    const { settings } = await import('./settings.svelte')
+    expect(settings.restoreVolume()).toBe(1) // default launch volume
+    settings.setVolume(0.4)
+    vi.resetModules()
+    localStorage.setItem('app-volume-v1', '0')
+    const fresh = await import('./settings.svelte')
+    expect(fresh.settings.volume).toBe(0)
+    expect(fresh.settings.restoreVolume()).toBe(0.5)
+  })
+})

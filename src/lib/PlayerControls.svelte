@@ -308,7 +308,15 @@
 
   function toggleMute(): void {
     if (!backend) return
-    backend.setMuted(!backend.muted)
+    // The bar already renders the muted icon at volume 0 (silent either
+    // way), so pressing it must make sound, not just flip the flag: restore
+    // the last non-zero volume first (half when none was ever recorded).
+    if (backend.muted || backend.volume === 0) {
+      if (backend.volume === 0) backend.setVolume(settings.restoreVolume())
+      backend.setMuted(false)
+      return
+    }
+    backend.setMuted(true)
   }
 
   function setVolume(v: number): void {
