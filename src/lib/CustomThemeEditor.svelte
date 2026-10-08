@@ -1058,7 +1058,7 @@
   .ct-btn--primary {
     background: var(--accent);
     border-color: var(--accent);
-    color: var(--text-primary);
+    color: var(--on-accent);
   }
   .ct-btn--danger:hover:not(:disabled) {
     color: var(--live);

@@ -50,6 +50,32 @@ export const CUSTOM_THEME_PROPS = [
 export type ThemePropName = (typeof CUSTOM_THEME_PROPS)[number]
 
 /**
+ * Derived theme tokens: text/icon ink guaranteed readable on --accent and
+ * --live fills. They are NOT part of the 20-property storage/import contract
+ * (adding them there would invalidate every stored theme) — built-in themes
+ * define them statically in app.css, and a custom theme gets them COMPUTED
+ * from its accent/live at apply time, so the pair can never drift from the
+ * background's luminance. Themes.test pins the app.css side; the values here
+ * mirror its contrast math.
+ */
+export const DERIVED_THEME_PROPS = ['--on-accent', '--on-live'] as const
+
+/** The readable ink for text on `bg` (a theme colour token): white or a
+ *  near-black, picked by WCAG relative luminance. The threshold sits where
+ *  white text starts losing contrast on bright backgrounds; every built-in
+ *  theme's static pair (app.css) satisfies >= 4.3:1 against this rule. */
+export function onColorToken(bg: string): string | null {
+  const c = parseColorToken(bg)
+  if (!c) return null
+  const channel = (n: number): number => {
+    const s = n / 255
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+  }
+  const y = 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
+  return y > 0.32 ? '#16151c' : '#ffffff'
+}
+
+/**
  * Runtime custom-theme ids are namespaced `custom-…` so they can never
  * collide with a built-in id (settings.ThemeId unions this with the built-in
  * literal union).
@@ -511,8 +537,9 @@ export function importAndStoreThemeJson(text: string): ThemeImportOutcome {
 
 /**
  * Set the 20 theme properties on the document root (inline style wins over
- * the app.css `:root` block). Callers must pass VALIDATED values — this
- * function is the trust boundary's other half and assumes validation upstream.
+ * the app.css `:root` block), then compute the derived ink tokens from them.
+ * Callers must pass VALIDATED values — this function is the trust boundary's
+ * other half and assumes validation upstream.
  */
 export function applyThemeProperties(values: ThemeValues): void {
   if (typeof document === 'undefined') return
@@ -521,13 +548,17 @@ export function applyThemeProperties(values: ThemeValues): void {
     const v = values[prop]
     if (typeof v === 'string') root.style.setProperty(prop, v)
   }
+  // The derived ink tokens are computed, never authored: they must always
+  // match the accent/live that were just applied.
+  root.style.setProperty('--on-accent', onColorToken(values['--accent']) ?? '#ffffff')
+  root.style.setProperty('--on-live', onColorToken(values['--live']) ?? '#ffffff')
 }
 
 /** Remove every runtime theme property so a built-in theme is untouched. */
 export function clearThemeProperties(): void {
   if (typeof document === 'undefined') return
   const root = document.documentElement
-  for (const prop of CUSTOM_THEME_PROPS) {
+  for (const prop of [...CUSTOM_THEME_PROPS, ...DERIVED_THEME_PROPS]) {
     root.style.removeProperty(prop)
   }
 }

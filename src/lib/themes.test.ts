@@ -2,15 +2,16 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { THEMES } from './settings.svelte'
-import { CUSTOM_THEME_PROPS } from './custom-themes.svelte'
+import { CUSTOM_THEME_PROPS, DERIVED_THEME_PROPS } from './custom-themes.svelte'
 
 /*
  * Built-in theme contract, cross-checked against the compile-time source of
- * truth (src/app.css): every theme block defines EXACTLY the 20 properties
- * (a missing one would inherit from whatever was set last — a broken theme),
- * the CSS blocks and the THEMES array list the same ids, and the five
- * saturated themes (v1.1: Riptide/Toxin/Redline/Hazard/Blacklight) keep
- * genuinely coloured backgrounds (real chroma, not near-neutral tints).
+ * truth (src/app.css): every theme block defines EXACTLY the 20 stored
+ * properties plus the two derived ink tokens (a missing one would inherit
+ * from whatever was set last — a broken theme), the CSS blocks and the THEMES
+ * array list the same ids, and the five saturated themes (v1.1:
+ * Riptide/Toxin/Redline/Hazard/Blacklight) keep genuinely coloured
+ * backgrounds (real chroma, not near-neutral tints).
  */
 
 const css = readFileSync('src/app.css', 'utf8')
@@ -36,10 +37,10 @@ function channelSpread(hex: string): number {
 describe('built-in themes (app.css ↔ THEMES parity)', () => {
   const blocks = parseThemeBlocks()
 
-  it('every theme block defines EXACTLY the 20 known properties', () => {
+  it('every theme block defines EXACTLY the 20 stored + 2 derived properties', () => {
     expect(blocks.size).toBeGreaterThanOrEqual(34)
     for (const [id, props] of blocks) {
-      expect(props.sort(), `theme ${id}`).toEqual([...CUSTOM_THEME_PROPS].sort())
+      expect(props.sort(), `theme ${id}`).toEqual([...CUSTOM_THEME_PROPS, ...DERIVED_THEME_PROPS].sort())
     }
   })
 
@@ -54,6 +55,58 @@ describe('built-in themes (app.css ↔ THEMES parity)', () => {
       expect(t.label.length).toBeGreaterThan(0)
       expect(t.swatch).toMatch(/^#[0-9a-fA-F]{6}$/)
     }
+  })
+})
+
+describe('derived ink tokens (--on-accent / --on-live)', () => {
+  /** WCAG relative luminance of a #rrggbb token. */
+  function luminance(hex: string): number {
+    const h = hex.replace('#', '')
+    const ch = [0, 2, 4].map((i) => {
+      const s = parseInt(h.slice(i, i + 2), 16) / 255
+      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+    })
+    return 0.2126 * ch[0]! + 0.7152 * ch[1]! + 0.0722 * ch[2]!
+  }
+
+  function contrast(a: string, b: string): number {
+    const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p)
+    return (x + 0.05) / (y + 0.05)
+  }
+
+  function blockBody(id: string): string {
+    const start = css.indexOf(`[data-theme='${id}']`)
+    const block = css.slice(start)
+    return block.slice(0, block.indexOf('}'))
+  }
+
+  it('every theme ink pair meets at least 4.3:1 on its fill', () => {
+    for (const t of THEMES) {
+      const body = blockBody(t.id)
+      for (const [bgProp, inkProp] of [
+        ['--accent', '--on-accent'],
+        ['--live', '--on-live'],
+      ] as const) {
+        const bg = new RegExp(bgProp + String.raw`:\s*(#[0-9a-fA-F]{6})`).exec(body)?.[1]
+        const ink = new RegExp(inkProp + String.raw`:\s*(#[0-9a-fA-F]{6})`).exec(body)?.[1]
+        expect(bg, `${t.id} ${bgProp}`).toBeDefined()
+        expect(ink, `${t.id} ${inkProp}`).toBeDefined()
+        const ratio = contrast(ink!, bg!)
+        expect(ratio, `${t.id} ${inkProp} (${ink!}) on ${bgProp} (${bg!})`).toBeGreaterThanOrEqual(4.3)
+      }
+    }
+  })
+
+  it('redline keeps a saturated --live usable as text on its own background', () => {
+    // Redline's LIVE colour doubles as badge background AND as text/dot
+    // colour on the deep-red surfaces, so it must carry real chroma and
+    // still read on --bg-app (the old pale pink managed one but not the
+    // other, leaving a 1.3:1 badge).
+    const body = blockBody('redline')
+    const live = /--live:\s*(#[0-9a-fA-F]{6})/.exec(body)![1]!
+    const bgApp = /--bg-app:\s*(#[0-9a-fA-F]{6})/.exec(body)![1]!
+    expect(channelSpread(live)).toBeGreaterThanOrEqual(60)
+    expect(contrast(live, bgApp)).toBeGreaterThanOrEqual(4)
   })
 })
 

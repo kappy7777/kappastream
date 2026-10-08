@@ -672,7 +672,7 @@
   .add-fav-submit {
     flex: 0 0 auto;
     background: var(--accent);
-    color: var(--accent-text, #fff);
+    color: var(--on-accent);
     border: 1px solid transparent;
     border-radius: 4px;
     padding: 4px 10px;

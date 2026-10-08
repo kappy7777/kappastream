@@ -346,7 +346,7 @@
   .welcome-primary {
     background: var(--accent);
     border: 1px solid var(--accent);
-    color: #fff;
+    color: var(--on-accent);
     font-weight: 600;
     font-size: 13px;
     padding: 8px 18px;

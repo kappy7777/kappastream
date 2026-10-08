@@ -4351,7 +4351,7 @@
     border: none;
     border-radius: 4px;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
     font-size: 12px;
     font-weight: 600;
     padding: 4px 8px;
@@ -4570,7 +4570,7 @@
     gap: 4px;
     padding: 1px 6px;
     background: var(--live);
-    color: #fff;
+    color: var(--on-live);
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.05em;
@@ -4580,7 +4580,7 @@
   .stream-info-live-dot {
     width: 6px;
     height: 6px;
-    background: #fff;
+    background: var(--on-live);
     border-radius: 50%;
   }
 
@@ -4590,7 +4590,7 @@
     flex: 0 0 auto;
     padding: 1px 6px;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.05em;
@@ -4688,28 +4688,18 @@
     border-color: var(--track-hover);
   }
 
-  .notif-toggle--on {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--text-primary);
-  }
-
-  .notif-toggle--on:hover {
-    background: var(--accent-hover);
-    border-color: var(--accent-hover);
-    color: var(--text-primary);
-  }
-
+  .notif-toggle--on,
   .favorite-toggle--on {
     background: var(--accent);
     border-color: var(--accent);
-    color: var(--text-primary);
+    color: var(--on-accent);
   }
 
+  .notif-toggle--on:hover,
   .favorite-toggle--on:hover {
     background: var(--accent-hover);
     border-color: var(--accent-hover);
-    color: var(--text-primary);
+    color: var(--on-accent);
   }
 
   .notif-toggle-icon {
@@ -4894,7 +4884,7 @@
 
   .resume-bar-btn:hover {
     background: var(--accent);
-    color: var(--text-primary);
+    color: var(--on-accent);
   }
 
   .resume-bar-close {
@@ -4957,7 +4947,7 @@
 
   .overlay-action:hover {
     background: var(--accent);
-    color: var(--bg-panel);
+    color: var(--on-accent);
   }
 
   .spinner {

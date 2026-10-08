@@ -176,7 +176,7 @@
     padding: 0 3px;
     border-radius: 7px;
     background: var(--live);
-    color: #fff;
+    color: var(--on-live);
     font-size: 9px;
     font-weight: 700;
     line-height: 14px;
@@ -321,7 +321,7 @@
 
   .notif-icon--live {
     background: var(--live);
-    color: #fff;
+    color: var(--on-live);
   }
 
   .notif-body {

@@ -1757,7 +1757,7 @@
 
   .seg-btn--active {
     background: var(--accent);
-    color: var(--text-primary);
+    color: var(--on-accent);
   }
 
   .seg-btn[disabled] {
@@ -1968,7 +1968,7 @@
 
   .lang-btn--active {
     background: var(--accent);
-    color: var(--text-primary);
+    color: var(--on-accent);
     border-color: var(--accent);
   }
 

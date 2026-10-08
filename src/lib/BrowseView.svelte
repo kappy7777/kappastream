@@ -531,7 +531,7 @@
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.04em;
-    color: #fff;
+    color: var(--on-live);
     background: var(--live);
     border-radius: 3px;
     padding: 1px 5px;

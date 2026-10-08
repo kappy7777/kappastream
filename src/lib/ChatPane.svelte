@@ -433,7 +433,7 @@
     padding: 0 4px;
     border-radius: 8px;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
     font-size: 10px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;

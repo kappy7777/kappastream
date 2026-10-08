@@ -398,12 +398,12 @@ describe('unknown stored theme ids fall back safely (settings integration)', () 
 })
 
 describe('the 20-property contract', () => {
-  it('CUSTOM_THEME_PROPS lists exactly the 20 properties every app.css theme defines', () => {
+  it('CUSTOM_THEME_PROPS lists exactly the 20 stored properties (+ 2 derived) every app.css theme defines', () => {
     // vitest runs from the repo root; app.css is the compile-time source of truth.
     const css = readFileSync('src/app.css', 'utf8')
     const firstBlock = css.slice(0, css.indexOf('}') + 1) // the `:root, :root[data-theme='amethyst']` block
     const cssProps = [...firstBlock.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1])
-    expect(cssProps.sort()).toEqual([...S.CUSTOM_THEME_PROPS].sort())
+    expect(cssProps.sort()).toEqual([...S.CUSTOM_THEME_PROPS, ...S.DERIVED_THEME_PROPS].sort())
     expect(S.CUSTOM_THEME_PROPS).toHaveLength(20)
   })
 

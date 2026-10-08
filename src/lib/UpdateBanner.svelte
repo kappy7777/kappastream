@@ -196,7 +196,7 @@
   .update-banner__btn--primary {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
     font-weight: 600;
   }
   .update-banner__btn--primary:hover {
