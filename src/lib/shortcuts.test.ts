@@ -135,6 +135,38 @@ describe('shortcuts are a no-op behind open modals/overlays', () => {
   })
 })
 
+describe("'?' works from behind the help overlay and the Settings modal", () => {
+  it('? closes the help while the help overlay is open (the list says "Show / hide")', () => {
+    expect(resolveShortcut(makeKey('?', null), ctx({ helpOpen: true }))).toEqual({ type: 'toggle-help' })
+  })
+
+  it('? opens the help from behind the Settings modal (its hint points at ?)', () => {
+    expect(resolveShortcut(makeKey('?', null), ctx({ settingsOpen: true }))).toEqual({ type: 'toggle-help' })
+  })
+
+  it('? still never fires from a text field, even with Settings open', () => {
+    expect(resolveShortcut(makeKey('?', el('input')), ctx({ settingsOpen: true }))).toBeNull()
+  })
+
+  it('? with a Ctrl/Cmd modifier stays a browser chord even when help is open', () => {
+    expect(resolveShortcut(makeKey('?', null, { ctrlKey: true }), ctx({ helpOpen: true }))).toBeNull()
+    expect(resolveShortcut(makeKey('?', null, { metaKey: true }), ctx({ settingsOpen: true }))).toBeNull()
+  })
+
+  it('? stays suppressed behind the other overlays (about, browse, welcome)', () => {
+    expect(resolveShortcut(makeKey('?', null), ctx({ aboutOpen: true }))).toBeNull()
+    expect(resolveShortcut(makeKey('?', null), ctx({ browseOpen: true }))).toBeNull()
+    expect(resolveShortcut(makeKey('?', null), ctx({ welcomeOpen: true }))).toBeNull()
+  })
+
+  it('every other shortcut stays suppressed while help/Settings is open', () => {
+    for (const key of [' ', 'k', 'm', 'f', 't', 'ArrowLeft', 'ArrowUp']) {
+      expect(resolveShortcut(makeKey(key, null), ctx({ helpOpen: true })), `help open, ${key}`).toBeNull()
+      expect(resolveShortcut(makeKey(key, null), ctx({ settingsOpen: true })), `settings open, ${key}`).toBeNull()
+    }
+  })
+})
+
 describe('already-handled events are never double-acted', () => {
   it('a defaultPrevented keydown resolves to null (the scrubber seeks once)', () => {
     // PlayerControls' scrubber handler preventDefaults its ±5s arrow seek;

@@ -3316,7 +3316,7 @@
           <rect x="9" y="9" width="5.5" height="5.5" rx="1" fill="currentColor" />
         </svg>
       </button>
-      <Settings onarmsleep={armSleep} onoverlay={(v) => (settingsOverlayOpen = v)} />
+      <Settings onarmsleep={armSleep} onoverlay={(v) => (settingsOverlayOpen = v)} helpOpen={shortcutsHelpOpen} />
       <div class="win-controls">
         <button type="button" class="win-btn" onclick={winMinimize} aria-label={t('tb_minimize')}>
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">

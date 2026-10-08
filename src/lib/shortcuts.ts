@@ -83,9 +83,12 @@ const SEEK_STEP = 10
 
 // Resolve a keydown into a shortcut action, or null if the key is not a
 // shortcut / is suppressed. Escape closes the topmost overlay (help, then
-// about) and works even inside an editable field; everything else is blocked
-// while typing, behind an open modal/overlay, when the event was already
-// handled (defaultPrevented), or when a focused widget owns the key.
+// about) and works even inside an editable field; '?' toggles the help even
+// from behind the help overlay itself or the Settings modal (the help's list
+// promises "Show / hide", and Settings points at '?' for the full list);
+// everything else is blocked while typing, behind an open modal/overlay,
+// when the event was already handled (defaultPrevented), or when a focused
+// widget owns the key.
 export function resolveShortcut(e: KeyboardEvent, ctx: ShortcutCtx): ShortcutAction | null {
   // Another handler already claimed this event (a slider's own keydown, a
   // component that preventDefaults) — never stack a second action on it.
@@ -104,6 +107,12 @@ export function resolveShortcut(e: KeyboardEvent, ctx: ShortcutCtx): ShortcutAct
 
   // No player shortcuts while typing in any editable field.
   if (isEditableTarget(e.target)) return null
+
+  // '?' resolves BEFORE the overlay suppression below when the help overlay
+  // or the Settings modal is open — otherwise '?' could open the help but
+  // never close it, and the hint inside Settings would be a dead promise.
+  // The other overlays (about, browse, welcome) still swallow it.
+  if (e.key === '?' && (ctx.helpOpen || ctx.settingsOpen)) return { type: 'toggle-help' }
 
   // No player shortcuts behind an open modal/overlay (about, browse, help,
   // the first-launch welcome / what's-new overlay, the on-demand changelog —

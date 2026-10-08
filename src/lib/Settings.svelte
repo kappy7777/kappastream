@@ -34,9 +34,15 @@
     // resolver so player shortcuts stay suppressed behind it, like about/
     // browse/help.
     onoverlay = () => {},
+    // True while the keyboard-shortcuts help overlay (App-owned) stacks on
+    // top of this panel — opened by pressing '?' from inside Settings. The
+    // panel's Escape handler yields while it is up so Escape peels the help
+    // first instead of closing both at once.
+    helpOpen = false,
   }: {
     onarmsleep?: (minutes: number) => void
     onoverlay?: (open: boolean) => void
+    helpOpen?: boolean
   } = $props()
 
   // ---- Experimental native video engine (LINUX mpv-embed builds only) ----
@@ -434,6 +440,9 @@
       if (e.key !== 'Escape') return
       // The custom-theme editor owns Escape while it is open.
       if (themeEditorFor !== undefined) return
+      // The shortcuts help layered above the panel owns it (App's global
+      // handler closes it there).
+      if (helpOpen) return
       closePanel()
     }
     document.addEventListener('keydown', onKey)
