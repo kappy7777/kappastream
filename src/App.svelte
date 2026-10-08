@@ -2662,9 +2662,15 @@
   // moderation/bits render gating live in the shared ChatPane component.
   const chatModeKeys = $derived(activeRoomModes(roomState))
 
+  // Re-sort the sidebar when the sort mode flips. refresh() re-sorts and
+  // notifies every subscriber; untrack keeps those reads (and the
+  // subscribers' own — this effect sits in App) from becoming dependencies
+  // here, or it re-ran on every join, live/VOD switch and list edit,
+  // re-sorting the whole list and letting the cached snapshot overwrite a
+  // fresher join-time status.
   $effect(() => {
     void settings.sortMode
-    favoritesStore.refresh()
+    untrack(() => favoritesStore.refresh())
   })
 
   // Low-latency toggle: re-resolve the current stream so streamlink re-fetches
