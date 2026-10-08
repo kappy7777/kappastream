@@ -381,6 +381,8 @@ export const en = {
   update_youHave: ' (you have v{version})',
   update_sigError: 'the update signature could not be verified',
   update_pkgDeps: 'a system dependency changed; install the update with your package manager',
+  update_pkgInstall: 'the package could not be installed; install the update with your package manager',
+  update_authCancelled: 'the password prompt was cancelled; try again or install with your package manager',
   update_timeout: 'the download timed out',
   update_network: 'a network problem blocked the download',
   update_downloadFailed: 'the update could not be downloaded',

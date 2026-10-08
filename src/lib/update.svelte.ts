@@ -168,3 +168,81 @@ export function displayUpdateNotes(raw: string | null, version: string | null): 
 
 // Re-export for tests / typing only.
 export type { UpdateState }
+
+/**
+ * The banner's plain-language classification of a raw updater error: the i18n
+ * key carrying the friendly one-line reason, or null when there is nothing to
+ * explain. The raw string is already logged to the console (apply()'s catch),
+ * so the banner surfaces only the friendly reason — a non-technical user
+ * should not see "invalid encoding in minisign data" or a bare HTTP status.
+ *
+ * The matched strings are the messages tauri-plugin-updater 2.11 and reqwest
+ * 0.13 actually emit: transport failures ("error sending request for url …")
+ * and a download stream dying mid-body ("request or response body error")
+ * mention no network words of their own; "Failed to install package" /
+ * "Failed to install .deb package" is the pkexec/zenity/sudo install of the
+ * downloaded deb/rpm failing; "Authentication failed or was cancelled" means
+ * every password prompt for that install was dismissed or unavailable.
+ * Unknown failures fall back to the generic message; the detail stays in the
+ * console.
+ */
+export type UpdateErrorReason =
+  | 'update_sigError'
+  | 'update_pkgDeps'
+  | 'update_pkgInstall'
+  | 'update_authCancelled'
+  | 'update_timeout'
+  | 'update_network'
+  | 'update_downloadFailed'
+  | 'update_diskSpace'
+  | 'update_permissions'
+  | 'update_installFailed'
+
+export function updateErrorReason(raw: string | null): UpdateErrorReason | null {
+  if (!raw) return null
+  const s = raw.toLowerCase()
+  if (s.includes('minisign') || s.includes('signature') || s.includes('verif')) {
+    return 'update_sigError'
+  }
+  // Package-manager install failures (deb/rpm): the updater replaced the
+  // package out from under dpkg/rpm and a dependency changed — the user
+  // must let the package manager perform this one. Matched before the
+  // generic HTTP-status arm, whose bare-number regex would otherwise eat
+  // dpkg/apt-style suffixes like "dependency problems (exit 1)".
+  if (s.includes('failed dependencies') || s.includes('dependency problems') || s.includes('depends on ')) {
+    return 'update_pkgDeps'
+  }
+  // The package install itself failed (not a dependency change) — same
+  // advice: let the package manager run this update.
+  if (s.includes('failed to install')) {
+    return 'update_pkgInstall'
+  }
+  if (s.includes('authentication failed')) {
+    return 'update_authCancelled'
+  }
+  if (s.includes('timeout') || s.includes('timed out')) {
+    return 'update_timeout'
+  }
+  // The reqwest transport strings carry none of the classic network words,
+  // so match them explicitly alongside those.
+  if (
+    s.includes('network') ||
+    s.includes('connect') ||
+    s.includes('dns') ||
+    s.includes('resolve') ||
+    s.includes('error sending request') ||
+    s.includes('request or response body error')
+  ) {
+    return 'update_network'
+  }
+  if (s.includes('status') || /\b[45]\d\d\b/.test(s)) {
+    return 'update_downloadFailed'
+  }
+  if (s.includes('enospc') || s.includes('disk') || s.includes('no space') || s.includes('space')) {
+    return 'update_diskSpace'
+  }
+  if (s.includes('permission') || s.includes('denied') || s.includes('eacces') || s.includes('eperm')) {
+    return 'update_permissions'
+  }
+  return 'update_installFailed'
+}

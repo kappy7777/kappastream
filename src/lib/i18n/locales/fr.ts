@@ -357,6 +357,9 @@ export const fr: Record<TKey, string> = {
   update_youHave: ' (vous avez la v{version})',
   update_sigError: 'la signature de la mise à jour n’a pas pu être vérifiée',
   update_pkgDeps: 'une dépendance système a changé ; installez la mise à jour via votre gestionnaire de paquets',
+  update_pkgInstall: 'le paquet n’a pas pu être installé ; installez la mise à jour via votre gestionnaire de paquets',
+  update_authCancelled:
+    'la demande de mot de passe a été annulée ; réessayez ou installez via votre gestionnaire de paquets',
   update_timeout: 'le téléchargement a expiré',
   update_network: 'un problème réseau a bloqué le téléchargement',
   update_downloadFailed: 'la mise à jour n’a pas pu être téléchargée',

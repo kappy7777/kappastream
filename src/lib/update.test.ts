@@ -224,6 +224,43 @@ describe('getters', () => {
   })
 })
 
+describe('updateErrorReason (the banner error classification)', () => {
+  const reason = (raw: string | null) => U.updateErrorReason(raw)
+
+  it('null input stays null (nothing to explain)', () => {
+    expect(reason(null)).toBeNull()
+  })
+
+  it('matches the real plugin error strings (tauri-plugin-updater 2.11 / reqwest 0.13)', () => {
+    // Dead connection while fetching — reqwest Kind::Request says no network words.
+    expect(
+      reason(
+        'error sending request for url (https://github.com/kappy7777/kappastream/releases/download/v1.0.6/latest.json)',
+      ),
+    ).toBe('update_network')
+    // Download stream died mid-body — reqwest Kind::Body.
+    expect(reason('request or response body error: connection closed')).toBe('update_network')
+    // The pkexec/zenity/sudo install of the downloaded deb/rpm failed.
+    expect(reason('Failed to install package')).toBe('update_pkgInstall')
+    expect(reason('Failed to install .deb package')).toBe('update_pkgInstall')
+    // Every password prompt for that install was dismissed or unavailable.
+    expect(reason('Authentication failed or was cancelled')).toBe('update_authCancelled')
+  })
+
+  it('keeps the pre-existing mappings', () => {
+    expect(reason('invalid minisign signature')).toBe('update_sigError')
+    expect(reason('dependency problems (exit 1)')).toBe('update_pkgDeps')
+    expect(reason('request timed out')).toBe('update_timeout')
+    expect(reason('HTTP status 404')).toBe('update_downloadFailed')
+    expect(reason('No space left on device (os error 28)')).toBe('update_diskSpace')
+    expect(reason('permission denied (os error 13)')).toBe('update_permissions')
+  })
+
+  it('an unknown failure falls back to the generic install message', () => {
+    expect(reason('something novel went wrong')).toBe('update_installFailed')
+  })
+})
+
 describe('displayUpdateNotes (the banner one-line filter)', () => {
   const display = (raw: string | null, version: string | null = '1.0.5'): string | null =>
     U.displayUpdateNotes(raw, version)

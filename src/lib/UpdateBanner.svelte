@@ -3,7 +3,7 @@
   // App.svelte. Driven entirely by `updateStore`. A failed/absent check never
   // shows anything (the store stays `idle`); this component only renders when
   // an update is actually available (or a user-initiated install is in flight).
-  import { updateStore, displayUpdateNotes } from './update.svelte'
+  import { updateStore, displayUpdateNotes, updateErrorReason } from './update.svelte'
   import { t } from './i18n/index.svelte'
 
   function fmtBytes(n: number): string {
@@ -11,43 +11,6 @@
     const units = ['B', 'KB', 'MB', 'GB']
     const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)))
     return `${(n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
-  }
-
-  // Map raw tauri-plugin-updater errors to plain-language copy. The raw string
-  // is already logged to the console (update.svelte.ts apply() catch), so the
-  // banner surfaces only a friendly reason — a non-technical user should not
-  // see "invalid encoding in minisign data" or a bare HTTP status. Unknown
-  // failures fall back to a generic message; the detail stays in the console.
-  function friendlyError(raw: string | null): string | null {
-    if (!raw) return null
-    const s = raw.toLowerCase()
-    if (s.includes('minisign') || s.includes('signature') || s.includes('verif')) {
-      return t('update_sigError')
-    }
-    // Package-manager install failures (deb/rpm): the updater replaced the
-    // package out from under dpkg/rpm and a dependency changed — the user
-    // must let the package manager perform this one. Matched before the
-    // generic HTTP-status arm, whose bare-number regex would otherwise eat
-    // dpkg/apt-style suffixes like "dependency problems (exit 1)".
-    if (s.includes('failed dependencies') || s.includes('dependency problems') || s.includes('depends on ')) {
-      return t('update_pkgDeps')
-    }
-    if (s.includes('timeout') || s.includes('timed out')) {
-      return t('update_timeout')
-    }
-    if (s.includes('network') || s.includes('connect') || s.includes('dns') || s.includes('resolve')) {
-      return t('update_network')
-    }
-    if (s.includes('status') || /\b[45]\d\d\b/.test(s)) {
-      return t('update_downloadFailed')
-    }
-    if (s.includes('enospc') || s.includes('disk') || s.includes('no space') || s.includes('space')) {
-      return t('update_diskSpace')
-    }
-    if (s.includes('permission') || s.includes('denied') || s.includes('eacces') || s.includes('eperm')) {
-      return t('update_permissions')
-    }
-    return t('update_installFailed')
   }
 
   // Relative "released Nd ago" from the manifest's pub_date, shown next to the
@@ -108,13 +71,12 @@
         >
       </div>
     {:else if updateStore.status === 'error'}
+      {@const reason = updateErrorReason(updateStore.errorMsg)}
       <div class="update-banner__main">
         <span class="update-banner__icon update-banner__icon--error" aria-hidden="true">!</span>
         <span class="update-banner__text">
           {t('update_failed', { version: updateStore.version ?? '' })}
-          {#if friendlyError(updateStore.errorMsg)}<span class="update-banner__reason">
-              — {friendlyError(updateStore.errorMsg)}</span
-            >{/if}
+          {#if reason}<span class="update-banner__reason"> — {t(reason)}</span>{/if}
         </span>
         <button type="button" class="update-banner__btn update-banner__btn--primary" onclick={() => updateStore.apply()}
           >{t('retry')}</button
