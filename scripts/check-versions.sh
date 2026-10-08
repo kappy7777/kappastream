@@ -15,7 +15,12 @@
 # file (streamlink, libmpv, the deb gst-libav dep, hicolor-icon-theme, the
 # tray's dlopen'd appindicator lib), so the tauri-bundler-generated deb/rpm
 # metadata and the hand-maintained control.in / spec / AUR definitions
-# cannot drift apart. tauri.conf.json is
+# cannot drift apart. PKGBUILD depends=() arrays are read comment-stripped —
+# a dependency commented out must read as absent, not still satisfy the
+# matrix. The published AUR snapshots' .SRCINFO files (the dotfiles aurweb's
+# package database actually reads) are compared against their PKGBUILDs:
+# pkgver/pkgrel/depends for both, plus -bin's source URL, sha256sums, and
+# versioned provides. tauri.conf.json is
 # read with `node -p` (node is already required for package.json above and is
 # installed by CI before this script runs; jq is NOT a dependency here).
 #
@@ -102,7 +107,9 @@ fi
 # version during a prerelease, which is not drift.
 SEMVER_RE='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?'
 failures=$(mktemp)
-trap 'rm -f "$failures"' EXIT INT TERM HUP
+aur_pb_list=$(mktemp)
+aur_si_list=$(mktemp)
+trap 'rm -f "$failures" "$aur_pb_list" "$aur_si_list"' EXIT INT TERM HUP
 
 scan_file() {
     path=$1
@@ -125,7 +132,15 @@ else
   git ls-files packaging | grep -E '(^|/)README\.md$' | while IFS= read -r f; do
       scan_file "$f"
   done
-  # Plus the one PKGBUILD whose pkgver must track the current version.
+  # Plus the one PKGBUILD whose pkgver must track the current version. The
+  # published .SRCINFO files are deliberately NOT semver-scanned: their
+  # resolved source URLs contain `1.0.5-x86_64` and friends, which the
+  # pre-release tail of the regex reads as a false mismatch. Their version
+  # staleness is covered structurally instead — the .SRCINFO checks below
+  # compare pkgver, the resolved source URL, and the versioned provides
+  # against this PKGBUILD, whose own pkgver this scan pins to $PKG_VER.
+  # (The -git .SRCINFO legitimately lags between releases, like the -git
+  # PKGBUILD.)
   scan_file "packaging/aur/PKGBUILD-bin"
 
   if [ -s "$failures" ]; then
@@ -155,6 +170,12 @@ for aur_pkgbuild in \
     if ! grep -qE '^[[:space:]]*cargo build .*--no-default-features' "$aur_pkgbuild"; then
         fail "$aur_pkgbuild: AUR -git build is missing --no-default-features — the updater plugins would be registered on an Arch install (pacman owns updates). See src-tauri/Cargo.toml [features] default = [\"updater\"] and src-tauri/src/lib.rs."
     fi
+    # --no-default-features also drops the default mpv-embed engine; the same
+    # command line must re-add it, or the AUR binary ships without the
+    # embedded engine while its depends=() still declares Arch's mpv package.
+    if ! grep -qE '^[[:space:]]*cargo build .*--features.*mpv-embed' "$aur_pkgbuild"; then
+        fail "$aur_pkgbuild: AUR -git build does not re-add mpv-embed after --no-default-features — the embedded engine would be compiled out. See src-tauri/Cargo.toml [features]."
+    fi
 done
 
 # AUR template/snapshot pair identity (packaging drift, not version drift).
@@ -173,6 +194,89 @@ for aur_pair in \
     if ! cmp -s "$aur_template" "$aur_snapshot"; then
         fail "$aur_template and $aur_snapshot differ — keep each AUR template/snapshot pair byte-identical (copy one over the other in the same commit that changes either)"
     fi
+done
+
+# AUR snapshot .SRCINFO consistency (packaging drift, like the pair check
+# above — runs unconditionally). aurweb's package database reads ONLY
+# submit/<pkg>/.SRCINFO, a dotfile a plain `ls` hides, so a bump that edits
+# the PKGBUILDs but not their .SRCINFO pushes a snapshot whose package page
+# keeps serving the old version, deps, and tarball hash while CI stays
+# green. Each snapshot must agree with its PKGBUILD on the fields a release
+# touches: pkgver, pkgrel, and depends for both packages; -bin additionally
+# resolves the source URL, the tarball sha256sums, and the versioned
+# provides the PKGBUILD writes via ${pkgver} interpolation.
+pkgbuild_var() {
+    # $1 = PKGBUILD path, $2 = variable name. Prints the first top-level
+    # assignment. `pkgver() {` cannot match: the anchor requires `=`
+    # immediately after the name.
+    sed -n "s/^$2=//p" "$1" | head -n 1 | tr -d '"'
+}
+pkgbuild_array_entries() {
+    # $1 = PKGBUILD path, $2 = array name. Prints one entry per line, single-
+    # or double-quoted, from a single- or multi-line assignment. Comments are
+    # stripped first so an entry commented out inside the array reads as
+    # absent — the dependency matrix must not be satisfiable by prose.
+    # Entries in these files never contain ')' or '#', so the [^)]* capture
+    # is safe, and no entry mixes both quote styles.
+    sed -e 's/#.*//' "$1" | tr '\n' ' ' \
+        | grep -oE "(^|[^A-Za-z0-9_])$2=\\([^)]*\\)" \
+        | head -n 1 | grep -oE "\"[^\"]*\"|'[^']*'" | tr -d "\"'"
+}
+pkgbuild_expand_vars() {
+    # $1 = PKGBUILD path; expands ${_repo}/${_pkgname}/${pkgver} (and the
+    # bare $pkgver form) on stdin to the values that file assigns, so
+    # interpolated entries compare equal against .SRCINFO's resolved text.
+    _repo_v="$(pkgbuild_var "$1" _repo)"
+    _pkgname_v="$(pkgbuild_var "$1" _pkgname)"
+    _pkgver_v="$(pkgbuild_var "$1" pkgver)"
+    sed -e "s|\${_repo}|${_repo_v}|g" \
+        -e "s|\${_pkgname}|${_pkgname_v}|g" \
+        -e "s|\${pkgver}|${_pkgver_v}|g" \
+        -e "s|\$pkgver|${_pkgver_v}|g"
+}
+srcinfo_values() {
+    # $1 = .SRCINFO path, $2 = field. Prints one `field = value` entry per
+    # line; .SRCINFO values are already resolved (no shell interpolation).
+    # The anchored name cannot match makedepends/optdepends for a `depends`
+    # query, or pkgver() prose.
+    sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1"
+}
+aur_lists_differ() {
+    # $1 = label for the error message. Expects PKGBUILD entries sorted in
+    # $aur_pb_list and .SRCINFO entries sorted in $aur_si_list.
+    if ! cmp -s "$aur_pb_list" "$aur_si_list"; then
+        echo "check-versions: ERROR: $1 differ between the PKGBUILD and its .SRCINFO:" >&2
+        diff "$aur_pb_list" "$aur_si_list" | sed 's/^/    /' >&2
+        echo "    (< = PKGBUILD, > = .SRCINFO — regenerate the .SRCINFO in the same commit)" >&2
+        exit 1
+    fi
+}
+aur_srcinfo_check() {
+    # $1 = PKGBUILD path, $2 = its published .SRCINFO.
+    aur_pkgbuild=$1
+    aur_srcinfo=$2
+    [ -f "$aur_srcinfo" ] \
+        || fail "$aur_srcinfo is missing — every submit/ snapshot ships its .SRCINFO (a dotfile; plain ls hides it)"
+    for field in pkgver pkgrel; do
+        pb_val="$(pkgbuild_var "$aur_pkgbuild" "$field")"
+        si_val="$(srcinfo_values "$aur_srcinfo" "$field" | head -n 1)"
+        [ "$pb_val" = "$si_val" ] \
+            || fail "$aur_pkgbuild and $aur_srcinfo disagree on $field ('$pb_val' vs '$si_val') — regenerate the .SRCINFO in the same commit"
+    done
+    pkgbuild_array_entries "$aur_pkgbuild" depends | sort > "$aur_pb_list"
+    srcinfo_values "$aur_srcinfo" depends | sort > "$aur_si_list"
+    aur_lists_differ "$aur_pkgbuild depends=() entries"
+}
+aur_srcinfo_check packaging/aur/PKGBUILD packaging/aur/submit/kappastream-git/.SRCINFO
+aur_srcinfo_check packaging/aur/PKGBUILD-bin packaging/aur/submit/kappastream-bin/.SRCINFO
+# -bin only: the fields whose .SRCINFO values resolve PKGBUILD
+# interpolation (the source URL, the versioned provides) plus the pinned
+# tarball hash.
+for field in provides source sha256sums; do
+    pkgbuild_array_entries packaging/aur/PKGBUILD-bin "$field" \
+        | pkgbuild_expand_vars packaging/aur/PKGBUILD-bin | sort > "$aur_pb_list"
+    srcinfo_values packaging/aur/submit/kappastream-bin/.SRCINFO "$field" | sort > "$aur_si_list"
+    aur_lists_differ "PKGBUILD-bin $field=() entries"
 done
 
 # Linux runtime-dependency drift check (packaging integrity, like the AUR
@@ -219,20 +323,14 @@ spec_requires() {
     sed -n 's/^[[:space:]]*Requires:[[:space:]]*//p' packaging/fedora/kappastream.spec.in \
         | tr ',' '\n' | sed -e 's/[[:space:]]//g' -e '/^$/d'
 }
-aur_depends() {
-    # $1 = PKGBUILD path. Prints each single-quoted depends=() entry, one per
-    # line. grep -oE is line-scoped, so an apostrophe inside an array comment
-    # cannot pair across lines.
-    sed -n '/^depends=(/,/^[[:space:]]*)/p' "$1" | grep -oE "'[^']+'" | tr -d "'"
-}
 dep_list_for() {
     case $1 in
       tauri-deb) tauri_deb_deps ;;
       tauri-rpm) tauri_rpm_deps ;;
       control)   control_depends ;;
       spec)      spec_requires ;;
-      aur-git)   aur_depends packaging/aur/PKGBUILD ;;
-      aur-bin)   aur_depends packaging/aur/PKGBUILD-bin ;;
+      aur-git)   pkgbuild_array_entries packaging/aur/PKGBUILD depends ;;
+      aur-bin)   pkgbuild_array_entries packaging/aur/PKGBUILD-bin depends ;;
       *)         fail "dependency matrix references unknown slot '$1'" ;;
     esac
 }
@@ -285,4 +383,4 @@ if [ -s "$failures" ]; then
     exit 1
 fi
 
-echo "check-versions: OK — package.json, Cargo.toml and Cargo.lock all at $PKG_VER; no stale packaging versions; AUR -git builds are updater-off; AUR template/snapshot pairs identical; Linux runtime deps present in every packaging file."
+echo "check-versions: OK — package.json, Cargo.toml and Cargo.lock all at $PKG_VER; no stale packaging versions; AUR -git builds are updater-off with mpv-embed re-added; AUR template/snapshot pairs identical with .SRCINFO fields in sync; Linux runtime deps present in every packaging file."
