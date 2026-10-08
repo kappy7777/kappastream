@@ -427,3 +427,47 @@ it('an error tile offers a Retry button that re-resolves', async () => {
   await sleep(150)
   expect(resolves()).toBe(2)
 })
+
+// A native tile's resolve/attach window must not flash the full hls look
+// (HTML bar + label + drag handle) before the OSC takes over — the loading
+// state is excluded from htmlControls. Controls come back for the states
+// that need them (offline/error).
+it('native mode: no HTML overlay flash while a tile loads', async () => {
+  settings.setMpvEngine(true)
+  mountView(true)
+  await sleep(60)
+  let releaseLoad: (() => void) | null = null
+  vi.mocked(invoke).mockImplementation((cmd: string) => {
+    if (cmd === 'mpv_load') {
+      return new Promise((res) => {
+        releaseLoad = () => res({ ok: true })
+      })
+    }
+    return Promise.resolve({ ok: true, url: 'https://example.invalid/x.m3u8' })
+  })
+  tileStore.addOrReplace('chan1', 'best', 1)
+  await sleep(250)
+  const tile = () => document.querySelector('[data-tile-id]')!
+  // Loading, native attach pending: spinner only, none of the hls look.
+  expect(tile().querySelector('.mv-tile-overlay')).toBeTruthy()
+  expect(tile().querySelector('.mv-tile-controls')).toBeNull()
+  expect(tile().querySelector('.mv-drag-handle')).toBeNull()
+  expect(tile().querySelector('.mv-tile-channel')).toBeNull()
+
+  releaseLoad!()
+  await sleep(200)
+  // Playing natively: the OSC owns the tile, the HTML bar stays away.
+  expect(tile().querySelector('.mv-tile-controls')).toBeNull()
+
+  // An offline-resolving native tile DOES get the HTML controls back
+  // (close/volume/Retry live there).
+  vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    if (cmd === 'resolve_stream') return { ok: false, offline: true }
+    return { ok: true, url: 'https://example.invalid/x.m3u8' }
+  })
+  tileStore.addOrReplace('chan2', 'best', 1)
+  await sleep(250)
+  const tiles = () => [...document.querySelectorAll('[data-tile-id]')]
+  expect(tiles()[1]!.querySelector('.mv-tile-controls')).toBeTruthy()
+  expect(tiles()[1]!.querySelector('.mv-overlay-retry')).toBeTruthy()
+})

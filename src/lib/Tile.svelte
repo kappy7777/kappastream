@@ -949,14 +949,17 @@
   })
 
   // The HTML overlay controls (bar, label, drag handle) render for hls
-  // tiles AND for native tiles whose surface is NOT up — the initial load
-  // before the first native attach, an offline/error resolve, a mid-playback
-  // engine error or stream end, or an mpv_load fallback to hls.js. While the
-  // native surface is actually showing, the mpv OSC owns the tile and the
-  // HTML overlay stays away; gating on mpvEnabled alone left every one of
-  // those states with NO controls at all (uncloseable, unmutable, no quality
-  // menu — the OSC's surface was already hidden).
-  const htmlControls = $derived(controlsShown && !(mpvEnabled && nativeActive))
+  // tiles AND for native tiles whose surface is NOT up — an offline/error
+  // resolve, a mid-playback engine error or stream end, or an mpv_load
+  // fallback to hls.js. While the native surface is actually showing, the
+  // mpv OSC owns the tile and the HTML overlay stays away; gating on
+  // mpvEnabled alone left every one of those states with NO controls at
+  // all (uncloseable, unmutable, no quality menu — the OSC's surface was
+  // already hidden). The LOADING state is excluded on purpose too: a
+  // native tile's resolve/attach window would otherwise flash the full
+  // hls look before the OSC takes over (spinner-only until it plays or
+  // fails — a failure lands in offline/error, which bring the bar back).
+  const htmlControls = $derived(controlsShown && !(mpvEnabled && (nativeActive || tile.status === 'loading')))
 
   const showOverlay = $derived(tile.status === 'loading' || tile.status === 'offline' || tile.status === 'error')
 </script>
