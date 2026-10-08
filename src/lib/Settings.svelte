@@ -26,6 +26,7 @@
   } from './custom-themes.svelte'
   import CustomThemeEditor from './CustomThemeEditor.svelte'
   import VersionLog from './VersionLog.svelte'
+  import ShortcutsList from './ShortcutsList.svelte'
 
   let {
     onarmsleep,
@@ -1110,15 +1111,7 @@
             <VersionLog />
           {:else if section === 'shortcuts'}
             <h3 class="section-title">{t('shortcuts_title')}</h3>
-            <p class="shortcut-hint">
-              {t('shortcuts_hintPrefix')} <kbd>Space</kbd>
-              {t('shortcuts_hintPlay')}, <kbd>M</kbd>
-              {t('shortcuts_hintMute')}, <kbd>F</kbd>
-              {t('shortcuts_hintFullscreen')}, <kbd>T</kbd>
-              {t('shortcuts_hintTheater')}, {t('shortcuts_hintArrows')}
-              {t('shortcuts_hintPress')} <kbd>?</kbd>
-              {t('shortcuts_hintFullList')}
-            </p>
+            <ShortcutsList />
           {/if}
         </div>
       </div>
@@ -1739,26 +1732,6 @@
     margin: 0;
     font-size: 11px;
     color: var(--live);
-  }
-
-  .shortcut-hint {
-    margin: 0;
-    font-size: 12px;
-    line-height: 1.7;
-    color: var(--text-secondary);
-  }
-
-  .shortcut-hint kbd {
-    display: inline-block;
-    padding: 1px 5px;
-    border: 1px solid var(--border);
-    border-bottom-width: 2px;
-    border-radius: 3px;
-    background: var(--bg-input);
-    color: var(--text-primary);
-    font-family: 'Menlo', 'Consolas', monospace;
-    font-size: 10px;
-    line-height: 1.3;
   }
 
   .seg {

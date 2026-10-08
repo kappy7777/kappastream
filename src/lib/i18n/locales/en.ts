@@ -235,14 +235,6 @@ export const en = {
   shortcuts_volume: 'Volume up / down',
   shortcuts_showHelp: 'Show / hide this help',
   shortcuts_note: 'Shortcuts are disabled while typing in any text field (chat, search, inputs).',
-  shortcuts_hintPrefix: 'Player keyboard shortcuts:',
-  shortcuts_hintPlay: 'play',
-  shortcuts_hintMute: 'mute',
-  shortcuts_hintFullscreen: 'fullscreen',
-  shortcuts_hintTheater: 'theater',
-  shortcuts_hintArrows: 'arrows seek/volume.',
-  shortcuts_hintPress: 'Press',
-  shortcuts_hintFullList: 'for the full list.',
 
   // ---- Settings.svelte -----------------------------------------------------
   settings_language: 'Language',
