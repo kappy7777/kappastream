@@ -434,7 +434,13 @@
 </script>
 
 {#snippet toggleRow(id: string, label: string, hint: string, value: boolean, ontoggle: () => void)}
-  <div class="toggle-row">
+  <!-- The whole row toggles (the cursor promised as much, but only the
+     32x18px switch reacted). The switch inside stays the keyboard control —
+     its Enter/Space handler covers the row's action, so the row itself needs
+     no key handling. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="toggle-row" onclick={ontoggle}>
     <span class="toggle-label" {id}>
       {label}
       {#if hint}<span class="toggle-hint">{hint}</span>{/if}
@@ -446,7 +452,6 @@
       tabindex="0"
       aria-checked={value}
       aria-labelledby={id}
-      onclick={ontoggle}
       onkeydown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
