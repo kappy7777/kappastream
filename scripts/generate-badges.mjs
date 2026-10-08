@@ -18,15 +18,22 @@
 // SIZE index, NOT the IRC version — see badgeUrl in irc.ts).
 //
 // Every UUID emitted below was verified to return a real PNG at generation
-// time; any that did not are dropped. DO NOT HAND-EDIT the output — re-run:
+// time; any that did not are dropped. Verification failures that could be
+// transient (timeout, 429, 5xx) abort the run instead of dropping live
+// badges, and a result that would sharply shrink the existing baseline is
+// refused. DO NOT HAND-EDIT the output — re-run:
 //   node scripts/generate-badges.mjs
 
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 
 const GQL_URL = 'https://gql.twitch.tv/gql'
 const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 const CDN_HOST = 'https://static-cdn.jtvnw.net'
 const OUT_PATH = new URL('../src/lib/badges.generated.ts', import.meta.url)
+
+// A regenerated baseline holding under this fraction of the previous set
+// count aborts the run instead of writing (see previousSetCount).
+const SHARP_DROP_FRACTION = 0.8
 
 const QUERY = 'query { badges { setID version title imageURL(size: NORMAL) } }'
 
@@ -158,27 +165,38 @@ async function gqlFetchBadges() {
   throw new Error(`GQL fetch failed after retries: ${lastErr}`)
 }
 
-// Verify a UUID returns a real image at size 1. Returns true if it resolves to
-// a PNG, false otherwise. Used to guarantee no shipped UUID 404s.
+// Verify a UUID returns a real image at size 1. Returns true if it resolves
+// to a PNG, and false only when the CDN definitively disowns the badge (a
+// 404/403, or a 2xx body whose bytes are not a PNG — one current set serves
+// Photoshop data mislabeled image/png, which no <img> can decode). Transient
+// failures (timeout, 429, 5xx) are retried and, if they persist, THROW:
+// counting them as dead badges would let a network hiccup silently shrink the
+// committed baseline while the script still exits 0.
 async function uuidResolves(uuid) {
   const url = `${CDN_HOST}/badges/v1/${uuid}/1`
-  try {
-    const resp = await fetch(url, {
-      method: 'GET',
-      signal: AbortSignal.timeout(15000),
-      headers: { range: 'bytes=0-7' },
-    })
-    if (!resp.ok) return false
-    // CDN serves image/png OR binary/octet-stream (same PNG bytes); sniff the
-    // PNG magic rather than trusting the content-type label. Request a small
-    // range so we don't download every full image (the CDN honours range and
-    // returns 206 + the first bytes; if it ignored range we'd get the whole
-    // image, whose first bytes are still the PNG magic).
-    const buf = new Uint8Array(await resp.arrayBuffer())
-    return buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47
-  } catch {
-    return false
+  let lastErr
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1000 * attempt))
+    try {
+      const resp = await fetch(url, {
+        method: 'GET',
+        signal: AbortSignal.timeout(15000),
+        headers: { range: 'bytes=0-7' },
+      })
+      if (resp.status === 404 || resp.status === 403) return false
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      // CDN serves image/png OR binary/octet-stream (same PNG bytes); sniff the
+      // PNG magic rather than trusting the content-type label. Request a small
+      // range so we don't download every full image (the CDN honours range and
+      // returns 206 + the first bytes; if it ignored range we'd get the whole
+      // image, whose first bytes are still the PNG magic).
+      const buf = new Uint8Array(await resp.arrayBuffer())
+      return buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47
+    } catch (e) {
+      lastErr = e
+    }
   }
+  throw new Error(`badge check for ${uuid} failed after retries: ${lastErr}`)
 }
 
 async function mapLimited(items, limit, fn) {
@@ -197,13 +215,20 @@ async function mapLimited(items, limit, fn) {
 // Group the GQL badges by setID -> [{version, uuid, title}] (deduped).
 function groupBySetID(badges) {
   const map = new Map()
+  let skipped = 0
   for (const b of badges) {
     const setID = b.setID
     const version = String(b.version ?? '')
     const uuid = uuidFromImageURL(b.imageURL)
-    if (!setID || !version || !uuid) continue
+    if (!setID || !version || !uuid) {
+      skipped++
+      continue
+    }
     if (!map.has(setID)) map.set(setID, new Map())
     map.get(setID).set(version, { version, uuid, title: b.title ?? '' })
+  }
+  if (skipped > 0) {
+    console.log(`  WARNING: ${skipped} row(s) lacked setID/version/imageURL and were skipped`)
   }
   return map
 }
@@ -242,11 +267,15 @@ function cmpVersion(a, b) {
 }
 
 function emitKey(k) {
-  return /^[A-Za-z_$][\w$]*$/.test(k) ? k : `'${k}'`
+  return /^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k)
 }
 
+// JSON.stringify escapes everything a JS string literal needs escaped
+// (quotes, backslashes, control characters); a hand-rolled escaper that
+// misses one — say a raw newline inside an upstream title — emits a file
+// that no longer parses.
 function emitStr(s) {
-  return `'${String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+  return JSON.stringify(String(s))
 }
 
 function emitEntry(setID, entry) {
@@ -299,6 +328,19 @@ export const BASELINE_BADGES: Record<string, BadgeMeta> = {
   return `${header}${body}\n}\n`
 }
 
+// The existing baseline's set count, from its header line. Used to refuse
+// overwriting a much larger committed baseline: a partial upstream format
+// change — rows silently failing to parse — would otherwise write a
+// near-empty file that still compiles and ships.
+function previousSetCount() {
+  try {
+    const m = readFileSync(OUT_PATH, 'utf8').match(/^\/\/ (\d+) badge sets, \d+ versions\.$/m)
+    return m ? Number(m[1]) : null
+  } catch {
+    return null // no baseline yet — nothing to compare against
+  }
+}
+
 async function main() {
   console.log('Fetching global badges via GQL...')
   const badges = await gqlFetchBadges()
@@ -306,10 +348,17 @@ async function main() {
 
   const bySet = groupBySetID(badges)
 
-  // Add legacy aliases (alias -> canonical entry, built from GQL data).
+  // Add legacy aliases (alias -> canonical entry, built from GQL data). An
+  // alias must never overwrite a set GQL serves under that setID itself: if
+  // Twitch revives a legacy name, its own data wins.
   for (const [alias, canonical] of Object.entries(LEGACY_ALIASES)) {
     const canon = bySet.get(canonical)
-    if (canon) bySet.set(alias, canon)
+    if (!canon) continue
+    if (bySet.has(alias)) {
+      console.log(`  alias ${alias} not applied: GQL serves its own ${alias} set`)
+      continue
+    }
+    bySet.set(alias, canon)
   }
   // Add standalone legacy badges as single-version entries.
   for (const [setID, meta] of Object.entries(LEGACY_STANDALONE)) {
@@ -348,6 +397,16 @@ async function main() {
   const versionCount = entries.reduce((n, [, e]) => n + (e.perVersion ? Object.keys(e.perVersion).length : 1), 0)
   const dateStr = new Date().toISOString().slice(0, 10)
   const file = emitFile(entries, dateStr, entries.length, versionCount)
+
+  // A drop this sharp means an upstream format change or a partial outage,
+  // not a real cull; refuse to overwrite the baseline with it.
+  const prevSets = previousSetCount()
+  if (prevSets !== null && entries.length < prevSets * SHARP_DROP_FRACTION) {
+    throw new Error(
+      `refusing to write ${entries.length} sets over the existing ${prevSets}-set baseline; ` +
+        'inspect the log above and rerun if the drop is genuine',
+    )
+  }
 
   writeFileSync(OUT_PATH, file)
   console.log(
