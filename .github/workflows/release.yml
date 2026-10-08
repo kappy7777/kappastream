@@ -150,7 +150,9 @@ jobs:
             libmpv-dev
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
+        with:
+          toolchain: stable
 
       # Separate cache key from the AppImage job: the container's
       # Debian-12 toolchain and 24.04's produce glibc-incompatible
@@ -251,7 +253,9 @@ jobs:
           cache: npm
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
+        with:
+          toolchain: stable
 
       - name: Install Tauri + GStreamer system dependencies
         # Same dev headers as the native job, PLUS the GStreamer runtime codec
@@ -477,7 +481,9 @@ jobs:
           cache: npm
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
+        with:
+          toolchain: stable
 
       # Separate cache key from the Linux jobs (different target triple).
       - name: Cache Cargo (~/.cargo + src-tauri/target)
@@ -650,7 +656,9 @@ jobs:
           cache: npm
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
+        with:
+          toolchain: stable
 
       # Separate cache key from the Linux/Windows jobs (aarch64-apple-darwin).
       - name: Cache Cargo (~/.cargo + src-tauri/target)

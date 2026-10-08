@@ -44,8 +44,9 @@ jobs:
           cache: npm
 
       - name: Install Rust stable (with clippy + rustfmt)
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
         with:
+          toolchain: stable
           components: clippy, rustfmt
 
       - name: Install Tauri system dependencies
@@ -185,8 +186,9 @@ jobs:
         run: npm run build
 
       - name: Install Rust stable (with clippy)
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
         with:
+          toolchain: stable
           components: clippy
 
       - name: Cache Cargo (~/.cargo + src-tauri/target)
