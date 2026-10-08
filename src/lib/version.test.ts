@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isVersionNewer, compareSemverCore } from './version'
+import { isVersionNewer, compareSemverCore, semverCore } from './version'
 
 describe('isVersionNewer (downgrade guard)', () => {
   it('a higher patch is newer', () => {
@@ -69,5 +69,24 @@ describe('compareSemverCore (three-way sort key)', () => {
   it('drives a newest-first sort', () => {
     const versions = ['0.2.9', '1.0.0', '0.3.1', '1.0.3', '1.0.1']
     expect([...versions].sort((a, b) => compareSemverCore(b, a))).toEqual(['1.0.3', '1.0.1', '1.0.0', '0.3.1', '0.2.9'])
+  })
+})
+
+describe('semverCore (core extraction)', () => {
+  it('strips pre-release and build tails', () => {
+    expect(semverCore('1.2.3-rc1')).toBe('1.2.3')
+    expect(semverCore('0.2.6-beta.2')).toBe('0.2.6')
+    expect(semverCore('1.0.6-rc1+build.7')).toBe('1.0.6')
+  })
+
+  it('passes a plain core through', () => {
+    expect(semverCore('1.0.6')).toBe('1.0.6')
+    expect(semverCore('10.20.30')).toBe('10.20.30')
+  })
+
+  it('returns an empty string when there is no parseable core', () => {
+    expect(semverCore('garbage')).toBe('')
+    expect(semverCore('')).toBe('')
+    expect(semverCore('v1.2')).toBe('')
   })
 })

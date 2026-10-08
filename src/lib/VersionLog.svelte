@@ -6,11 +6,22 @@
   // where the log scrolls via its own container, this component just sizes to
   // its content (flex:1 + overflow-y:auto makes it fill/scroll when the
   // parent bounds it). Sections (Added / Changed / Fixed) mirror the
-  // CHANGELOG's headings per version; the running version leads, accented.
+  // CHANGELOG's headings per version; the running version leads, accented —
+  // even before its curated notes exist, in which case its block carries the
+  // generic line (releaseNoteVersions guarantees the running version's
+  // presence; the empty-list branch below is only the unparseable-version
+  // fail-safe).
   import { t } from './i18n/index.svelte'
   import { releaseNotesFor, releaseNoteVersions } from './release-notes'
+  import { compareSemverCore } from './version'
 
   const noteVersions = $derived(releaseNoteVersions(__APP_VERSION__))
+
+  // Core comparison, not string equality: an rc build (1.0.6-rc1) must
+  // accent its own core's block (1.0.6).
+  function isRunning(version: string): boolean {
+    return compareSemverCore(version, __APP_VERSION__) === 0
+  }
 </script>
 
 <div class="version-log">
@@ -20,30 +31,34 @@
     {#each noteVersions as version, idx (version)}
       {@const vn = releaseNotesFor(version)}
       <section class="version-block" class:version-block--first={idx === 0}>
-        <h3 class="version-h" class:version-h--latest={version === __APP_VERSION__}>v{version}</h3>
-        {#if vn.added && vn.added.length > 0}
-          <p class="version-section-h">{t('whatsnew_added')}</p>
-          <ul class="version-list">
-            {#each vn.added as h (h)}
-              <li>{h}</li>
-            {/each}
-          </ul>
-        {/if}
-        {#if vn.changed && vn.changed.length > 0}
-          <p class="version-section-h">{t('whatsnew_changed')}</p>
-          <ul class="version-list">
-            {#each vn.changed as h (h)}
-              <li>{h}</li>
-            {/each}
-          </ul>
-        {/if}
-        {#if vn.fixed && vn.fixed.length > 0}
-          <p class="version-section-h">{t('whatsnew_fixed')}</p>
-          <ul class="version-list">
-            {#each vn.fixed as h (h)}
-              <li>{h}</li>
-            {/each}
-          </ul>
+        <h3 class="version-h" class:version-h--latest={isRunning(version)}>v{version}</h3>
+        {#if !vn.added?.length && !vn.changed?.length && !vn.fixed?.length}
+          <p class="version-generic">{t('whatsnew_generic')}</p>
+        {:else}
+          {#if vn.added && vn.added.length > 0}
+            <p class="version-section-h">{t('whatsnew_added')}</p>
+            <ul class="version-list">
+              {#each vn.added as h (h)}
+                <li>{h}</li>
+              {/each}
+            </ul>
+          {/if}
+          {#if vn.changed && vn.changed.length > 0}
+            <p class="version-section-h">{t('whatsnew_changed')}</p>
+            <ul class="version-list">
+              {#each vn.changed as h (h)}
+                <li>{h}</li>
+              {/each}
+            </ul>
+          {/if}
+          {#if vn.fixed && vn.fixed.length > 0}
+            <p class="version-section-h">{t('whatsnew_fixed')}</p>
+            <ul class="version-list">
+              {#each vn.fixed as h (h)}
+                <li>{h}</li>
+              {/each}
+            </ul>
+          {/if}
         {/if}
       </section>
     {/each}
@@ -92,6 +107,12 @@
      THIS update" answer is visually first. */
   .version-h--latest {
     color: var(--accent);
+  }
+  .version-generic {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
   }
   .version-section-h {
     margin: 0;

@@ -29,7 +29,7 @@
 // title, buttons, the section headers, the streamlink hint — IS translated
 // (see the i18n catalogue). Revisit if release cadence rises.
 
-import { compareSemverCore } from './version'
+import { compareSemverCore, semverCore } from './version'
 
 export interface VersionNotes {
   /** New features (mirrors the CHANGELOG's ### Added bullets). */
@@ -159,16 +159,23 @@ export function releaseNotesFor(version: string): VersionNotes {
 }
 
 /**
- * Every recorded version that has curated notes, NEWEST FIRST, capped at
- * `currentVersion` (the running build). The what's-new screen and the
- * About-modal changelog render this list scrollably, so highlights from
- * previous releases stay reachable. Versions NEWER than the running build
- * are excluded: a draft of the next release's entry written before tagging
- * it must never surface unreleased notes in a shipped build. Comparison is
- * SemVer-core (rc tails compare as their core).
+ * The version log's entries, NEWEST FIRST, capped at `currentVersion` (the
+ * running build): every recorded version that has curated notes, plus the
+ * running version itself when it has none — a build shipped before its
+ * notes were drafted must still lead with its own block (rendered with the
+ * generic line), not the previous release's highlights. Versions NEWER
+ * than the running build are excluded: a draft of the next release's entry
+ * written before tagging it must never surface unreleased notes in a
+ * shipped build. Comparison is SemVer-core (rc tails compare as their
+ * core); an unparseable current version yields the plain recorded list.
  */
 export function releaseNoteVersions(currentVersion: string): string[] {
-  return Object.keys(RELEASE_NOTES)
+  const versions = Object.keys(RELEASE_NOTES)
     .filter((v) => compareSemverCore(v, currentVersion) <= 0)
     .sort((a, b) => compareSemverCore(b, a))
+  const core = semverCore(currentVersion)
+  if (core && (versions.length === 0 || versions[0] !== core)) {
+    versions.unshift(core)
+  }
+  return versions
 }

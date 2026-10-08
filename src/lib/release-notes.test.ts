@@ -55,8 +55,25 @@ describe('releaseNoteVersions — the scrollable version log', () => {
       const [bmaj, bmin, bpat] = b.split('.').map(Number)
       return bmaj - amaj || bmin - amin || bpat - apat
     })
-    // Use a far-future current version so every recorded one is included.
-    expect(releaseNoteVersions('99.0.0')).toEqual(all)
+    // Use a far-future current version so every recorded one is included;
+    // its own unrecorded core still leads the log with a generic-line block.
+    expect(releaseNoteVersions('99.0.0')).toEqual(['99.0.0', ...all])
+  })
+
+  it("the running version leads even when it has no curated notes (generic line, not the previous release's)", () => {
+    const list = releaseNoteVersions('99.0.0')
+    expect(list[0]).toBe('99.0.0')
+    expect(releaseNotesFor(list[0]!)).toEqual({})
+  })
+
+  it('the running version is not duplicated when it HAS curated notes', () => {
+    const list = releaseNoteVersions('1.0.3')
+    expect(list[0]).toBe('1.0.3')
+    expect(list.filter((v) => v === '1.0.3')).toHaveLength(1)
+  })
+
+  it('an unparseable current version keeps the plain recorded list (no synthetic block)', () => {
+    expect(releaseNoteVersions('not-a-version')).toEqual([])
   })
 
   it('caps at the running build — a drafted-but-unreleased entry never ships', () => {

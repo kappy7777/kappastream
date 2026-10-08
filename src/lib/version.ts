@@ -28,6 +28,16 @@ export function isVersionNewer(candidate: string, current: string): boolean {
 }
 
 /**
+ * The leading `major.minor.patch` core of a version string
+ * ('1.2.3-rc1' → '1.2.3'), or '' when there is no parseable core. Log
+ * headings and RELEASE_NOTES keys use the core so an rc build and its
+ * stable release refer to the same entry.
+ */
+export function semverCore(v: string): string {
+  return parseCore(v)?.join('.') ?? ''
+}
+
+/**
  * Three-way SemVer-core compare of two version strings (negative / zero /
  * positive). Pre-release tails are ignored — an rc compares as its core, the
  * same rule `isVersionNewer` applies. An unparseable string compares LOWEST
