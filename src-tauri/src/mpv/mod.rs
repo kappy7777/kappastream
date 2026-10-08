@@ -226,8 +226,9 @@ struct Engine {
     osd: (i64, i64),
     /// OSD image overlays (info block, storyboard thumbnails, page-UI
     /// snapshots): decoded by
-    /// the webview (which already has the sources cached/fetched) into BGRA and
-    /// pushed via mpv_set_bitmap; ks-osc.lua drives show/hide + geometry
+    /// the webview (which already has the sources cached/fetched) into
+    /// PREMULTIPLIED BGRA — the format overlay-add composites — and pushed
+    /// via mpv_set_bitmap; ks-osc.lua drives show/hide + geometry
     /// through `ks-overlay` script messages so the OSD stays the single
     /// source of layout truth. Rendered by mpv's `overlay-add`, which rides
     /// the same OSD path vo=libmpv already draws.
@@ -1214,12 +1215,16 @@ fn resample_bgra(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
     out
 }
 
-/// Crop a rect out of a cairo ARGB32 image surface (PREMULTIPLIED alpha,
-/// little-endian bytes `[B, G, R, A]`, rows padded to `stride`) and convert
-/// it to straight-alpha row-major BGRA — the format overlay-add composites.
-/// The webview snapshot hands us the page exactly in that cairo format.
-/// `crop` is (x, y, w, h) in snapshot pixels; it is clamped to the image
-/// and an empty intersection yields an empty vec.
+/// Crop a rect out of a cairo ARGB32 image surface and pack it into
+/// row-major BGRA. This is a PURE COPY of the pixel bytes: cairo ARGB32 is
+/// little-endian `[B, G, R, A]` with PREMULTIPLIED alpha, and overlay-add's
+/// `bgra` expects premultiplied pixels too (mpv input.rst: "every color
+/// component is already multiplied with the alpha component"; straight-alpha
+/// data violates that invariant and blends unpredictably per VO — darkened,
+/// speckled fringes on antialiased edges). Only the crop/clamp/stride logic
+/// lives here. The webview snapshot hands us the page exactly in that cairo
+/// format. `crop` is (x, y, w, h) in snapshot pixels; it is clamped to the
+/// image and an empty intersection yields an empty vec.
 fn argb32_crop_to_bgra(
     data: &[u8],
     stride: usize,
@@ -1239,31 +1244,20 @@ fn argb32_crop_to_bgra(
     let mut out = Vec::with_capacity(w * (y2 - y1) * 4);
     for row in y1..y2 {
         let base = row * stride + x1 * 4;
-        for px in data[base..base + w * 4].as_chunks::<4>().0 {
-            let (b, g, r, a) = (px[0], px[1], px[2], px[3]);
-            if a == 0 {
-                out.extend_from_slice(&[0, 0, 0, 0]);
-            } else if a == 255 {
-                out.extend_from_slice(&[b, g, r, a]);
-            } else {
-                // Un-premultiply with rounding: cairo stores color channels
-                // already multiplied by a/255.
-                let un = |c: u8| -> u8 {
-                    ((u16::from(c) * 255 + u16::from(a) / 2) / u16::from(a)) as u8
-                };
-                out.extend_from_slice(&[un(b), un(g), un(r), a]);
-            }
-        }
+        out.extend_from_slice(&data[base..base + w * 4]);
     }
     out
 }
 
-/// Zero the alpha of every packed straight-BGRA pixel OUTSIDE the union of
-/// `keeps` ((x, y, w, h) bitmap px, clamped). The page snapshot's crop box
-/// is the UNION BBOX of the overlapping elements — regions inside the box
-/// but outside the elements show the page's empty player, which would
-/// composite as an opaque dark border around the UI. Masking keeps only
-/// the elements themselves; empty `keeps` leaves the bitmap untouched.
+/// Zero every packed premultiplied-BGRA pixel OUTSIDE the union of `keeps`
+/// ((x, y, w, h) bitmap px, clamped). The page snapshot's crop box is the
+/// UNION BBOX of the overlapping elements — regions inside the box but
+/// outside the elements show the page's empty player, which would composite
+/// as an opaque dark border around the UI. ALL FOUR bytes go to zero, not
+/// just alpha: overlay-add blends premultiplied, where a pixel with a=0 but
+/// nonzero color channels ADDS that color to the video (a dark haze box
+/// around the tooltip). Masking keeps only the elements themselves; empty
+/// `keeps` leaves the bitmap untouched.
 fn mask_keep_rects(bgra: &mut [u8], w: usize, h: usize, keeps: &[(usize, usize, usize, usize)]) {
     if keeps.is_empty() || w == 0 || h == 0 || bgra.len() < w * h * 4 {
         return;
@@ -1280,7 +1274,7 @@ fn mask_keep_rects(bgra: &mut [u8], w: usize, h: usize, keeps: &[(usize, usize, 
     }
     for (px, keep) in bgra.as_chunks_mut::<4>().0.iter_mut().zip(mask) {
         if keep == 0 {
-            px[3] = 0;
+            *px = [0, 0, 0, 0];
         }
     }
 }
@@ -2034,28 +2028,30 @@ mod tests {
     }
 
     #[test]
-    fn keep_rect_masking_zeroes_only_outside_alpha() {
+    fn keep_rect_masking_zeroes_outside_pixels_whole() {
         // 3x2 bitmap, all opaque; keep the left column and the bottom-right
-        // pixel — everything else must end transparent (color kept, alpha 0).
+        // pixel — everything else must end FULLY zeroed. All four bytes, not
+        // just alpha: overlay-add blends premultiplied, and a=0 pixels with
+        // leftover color channels add that color to the video.
         let mut bgra = vec![0xEEu8; 3 * 2 * 4];
         mask_keep_rects(&mut bgra, 3, 2, &[(0, 0, 1, 2), (2, 1, 1, 1)]);
-        let alpha = |i: usize| bgra[i * 4 + 3];
-        assert_eq!(alpha(0), 0xEE); // (0,0) kept
-        assert_eq!(alpha(1), 0x00); // (1,0) outside
-        assert_eq!(alpha(2), 0x00); // (2,0) outside
-        assert_eq!(alpha(3), 0xEE); // (0,1) kept
-        assert_eq!(alpha(4), 0x00); // (1,1) outside
-        assert_eq!(alpha(5), 0xEE); // (2,1) kept — overlapping/clamped rect
-                                    // Out-of-bounds keeps clamp; empty keeps leave everything opaque.
+        let px = |i: usize| &bgra[i * 4..i * 4 + 4];
+        assert_eq!(px(0), &[0xEE; 4]); // (0,0) kept
+        assert_eq!(px(1), &[0, 0, 0, 0]); // (1,0) outside
+        assert_eq!(px(2), &[0, 0, 0, 0]); // (2,0) outside
+        assert_eq!(px(3), &[0xEE; 4]); // (0,1) kept
+        assert_eq!(px(4), &[0, 0, 0, 0]); // (1,1) outside
+        assert_eq!(px(5), &[0xEE; 4]); // (2,1) kept — overlapping/clamped rect
+                                       // Out-of-bounds keeps clamp; empty keeps leave everything opaque.
         let mut untouched = vec![0xEEu8; 4];
         mask_keep_rects(&mut untouched, 1, 1, &[]);
         assert_eq!(untouched, vec![0xEE; 4]);
         mask_keep_rects(&mut untouched, 1, 1, &[(9, 9, 5, 5)]);
-        assert_eq!(untouched[3], 0x00);
+        assert_eq!(untouched, vec![0, 0, 0, 0]);
     }
 
     #[test]
-    fn argb32_crop_unpremultiplies_and_clamps() {
+    fn argb32_crop_passes_premultiplied_and_clamps() {
         // 2x2 ARGB32 image, stride padded to 12 B (one phantom column):
         //   opaque red | 50% blue (premult b=64,a=128)
         //   transparent| opaque white
@@ -2065,12 +2061,15 @@ mod tests {
         let row2 = &mut data[12..]; // second row (past the 12 B stride)
         row2[0..4].copy_from_slice(&[0x00, 0x00, 0x00, 0x00]); // empty
         row2[4..8].copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]); // white
-                                                               // Full crop: straight alpha restored (64*255/128 = 127.5 → 128).
+                                                               // Full crop: the premultiplied bytes pass through UNTOUCHED —
+                                                               // cairo ARGB32 and overlay-add's bgra are the same
+                                                               // (premultiplied) format, so converting alpha would break
+                                                               // antialiased pixels for every consumer.
         assert_eq!(
             argb32_crop_to_bgra(&data, 12, 2, 2, (0, 0, 2, 2)),
             vec![
                 0x00, 0x00, 0xFF, 0xFF, //
-                0x80, 0x00, 0x00, 0x80, //
+                0x40, 0x00, 0x00, 0x80, //
                 0x00, 0x00, 0x00, 0x00, //
                 0xFF, 0xFF, 0xFF, 0xFF,
             ]

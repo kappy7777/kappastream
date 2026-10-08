@@ -4,8 +4,9 @@
  * HERE in the webview, from what the app already has: avatars load with
  * crossOrigin=anonymous (static-cdn.jtvnw.net sends ACAO:*, verified against
  * the live CDN), storyboard strips through the ksvod proxy (the VOD CDN sends
- * no CORS; the proxy adds it). Raw BGRA + base64 go to the Rust engine via
- * mpv_set_bitmap; Rust resamples/crops and composites with mpv's overlay-add.
+ * no CORS; the proxy adds it). Raw PREMULTIPLIED BGRA + base64 go to the Rust
+ * engine via mpv_set_bitmap; Rust resamples/crops and composites with mpv's
+ * overlay-add (premultiplied bgra per its docs — see toBgraBase64).
  * No new hosts, no fetches the page doesn't already make.
  */
 
@@ -16,12 +17,23 @@ export interface OsdBitmap {
 }
 
 function toBgraBase64(data: Uint8ClampedArray): string {
-  // RGBA → BGRA in place, then base64 in chunks (btoa takes strings, and
-  // spreading megabytes at once would blow the argument limit).
+  // RGBA → PREMULTIPLIED BGRA, then base64 in chunks (btoa takes strings,
+  // and spreading megabytes at once would blow the argument limit).
+  // getImageData hands out UN-premultiplied pixels, but mpv's overlay-add
+  // composites premultiplied ("every color component is already multiplied
+  // with the alpha component", mpv input.rst) — uploading straight alpha
+  // makes antialiased edges blend unpredictably (darkened, speckled text)
+  // and the infoblock's transparent regions misbehave. a=255 stays exact
+  // ((c*255+127)/255 floors back to c); a=0 zeroes the pixel.
   for (let i = 0; i < data.length; i += 4) {
-    const r = data[i]
-    data[i] = data[i + 2]
+    const a = data[i + 3]
+    const r = ((data[i] * a + 127) / 255) | 0
+    const g = ((data[i + 1] * a + 127) / 255) | 0
+    const b = ((data[i + 2] * a + 127) / 255) | 0
+    data[i] = b
+    data[i + 1] = g
     data[i + 2] = r
+    data[i + 3] = a
   }
   let bin = ''
   const CHUNK = 0x8000
