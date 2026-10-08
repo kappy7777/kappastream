@@ -63,7 +63,8 @@
 //     NEVER the GTK main thread, which is the render thread (the GLArea
 //     render callback) and must per libmpv's render.h contract call only
 //     mpv_render_* functions. A per-engine gate (`with_core`) serializes
-//     concurrent commands deterministically. GTK-only commands
+//     concurrent commands (fire-and-forget calls may arrive out of call
+//     order — see `with_core`). GTK-only commands
 //     (mpv_set_rect, mpv_set_surface_visible, mpv_page_snapshot) and the
 //     state-only mpv_set_bitmap stay sync — running on the main thread is
 //     what they want; the engine bootstrap (widgets + render-context
@@ -515,6 +516,16 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
             init.set_property("scripts", osc_script.as_str())?;
             init.set_property("ytdl", false)?;
             init.set_property("input-default-bindings", false)?;
+            // Builtin scripts (console, stats) still load under
+            // load-scripts=no — that option only stops script-directory
+            // autoloading. They sit dormant here (no keyboard input reaches
+            // mpv), but loading them into every engine buys nothing. Set
+            // tolerantly: mpv renamed load-osd-console to load-console after
+            // 0.40, and an unknown name must never fail engine creation —
+            // each line applies where the name exists, no-ops where not.
+            let _ = init.set_property("load-stats-overlay", false);
+            let _ = init.set_property("load-osd-console", false);
+            let _ = init.set_property("load-console", false);
             // The render signal runs on the GTK main thread (WebKitGTK's UI
             // thread, also where every sync invoke lands). mpv_render_context_
             // render() blocks until a frame's target display time unless this
@@ -1494,12 +1505,14 @@ fn with_engine<R>(id: u32, f: impl FnOnce(&mut Engine) -> Result<R, String>) -> 
 /// GLArea render callback) and WebKitGTK's UI thread, and per libmpv's
 /// render.h threading contract must not call non-render core APIs or wait
 /// behind threads that do. The per-engine gate serializes concurrent
-/// commands (a tokio Mutex hands out lock() in request order); the strict
-/// invoke-order the sync commands had still holds where it matters because
-/// the frontend awaits every load, while the fire-and-forget commands
-/// (pointer, volume, script feeds) are last-wins. Quick, synchronous
-/// core calls are exactly what async Tauri commands are for; the surface
-/// bootstrap (which needs the main thread) is separate — see
+/// commands; the tokio Mutex is fair among WAITERS, but each async invoke
+/// is its own spawned task, so two fire-and-forget calls (pointer,
+/// volume, script feeds) can reach the gate out of JS call order — an
+/// accepted window, since only adjacent reordering of such transient
+/// inputs is possible. Strict order holds wherever the frontend awaits
+/// the invoke (every load does). Quick, synchronous core calls are
+/// exactly what async Tauri commands are for; the surface bootstrap
+/// (which needs the main thread) is separate — see
 /// `ensure_engine`.
 async fn with_core<R: Send>(
     id: u32,
