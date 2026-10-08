@@ -355,6 +355,33 @@ describe('colour math + palette (the editor generates every value)', () => {
     expect(S.THEME_PALETTE).toContain('#000000')
     expect(S.THEME_PALETTE).toContain('#FFFFFF')
   })
+
+  // Why the editor's H/S/L sliders hold LOCAL state seeded per expansion
+  // instead of re-deriving from the stored value: hex -> HSL -> hex is NOT
+  // the identity, and re-deriving on every render quantizes the slider
+  // positions through the stored 8-bit colour. These two tests pin the
+  // invariant the editor relies on instead.
+  it('hex → HSL → hex is not the identity (slider state must not re-derive)', () => {
+    // #555555: l = 33.33 rounds to 33, and hslToHex(0, 0, 33) lands on #545454.
+    const hsl = S.colorToHsl('#555555')
+    expect(S.hslToHex(hsl!.h, hsl!.s, hsl!.l)).not.toBe('#555555')
+    // Black collapses H and S entirely — dragging L back up from 0 through a
+    // re-derived state loses the colour's hue and saturation for good.
+    const black = S.colorToHsl('#000000')
+    expect(black).toEqual({ h: 0, s: 0, l: 0 })
+  })
+
+  it('every palette swatch written as a value reads back as ITSELF (by-value selection)', () => {
+    // The editor marks a swatch active by comparing the property's parsed RGB
+    // hex against the swatch string, so a clicked swatch must always read
+    // back byte-identical through parseColorToken.
+    for (const swatch of S.THEME_PALETTE) {
+      const parsed = S.parseColorToken(swatch)
+      expect(parsed).not.toBeNull()
+      const f = (n: number) => Math.round(n).toString(16).padStart(2, '0').toUpperCase()
+      expect(`#${f(parsed!.r)}${f(parsed!.g)}${f(parsed!.b)}`).toBe(swatch)
+    }
+  })
 })
 
 describe('runtime application on the document root', () => {

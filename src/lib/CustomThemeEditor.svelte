@@ -280,9 +280,43 @@
     return colorToHsl(values[p])
   }
 
-  function hexOfShadow(v: string): string {
-    const c = shadowParts(v)?.color
-    if (!c) return 'transparent'
+  /**
+   * The expanded property's slider positions. LOCAL state, seeded once per
+   * expansion (and re-seeded on swatch picks / base switches) — deliberately
+   * NOT recomputed from the stored value on every render: the stored value is
+   * an 8-bit hex, and re-deriving HSL through it quantizes. Dragging L to 0
+   * and back permanently lost H and S (black parses back as h=0, s=0), the
+   * hue thumb jumped on low-saturation colours, and re-synthesising hex from
+   * the re-derived HSL made most palette swatches never compare equal.
+   */
+  let picker = $state<{ p: ThemePropName; h: number; s: number; l: number } | null>(null)
+
+  function seedPicker(p: ThemePropName): void {
+    const hsl = hslOf(p)
+    picker = hsl ? { p, h: hsl.h, s: hsl.s, l: hsl.l } : null
+  }
+
+  function togglePicker(p: ThemePropName): void {
+    if (expanded === p) {
+      expanded = null
+      picker = null
+      return
+    }
+    expanded = p
+    seedPicker(p)
+  }
+
+  /** One slider tick: move the LOCAL position, then write the colour it means. */
+  function onSliderHsl(p: ThemePropName, key: 'h' | 's' | 'l', raw: string): void {
+    if (!picker || picker.p !== p) return
+    picker = { ...picker, [key]: Number(raw) }
+    setRgb(p, hslToHex(picker.h, picker.s, picker.l))
+  }
+
+  /** The RGB hex of a property's colour (the rgba inside --shadow-menu too). */
+  function hexOf(p: ThemePropName): string | null {
+    const c = colorOf(p)
+    if (!c) return null
     const f = (n: number) => Math.round(n).toString(16).padStart(2, '0').toUpperCase()
     return `#${f(c.r)}${f(c.g)}${f(c.b)}`
   }
@@ -307,6 +341,9 @@
     if (next) {
       values = { ...next }
       lastValid = { ...next }
+      // Every colour was replaced wholesale; the open picker's sliders must
+      // follow the new values instead of dragging the old colour back.
+      if (expanded) seedPicker(expanded)
     }
   }
 
@@ -363,8 +400,10 @@
     if (e.key === 'Escape') {
       e.preventDefault()
       if (baseOpen) baseOpen = false
-      else if (expanded) expanded = null
-      else close()
+      else if (expanded) {
+        expanded = null
+        picker = null
+      } else close()
     }
   }
 
@@ -507,7 +546,6 @@
             </button>
           </h3>
           {#each group.props as p (p)}
-            {@const hsl = hslOf(p)}
             {@const help = PROP_HELP[p] ? t(PROP_HELP[p]!) : p}
             <div class="ct-item" class:ct-item--invalid={!valid(p, values[p])}>
               <button
@@ -515,17 +553,13 @@
                 class="ct-row"
                 aria-expanded={expanded === p}
                 onclick={() => {
-                  expanded = expanded === p ? null : p
+                  togglePicker(p)
                 }}
               >
                 <span class="ct-prop" use:tooltip={help}>{PROP_LABEL[p] ? t(PROP_LABEL[p]!) : p}</span>
                 <span
                   class="ct-chip"
-                  style="background: {p === '--shadow-menu'
-                    ? shadowParts(values[p])
-                      ? hexOfShadow(values[p])
-                      : 'transparent'
-                    : values[p]}"
+                  style="background: {p === '--shadow-menu' ? (hexOf(p) ?? 'transparent') : values[p]}"
                 ></span>
                 <span class="ct-value">{values[p]}</span>
                 <svg
@@ -545,16 +579,20 @@
                   /></svg
                 >
               </button>
-              {#if expanded === p && hsl}
+              {#if expanded === p && picker && picker.p === p}
+                {@const hsl = picker}
                 <div class="ct-picker">
                   <div class="ct-palette" role="listbox" aria-label={PROP_LABEL[p] ? t(PROP_LABEL[p]!) : p}>
                     {#each THEME_PALETTE as swatch (swatch)}
                       <button
                         type="button"
                         class="ct-swatch"
-                        class:ct-swatch--active={hslToHex(hsl.h, hsl.s, hsl.l) === swatch}
+                        class:ct-swatch--active={hexOf(p) === swatch}
                         style="background: {swatch}"
-                        onclick={() => setRgb(p, swatch)}
+                        onclick={() => {
+                          setRgb(p, swatch)
+                          seedPicker(p)
+                        }}
                         aria-label={swatch}
                       ></button>
                     {/each}
@@ -568,8 +606,7 @@
                         max="360"
                         step="1"
                         value={hsl.h}
-                        oninput={(e) =>
-                          setRgb(p, hslToHex(Number((e.currentTarget as HTMLInputElement).value), hsl.s, hsl.l))}
+                        oninput={(e) => onSliderHsl(p, 'h', (e.currentTarget as HTMLInputElement).value)}
                       />
                     </label>
                     <label class="ct-slider">
@@ -580,8 +617,7 @@
                         max="100"
                         step="1"
                         value={hsl.s}
-                        oninput={(e) =>
-                          setRgb(p, hslToHex(hsl.h, Number((e.currentTarget as HTMLInputElement).value), hsl.l))}
+                        oninput={(e) => onSliderHsl(p, 's', (e.currentTarget as HTMLInputElement).value)}
                       />
                     </label>
                     <label class="ct-slider">
@@ -592,8 +628,7 @@
                         max="100"
                         step="1"
                         value={hsl.l}
-                        oninput={(e) =>
-                          setRgb(p, hslToHex(hsl.h, hsl.s, Number((e.currentTarget as HTMLInputElement).value)))}
+                        oninput={(e) => onSliderHsl(p, 'l', (e.currentTarget as HTMLInputElement).value)}
                       />
                     </label>
                     {#if p === '--shadow-menu' || TRANSLUCENT_PROPS.has(p)}
