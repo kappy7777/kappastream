@@ -2672,6 +2672,12 @@
   })
 
   let activeStatusToken = 0
+  // Which channel the current activeStatus belongs to (plain, non-reactive):
+  // only a CHANNEL change may reset it. A favorites-membership flip must not
+  // — resetting there blanked the status bar, the pinned-message banner and
+  // the Back-to-live banner until a refetch landed (and a failed one left
+  // them blank); the last-known status simply stays.
+  let activeStatusChannel: string | null = null
   // Status-bar badge data for the active channel: the store badge,
   // upgraded by the per-channel roster fetch the moment it lands (real "other
   // channels" count + a real co-streamer avatar, with no favorites dependency).
@@ -2729,39 +2735,41 @@
 
   $effect(() => {
     const channel = channelJoined
-    if (!channel) {
-      activeStatus = { state: 'unknown' }
-      return
+    // Membership drives ONLY the polling branch below (favorites refresh via
+    // the sidebar's batch; non-favorites need the interval). Reading it keeps
+    // this effect re-running on a membership flip — the flip must start or
+    // stop the poll, never reset the status itself.
+    const isFavorite = channelIsFavorite
+    if (channel !== activeStatusChannel) {
+      activeStatusChannel = channel
+      if (!channel) {
+        activeStatus = { state: 'unknown' }
+        return
+      }
+      const cached = favoritesStore.getStatus(channel)
+      if (cached && cached.status.state !== 'unknown') {
+        activeStatus = cached.status
+      } else {
+        activeStatus = { state: 'unknown' }
+      }
+      const myToken = ++activeStatusToken
+      void (async () => {
+        const s = await fetchLiveStatus(channel)
+        if (myToken !== activeStatusToken) return
+        // A failed fetch NEVER overwrites the last known status: fetchLiveStatus
+        // resolves {state:'error'} instead of throwing, and assigning it would
+        // blank the bar (title/viewers render only for live/offline) and drop
+        // the pinned-chat target until the next good poll. Keep the cached /
+        // placeholder status instead.
+        if (s.state === 'error') return
+        activeStatus = s
+      })()
     }
-    const cached = favoritesStore.getStatus(channel)
-    if (cached && cached.status.state !== 'unknown') {
-      activeStatus = cached.status
-    } else {
-      activeStatus = { state: 'unknown' }
-    }
-    const myToken = ++activeStatusToken
-    void (async () => {
-      const s = await fetchLiveStatus(channel)
-      if (myToken !== activeStatusToken) return
-      // A failed fetch NEVER overwrites the last known status: fetchLiveStatus
-      // resolves {state:'error'} instead of throwing, and assigning it would
-      // blank the bar (title/viewers render only for live/offline) and drop
-      // the pinned-chat target until the next good poll. Keep the cached /
-      // placeholder status instead.
-      if (s.state === 'error') return
-      activeStatus = s
-    })()
     // A favorite's status refreshes with the sidebar's poll batch (the
     // subscribe below feeds those snapshots in for free). A NON-favorite
     // would otherwise freeze at the join-time snapshot forever — poll it
-    // directly on the same cadence. The effect reads the membership through
-    // the `channelIsFavorite` DERIVED (not has() inline): the store's entries
-    // are reactive now, and an inline read would re-run this fetch-driving
-    // effect on every favorites change; the boolean only flips when the
-    // JOINED channel's membership actually changes. The effect's teardown
-    // (channel change, disconnect, or that flip) clears the loop, and the
-    // re-run's token bump strands any in-flight answer.
-    if (channelIsFavorite) return
+    // directly on the same cadence.
+    if (!channel || isFavorite) return
     const poll = setInterval(() => {
       const tickToken = ++activeStatusToken
       void (async () => {

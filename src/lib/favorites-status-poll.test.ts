@@ -4,7 +4,10 @@
 // it — the store's poll stopped covering the channel (it was no longer a
 // favorite) while App never started its own cadence, and the status bar
 // froze until the next channel change. The membership now reads through a
-// tracked $derived; the effect re-runs the moment it flips.
+// tracked $derived; the effect re-runs the moment it flips and starts App's
+// own interval — WITHOUT resetting activeStatus or issuing an immediate
+// refetch (the flip used to blank the bar, the pinned banner and the
+// Back-to-live banner until that refetch landed).
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount, unmount } from 'svelte'
 
@@ -103,8 +106,7 @@ localStorage.setItem('twitch-favorites-v1', JSON.stringify([{ name: 'chan7', add
 
 const App = (await import('../App.svelte')).default
 const { settings } = await import('./settings.svelte.ts')
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+const { GQL_REFRESH_INTERVAL_MS } = await import('./gql')
 
 function q(sel: string): HTMLElement {
   const el = document.querySelector(sel)
@@ -128,27 +130,41 @@ afterEach(() => {
 })
 
 describe("un-favoriting the joined channel starts App's own status poll", () => {
-  it('the status-bar heart flip re-runs the activeStatus effect', async () => {
-    const target = document.createElement('div')
-    document.body.appendChild(target)
-    view = mount(App, { target })
-    await sleep(150)
+  it('the heart flip neither blanks the bar nor double-fetches; the own poll takes over', async () => {
+    vi.useFakeTimers()
+    try {
+      const target = document.createElement('div')
+      document.body.appendChild(target)
+      view = mount(App, { target })
+      await vi.advanceTimersByTimeAsync(200)
 
-    // Join the FAVORITE channel (the heart is on: it is a favorite).
-    q('.fav').click()
-    await sleep(400)
-    const joinedFetches = chanFetches()
-    // The join-time fetchLiveStatus fired once for the status bar.
-    expect(joinedFetches).toBeGreaterThanOrEqual(1)
+      // Join the FAVORITE channel (the heart is on: it is a favorite).
+      q('.fav').click()
+      await vi.advanceTimersByTimeAsync(400)
+      const joinedFetches = chanFetches()
+      // The join-time fetchLiveStatus fired once for the status bar.
+      expect(joinedFetches).toBeGreaterThanOrEqual(1)
+      // Its (offline) answer is on screen.
+      expect(document.querySelector('.stream-info-offline')).toBeTruthy()
 
-    // Un-favorite via the status-bar heart (the first .notif-toggle).
-    const heart = document.querySelector<HTMLButtonElement>('.notif-toggle')
-    expect(heart).toBeTruthy()
-    heart!.click()
-    await sleep(400)
+      // Un-favorite via the status-bar heart (the first .notif-toggle).
+      const heart = document.querySelector<HTMLButtonElement>('.notif-toggle')
+      expect(heart).toBeTruthy()
+      heart!.click()
+      await vi.advanceTimersByTimeAsync(400)
 
-    // The membership flip re-ran the effect: a fresh fetchLiveStatus for the
-    // now non-favorite channel (plus its own poll interval from here on).
-    expect(chanFetches()).toBeGreaterThan(joinedFetches)
+      // The membership flip re-ran the effect, but it must NOT reset the
+      // status (the bar keeps its content) and must NOT refetch immediately
+      // — the last-known status simply stays until the own cadence ticks.
+      expect(document.querySelector('.stream-info-offline')).toBeTruthy()
+      expect(chanFetches()).toBe(joinedFetches)
+
+      // App's own poll interval exists for the now non-favorite channel:
+      // one GQL_REFRESH_INTERVAL later a fresh single-channel query fires.
+      await vi.advanceTimersByTimeAsync(GQL_REFRESH_INTERVAL_MS + 200)
+      expect(chanFetches()).toBeGreaterThan(joinedFetches)
+    } finally {
+      vi.useRealTimers()
+    }
   }, 20000)
 })
