@@ -2031,8 +2031,16 @@
       // Mirror attachStream: route through the ksvod proxy on Windows so the
       // PiP WebView2 can load the manifest (it would hit the same CORS block).
       const pipUrl = isWindows ? toKsvodProxyUrl(resolved.url, isWindows) : resolved.url
-      // isLive gates PiP's stall recovery (never force-seek a VOD/clip).
-      pipController.setStream({ url: pipUrl, channel, quality: q, isLive: playback.kind === 'live' })
+      // isLive gates PiP's stall recovery (never force-seek a VOD/clip);
+      // lowLatency rides along so the floating window's hls.js config always
+      // matches the playlist this resolve just produced.
+      pipController.setStream({
+        url: pipUrl,
+        channel,
+        quality: q,
+        isLive: playback.kind === 'live',
+        lowLatency: settings.lowLatency,
+      })
       return
     }
     playerStatus = 'error'

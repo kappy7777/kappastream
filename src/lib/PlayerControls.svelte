@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { settings } from './settings.svelte.ts'
   import { pipController } from './pip-controller.svelte.ts'
   import { tooltip } from './tooltip.ts'
@@ -169,10 +170,22 @@
     // flagging hydration (the writes above fire volumechange, which must not
     // round-trip back into settings). This deliberately mirrors the order the
     // old element-attached version used.
-    b.setVolume(settings.volume)
-    b.setMuted(settings.muted)
-    volume = settings.volume
-    muted = settings.muted
+    //
+    // The settings reads run under untrack: this subscription effect re-runs
+    // only when the BACKEND identity changes, never on a settings write. The
+    // PiP window's volume events persist through the same store — a tracked
+    // read had every volume/mute change (PiP's own slider included) re-run
+    // the hydrate and un-mute the main copy the PiP controller keeps
+    // force-muted, leaving two audible copies drifting out of sync. The PiP
+    // override itself stays tracked: while the floating window owns audio, a
+    // remounted element must hydrate muted, and on close the re-run resyncs
+    // alongside the controller's own restore.
+    const pipOwnsAudio = pipController.overridingMainMute
+    const persisted = untrack(() => ({ volume: settings.volume, muted: settings.muted }))
+    b.setVolume(persisted.volume)
+    b.setMuted(pipOwnsAudio || persisted.muted)
+    volume = persisted.volume
+    muted = pipOwnsAudio || persisted.muted
     volumeHydrated = true
     playing = !b.paused
     duration = isFinite(b.duration) ? b.duration : 0

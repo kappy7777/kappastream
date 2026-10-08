@@ -7,7 +7,6 @@
   import { PhysicalSize } from '@tauri-apps/api/dpi'
   import { shouldRecoverStallAfterPause } from './lib/playback'
   import { PlaybackSession } from './lib/playback-session.svelte'
-  import { settings } from './lib/settings.svelte.ts'
   import { t } from './lib/i18n/index.svelte'
 
   // Minimal PiP window: a single <video> fed by hls.js from the URL the main
@@ -28,12 +27,14 @@
     muted: boolean
     mediaKind?: 'hls' | 'mp4'
     isLive?: boolean
+    lowLatency?: boolean
     startAt?: number
   }
   interface StreamPayload {
     url: string
     mediaKind?: 'hls' | 'mp4'
     isLive?: boolean
+    lowLatency?: boolean
     startAt?: number
   }
 
@@ -69,7 +70,19 @@
   let snapTimer: ReturnType<typeof setTimeout> | null = null
   let suppressSnapUntil = 0
 
-  function loadSource(url: string, mediaKind: 'hls' | 'mp4' = 'hls', live?: boolean, startAt?: number): void {
+  // `lowLatency` always arrives in the payload (init + stream): this window
+  // keeps its OWN settings-store instance, booted once at creation, so a
+  // toggle in the main window while PiP is open would leave a stale read
+  // here — and an hls.js config that disagrees with the playlist is the
+  // micro-stutter mode hls-config.ts exists to prevent. VODs and clips never
+  // carry it (absent = false, matching their non-low-latency config).
+  function loadSource(
+    url: string,
+    mediaKind: 'hls' | 'mp4' = 'hls',
+    live?: boolean,
+    startAt?: number,
+    lowLatency?: boolean,
+  ): void {
     if (!videoEl) return
     isLive = live === true
     pendingStart = typeof startAt === 'number' && Number.isFinite(startAt) && startAt > 0.5 ? startAt : null
@@ -117,7 +130,7 @@
         .attachHls({
           video: videoEl,
           url,
-          lowLatency: settings.lowLatency,
+          lowLatency: lowLatency === true,
           isCurrent: () => gen === playback.generation,
           onManifestParsed: () => {
             loading = false
@@ -365,12 +378,12 @@
         videoEl.volume = volume
         videoEl.muted = muted
       }
-      loadSource(p.url, p.mediaKind ?? 'hls', p.isLive, p.startAt)
+      loadSource(p.url, p.mediaKind ?? 'hls', p.isLive, p.startAt, p.lowLatency)
     })
     unlisteners.push(uInit)
 
     const uStream = await listen<StreamPayload>(EV_STREAM, (e) => {
-      loadSource(e.payload.url, e.payload.mediaKind ?? 'hls', e.payload.isLive, e.payload.startAt)
+      loadSource(e.payload.url, e.payload.mediaKind ?? 'hls', e.payload.isLive, e.payload.startAt, e.payload.lowLatency)
     })
     unlisteners.push(uStream)
 

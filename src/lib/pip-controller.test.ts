@@ -112,19 +112,25 @@ describe('pip-controller: setStream → ks://pip-stream normalization', () => {
   it('emits isLive: true when the stream info says live', async () => {
     await openPip()
     P.pipController.setStream({ url: 'https://x/2.m3u8', channel: 'chan1', quality: 'best', isLive: true })
-    expect(payloadsOf(EV_STREAM)).toEqual([{ url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: true }])
+    expect(payloadsOf(EV_STREAM)).toEqual([
+      { url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: true, lowLatency: false },
+    ])
   })
 
   it('emits isLive: false for an explicit false', async () => {
     await openPip()
     P.pipController.setStream({ url: 'https://x/2.m3u8', channel: 'chan1', quality: 'best', isLive: false })
-    expect(payloadsOf(EV_STREAM)).toEqual([{ url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: false }])
+    expect(payloadsOf(EV_STREAM)).toEqual([
+      { url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: false, lowLatency: false },
+    ])
   })
 
   it('emits isLive: false when the field is ABSENT (the VOD-in-PiP safety default)', async () => {
     await openPip()
     P.pipController.setStream({ url: 'https://x/2.m3u8', channel: 'chan1', quality: 'best' })
-    expect(payloadsOf(EV_STREAM)).toEqual([{ url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: false }])
+    expect(payloadsOf(EV_STREAM)).toEqual([
+      { url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: false, lowLatency: false },
+    ])
   })
 
   it('defaults mediaKind to hls and passes mp4 through', async () => {
@@ -132,8 +138,26 @@ describe('pip-controller: setStream → ks://pip-stream normalization', () => {
     P.pipController.setStream({ url: 'https://x/a.m3u8', channel: 'chan1', quality: 'best' })
     P.pipController.setStream({ url: 'https://x/b.mp4', channel: 'chan1', quality: 'best', mediaKind: 'mp4' })
     expect(payloadsOf(EV_STREAM)).toEqual([
-      { url: 'https://x/a.m3u8', mediaKind: 'hls', isLive: false },
-      { url: 'https://x/b.mp4', mediaKind: 'mp4', isLive: false },
+      { url: 'https://x/a.m3u8', mediaKind: 'hls', isLive: false, lowLatency: false },
+      { url: 'https://x/b.mp4', mediaKind: 'mp4', isLive: false, lowLatency: false },
+    ])
+  })
+
+  it('carries lowLatency so the floating window config matches the playlist', async () => {
+    // The PiP webview keeps its own settings instance (booted once at window
+    // creation), so the hls.js low-latency mode MUST ride the payload — a
+    // main-window toggle while PiP is open otherwise leaves the exact
+    // config/playlist mismatch hls-config.ts warns about.
+    await openPip()
+    P.pipController.setStream({
+      url: 'https://x/ll.m3u8',
+      channel: 'chan1',
+      quality: 'best',
+      isLive: true,
+      lowLatency: true,
+    })
+    expect(payloadsOf(EV_STREAM)).toEqual([
+      { url: 'https://x/ll.m3u8', mediaKind: 'hls', isLive: true, lowLatency: true },
     ])
   })
 })
@@ -172,6 +196,24 @@ describe('pip-controller: sendInit → ks://pip-init normalization', () => {
     const p = initPayloadAfter({ url: 'https://x/1.mp4', channel: 'chan1', quality: 'best', mediaKind: 'mp4' })
     expect(p.mediaKind).toBe('mp4')
     expect(p.isLive).toBe(false)
+  })
+
+  it('continues the persisted audio state (muted included) and the low-latency flag', async () => {
+    // The init handshake is the floating window's ONLY volume/mute seed: a
+    // hardcoded unmute used to blast sound the user had explicitly muted,
+    // and a missing lowLatency re-created the stale-settings mismatch.
+    const { settings } = await import('./settings.svelte')
+    settings.setMuted(true)
+    const p = initPayloadAfter({
+      url: 'https://x/1.m3u8',
+      channel: 'chan1',
+      quality: 'best',
+      isLive: true,
+      lowLatency: true,
+    })
+    expect(p.muted).toBe(true)
+    expect(p.lowLatency).toBe(true)
+    settings.setMuted(false)
   })
 })
 
@@ -244,8 +286,8 @@ describe('pip-controller: VOD resume handoff', () => {
     P.pipController.setStream({ url: 'https://x/2.m3u8', channel: 'chan1', quality: 'best' })
     P.pipController.setStream({ url: 'https://x/3.m3u8', channel: 'chan1', quality: 'best', startAt: 42 })
     expect(payloadsOf(EV_STREAM)).toEqual([
-      { url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: false },
-      { url: 'https://x/3.m3u8', mediaKind: 'hls', isLive: false, startAt: 42 },
+      { url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: false, lowLatency: false },
+      { url: 'https://x/3.m3u8', mediaKind: 'hls', isLive: false, lowLatency: false, startAt: 42 },
     ])
   })
 
@@ -259,7 +301,9 @@ describe('pip-controller: VOD resume handoff', () => {
       isLive: true,
       startAt: 42,
     })
-    expect(payloadsOf(EV_STREAM)).toEqual([{ url: 'https://x/live.m3u8', mediaKind: 'hls', isLive: true }])
+    expect(payloadsOf(EV_STREAM)).toEqual([
+      { url: 'https://x/live.m3u8', mediaKind: 'hls', isLive: true, lowLatency: false },
+    ])
   })
 
   it('updatePosition refreshes the stored startAt for the init handshake', () => {

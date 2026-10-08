@@ -11,8 +11,8 @@ import { STORAGE_KEYS } from './storage-keys'
 // while open and the main video is force-muted (without persisting that mute).
 //
 // Everything is coordinated over Tauri global events:
-//   main -> pip   ks://pip-init       { url, channel, quality, volume, muted, mediaKind?, isLive?, startAt? }
-//   main -> pip   ks://pip-stream     { url, mediaKind?, isLive?, startAt? }    (channel/quality change)
+//   main -> pip   ks://pip-init       { url, channel, quality, volume, muted, mediaKind?, isLive?, lowLatency?, startAt? }
+//   main -> pip   ks://pip-stream     { url, mediaKind?, isLive?, lowLatency?, startAt? }    (channel/quality change)
 //   main -> pip   ks://pip-do-close                        (main requests close)
 //   pip  -> main  ks://pip-ready                           (pip listening, wants init)
 //   pip  -> main  ks://pip-volume     { volume, muted }    (pip is audio authority)
@@ -48,6 +48,13 @@ interface StreamInfo {
   mediaKind?: 'hls' | 'mp4'
   /** Whether the URL is a LIVE stream (gates PiP stall recovery). Absent = false. */
   isLive?: boolean
+  /** The low-latency setting this URL was resolved under. Rides BOTH payloads
+   *  so the floating window's hls.js config always matches the playlist: the
+   *  PiP webview keeps its OWN settings-store instance (booted once at window
+   *  creation), which goes stale when the user toggles the setting while PiP
+   *  is open — the exact playlist/config mismatch hls-config.ts warns about.
+   *  Absent = false (VODs and clips are never low-latency). */
+  lowLatency?: boolean
   /** VOD position (seconds) the floating window should start at — the resume
    *  half of the PiP position handoff. Absent or <= 0.5 = play from the
    *  start; live streams never carry one. */
@@ -163,6 +170,7 @@ class PipController {
       url: info.url,
       mediaKind: info.mediaKind ?? 'hls',
       isLive: info.isLive === true,
+      lowLatency: info.lowLatency === true,
       ...startAtProp(info),
     })
   }
@@ -233,9 +241,14 @@ class PipController {
       quality: this.currentStream.quality,
       mediaKind: this.currentStream.mediaKind ?? 'hls',
       isLive: this.currentStream.isLive === true,
+      lowLatency: this.currentStream.lowLatency === true,
       ...startAtProp(this.currentStream),
       volume: settings.volume,
-      muted: false,
+      // The floating window CONTINUES the main player's audio state — it
+      // does not reset it. Starting from the persisted mute (not a hardcoded
+      // unmute) keeps a muted session muted instead of blasting sound the
+      // user had explicitly turned off.
+      muted: settings.muted === true,
     })
   }
 
