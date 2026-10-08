@@ -188,11 +188,17 @@
   // A draggable scale LINE instead of a button grid: one track, a tick dot
   // per preset stop, and a knob that snaps to the stops while dragging. The
   // stops ARE the existing presets (0.5×…4×) — nothing in between exists.
-  // All geometry math is ratio-based (clientX vs the track rect, both in the
-  // same visual space), so UI-scale zoom cancels out and no zoomDivisor is
-  // needed here.
+  // Geometry math is ratio-based (clientX vs the track rect, both in the
+  // same visual space), so UI-scale zoom cancels out for any ONE read. But
+  // the modal is centered and zooms with the document root, so APPLYING a
+  // stop mid-drag resizes the track under the captured pointer and flips
+  // the pointer's fraction of it — a rightward drag ping-pongs between
+  // stops. The drag therefore only moves the knob (dragScaleIndex) and
+  // commits setUiScale once, on pointerup; the keyboard path applies per
+  // press (a discrete step with no feedback loop).
   let scaleLineEl = $state<HTMLElement | undefined>(undefined)
   let scaleDragging = $state(false)
+  let dragScaleIndex = $state<number | null>(null)
   const SCALE_LAST = UI_SCALE_PRESETS.length - 1
 
   function scaleIndexOf(v: number): number {
@@ -200,33 +206,43 @@
     return i === -1 ? UI_SCALE_PRESETS.indexOf(UI_SCALE_DEFAULT) : i
   }
   const scaleIndex = $derived(scaleIndexOf(settings.uiScale))
+  // What the line renders: the stop under a live drag, else the setting.
+  const shownScaleIndex = $derived(dragScaleIndex ?? scaleIndex)
   function scalePct(i: number): number {
     return (i / SCALE_LAST) * 100
   }
   function pickScaleIndex(i: number): void {
     onUiScalePick(UI_SCALE_PRESETS[Math.max(0, Math.min(SCALE_LAST, i))])
   }
-  function scaleFromPointer(e: PointerEvent): void {
-    if (!scaleLineEl) return
+  function scaleIndexAt(e: PointerEvent): number {
+    if (!scaleLineEl) return dragScaleIndex ?? scaleIndex
     const r = scaleLineEl.getBoundingClientRect()
-    if (r.width < 1) return
-    pickScaleIndex(Math.round(((e.clientX - r.left) / r.width) * SCALE_LAST))
+    if (r.width < 1) return dragScaleIndex ?? scaleIndex
+    return Math.max(0, Math.min(SCALE_LAST, Math.round(((e.clientX - r.left) / r.width) * SCALE_LAST)))
   }
   function onScaleDown(e: PointerEvent): void {
     scaleDragging = true
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    scaleFromPointer(e)
+    dragScaleIndex = scaleIndexAt(e)
   }
   function onScaleMove(e: PointerEvent): void {
-    if (scaleDragging) scaleFromPointer(e)
+    if (scaleDragging) dragScaleIndex = scaleIndexAt(e)
   }
   function onScaleUp(e: PointerEvent): void {
+    if (dragScaleIndex !== null) pickScaleIndex(dragScaleIndex)
+    dragScaleIndex = null
     scaleDragging = false
     try {
       ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
     } catch {
       /* pointer already released */
     }
+  }
+  function onScaleCancel(): void {
+    // An aborted drag reverts: committing a stop the pointer never settled
+    // on would change the app scale out from under the user.
+    dragScaleIndex = null
+    scaleDragging = false
   }
   function onScaleKey(e: KeyboardEvent): void {
     const step =
@@ -594,7 +610,7 @@
             <h3 class="section-title">{t('settings_sectionAppearance')}</h3>
             <div class="scale-head">
               <div class="subgroup-label">{t('settings_uiScale')}</div>
-              <span class="scale-value">{settings.uiScale}×</span>
+              <span class="scale-value">{UI_SCALE_PRESETS[shownScaleIndex]}×</span>
             </div>
             <div
               class="scale-line"
@@ -604,25 +620,29 @@
               aria-label={t('settings_uiScale')}
               aria-valuemin={UI_SCALE_MIN}
               aria-valuemax={UI_SCALE_MAX}
-              aria-valuenow={settings.uiScale}
-              aria-valuetext="{settings.uiScale}×"
+              aria-valuenow={UI_SCALE_PRESETS[shownScaleIndex]}
+              aria-valuetext="{UI_SCALE_PRESETS[shownScaleIndex]}×"
               bind:this={scaleLineEl}
               onpointerdown={onScaleDown}
               onpointermove={onScaleMove}
               onpointerup={onScaleUp}
-              onpointercancel={onScaleUp}
+              onpointercancel={onScaleCancel}
               onkeydown={onScaleKey}
             >
               <div class="scale-track"></div>
-              <div class="scale-fill" style="width: {scalePct(scaleIndex)}%"></div>
+              <div class="scale-fill" style="width: {scalePct(shownScaleIndex)}%"></div>
               {#each UI_SCALE_PRESETS as preset, i (preset)}
-                <div class="scale-tick" class:scale-tick--active={i === scaleIndex} style="left: {scalePct(i)}%"></div>
+                <div
+                  class="scale-tick"
+                  class:scale-tick--active={i === shownScaleIndex}
+                  style="left: {scalePct(i)}%"
+                ></div>
               {/each}
-              <div class="scale-knob" style="left: {scalePct(scaleIndex)}%"></div>
+              <div class="scale-knob" style="left: {scalePct(shownScaleIndex)}%"></div>
             </div>
             <div class="scale-labels" aria-hidden="true">
               {#each UI_SCALE_PRESETS as preset, i (preset)}
-                <span class="scale-label" class:scale-label--active={i === scaleIndex} style="left: {scalePct(i)}%"
+                <span class="scale-label" class:scale-label--active={i === shownScaleIndex} style="left: {scalePct(i)}%"
                   >{preset}×</span
                 >
               {/each}
