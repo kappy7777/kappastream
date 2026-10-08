@@ -92,7 +92,7 @@ export interface VideoBackend {
 export interface TileShortcutHandles {
   video: HTMLVideoElement | null
   backend: VideoBackend | null
-  controls: { togglePlay: () => void }
+  controls: { togglePlay: () => void; isPaused: () => boolean }
 }
 
 /**

@@ -6,6 +6,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { PhysicalSize } from '@tauri-apps/api/dpi'
   import { shouldRecoverStallAfterPause } from './lib/playback'
+  import { bindMediaSessionPlayPause } from './lib/media-session'
   import { PlaybackSession } from './lib/playback-session.svelte'
   import { t } from './lib/i18n/index.svelte'
 
@@ -215,6 +216,16 @@
       videoEl.pause()
     }
   }
+
+  // Media keys pause this window's stream through the same discipline (the
+  // PiP webview is its own document with its own Media Session). Without the
+  // handler a hardware pause looks like a stall and recovery force-resumes it.
+  onMount(() =>
+    bindMediaSessionPlayPause(() => {
+      const el = videoEl
+      return el ? { playing: () => !el.paused, toggle: togglePlay } : null
+    }),
+  )
 
   async function gesturePlay(): Promise<void> {
     if (!videoEl) return

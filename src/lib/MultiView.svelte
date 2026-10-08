@@ -60,9 +60,10 @@
     /** The authority tile's playback BACKEND (native-engine tiles) — the
      *  keyboard-shortcut target App uses instead of the <video> element. */
     onAuthorityBackend: (b: VideoBackend | null) => void
-    /** The authority tile's play/pause handle — the keyboard shortcut routes
-     *  through the tile's own session so its stall-recovery respects it. */
-    onAuthorityControls: (h: { togglePlay: () => void } | null) => void
+    /** The authority tile's play/pause handles — the keyboard shortcut and
+     *  the media keys route through the tile's own session so its
+     *  stall-recovery respects the pause. */
+    onAuthorityControls: (h: { togglePlay: () => void; isPaused: () => boolean } | null) => void
     /** invoke('mpv_available') result from App (feature build + surface). */
     mpvAvailable: boolean
   }

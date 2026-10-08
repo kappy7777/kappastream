@@ -59,6 +59,7 @@
   import { notifications } from './lib/notifications.svelte.ts'
   import { tooltipState } from './lib/tooltip.svelte.ts'
   import { tileStore } from './lib/tile-store.svelte.ts'
+  import { bindMediaSessionPlayPause, setMediaSessionTitle } from './lib/media-session'
   import MultiView from './lib/MultiView.svelte'
   import PinnedMessage from './lib/PinnedMessage.svelte'
   import { pinnedChat } from './lib/pinned-chat.svelte'
@@ -374,7 +375,7 @@
   // the tile's own onPause stall-recovery watcher respects; pausing the
   // element from App's session looked like a stall and auto-resumed ~1 s
   // later, so Space/K never stuck on hls tiles.
-  let authorityTileControls = $state<{ togglePlay: () => void } | null>(null)
+  let authorityTileControls = $state<{ togglePlay: () => void; isPaused: () => boolean } | null>(null)
   let tooltipEl: HTMLElement | undefined = $state()
   let tooltipPos = $state({ left: 0, top: 0 })
   let probeEl: HTMLElement | undefined = $state()
@@ -525,6 +526,27 @@
       backend.pause()
     }
   }
+  // OS media keys (keyboard pause/play, desktop media controls) route through
+  // the same discipline as the on-screen controls — otherwise the engine
+  // delivers the pause as a plain video event and live stall recovery undoes
+  // it ~1s later. See lib/media-session.ts.
+  onMount(() =>
+    bindMediaSessionPlayPause(() => {
+      if (multiView) {
+        const controls = authorityTileControls
+        return controls ? { playing: () => !controls.isPaused(), toggle: controls.togglePlay } : null
+      }
+      const backend = videoBackend
+      return backend ? { playing: () => !backend.paused, toggle: toggleVideoPlay } : null
+    }),
+  )
+
+  // Desktop media controls show the stream they would act on.
+  $effect(() => {
+    const authority = multiView ? tileStore.authority : null
+    setMediaSessionTitle(channelJoined ?? authority?.channel ?? null)
+  })
+
   function toggleVideoMute(): void {
     if (multiView) {
       // The authority tile owns the global mute → M toggles it. Unmuting at

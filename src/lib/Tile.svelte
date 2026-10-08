@@ -485,6 +485,13 @@
     void load(q)
   }
 
+  /** The paused read for the shortcut/media-key handles (engine-aware). */
+  function isPaused(): boolean {
+    const b = mpvBackend
+    if (b && nativeActive) return b.paused
+    return videoEl ? videoEl.paused : true
+  }
+
   function togglePlay(): void {
     const b = mpvBackend
     if (b && nativeActive) {
@@ -859,9 +866,9 @@
     const el = videoEl
     if (!el) return
     if (nativeActive && mpvBackend) {
-      onTileHandles(tile.id, { video: null, backend: mpvBackend, controls: { togglePlay } })
+      onTileHandles(tile.id, { video: null, backend: mpvBackend, controls: { togglePlay, isPaused } })
     } else {
-      onTileHandles(tile.id, { video: el, backend: null, controls: { togglePlay } })
+      onTileHandles(tile.id, { video: el, backend: null, controls: { togglePlay, isPaused } })
     }
   })
 
