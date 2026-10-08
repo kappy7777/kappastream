@@ -248,18 +248,25 @@
   let videoAspect = $state(Number.NaN)
 
   // The playback backend every state read / transport write goes through
-  // (VideoBackend in lib/video-backend.ts): the native backend while it is
-  // selected, otherwise the HTML wrapper over the single player's <video>
-  // element (pure delegation). The element remounts per stream ({#if
-  // playerActive} unmounts it), so the HTML backend is derived from it and is
-  // recreated with it.
+  // (VideoBackend in lib/video-backend.ts): the native backend while it
+  // actually OWNS playback, otherwise the HTML wrapper over the single
+  // player's <video> element (pure delegation). "Selected" is not enough: a
+  // FAILED native load falls back to hls.js for the item (nativeVideoActive
+  // stays false), and driving the idle engine from then on would leave the
+  // fallback muted with play/pause/volume doing nothing. The element remounts
+  // per stream ({#if playerActive} unmounts it), so the HTML backend is
+  // derived from it and is recreated with it.
   const videoBackend = $derived.by((): VideoBackend | null => {
-    if (mpvSelected && mpvBackend) return mpvBackend
+    if (mpvSelected && mpvBackend && nativeVideoActive) return mpvBackend
     return videoEl ? new HtmlVideoBackend(videoEl) : null
   })
   // Last position seen on a timeupdate, whichever backend reported it — the
   // engine-flip effect below uses it to carry a VOD position across the swap.
   let lastVideoPosition = 0
+  // The matching duration snapshot (NaN until known). The engine-flip save
+  // needs it AFTER the selection already flipped, when the derived backend
+  // resolves to the inert <video> and can no longer be asked.
+  let lastVideoDuration = Number.NaN
   // Mirrors PlayerControls' effective visibility (visible && controlsShown) so
   // the VOD/clip "Back to live" banner can auto-hide with the controls during
   // playback and reappear on mouse activity. Defaults true so the banner shows
@@ -872,7 +879,10 @@
     // Throttled VOD position checkpoint (live + clips are ignored inside) +
     // the cross-engine position snapshot for the settings-flip re-home.
     const backend = videoBackend
-    if (backend) lastVideoPosition = backend.currentTime
+    if (backend) {
+      lastVideoPosition = backend.currentTime
+      lastVideoDuration = backend.duration
+    }
     vodCtl.save(currentVodId())
   }
 

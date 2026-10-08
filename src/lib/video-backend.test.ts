@@ -318,6 +318,22 @@ describe('MpvBackend', () => {
     await b.dispose()
   })
 
+  it("load resets the previous file's time/duration mirrors (no VOD-A bleed into VOD-B)", async () => {
+    const b = new MpvBackend()
+    dispatch('mpv://time', { id: 0, position: 1500, duration: 7200 })
+    expect(b.currentTime).toBe(1500)
+    expect(b.duration).toBe(7200)
+    const onDur = vi.fn()
+    b.on('durationchange', onDur)
+    await b.load('https://cdn.example/y.m3u8', { kind: 'vod', hwdec: 'no', startAt: 42 })
+    // A resume-position save in the gap between loadfile and the first
+    // mpv://time must read the NEW start (or 0), never VOD A's position.
+    expect(b.currentTime).toBe(42)
+    expect(Number.isNaN(b.duration)).toBe(true)
+    expect(onDur).toHaveBeenCalledTimes(1)
+    await b.dispose()
+  })
+
   it('load failure carries the invoke error message', async () => {
     const b = new MpvBackend()
     invokeMock.mockRejectedValueOnce('mpv engine unavailable')

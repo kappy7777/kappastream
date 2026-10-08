@@ -781,6 +781,12 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                 Ok(Event::EndFile(_)) => {
                     // Normal ends surface via eof-reached/idle-active; an
                     // ERRORED end-file arrives as the Err arm below.
+                    // The ended file's duration must not leak into the next
+                    // one: mpv://time payloads keep carrying `duration` until
+                    // the next file reports its own, so a stale value would
+                    // have the frontend size the next VOD's scrub bar with
+                    // the previous VOD's length.
+                    duration = 0.0;
                     state_dirty = true;
                 }
                 Ok(Event::VideoReconfig) => {

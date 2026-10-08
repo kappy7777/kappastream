@@ -441,6 +441,14 @@ export class MpvBackend implements VideoBackend {
    * be the STREAMLINK-RESOLVED one — no ksvod proxy (mpv is not a browser).
    */
   async load(url: string, opts: MpvLoadOptions): Promise<{ ok: true } | { ok: false; error: string }> {
+    // A new file invalidates the previous one's mirrors. Until the engine
+    // reports the new time/duration, consumers must not read stream A's
+    // values against stream B — most importantly the VOD resume save, which
+    // would otherwise write A's position into B's entry during the gap
+    // between the loadfile and the first mpv://time event.
+    this.curTime = opts.startAt && opts.startAt > 0.5 ? opts.startAt : 0
+    this.dur = Number.NaN
+    this.emit('durationchange')
     try {
       await invoke('mpv_load', {
         id: this.id,
