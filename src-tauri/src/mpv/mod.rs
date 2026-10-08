@@ -1432,7 +1432,8 @@ pub async fn mpv_available(app: AppHandle) -> AvailabilityPayload {
 /// every load ("none" without a resume) so a failed load can never leave a
 /// stale offset armed; FileLoaded clears it too. Volume/muted are applied at
 /// load (the engine may have been created by a bare availability probe
-/// before the frontend ever set them).
+/// before the frontend ever set them), and `pause` is cleared at load so a
+/// core paused for a previous item cannot start the new one frozen.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // the load's full parameter set, mirroring mpv's own loadfile+options
 pub async fn mpv_load(
@@ -1472,6 +1473,14 @@ pub async fn mpv_load(
             .map_err(|err| format!("set volume: {err}"))?;
         mpv.set_property("mute", muted)
             .map_err(|err| format!("set mute: {err}"))?;
+        // `pause` survives both `stop` and `loadfile … replace`, so a core
+        // paused for the PREVIOUS item (user pause, then another channel /
+        // VOD / quality, or a tile reusing the engine) would present the new
+        // one as a frozen first frame while the frontend believes it is
+        // playing. Every load implies the user wants playback — the
+        // frontend clears its own pause-intent when a load starts.
+        mpv.set_property("pause", false)
+            .map_err(|err| format!("set pause: {err}"))?;
         // `start` is set EXPLICITLY on every load, "none" included: the
         // property is otherwise only cleared on FileLoaded, so a load that
         // fails before FileLoaded would leave a stale +N armed for the NEXT
