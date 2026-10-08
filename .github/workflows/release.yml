@@ -46,7 +46,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag/version to build (e.g. v0.1.8). Must not already exist as a published release."
+        description: "Tag/version to build (e.g. v0.1.8). If the tag already exists it must point at the commit this run builds; otherwise dispatch from the tag itself."
         required: true
         type: string
       publish:
@@ -82,13 +82,50 @@ jobs:
     name: check
     uses: ./.github/workflows/ci.yml
 
+  # A manual dispatch builds the commit it was dispatched from (github.sha)
+  # while the release is published under the `tag` input — and the checkouts
+  # in the jobs below fetch no tags, so they cannot see what a local
+  # rev-parse would need. If the tag already exists on a DIFFERENT commit,
+  # GitHub attaches the release to the old tag commit while the artifacts
+  # come from this run, or the release create fails outright. Ask the remote
+  # instead, before any build minute is spent. A tag that does not exist yet
+  # is fine (publish creates it at this run's commit), and so is an existing
+  # tag that already points at this run's commit.
+  verify-dispatch-tag:
+    name: verify dispatch tag
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Existing tag must point at this run's commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `^{}` peels an annotated tag to its commit; a lightweight tag has
+          # no peeled line and is listed directly.
+          tag_ref="refs/tags/${RELEASE_TAG}"
+          remote_refs="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" "$tag_ref" "${tag_ref}^{}")"
+          if [ -z "$remote_refs" ]; then
+            echo "OK: ${RELEASE_TAG} does not exist yet — publish will create it at ${GITHUB_SHA}"
+            exit 0
+          fi
+          tag_sha="$(printf '%s\n' "$remote_refs" | awk -v peeled="${tag_ref}^{}" '$2 == peeled {print $1}')"
+          if [ -z "$tag_sha" ]; then
+            tag_sha="$(printf '%s\n' "$remote_refs" | awk -v t="$tag_ref" '$2 == t {print $1}')"
+          fi
+          if [ "$tag_sha" != "$GITHUB_SHA" ]; then
+            echo "ERROR: tag ${RELEASE_TAG} already exists at ${tag_sha}, but this run builds ${GITHUB_SHA}." >&2
+            echo "       Dispatch from the tag itself (pick it as the run's ref), or use a tag that does not exist yet." >&2
+            exit 1
+          fi
+          echo "OK: ${RELEASE_TAG} already points at this run's commit ${GITHUB_SHA}"
+
   # ── Native packages: .deb + .rpm + the AUR -bin tarball ───────────────
   # Built in the debian:12 container below (glibc 2.36, libmpv2). The AUR
   # tarball reuses THIS job's compiled binary, so it inherits the same
   # baseline. No AppImage is built here.
   build-native-packages:
     name: build native (deb/rpm/aur) · debian-12 container
-    needs: [check]
+    needs: [check, verify-dispatch-tag]
     runs-on: ubuntu-latest
     # Debian 12 (bookworm), not ubuntu-22.04: the embedded-libmpv engine
     # links the BUILD HOST's libmpv, and the deb/rpm `depends` declare
@@ -240,7 +277,7 @@ jobs:
   # .so files (incl. libgstlibav → avdec_h264) into the AppImage.
   build-appimage:
     name: build AppImage · ubuntu-24.04
-    needs: [check]
+    needs: [check, verify-dispatch-tag]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -494,7 +531,7 @@ jobs:
   # build step + the matching publish globs when wanted.)
   build-windows:
     name: build windows (nsis) · windows-latest
-    needs: [check]
+    needs: [check, verify-dispatch-tag]
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -669,7 +706,7 @@ jobs:
   # ships here.)
   build-macos:
     name: build macos (app/dmg) · macos-latest · arm64
-    needs: [check]
+    needs: [check, verify-dispatch-tag]
     runs-on: macos-latest
     steps:
       - name: Checkout
