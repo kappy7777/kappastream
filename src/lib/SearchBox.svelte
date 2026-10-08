@@ -145,8 +145,11 @@
     if (e.key === 'Escape') {
       if (phase !== 'idle') {
         // Close the dropdown but keep input focus so a new query can be typed
-        // immediately (re-typing reopens the panel via the value effect).
+        // immediately (re-typing reopens the panel via the value effect). The
+        // pending work is cancelled too — a query left in flight would land
+        // afterwards, flip the phase back, and pop the panel open again.
         e.preventDefault()
+        cancelPendingSearch()
         phase = 'idle'
         activeIndex = -1
       }
@@ -175,6 +178,15 @@
     activeIndex = -1
     phase = 'idle'
     errorMessage = ''
+    cancelPendingSearch()
+  }
+
+  /** Clear the debounce timer and abort the in-flight request, if any. */
+  function cancelPendingSearch(): void {
+    if (searchTimer) {
+      clearTimeout(searchTimer)
+      searchTimer = null
+    }
     if (searchController) {
       searchController.abort()
       searchController = null
