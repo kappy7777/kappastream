@@ -2798,9 +2798,11 @@
     // covered too.
     favoritesStore.start()
     const unsubscribe = favoritesStore.subscribe((snapshot) => {
-      // Pinned messages ride the SAME 150s poll cadence (no second timer):
-      // every favorites cycle nudges the store, whose internal throttle caps
-      // any single channel at one request per cycle.
+      // Pinned messages ride the SAME 150s poll cadence when it runs: every
+      // favorites cycle nudges the store, whose internal throttle caps any
+      // single channel at one request per cycle. (The store also keeps its
+      // own interval while a target is set — this poll never fires for an
+      // empty favorites list.)
       pinnedChat.tick()
       if (playback.kind !== 'live') return
       const channel = channelJoined

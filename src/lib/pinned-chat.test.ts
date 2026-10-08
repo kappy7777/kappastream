@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 
 /*
@@ -405,6 +405,72 @@ describe('pinned chat: display model', () => {
     expect(isPinExpired(base, 1000)).toBe(false)
     expect(isPinExpired({ ...base, endsAtMs: 999 }, 1000)).toBe(true)
     expect(isPinExpired({ ...base, endsAtMs: 1001 }, 1000)).toBe(false)
+  })
+})
+
+// The store's own refresh cadence: the favorites poll that usually drives
+// tick() never fires for an EMPTY favorites list, so a target set with no
+// favorites (multi-view over non-favorited channels, a favorites-less
+// single view) would never see a pin update. The store keeps its own
+// interval while a target is set; its internal throttle dedupes that
+// against favorites-driven ticks.
+describe('pinned chat: self-owned refresh interval', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  // Let the void-refresh() chain settle under fake timers (fetch + assignment
+  // microtasks) without touching the interval clock.
+  const settle = async (): Promise<void> => {
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(0)
+  }
+
+  it('refreshes on its own interval while a target is set (no tick() needed)', async () => {
+    const h = makeHarness([[fixturePin()]])
+    h.store.setTarget('chan', '1')
+    await settle()
+    expect(h.fetch).toHaveBeenCalledTimes(1)
+
+    // First interval fire lands within the throttle window (the injected
+    // clock has not moved) — nothing yet. Push the clock past the window so
+    // the SECOND fire fetches: the interval alone drives the refresh.
+    await vi.advanceTimersByTimeAsync(150_000)
+    h.advance(150_001)
+    await vi.advanceTimersByTimeAsync(150_000)
+    await settle()
+    expect(h.fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops the interval when the target clears', async () => {
+    const h = makeHarness([[fixturePin()]])
+    h.store.setTarget('chan', '1')
+    await settle()
+    h.store.setTarget(null, null)
+    h.advance(150_001)
+    await vi.advanceTimersByTimeAsync(600_000)
+    await settle()
+    expect(h.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops the interval while the toggle is off and restarts it when on', async () => {
+    const h = makeHarness([[fixturePin()]])
+    h.setEnabled(false)
+    h.store.setTarget('chan', '1')
+    await settle()
+    expect(h.fetch).not.toHaveBeenCalled()
+
+    h.setEnabled(true)
+    h.store.tick() // any driver observes the flip; refresh re-arms the timer
+    await settle()
+    expect(h.fetch).toHaveBeenCalledTimes(1)
+    h.advance(150_001)
+    await vi.advanceTimersByTimeAsync(150_000)
+    await settle()
+    expect(h.fetch).toHaveBeenCalledTimes(2)
   })
 })
 

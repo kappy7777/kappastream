@@ -15,14 +15,16 @@
 //     (oldest evicted first) so the store cannot grow forever.
 //   - Expiry: endsAt is checked against a slowly ticking clock, so a pin that
 //     lapses BETWEEN polls disappears without waiting for the next refresh.
-//   - PinnedChatStore: the fetch controller. It rides the existing favorites
-//     poll cadence (GQL_REFRESH_INTERVAL_MS) — tick() is called from the
-//     favorites subscribe callback, and an internal throttle caps any single
-//     channel at one request per cycle no matter how often notify() fires.
-//     The toggle gates the FETCH, not the rendering: with settings.chatPinned
-//     off, refresh() returns before any request is issued (and drops the
-//     current pin), unlike the Tier 2 toggles which parse always and gate
-//     only presentation.
+//   - PinnedChatStore: the fetch controller. Its cadence floor is the
+//     favorites poll (GQL_REFRESH_INTERVAL_MS) — tick() is called from the
+//     favorites subscribe callback — but that poll never fires with an
+//     EMPTY favorites list, so the store also keeps its OWN interval while
+//     a target is set; the internal throttle caps any single channel at
+//     one request per cycle no matter how often tick() or the interval
+//     fire. The toggle gates the FETCH, not the rendering: with
+//     settings.chatPinned off, refresh() returns before any request is
+//     issued (and drops the current pin), unlike the Tier 2 toggles which
+//     parse always and gate only presentation.
 //
 // Single-view App.svelte targets the joined channel and passes the numeric
 // userId the favorites status batch already carries. MultiView targets ONLY
@@ -192,6 +194,7 @@ export class PinnedChatStore {
   private userIdFailedAt = new Map<string, number>()
   private resolvingIds = new Set<string>()
   private expiryTimer: ReturnType<typeof setInterval> | null = null
+  private pollTimer: ReturnType<typeof setInterval> | null = null
   private readonly deps: PinnedChatDeps
 
   constructor(deps: PinnedChatDeps = DEFAULT_DEPS) {
@@ -233,6 +236,7 @@ export class PinnedChatStore {
       }
       this.targetChannel = channel
       this.targetUserId = userId
+      this.updatePollTimer()
       void this.refresh()
     })
   }
@@ -285,6 +289,7 @@ export class PinnedChatStore {
   private async refresh(): Promise<void> {
     return untrack(async () => {
       const enabled = this.deps.enabled()
+      this.updatePollTimer()
       if (!enabled) {
         this.wasEnabled = false
         if (this.pins.length > 0) this.pins = []
@@ -382,6 +387,21 @@ export class PinnedChatStore {
     } else if (!needsTicker && this.expiryTimer != null) {
       clearInterval(this.expiryTimer)
       this.expiryTimer = null
+    }
+  }
+
+  // The store's own refresh cadence while a target is set and the toggle is
+  // on — the favorites poll that usually drives tick() never fires for an
+  // EMPTY favorites list, and multi-view (or a favorites-less single view)
+  // must not go pinless for a whole session because of it. The throttle in
+  // refresh() dedupes this against favorites-driven ticks.
+  private updatePollTimer(): void {
+    const needsTimer = this.deps.enabled() && this.targetChannel != null
+    if (needsTimer && this.pollTimer == null) {
+      this.pollTimer = setInterval(() => void this.refresh(), this.deps.intervalMs)
+    } else if (!needsTimer && this.pollTimer != null) {
+      clearInterval(this.pollTimer)
+      this.pollTimer = null
     }
   }
 }
