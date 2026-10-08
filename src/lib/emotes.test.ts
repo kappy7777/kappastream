@@ -339,6 +339,76 @@ describe('transient provider failures are not cached', () => {
   })
 })
 
+describe('global emote caching', () => {
+  it('a fully successful global load is cached for the process', async () => {
+    let hits = 0
+    fetchImpl = async (url) => {
+      hits++
+      if (url === 'https://7tv.io/v3/emote-sets/global') return jsonRes({ emotes: [] })
+      if (url === 'https://api.betterttv.net/3/cached/emotes/global') return jsonRes([])
+      if (url === 'https://api.frankerfacez.com/v1/set/global') {
+        return jsonRes({ default_sets: [1], sets: { '1': { emoticons: [{ id: 10, name: 'GlobalOne' }] } } })
+      }
+      throw new Error('unexpected fetch URL: ' + url)
+    }
+
+    const first = await E.loadGlobalEmotes()
+    expect(first.allFailed).toBe(false)
+    const second = await E.loadGlobalEmotes()
+    expect(second.emotes.map((e) => e.name)).toEqual(['GlobalOne'])
+    expect(second.allFailed).toBe(false)
+    expect(hits).toBe(3) // one provider round; the second load hit the cache
+  })
+
+  it('an all-providers outage is not cached — the next load refetches', async () => {
+    let down = true
+    fetchImpl = async (url) => {
+      if (down) throw new Error('network down')
+      if (url === 'https://7tv.io/v3/emote-sets/global') return jsonRes({ emotes: [] })
+      if (url === 'https://api.betterttv.net/3/cached/emotes/global') return jsonRes([])
+      if (url === 'https://api.frankerfacez.com/v1/set/global') {
+        return jsonRes({ default_sets: [1], sets: { '1': { emoticons: [{ id: 10, name: 'GlobalOne' }] } } })
+      }
+      throw new Error('unexpected fetch URL: ' + url)
+    }
+
+    const first = await E.loadGlobalEmotes()
+    expect(first.emotes).toEqual([])
+    expect(first.allFailed).toBe(true)
+
+    down = false
+    const second = await E.loadGlobalEmotes()
+    expect(second.allFailed).toBe(false)
+    expect(second.emotes.map((e) => e.name)).toEqual(['GlobalOne'])
+  })
+
+  it('a partial outage is not cached — the next load refetches every provider', async () => {
+    let bttvDown = true
+    let ffzHits = 0
+    fetchImpl = async (url) => {
+      if (url === 'https://api.betterttv.net/3/cached/emotes/global') {
+        if (bttvDown) throw new Error('network down')
+        return jsonRes([])
+      }
+      if (url === 'https://7tv.io/v3/emote-sets/global') return jsonRes({ emotes: [] })
+      if (url === 'https://api.frankerfacez.com/v1/set/global') {
+        ffzHits++
+        return jsonRes({ default_sets: [1], sets: { '1': { emoticons: [{ id: 10, name: 'GlobalOne' }] } } })
+      }
+      throw new Error('unexpected fetch URL: ' + url)
+    }
+
+    const first = await E.loadGlobalEmotes()
+    expect(first.allFailed).toBe(false) // 7TV/FFZ answered
+    expect(first.emotes.map((e) => e.name)).toEqual(['GlobalOne'])
+
+    bttvDown = false
+    const second = await E.loadGlobalEmotes()
+    expect(second.emotes.map((e) => e.name)).toEqual(['GlobalOne'])
+    expect(ffzHits).toBe(2) // the partial first round cached nothing
+  })
+})
+
 describe('ChatSession emoteStatus', () => {
   it("is 'error' only when every provider request fails", async () => {
     const { ChatSession } = await import('./chat-session.svelte')

@@ -29,6 +29,10 @@ interface ProviderCache {
 }
 
 const cache = new Map<string, ProviderCache>()
+// Global sets change rarely and ride along on EVERY channel join, so a fully
+// successful load is cached for the whole process — the same policy as the
+// channel cache. A transient failure (any null provider) never lands here.
+let globalCache: ProviderCache | null = null
 const FETCH_TIMEOUT_MS = 8_000
 
 /**
@@ -312,14 +316,21 @@ export async function loadChannelEmotes(channel: string, signal?: AbortSignal): 
 }
 
 export async function loadGlobalEmotes(signal?: AbortSignal): Promise<EmoteLoadResult> {
+  if (globalCache) {
+    return { emotes: [...globalCache.seventv, ...globalCache.bttv, ...globalCache.ffz], allFailed: false }
+  }
   const [seventv, bttv, ffz] = await Promise.all([
     fetch7TVGlobal(signal),
     fetchBTTVGlobal(signal),
     fetchFFZGlobal(signal),
   ])
+  if (signal?.aborted) return { emotes: [], allFailed: false }
   const emotes = [seventv, bttv, ffz].filter((l): l is Emote[] => l !== null).flat()
   // FFZ appended last so channel emotes (which already won earlier in
   // buildEmoteMap's first-write-wins on the exact name) keep winning.
+  if (seventv !== null && bttv !== null && ffz !== null) {
+    globalCache = { seventv, bttv, ffz }
+  }
   return { emotes, allFailed: seventv === null && bttv === null && ffz === null }
 }
 
