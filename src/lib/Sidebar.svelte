@@ -141,36 +141,140 @@
     }
   }
 
-  function onDragStart(e: DragEvent, name: string): void {
-    if (!e.dataTransfer) return
-    draggingName = name
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', name)
+  // ---- Pointer-driven drag-to-reorder --------------------------------------
+  // Replaces HTML5 drag-and-drop. In the webview, a native drag started
+  // fine but its dragover events stopped reaching the rows once anything
+  // about them changed at runtime — no drop indicator, no accepted drop,
+  // until an app restart. Pointer events carry no such negotiation: the
+  // rows' rects decide the target. The preview is a clone of the row
+  // (avatar, name, status info) at row size — the webview's default drag
+  // snapshot painted the row oversized.
+  const DRAG_THRESHOLD_PX = 4
+
+  let dragCandidate: {
+    name: string
+    row: HTMLElement
+    pointerId: number
+    startX: number
+    startY: number
+  } | null = null
+  let dragGhostEl: HTMLElement | null = null
+  let dragRects: { name: string; left: number; right: number; top: number; bottom: number }[] = []
+  let dragGrabOffset = { x: 0, y: 0 }
+  // The browser still fires a click on the capture element after a drag;
+  // a completed drag must not also select the row.
+  let suppressRowClick = false
+
+  function onRowPointerDown(e: PointerEvent, name: string): void {
+    suppressRowClick = false
+    if (e.button !== 0) return
+    // Plain presses stay plain in Auto sort: no drag, no reorder.
+    if (settings.sortMode !== 'manual') return
+    const row = e.currentTarget as HTMLElement
+    row.setPointerCapture(e.pointerId)
+    dragCandidate = { name, row, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY }
   }
 
-  function onDragOver(e: DragEvent, name: string): void {
-    if (!draggingName || draggingName === name) return
-    e.preventDefault()
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-    dragOverName = name
-  }
-
-  function onDragLeave(_e: DragEvent, name: string): void {
-    if (dragOverName === name) dragOverName = null
-  }
-
-  function onDrop(e: DragEvent, name: string): void {
-    e.preventDefault()
-    if (draggingName && draggingName !== name) {
-      store.reorder(draggingName, name)
+  function onRowPointerMove(e: PointerEvent): void {
+    const c = dragCandidate
+    if (!c || e.pointerId !== c.pointerId) return
+    if (!draggingName) {
+      if (Math.hypot(e.clientX - c.startX, e.clientY - c.startY) < DRAG_THRESHOLD_PX) return
+      startRowDrag(e)
     }
-    draggingName = null
-    dragOverName = null
+    updateRowDrag(e)
   }
 
-  function onDragEnd(): void {
+  function onRowPointerUp(e: PointerEvent): void {
+    const c = dragCandidate
+    if (!c || e.pointerId !== c.pointerId) return
+    const wasDragging = draggingName !== null
+    const target = dragOverName
+    endRowDrag()
+    dragCandidate = null
+    if (wasDragging) {
+      suppressRowClick = true
+      if (target && target !== c.name) store.reorder(c.name, target)
+    }
+  }
+
+  function onRowPointerCancel(): void {
+    if (!dragCandidate) return
+    endRowDrag()
+    dragCandidate = null
+  }
+
+  function startRowDrag(e: PointerEvent): void {
+    const c = dragCandidate
+    if (!c) return
+    draggingName = c.name
+    const rect = c.row.getBoundingClientRect()
+    dragGrabOffset = { x: c.startX - rect.left, y: c.startY - rect.top }
+    // Snapshot the sibling geometry once: nothing reflows mid-drag (the
+    // ghost is fixed-position and the indicator class swaps border for
+    // padding, keeping the box size).
+    const list = c.row.closest('.sidebar-list')
+    dragRects = [...(list?.querySelectorAll<HTMLElement>('.fav') ?? [])]
+      .filter((el) => el.dataset.favName)
+      .map((el) => {
+        const r = el.getBoundingClientRect()
+        return { name: el.dataset.favName as string, left: r.left, right: r.right, top: r.top, bottom: r.bottom }
+      })
+    // The clone keeps the row's scoped classes, so it renders with the row's
+    // own styles and full content; only the float overrides are inline.
+    // Width in css px: rect is visual space and the ghost paints at zoom ×
+    // its css size, so divide by the measured factor.
+    const k = zoomK || 1
+    const ghost = c.row.cloneNode(true) as HTMLElement
+    ghost.dataset.dragGhost = ''
+    ghost.inert = true
+    const s = ghost.style
+    s.position = 'fixed'
+    s.left = '0'
+    s.top = '0'
+    s.width = `${rect.width / k}px`
+    s.margin = '0'
+    s.zIndex = '3000'
+    s.pointerEvents = 'none'
+    s.boxShadow = 'var(--shadow-menu)'
+    s.opacity = '0.95'
+    s.cursor = 'grabbing'
+    document.body.appendChild(ghost)
+    dragGhostEl = ghost
+    document.body.style.cursor = 'grabbing'
+    updateRowDrag(e)
+  }
+
+  function updateRowDrag(e: PointerEvent): void {
+    if (dragGhostEl) {
+      // Pointer coordinates are visual space, but the fixed-position ghost
+      // lives inside the zoomed tree, where css translate paints at zoom ×
+      // its value — divide by the measured factor (the same discipline as
+      // the tooltip positioning) or the ghost races ahead of the cursor at
+      // any UI scale above 1×. Hit-testing stays visual: rects and pointer
+      // coordinates agree there.
+      const k = zoomK || 1
+      dragGhostEl.style.transform = `translate(${(e.clientX - dragGrabOffset.x) / k}px, ${
+        (e.clientY - dragGrabOffset.y) / k
+      }px)`
+    }
+    let hit: string | null = null
+    for (const r of dragRects) {
+      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+        if (r.name !== draggingName) hit = r.name
+        break
+      }
+    }
+    dragOverName = hit
+  }
+
+  function endRowDrag(): void {
     draggingName = null
     dragOverName = null
+    dragRects = []
+    dragGhostEl?.remove()
+    dragGhostEl = null
+    document.body.style.cursor = ''
   }
 
   function avatarInitial(name: string): string {
@@ -263,9 +367,12 @@
         {@const collab = collabBadge(fav.status)}
         {@const isOff = fav.status.state === 'offline'}
         {@const isErr = fav.status.state === 'error'}
-        <!-- Rows are only draggable in Manual sort: Auto ignores the manual
-             order (it sorts live-first by viewership), so a drop there would
-             silently rewrite an order the list never shows. -->
+        <!-- Drag-to-reorder is pointer-driven (see the script): HTML5
+             drag-and-drop in the webview stopped delivering dragover to the
+             rows once they changed at runtime, leaving the drag undroppable
+             until a restart. Auto sort ignores the manual order (it sorts
+             live-first by viewership), so a drop there would silently
+             rewrite an order the list never shows. -->
         <button
           type="button"
           class="fav"
@@ -274,12 +381,11 @@
           class:fav--error={isErr}
           class:fav--dragging={draggingName === fav.name}
           class:fav--drag-over={dragOverName === fav.name}
-          draggable={settings.sortMode === 'manual'}
-          ondragstart={(e) => onDragStart(e, fav.name)}
-          ondragover={(e) => onDragOver(e, fav.name)}
-          ondragleave={(e) => onDragLeave(e, fav.name)}
-          ondrop={(e) => onDrop(e, fav.name)}
-          ondragend={onDragEnd}
+          data-fav-name={fav.name}
+          onpointerdown={(e) => onRowPointerDown(e, fav.name)}
+          onpointermove={onRowPointerMove}
+          onpointerup={onRowPointerUp}
+          onpointercancel={onRowPointerCancel}
           onmouseenter={(e) => {
             hoveredName = fav.name
             if (iconsOnly) showTooltip(e, fav.name, fav.status)
@@ -289,7 +395,13 @@
             hideTooltip()
           }}
           oncontextmenu={(e) => handleContextMenu(fav.name, e)}
-          onclick={() => onselect(fav.name)}
+          onclick={() => {
+            if (suppressRowClick) {
+              suppressRowClick = false
+              return
+            }
+            onselect(fav.name)
+          }}
         >
           <span class="avatar-wrap">
             <span class="avatar" style="background: {info && info.avatarUrl ? 'transparent' : avatarBg(fav.name)}">
