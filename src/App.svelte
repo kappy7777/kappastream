@@ -1731,12 +1731,10 @@
 
   function onChatResizerPointerMove(e: PointerEvent): void {
     if (!isChatResizing) return
+    // The resizer only exists side-by-side (stacked mode hides it): dragging
+    // left widens the chat column.
     const dx = e.clientX - chatResizeStart.x
-    const dy = e.clientY - chatResizeStart.y
-    // In stacked mode the resizer is horizontal → drag Y changes height.
-    // In side-by-side the resizer is vertical → drag X changes width.
-    const delta = stacked ? dy : dx
-    const next = chatResizeStart.size - delta
+    const next = chatResizeStart.size - dx
     chatSize = Math.max(CHAT_SIZE_MIN, Math.min(CHAT_SIZE_MAX, next))
   }
 
@@ -3754,20 +3752,25 @@
         </div>
 
         {#if settings.chatVisible}
-          <div
-            class="chat-resizer"
-            class:chat-resizer--stacked={stacked}
-            class:chat-resizer--dragging={isChatResizing}
-            onpointerdown={onChatResizerPointerDown}
-            onkeydown={onChatResizerKey}
-            role="slider"
-            aria-orientation={stacked ? 'horizontal' : 'vertical'}
-            aria-label={t('chat_resizeChat')}
-            aria-valuenow={chatSize}
-            aria-valuemin={CHAT_SIZE_MIN}
-            aria-valuemax={CHAT_SIZE_MAX}
-            tabindex="0"
-          ></div>
+          <!-- Side-by-side only: in stacked mode the chat fills the space
+               below the player (flex 1 1 0), so there is nothing for a drag
+               to resize — the handle would silently rewrite the side-by-side
+               width instead. -->
+          {#if !stacked}
+            <div
+              class="chat-resizer"
+              class:chat-resizer--dragging={isChatResizing}
+              onpointerdown={onChatResizerPointerDown}
+              onkeydown={onChatResizerKey}
+              role="slider"
+              aria-orientation="vertical"
+              aria-label={t('chat_resizeChat')}
+              aria-valuenow={chatSize}
+              aria-valuemin={CHAT_SIZE_MIN}
+              aria-valuemax={CHAT_SIZE_MAX}
+              tabindex="0"
+            ></div>
+          {/if}
           <main class="chat" class:chat--hidden={!settings.chatVisible} style:--chat-size={`${chatSize}px`}>
             {#if activePin}
               <PinnedMessage
@@ -5006,11 +5009,6 @@
   .chat-resizer--dragging {
     background: var(--accent);
   }
-  .chat-resizer--stacked {
-    width: 100%;
-    height: 1px;
-    cursor: row-resize;
-  }
   /* Invisible hit-zone: extends the draggable area beyond the 1px line
      so the resize handle is easy to grab without needing pixel-perfect
      aim. Sized to match the other grab areas in the app. */
@@ -5019,9 +5017,6 @@
     position: absolute;
     inset: 0;
     margin: 0 -4px;
-  }
-  .main--stacked .chat-resizer::before {
-    margin: -4px 0;
   }
 
   /* The message list / jump pill / placeholder styles moved into the shared
