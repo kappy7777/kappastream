@@ -26,3 +26,9 @@ export function hideTooltip(host?: HTMLElement): void {
   currentHost = null
   tooltipState.visible = false
 }
+
+/** Whether `host` is the node whose tooltip is on screen right now — a
+ *  host refreshing its own text must not steal another host's tooltip. */
+export function isTooltipHost(host: HTMLElement): boolean {
+  return tooltipState.visible && currentHost === host
+}

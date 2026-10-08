@@ -1,5 +1,5 @@
 import type { Action } from 'svelte/action'
-import { showTooltip, hideTooltip } from './tooltip.svelte.ts'
+import { showTooltip, hideTooltip, isTooltipHost } from './tooltip.svelte.ts'
 
 export interface TooltipOptions {
   text: string
@@ -49,6 +49,21 @@ export const tooltip: Action<HTMLElement, string | TooltipOptions | undefined> =
   node.addEventListener('mouseenter', onEnter)
   node.addEventListener('mouseleave', onLeave)
   return {
+    // Without update() the closure keeps the mount-time params, so a tooltip
+    // whose text is derived from live state (Play/Pause, mute, the UI
+    // language) would freeze its first wording for the node's whole life.
+    update(next: string | TooltipOptions | undefined): void {
+      params = next
+      // Already showing for this node: swap the text in place so a state
+      // flip while hovered (pause pressed, locale changed) is reflected
+      // immediately. Re-anchoring keeps the rect current in case the host
+      // moved since the show.
+      const { text } = typeof params === 'string' ? { text: params } : (params ?? { text: '' })
+      if (text && isTooltipHost(node)) {
+        const rect = node.getBoundingClientRect()
+        showTooltip(text, rect, node)
+      }
+    },
     destroy(): void {
       clearTimer()
       node.removeEventListener('mouseenter', onEnter)

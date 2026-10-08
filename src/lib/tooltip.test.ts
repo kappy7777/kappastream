@@ -71,6 +71,31 @@ describe('tooltip action', () => {
     live.destroy()
   })
 
+  it('update() swaps the text live for the hovered host (Play → Pause)', () => {
+    const node = document.createElement('button')
+    document.body.appendChild(node)
+    const action = tooltip(node, 'Play')
+    hover(node)
+    expect(tooltipState.text).toBe('Play')
+    action?.update?.('Pause')
+    expect(tooltipState.text).toBe('Pause')
+    action?.destroy?.()
+    node.remove()
+  })
+
+  it('update() does not steal another host’s visible tooltip', () => {
+    const live = mountHost('The button being hovered')
+    const other = document.createElement('button')
+    document.body.appendChild(other)
+    const otherAction = tooltip(other, 'Somewhere else')
+    hover(live.node)
+    otherAction?.update?.('Somewhere else, re-rendered')
+    expect(tooltipState.text).toBe('The button being hovered')
+    otherAction?.destroy?.()
+    other.remove()
+    live.destroy()
+  })
+
   it('cancels a pending delayed show on destroy', () => {
     vi.useFakeTimers()
     const host = mountHost({ text: 'Delayed', delay: 50 })
