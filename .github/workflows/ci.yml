@@ -19,7 +19,14 @@ permissions:
 # Cancel superseded runs on the same ref so force-pushes / amended PRs
 # don't waste runner minutes.
 concurrency:
-  group: ci-${{ github.ref }}
+  # The workflow and event names keep direct runs of this workflow apart
+  # from the group a caller evaluates when reusing it: release.yml's
+  # nested check job resolves this group in the CALLER's context, and
+  # without the split a release dispatched from main shared
+  # ci-refs/heads/main with direct CI runs — cancel-in-progress then
+  # killed a push-to-main CI run or the release's own check (skipping
+  # every build job) depending on which started second.
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
