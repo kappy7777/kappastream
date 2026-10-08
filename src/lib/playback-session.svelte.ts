@@ -18,7 +18,7 @@
 import Hls from 'hls.js'
 import { invoke } from '@tauri-apps/api/core'
 import { buildHlsConfig } from './hls-config'
-import { isFatalNetworkishError, liveEdgeSeekTarget, STALL_RECOVER_GRACE_MS } from './playback'
+import { isFatalNetworkishError, isProxiedMediaUrl, liveEdgeSeekTarget, STALL_RECOVER_GRACE_MS } from './playback'
 import { installedStreamlinkVersion, streamlinkFloorHint } from './streamlink-floor'
 import type { MpvBackend, MpvMediaKind } from './video-backend'
 
@@ -210,7 +210,11 @@ export class PlaybackSession {
       }
       this.hls = null
     }
-    const instance = new Hls(buildHlsConfig(opts.lowLatency))
+    // A proxied source (ksvod rewrite for VODs always, live on Windows)
+    // gets the slow-link TTFB budget: the proxy answers only after the
+    // whole segment is buffered, so hls.js's default first-byte timer
+    // would kill every segment on a slow connection.
+    const instance = new Hls(buildHlsConfig(opts.lowLatency, { proxied: isProxiedMediaUrl(opts.url) }))
     this.hls = instance
     return new Promise((resolve) => {
       let done = false

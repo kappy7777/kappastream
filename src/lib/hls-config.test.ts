@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { buildHlsConfig, LIVE_SYNC_DURATION_COUNT_DEFAULT, BACK_BUFFER_LENGTH } from './hls-config'
+import {
+  buildHlsConfig,
+  LIVE_SYNC_DURATION_COUNT_DEFAULT,
+  BACK_BUFFER_LENGTH,
+  PROXIED_FRAG_TTFB_MS,
+} from './hls-config'
 
 /*
  * Tests for the shared hls.js config builder (src/lib/hls-config.ts). These
@@ -59,5 +64,35 @@ describe('buildHlsConfig', () => {
   it('only emits known keys (no accidental/typo config keys)', () => {
     const keys = Object.keys(buildHlsConfig(true)).sort()
     expect(keys).toEqual(['backBufferLength', 'enableWorker', 'liveSyncDurationCount', 'lowLatencyMode'])
+  })
+
+  it('leaves fragment load timing at the library defaults for direct sources', () => {
+    // Direct (non-proxied) loads keep hls.js's own fragLoadPolicy: the
+    // slow-link budget exists ONLY because the ksvod proxy answers a
+    // fragment request with the whole buffered body.
+    expect(buildHlsConfig(true).fragLoadPolicy).toBeUndefined()
+    expect(buildHlsConfig(false, { proxied: false }).fragLoadPolicy).toBeUndefined()
+  })
+
+  it('raises only the fragment TTFB budget for proxied sources', () => {
+    const policy = buildHlsConfig(false, { proxied: true }).fragLoadPolicy?.default
+    expect(policy, 'proxied config carries a fragLoadPolicy').toBeDefined()
+    // The raised budget — just above the proxy's 30 s overall timeout.
+    expect(policy?.maxTimeToFirstByteMs).toBe(PROXIED_FRAG_TTFB_MS)
+    expect(PROXIED_FRAG_TTFB_MS).toBeGreaterThan(30_000)
+    // Everything else mirrors the library defaults (hls.js merges user
+    // config with a shallow spread, so a partial policy would silently
+    // drop the untouched fields).
+    expect(policy?.maxLoadTimeMs).toBe(120_000)
+    expect(policy?.timeoutRetry).toEqual({ maxNumRetry: 4, retryDelayMs: 0, maxRetryDelayMs: 0 })
+    expect(policy?.errorRetry).toEqual({ maxNumRetry: 6, retryDelayMs: 1000, maxRetryDelayMs: 8000 })
+  })
+
+  it('the proxied policy rides along the rest of the config untouched', () => {
+    const cfg = buildHlsConfig(true, { proxied: true })
+    expect(cfg.lowLatencyMode).toBe(true)
+    expect(cfg.liveSyncDurationCount).toBe(1)
+    expect(cfg.enableWorker).toBe(true)
+    expect(cfg.backBufferLength).toBe(BACK_BUFFER_LENGTH)
   })
 })

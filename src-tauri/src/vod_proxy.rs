@@ -1,6 +1,6 @@
 use futures_util::StreamExt;
 use std::borrow::Cow;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 // VOD/clip media on Twitch is served from CloudFront (e.g.
@@ -37,6 +37,73 @@ const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 
 static PROXY_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+// --- Superseded-download aborting ------------------------------------------
+//
+// The webview cancels nothing on its side: a timed-out hls.js retry or a
+// seek simply issues NEW requests while the abandoned proxy fetch keeps
+// downloading to its cap, competing for the same bandwidth as its
+// replacement (and every retry starts from byte zero, so they stack).
+// In-flight fetches are tracked by target URL (+ Range): a repeat request
+// for the same key aborts its predecessor outright, and a small
+// concurrency cap evicts the OLDEST entry when exceeded — a seek abandons
+// whole URLs that are never re-requested, so only the cap reclaims those.
+// Every entry removes itself when its task finishes (or is aborted).
+
+/// Headroom over the realistic concurrent set (one frag load per player,
+/// at most four tiles + the main window): past it, the oldest fetch is
+/// treated as abandoned.
+const MAX_INFLIGHT_PROXY_FETCHES: usize = 6;
+
+struct InflightFetch {
+    id: u64,
+    key: String,
+    handle: tauri::async_runtime::JoinHandle<()>,
+}
+
+static INFLIGHT: Mutex<Vec<InflightFetch>> = Mutex::new(Vec::new());
+static NEXT_INFLIGHT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn lock_inflight() -> std::sync::MutexGuard<'static, Vec<InflightFetch>> {
+    INFLIGHT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Abort every in-flight fetch for `key` (a same-URL retry supersedes its
+/// predecessor), enforce the concurrency cap by evicting the oldest entry,
+/// then register the new fetch under `id`.
+fn register_inflight(id: u64, key: String, handle: tauri::async_runtime::JoinHandle<()>) {
+    let mut inflight = lock_inflight();
+    inflight.retain(|f| {
+        if f.key == key {
+            f.handle.abort();
+            false
+        } else {
+            true
+        }
+    });
+    while inflight.len() >= MAX_INFLIGHT_PROXY_FETCHES {
+        if let Some(oldest) = inflight.first() {
+            oldest.handle.abort();
+        }
+        inflight.remove(0);
+    }
+    inflight.push(InflightFetch { id, key, handle });
+}
+
+/// Removes the task's own entry on completion OR abort (Drop runs either
+/// way), identified by its unique id so a same-key successor's entry is
+/// never touched.
+struct InflightGuard {
+    id: u64,
+}
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        lock_inflight().retain(|f| f.id != self.id);
+    }
+}
 
 fn proxy_client() -> &'static reqwest::Client {
     PROXY_CLIENT.get_or_init(|| {
@@ -121,7 +188,18 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
             .get("range")
             .and_then(|v| v.to_str().ok())
             .map(|v| v.to_string());
-        tauri::async_runtime::spawn(async move {
+        // In-flight key: same target AND same Range — a retry re-requests
+        // exactly this pair, while a seek moves to different URLs entirely.
+        let inflight_key = format!(
+            "{target}{}",
+            range_header
+                .as_deref()
+                .map(|r| format!("\n{r}"))
+                .unwrap_or_default()
+        );
+        let inflight_id = NEXT_INFLIGHT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let handle = tauri::async_runtime::spawn(async move {
+            let _inflight = InflightGuard { id: inflight_id };
             let client = proxy_client();
             let mut upstream = client.get(&target);
             if let Some(range) = range_header.as_deref() {
@@ -228,6 +306,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
                 }
             }
         });
+        register_inflight(inflight_id, inflight_key, handle);
     })
 }
 

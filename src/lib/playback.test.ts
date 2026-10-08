@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   toKsvodProxyUrl,
+  isProxiedMediaUrl,
   isFatalNetworkishError,
   liveEdgeSeekTarget,
   shouldRecoverStallAfterPause,
@@ -57,6 +58,21 @@ describe('toKsvodProxyUrl', () => {
       )
     },
   )
+})
+
+describe('isProxiedMediaUrl', () => {
+  it('recognizes both proxy forms toKsvodProxyUrl emits', () => {
+    expect(isProxiedMediaUrl(toKsvodProxyUrl('https://host.example/x.m3u8', false))).toBe(true)
+    expect(isProxiedMediaUrl(toKsvodProxyUrl('https://host.example/x.m3u8', true))).toBe(true)
+  })
+
+  it('rejects direct media URLs and lookalikes', () => {
+    expect(isProxiedMediaUrl('https://ttvnw.net/live/x.m3u8')).toBe(false)
+    expect(isProxiedMediaUrl('http://host.example/x.m3u8')).toBe(false)
+    // The Windows origin must match exactly — a same-path http URL from
+    // anywhere else is not proxied.
+    expect(isProxiedMediaUrl('http://not-ksvod.localhost/host.example/x')).toBe(false)
+  })
 })
 
 describe('isFatalNetworkishError', () => {

@@ -31,6 +31,11 @@ export function toKsvodProxyUrl(httpsUrl: string, isWindows: boolean): string {
   return httpsUrl.replace('https://', prefix)
 }
 
+/** Whether a media URL is in one of the two ksvod-proxy forms toKsvodProxyUrl emits. */
+export function isProxiedMediaUrl(url: string): boolean {
+  return url.startsWith('ksvod://localhost/') || url.startsWith('http://ksvod.localhost/')
+}
+
 // hls.js fatal-error details that indicate a transport/manifest problem
 // (worth surfacing as "network" rather than a generic player error). The
 // check runs against BOTH `type` and `details` because hls.js is not
