@@ -1643,7 +1643,9 @@
     playback.kind === 'vod'
       ? vodChat.failed
         ? t('vod_chatUnavailable')
-        : t('vod_chatLoading')
+        : vodChat.ended && vodChat.visible.length === 0
+          ? t('vod_noChat')
+          : t('vod_chatLoading')
       : status === 'connected'
         ? t('chat_waitingMessages')
         : t('chat_joinToSee'),

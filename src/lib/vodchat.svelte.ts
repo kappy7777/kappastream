@@ -198,6 +198,13 @@ export class VodChatController<M> {
   /** True after a fetch failure (429/integrity/network) while backed off. */
   failed = $state(false)
   /**
+   * True once a page came back empty — the offset walked past the VOD's last
+   * comment (or it never had any). With `visible` empty this is the "no chat
+   * messages" state the placeholder renders instead of a spinner that would
+   * otherwise sit there for the whole VOD.
+   */
+  ended = $state(false)
+  /**
    * Trim hold requested by the rendering pane: true while the user is
    * scrolled UP reading history, so drain() caps `visible` at
    * VISIBLE_CAP_HELD instead of VISIBLE_CAP. Plain field on purpose —
@@ -211,7 +218,6 @@ export class VodChatController<M> {
   private playhead = 0
   private nextOffset = 0
   private maxFetched = 0
-  private eof = false
   private inFlight = false
   private videoId: string | null = null
   private generation = 0
@@ -230,7 +236,7 @@ export class VodChatController<M> {
     this.videoId = videoId
     this.failed = false
     this.inFlight = false
-    this.eof = false
+    this.ended = false
     this.resetBuffers()
     const start = Math.max(0, Math.floor(atOffset))
     this.playhead = start
@@ -271,7 +277,7 @@ export class VodChatController<M> {
     this.videoId = null
     this.inFlight = false
     this.failed = false
-    this.eof = false
+    this.ended = false
     this.resetBuffers()
   }
 
@@ -302,7 +308,7 @@ export class VodChatController<M> {
   private resync(offset: number): void {
     this.inFlight = false
     this.failed = false
-    this.eof = false
+    this.ended = false
     this.resetBuffers()
     this.playhead = offset
     this.nextOffset = offset
@@ -357,7 +363,12 @@ export class VodChatController<M> {
   // Fetch guards + margin top-up. Idempotent; called from the tick and after
   // every fetch / guard change.
   private maybeFetch(): void {
-    if (this.videoId == null || this.eof || this.inFlight || this.failed) return
+    if (this.videoId == null || this.ended || this.inFlight || this.failed) return
+    // A pending seek debounce owns the next resync: fetching now would either
+    // duplicate it (the tick's behind-playhead resync fires first, then the
+    // debounce resyncs again ~250 ms later — two requests for one scrub) or
+    // page at an offset the debounce is about to discard.
+    if (this.seekTimer) return
     if (this.deps.getPaused()) return // no fetch while paused
     if (!this.deps.getChatVisible()) return // no fetch while chat hidden
     // If we have no data at/after the playhead (chat was hidden while the video
@@ -385,7 +396,7 @@ export class VodChatController<M> {
       if (gen !== this.generation) return // superseded by seek/resync/stop
       this.inFlight = false
       if (page.comments.length === 0) {
-        this.eof = true
+        this.ended = true
         return
       }
       for (const c of page.comments) {

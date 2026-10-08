@@ -382,6 +382,7 @@ export const fr: Record<TKey, string> = {
   vod_clip: 'Clip',
   vod_chatLoading: 'Chargement du chat…',
   vod_chatUnavailable: 'Relecture du chat indisponible',
+  vod_noChat: 'Aucun message dans le chat',
 
   welcome_title: 'Bienvenue dans Kappastream',
   welcome_tagline: "Twitch, réduit à l'essentiel : le stream et le chat.",

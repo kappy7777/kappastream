@@ -381,6 +381,7 @@ export const es: Record<TKey, string> = {
   vod_clip: 'Clip',
   vod_chatLoading: 'Cargando chat…',
   vod_chatUnavailable: 'Repetición de chat no disponible',
+  vod_noChat: 'No hay mensajes de chat',
 
   welcome_title: 'Bienvenido a Kappastream',
   welcome_tagline: 'Twitch, reducido a lo esencial: el stream y el chat.',

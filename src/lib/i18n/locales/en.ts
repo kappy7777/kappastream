@@ -408,6 +408,7 @@ export const en = {
   vod_clip: 'Clip',
   vod_chatLoading: 'Loading chat…',
   vod_chatUnavailable: 'Chat replay unavailable',
+  vod_noChat: 'No chat messages',
 
   // ---- WelcomeOverlay.svelte (first-install welcome / what's-new) ---------
   welcome_title: 'Welcome to Kappastream',

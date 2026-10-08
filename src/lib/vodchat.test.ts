@@ -328,6 +328,69 @@ describe('VodChatController', () => {
     c.stop()
   })
 
+  it('exposes ended for an empty VOD (no comments at all)', async () => {
+    const { fetchPage } = makeStreamFetcher([]) // every page is empty
+    const c = new VodChatController<StreamMsg>({
+      fetchPage,
+      getPlayhead: () => 5,
+      getPaused: () => false,
+      getChatVisible: () => true,
+    })
+    c.start('v1', 0)
+    await settle(3)
+    expect(c.ended).toBe(true)
+    expect(c.visible.length).toBe(0)
+    expect(c.failed).toBe(false)
+    c.stop()
+    expect(c.ended).toBe(false) // stop clears it for the next VOD
+  })
+
+  it('exposes ended after seeking past the last comment', async () => {
+    const stream = buildStream(20)
+    const { fetchPage } = makeStreamFetcher(stream)
+    let playhead = 0
+    const c = new VodChatController<StreamMsg>({
+      fetchPage,
+      getPlayhead: () => playhead,
+      getPaused: () => false,
+      getChatVisible: () => true,
+    })
+    c.start('v1', 0)
+    await settle(2)
+    playhead = 500 // far past the end
+    c.seek(500)
+    await vi.advanceTimersByTimeAsync(600) // past the 500ms debounce
+    await settle(2)
+    expect(c.ended).toBe(true)
+    expect(c.visible.length).toBe(0)
+    c.stop()
+  })
+
+  it('the tick does not resync while a seek debounce is pending (no double fetch)', async () => {
+    const stream = buildStream(3000)
+    const { fetchPage, calls } = makeStreamFetcher(stream)
+    let playhead = 0
+    const c = new VodChatController<StreamMsg>({
+      fetchPage,
+      getPlayhead: () => playhead,
+      getPaused: () => false,
+      getChatVisible: () => true,
+    })
+    c.start('v1', 0)
+    await settle(2)
+    const before = calls.length
+    playhead = 900 // far ahead of the buffered margin
+    c.seek(900)
+    // A tick lands INSIDE the 500ms debounce window: with the playhead now
+    // past maxFetched, the old code resynced here AND again when the debounce
+    // fired — two fetch bursts for one scrub. The debounce owns the resync.
+    await vi.advanceTimersByTimeAsync(250)
+    expect(calls.length - before).toBe(0)
+    await vi.advanceTimersByTimeAsync(300) // debounce fires -> the one resync
+    expect(calls.length - before).toBeGreaterThan(0)
+    c.stop()
+  })
+
   it('an empty result page is success (EOF), not an error', async () => {
     // Stream ends at 0; any fetch beyond returns empty -> EOF.
     const stream = buildStream(0)
