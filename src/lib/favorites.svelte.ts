@@ -26,6 +26,9 @@ export type LiveStatus =
       title: string
       viewers: number
       uptime: string
+      // Stream start as epoch ms — the live-uptime display source (see
+      // formatUptimeElapsed above).
+      startedAt?: number
       game: string
       avatarUrl: string
       // Stream Together / costream (optional so hand-built literals — e.g.
@@ -147,17 +150,15 @@ function saveNotifChannels(set: Set<string>): void {
   }
 }
 
-// Convert a GQL stream `createdAt` (ISO-8601) into a human-readable uptime
-// string for the LiveStatus type. The sidebar doesn't render uptime (only the
-// active-channel path does, via fetchLiveStatus); this keeps the field
-// populated + sane for the status cache and any future caller. Stale by up to
-// one refresh interval (GQL_REFRESH_INTERVAL_MS) — acceptable since it isn't
-// displayed for favorites.
-function formatUptime(startedAtIso: string): string {
-  if (!startedAtIso) return ''
-  const start = Date.parse(startedAtIso)
-  if (!Number.isFinite(start)) return ''
-  let s = Math.max(0, Math.floor((Date.now() - start) / 1000))
+// Uptime rendering. `startedAt` (epoch ms) is the display source: the status
+// bar and the multi-view status rows re-format it against a ticking clock
+// (App / MultiView keep a 1s `now` while a live uptime is on screen), so the
+// "Up …" line advances instead of freezing for up to one refresh interval.
+// The `uptime` string on LiveStatus stays as the fetch-time snapshot for
+// callers without a ticker (tests; the fetch happens only every
+// GQL_REFRESH_INTERVAL_MS).
+export function formatUptimeElapsed(elapsedMs: number): string {
+  let s = Math.max(0, Math.floor(elapsedMs / 1000))
   const h = Math.floor(s / 3600)
   s -= h * 3600
   const m = Math.floor(s / 60)
@@ -165,6 +166,17 @@ function formatUptime(startedAtIso: string): string {
   if (h > 0) return `${h}h ${m}m`
   if (m > 0) return `${m}m ${s}s`
   return `${s}s`
+}
+
+function parseStartedAt(startedAtIso: string): number | undefined {
+  if (!startedAtIso) return undefined
+  const ms = Date.parse(startedAtIso)
+  return Number.isFinite(ms) ? ms : undefined
+}
+
+function formatUptime(startedAtIso: string): string {
+  const start = parseStartedAt(startedAtIso)
+  return start === undefined ? '' : formatUptimeElapsed(Date.now() - start)
 }
 
 // Atomic single-channel resolution used by App.svelte for the ACTIVE channel's
@@ -184,6 +196,7 @@ export async function fetchLiveStatus(channel: string): Promise<LiveStatus> {
         title: cs.title,
         viewers: cs.viewersCount,
         uptime: formatUptime(cs.startedAt),
+        startedAt: parseStartedAt(cs.startedAt),
         game: cs.game,
         avatarUrl: cs.avatarUrl,
         userId: cs.userId,
@@ -677,6 +690,7 @@ export class FavoritesStore {
             title: cs.title,
             viewers: cs.viewersCount,
             uptime: formatUptime(cs.startedAt),
+            startedAt: parseStartedAt(cs.startedAt),
             game: cs.game,
             avatarUrl: cs.avatarUrl,
             userId: cs.userId,

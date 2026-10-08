@@ -45,6 +45,7 @@
   import {
     collabBadge,
     fetchLiveStatus,
+    formatUptimeElapsed,
     type LiveStatus,
     favoritesStore,
     isValidChannelName,
@@ -2828,6 +2829,25 @@
     return unsubscribe
   })
 
+  // The status bar's "Up …" line formats from the stream's startedAt against
+  // a ticking clock — the fetch-time `uptime` string is frozen for up to one
+  // poll interval between refreshes. One 1s interval, armed only while a live
+  // startedAt is actually on display.
+  let uptimeNow = $state(Date.now())
+  $effect(() => {
+    const s = activeStatus
+    if (s.state !== 'live' || s.startedAt == null) return
+    const timer = setInterval(() => {
+      uptimeNow = Date.now()
+    }, 1000)
+    return () => clearInterval(timer)
+  })
+  const activeUptime = $derived.by(() => {
+    const s = activeStatus
+    if (s.state !== 'live') return ''
+    return s.startedAt != null ? formatUptimeElapsed(uptimeNow - s.startedAt) : s.uptime
+  })
+
   // ---- Pinned chat messages (single-stream view) ---------------------------
   // The banner follows the joined channel while live. The numeric id is the
   // one the status data already carries (activeStatus.userId rides the same
@@ -3583,9 +3603,9 @@
                           >{formatCompact(activeStatus.collabViewers)} {t('si_collabViewers')}</span
                         >
                       {/if}
-                      {#if activeStatus.uptime}
+                      {#if activeUptime}
                         <span class="stream-info-dot">·</span>
-                        <span class="stream-info-uptime">{t('si_uptime', { uptime: activeStatus.uptime })}</span>
+                        <span class="stream-info-uptime">{t('si_uptime', { uptime: activeUptime })}</span>
                       {/if}
                       {#if activeStatus.followers != null}
                         <span class="stream-info-dot">·</span>

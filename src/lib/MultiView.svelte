@@ -44,6 +44,7 @@
     type MergeSource,
   } from './merged-chat'
   import { fetchChannelStatuses } from './gql'
+  import { formatUptimeElapsed, type LiveStatus } from './favorites.svelte'
   import { openExternal } from './open-url'
   import { formatCompact } from './format'
   import { tooltip } from './tooltip.ts'
@@ -678,6 +679,26 @@
   // (the old hover-to-reveal button was undiscoverable). The
   // strip is its own flex row so it never steals clicks from tiles/controls.
 
+  // The status rows' "Up …" lines format from each stream's startedAt against
+  // a ticking clock — the polled `uptime` string is frozen between tile
+  // refreshes. One 1s interval for the whole grid, armed only while some tile
+  // has a live startedAt to display.
+  let uptimeNow = $state(Date.now())
+  $effect(() => {
+    const anyLive = tileStore.tiles.some(
+      (tile) => tile.liveStatus.state === 'live' && tile.liveStatus.startedAt != null,
+    )
+    if (!anyLive) return
+    const timer = setInterval(() => {
+      uptimeNow = Date.now()
+    }, 1000)
+    return () => clearInterval(timer)
+  })
+  function tileUptime(s: LiveStatus): string {
+    if (s.state !== 'live') return ''
+    return s.startedAt != null ? formatUptimeElapsed(uptimeNow - s.startedAt) : s.uptime
+  }
+
   // ---- resizable tile splits (#3) -------------------------------------------
   // splitX / splitY are the column / row split ratios (0.15–0.85, default 0.5).
   // They are NOT persisted (multi-view itself is never persisted) — they reset
@@ -879,6 +900,7 @@
         </button>
         {#each tileStore.tiles as tile (tile.id)}
           {@const s = tile.liveStatus}
+          {@const up = tileUptime(s)}
           {@const authority = tileStore.isAuthority(tile.id)}
           <button
             type="button"
@@ -903,8 +925,7 @@
               <span class="mv-status-meta">
                 {#if s.game}<span class="mv-status-game">{s.game}</span><span class="mv-status-sep">·</span>{/if}
                 <span>{formatCompact(s.viewers)} {t('viewers')}</span>
-                {#if s.uptime}<span class="mv-status-sep">·</span><span>{t('si_uptime', { uptime: s.uptime })}</span
-                  >{/if}
+                {#if up}<span class="mv-status-sep">·</span><span>{t('si_uptime', { uptime: up })}</span>{/if}
               </span>
             {:else if s.state === 'offline'}
               <span class="mv-status-offline">{t('offline')}</span>
