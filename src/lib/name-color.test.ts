@@ -95,6 +95,26 @@ describe('readableNameColor', () => {
     }
   })
 
+  it('reaches the target on mid-tone backgrounds by darkening', () => {
+    // Luminance ~0.22 / ~0.28 — the custom-theme mid-tone range. Even pure
+    // white is below 4.5:1 against these (the white/black contrast crossover
+    // sits at a background luminance of ~0.179), so LIGHTENING — what the
+    // old 0.5 pivot picked here — was a search that could never reach the
+    // target. The direction must follow the crossover and darken.
+    for (const bg of ['#808080', '#909090']) {
+      const bgc = parseColorToken(bg)!
+      for (const fg of hostile) {
+        const adjusted = readableNameColor(fg, bg)
+        const adj = parseColorToken(adjusted)
+        expect(adj, `${fg} on ${bg} adjusted to ${adjusted}`).not.toBeNull()
+        const ratio = contrastRatio({ r: adj!.r, g: adj!.g, b: adj!.b }, { r: bgc.r, g: bgc.g, b: bgc.b })
+        expect(ratio, `${fg} on ${bg} -> ${adjusted} (${ratio.toFixed(2)}:1)`).toBeGreaterThanOrEqual(
+          NAME_COLOR_CONTRAST_TARGET,
+        )
+      }
+    }
+  })
+
   it('leaves a colour that already passes unchanged', () => {
     // #00FF7F on the dark amethyst panel is ~13:1 already.
     expect(readableNameColor('#00FF7F', '#18181b')).toBe('#00FF7F')

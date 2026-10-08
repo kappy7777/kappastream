@@ -118,6 +118,9 @@ function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: n
 
 export const NAME_COLOR_CONTRAST_TARGET = 4.5
 
+const WHITE = { r: 255, g: 255, b: 255 }
+const BLACK = { r: 0, g: 0, b: 0 }
+
 // Steps from the current lightness toward the useful extreme. Going toward
 // pure 0/1 would keep hue in name only (a black/white-ish result); 0.06/0.94
 // retain a visible tint while passing 4.5:1 on every real chat background.
@@ -144,6 +147,23 @@ export function readableNameColor(fg: string, bg: string): string {
   return out
 }
 
+/** One lightness walk toward `targetL`: first hit, else the best seen. */
+function searchToward(
+  hsl: { h: number; s: number; l: number },
+  targetL: number,
+  bg: { r: number; g: number; b: number },
+): { hit: string | null; best: { hex: string; ratio: number } | null } {
+  const step = (targetL - hsl.l) / L_STEPS
+  let best: { hex: string; ratio: number } | null = null
+  for (let i = 1; i <= L_STEPS; i++) {
+    const rgb = hslToRgb(hsl.h, hsl.s, Math.min(1, Math.max(0, hsl.l + step * i)))
+    const ratio = contrastRatio(rgb, bg)
+    if (ratio >= NAME_COLOR_CONTRAST_TARGET) return { hit: rgbToHex(rgb), best }
+    if (!best || ratio > best.ratio) best = { hex: rgbToHex(rgb), ratio }
+  }
+  return { hit: null, best }
+}
+
 function computeReadableNameColor(fg: string, bg: string): string {
   const fgC = parseColorToken(fg)
   const bgC = parseColorToken(bg)
@@ -151,25 +171,36 @@ function computeReadableNameColor(fg: string, bg: string): string {
   const bgOpaque = { r: bgC.r, g: bgC.g, b: bgC.b }
   if (contrastRatio({ r: fgC.r, g: fgC.g, b: fgC.b }, bgOpaque) >= NAME_COLOR_CONTRAST_TARGET) return fg
   const hsl = rgbToHsl({ r: fgC.r, g: fgC.g, b: fgC.b })
-  const bgLum = relativeLuminance(bgOpaque.r, bgOpaque.g, bgOpaque.b)
-  // Dark background → lighten the name; light background → darken it.
-  const targetL = bgLum < 0.5 ? L_BRIGHT : L_DARK
-  const step = (targetL - hsl.l) / L_STEPS
-  let best: { r: number; g: number; b: number } | null = null
-  let bestRatio = 0
-  for (let i = 1; i <= L_STEPS; i++) {
-    const l = hsl.l + step * i
-    const rgb = hslToRgb(hsl.h, hsl.s, Math.min(1, Math.max(0, l)))
-    const ratio = contrastRatio(rgb, bgOpaque)
-    if (ratio >= NAME_COLOR_CONTRAST_TARGET) return rgbToHex(rgb)
-    if (ratio > bestRatio) {
-      bestRatio = ratio
-      best = rgb
-    }
+  // Pick the direction by which EXTREME actually contrasts more with this
+  // background: white and black cross over at a background luminance of
+  // ~0.179, not 0.5. On a mid-tone background (luminance ~0.18-0.5, the
+  // custom-theme range) even pure WHITE is below 4.5:1, so lightening there
+  // — the old 0.5 pivot — was a search that could never reach the target
+  // while darkening would.
+  const towardBright = contrastRatio(WHITE, bgOpaque) >= contrastRatio(BLACK, bgOpaque)
+  const primary = searchToward(hsl, towardBright ? L_BRIGHT : L_DARK, bgOpaque)
+  if (primary.hit) return primary.hit
+  // The preferred extreme fell short (e.g. a saturated hue whose luminance
+  // at L_DARK/L_BRIGHT still misses): try the other one before giving up on
+  // the tint-preserving range.
+  const secondary = searchToward(hsl, towardBright ? L_DARK : L_BRIGHT, bgOpaque)
+  if (secondary.hit) return secondary.hit
+  // The bounded extremes keep a visible tint but can land just short on a
+  // mid-tone background (a saturated green at L 0.06 misses 4.5:1 on
+  // #808080 by 0.05). The true extremes — pure black or white, preferred
+  // direction first — sacrifice the tint only in the case that would
+  // otherwise be unreadable.
+  for (const l of [towardBright ? 1 : 0, towardBright ? 0 : 1]) {
+    const rgb = hslToRgb(hsl.h, hsl.s, l)
+    if (contrastRatio(rgb, bgOpaque) >= NAME_COLOR_CONTRAST_TARGET) return rgbToHex(rgb)
   }
-  // No step reached the target (an extreme mid-contrast background): fall
-  // back to the best contrast available rather than returning unreadable.
-  return best ? rgbToHex(best) : fg
+  // Neither direction nor extreme reaches the target: the better of the two
+  // best-effort samples, never a guaranteed-miss direction alone.
+  const fallback =
+    primary.best && (!secondary.best || primary.best.ratio >= secondary.best.ratio)
+      ? primary.best
+      : (secondary.best ?? primary.best)
+  return fallback ? fallback.hex : fg
 }
 
 function rgbToHex(c: { r: number; g: number; b: number }): string {
