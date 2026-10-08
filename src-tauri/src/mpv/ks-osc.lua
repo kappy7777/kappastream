@@ -272,8 +272,12 @@ local function icon_external(a, x, y, u, color, al)
 end
 
 local function icon_theater(a, x, y, u, color, al)
-    rect(a, x + 3 * u, y + 4 * u, x + 21 * u, y + 6.5 * u, color, al)
-    frame(a, x + 5 * u, y + 9 * u, x + 19 * u, y + 17 * u, 1.8 * u, color, al)
+    -- mirrors the hls.js control bar's mark: two solid bars sandwiching a
+    -- full-width frame (the old drawing had a single top bar over an inset
+    -- frame with nothing below)
+    rect(a, x + 3 * u, y + 4 * u, x + 21 * u, y + 6 * u, color, al)
+    frame(a, x + 3 * u, y + 7 * u, x + 21 * u, y + 17 * u, 2 * u, color, al)
+    rect(a, x + 3 * u, y + 18 * u, x + 21 * u, y + 20 * u, color, al)
 end
 
 local function icon_fullscreen(a, x, y, u, color, al)
