@@ -43,12 +43,6 @@
     chapters?: VodChapter[]
     mutedSpans?: VodMuteSpan[]
     storyboard?: Storyboard | null
-    // OVERLAY mode (default, the hls.js-style bar floating over the video)
-    // vs STRIP mode (the native mpv engine's below-video bar, where the
-    // video surface covers the player rect): the strip pins the controls
-    // visible (auto-hide would blank a layout bar) and never renders the
-    // theater-info gradient (it would sit under the native video).
-    overlay?: boolean
     /** LIVE playback: no seek bar at all — live streams never show a
      *  scrubber; VODs/clips/highlights always do. */
     live?: boolean
@@ -75,7 +69,6 @@
     chapters = [],
     mutedSpans = [],
     storyboard = null,
-    overlay = true,
     live = false,
     qualities = QUALITY_IDS,
   }: Props = $props()
@@ -286,9 +279,8 @@
 
   // The effective visibility the parent should mirror for any sibling that
   // auto-hides with the controls. Recomputed declaratively from the same two
-  // signals the controls render on (`{#if effectiveVisible}`). In strip mode
-  // (native mpv engine) the bar is layout, not an overlay — always shown.
-  const effectiveVisible = $derived(visible && (overlay ? controlsShown : true))
+  // signals the controls render on (`{#if effectiveVisible}`).
+  const effectiveVisible = $derived(visible && controlsShown)
   $effect(() => {
     oncontrolsvisible?.(effectiveVisible)
   })
@@ -436,7 +428,7 @@
   }
 </script>
 
-{#if overlay && settings.theaterMode && activeStatus.state === 'live' && effectiveVisible}
+{#if settings.theaterMode && activeStatus.state === 'live' && effectiveVisible}
   <div class="theater-info">
     {#if activeStatus.avatarUrl}
       <img class="theater-info-avatar" src={activeStatus.avatarUrl} alt="" />

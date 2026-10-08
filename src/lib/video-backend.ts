@@ -340,8 +340,8 @@ export class MpvBackend implements VideoBackend {
         this.emit('waiting')
         return
       case 'loading':
-        // Not yet rendering: keep the paused-ish default; PlayerControls'
-        // `playing` flag flips on the first 'playing'.
+        // Not yet rendering: keep the paused-ish default; the owning
+        // surface's playing state flips on the first 'playing'.
         this.isPaused = true
         return
       case 'ended':
@@ -367,10 +367,11 @@ export class MpvBackend implements VideoBackend {
 
   /**
    * OSC-driven volume/mute (mpv's own in-video slider/buttons) mirrored into
-   * the backend's state — the 'volumechange' emit makes PlayerControls' onVol
-   * pick it up like an element-side change (UI + persisted settings follow).
-   * The app-side writes echo back through this with the same value and are
-   * absorbed (the emit is idempotent), so there is no feedback loop.
+   * the backend's state — the 'volumechange' emit makes the owning surface
+   * pick it up like an element-side change (App's settings sync in single
+   * view, the tile's audio model in multi-view). The app-side writes echo
+   * back through this with the same value and are absorbed (the emit is
+   * idempotent), so there is no feedback loop.
    */
   private onVolume(v: MpvVolumeEvent): void {
     this.vol = Math.max(0, Math.min(1, v.volume))
@@ -425,8 +426,9 @@ export class MpvBackend implements VideoBackend {
   setVolume(v: number): void {
     this.vol = Math.max(0, Math.min(1, v))
     void invoke('mpv_set_volume', { id: this.id, volume: this.vol }).catch(() => {})
-    // Local mirror → PlayerControls persists it to settings, exactly like
-    // the element's volumechange round-trip.
+    // Local mirror → the owning surface persists it (App's settings sync in
+    // single view, the tile's audio model in multi-view), exactly like the
+    // element's volumechange round-trip.
     this.emit('volumechange')
   }
 

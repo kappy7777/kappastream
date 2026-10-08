@@ -1,15 +1,16 @@
 <script lang="ts">
-  // Custom-theme editor overlay: "duplicate an existing theme, then adjust".
-  // The draft is seeded from the chosen base (built-in or an existing custom
-  // theme — readThemeValuesFor snapshots + NORMALIZES its 20 current values),
-  // previewed LIVE on the document root while editing, and only persisted on
-  // Save. Cancel (or Escape / backdrop) re-applies the saved theme, discarding
-  // the preview.
+  // Custom-theme editor overlay: "duplicate a built-in theme, then adjust".
+  // A new theme's draft is seeded from the chosen built-in base
+  // (readThemeValuesFor snapshots + NORMALIZES its 20 current values);
+  // editing an existing custom theme seeds the draft from its own stored
+  // values. The draft is previewed LIVE on the document root while editing,
+  // and only persisted on Save. Cancel (or Escape / backdrop) re-applies the
+  // saved theme, discarding the preview.
   //
   // Editing is SLIDERS + SWATCHES ONLY — there is no free-text colour entry:
   //  - every property shows a human label (PROP_LABEL, i18n) with the detailed
   //    explanation as its hover tooltip (PROP_HELP);
-  //  - expanding a property reveals a 90-swatch palette plus H/S/L sliders
+  //  - expanding a property reveals an 80-swatch palette plus H/S/L sliders
   //    (an alpha slider for the translucent properties, a blur slider for
   //    --shadow-menu — its offsets are fixed 0/8px like every built-in);
   //  - every produced value is generated (palette/swatch/slider math), so it
@@ -116,13 +117,10 @@
   let {
     theme,
     onclose,
-    onimported,
   }: {
     /** null = create a new theme (duplicate-a-base flow). */
     theme: CustomTheme | null
     onclose: () => void
-    /** Signals the host section that the list changed (cap messages, refresh). */
-    onimported?: () => void
   } = $props()
 
   // The editor treats `theme` as a FIXED seed: Settings closes and reopens the
@@ -361,7 +359,6 @@
         return
       }
       settings.setTheme(created.id)
-      onimported?.()
     } else {
       upsertCustomTheme({ id: editing.id, label: label.trim(), values: values as ThemeValues })
       settings.setTheme(editing.id)

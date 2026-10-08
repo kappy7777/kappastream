@@ -48,9 +48,10 @@ export function extraChatChannel(id: string): string {
  * null and the renderer omits them.
  */
 export interface ChatEntry {
-  /** Unique key across ALL sessions (tile id + message id). */
+  /** Unique key across ALL sessions (source id + message id). */
   key: string
-  /** Origin tile (null in single-session view — no attribution shown). */
+  /** Origin source — a tile id or a `chat:<channel>` pseudo-id (null in
+   *  single-session view — no attribution shown). */
   tileId: string | null
   /** Origin channel login (null in single-session view). */
   channel: string | null
@@ -59,7 +60,8 @@ export interface ChatEntry {
   msg: ChatMessage
 }
 
-/** One merged source: a session's buffer plus its origin identity. */
+/** One merged source: a session's buffer plus its origin identity (a tile
+ *  id, or the `chat:<channel>` pseudo-id of a chat-only member). */
 export interface MergeSource {
   tileId: string
   channel: string

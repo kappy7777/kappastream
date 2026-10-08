@@ -27,8 +27,8 @@ import { invoke } from '@tauri-apps/api/core'
 // index regardless of how many chunks fire. See favorites.svelte pollOnce.
 export const GQL_BATCH_SIZE = 100
 
-// Favorites refresh cadence. One batched request covers the whole list, so a
-// short interval is cheap.
+// Favorites refresh cadence. A poll is ceil(N/100) batched requests (see
+// GQL_BATCH_SIZE above), so a short interval stays cheap.
 export const GQL_REFRESH_INTERVAL_MS = 150_000
 
 const GQL_TIMEOUT_MS = 8_000

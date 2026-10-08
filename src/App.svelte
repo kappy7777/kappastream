@@ -3412,12 +3412,11 @@
         <div class="video-pane">
           <div class="video-scroll" bind:this={videoScrollEl}>
             <div class="player-stage">
-              <!-- The controls bar renders in ONE of two places: overlaid on
-                   the video (hls.js path), or in the strip BELOW the video
-                   (native mpv engine — the video surface covers the player
-                   rect, so page content can't overlay it). Same component,
-                   one definition, rendered per mode. -->
-              {#snippet controlsBar(overlayMode: boolean)}
+              <!-- The controls bar renders ONLY on the hls.js path, overlaid
+                   on the video. In native mode the mpv OSD owns the controls
+                   (PlayerControls stays unmounted) and only the two banners
+                   render below the video — see .native-strip below. -->
+              {#snippet controlsBar()}
                 <PlayerControls
                   video={videoEl}
                   backend={videoBackend}
@@ -3440,7 +3439,6 @@
                   chapters={vodCtl.chapters}
                   mutedSpans={vodCtl.mutedSpans}
                   storyboard={vodCtl.storyboard}
-                  overlay={overlayMode}
                 />
               {/snippet}
               {#snippet playbackBanner(strip: boolean, title: string)}
@@ -3484,7 +3482,7 @@
                   {#if playerActive}
                     <video bind:this={videoEl} class="video" autoplay muted playsinline></video>
                     {#if !nativeVideoActive}
-                      {@render controlsBar(true)}
+                      {@render controlsBar()}
                     {/if}
                     {#if showPlayerOverlay}
                       <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>

@@ -1,8 +1,10 @@
 /*
- * Sleep timer — pause PLAYBACK after N minutes. Does NOT close or quit the app
+ * Sleep timer — STOP playback after N minutes. Does NOT close or quit the app
  * (that would be a far more destructive default). Read-only / no-network: it
- * is purely a local countdown that, on expiry, asks the host to pause the
- * current <video>.
+ * is purely a local countdown that, on expiry, fires the host's onFire
+ * callback — App stops playback there outright (tears down the player and, on
+ * a live stream, the chat connection; multi-view exits every tile) rather
+ * than merely pausing the <video>.
  *
  * Identity guard: a timer is armed against the stream identity
  * {channel, playbackKind}. If the user changes channel or switches to a

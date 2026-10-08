@@ -13,12 +13,13 @@
   //     single-stream path, which only surfaces 'offline' from an authoritative
   //     resolve result).
   //
-  // The engine is hls.js OR the embedded native mpv engine (mpvEnabled):
-  // both render the SAME overlay layout (video area inset-0, auto-hiding
-  // control bar over it). A native tile plays the RAW resolved URL through
-  // its own engine id (multi-view = one mpv core per tile; see MultiView's
-  // id allocation) and its page UI over the video (bar, label, drag handle,
-  // quality menu) composites via the page-snapshot overlay path.
+  // The engine is hls.js OR the embedded native mpv engine (mpvEnabled).
+  // Both cover the same video area (inset-0), but the controls differ: an
+  // hls tile renders the HTML overlay bar (auto-hiding, with label + drag
+  // handle), while a native tile plays the RAW resolved URL through its own
+  // engine id (multi-view = one mpv core per tile; see MultiView's id
+  // allocation) and drives playback through the mpv OSC (ks-osc.lua in tile
+  // mode — see the OSC section below).
   //
   // Audio authority (mirrors src/lib/pip-controller.svelte.ts): the authority
   // tile (the one the user clicked; NOT moved by chat-tab clicks) — its volume
@@ -984,8 +985,8 @@
 >
   <!-- The video REGION — absolute inset-0 in BOTH engines (the mpv surface
        covers exactly this rect). The control bar / label / drag handle are
-       page UI OVER the surface in native mode, composited via MultiView's
-       page-snapshot overlay path (same as the quality menu). -->
+       page UI rendered by hls tiles only (htmlControls) — a playing native
+       tile uses the mpv OSC instead. -->
   <div class="mv-video-area" bind:this={areaEl}>
     <video
       bind:this={videoEl}

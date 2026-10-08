@@ -8,9 +8,9 @@ import { readFileSync } from 'node:fs'
 // and embeds into the Rust binary. Nothing here is served to a browser.
 
 // Bake package.json's version into the bundle at build time so the About
-// modal (and anything else) shows the real release version. Works in BOTH
-// the browser dev server and the Tauri WebView — unlike @tauri-apps/api's
-// getVersion(), which isn't a dependency and only works inside Tauri.
+// modal (and anything else) shows the real release version — a build-time
+// constant rather than @tauri-apps/api's getVersion() IPC round-trip, so it
+// also resolves outside a Tauri window (the test runner mirrors it).
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
 
 export default defineConfig({

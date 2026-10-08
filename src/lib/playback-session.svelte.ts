@@ -182,9 +182,11 @@ export class PlaybackSession {
 
   private hls: Hls | null = null
   /**
-   * The native backend whose load is current, if any — teardown stops it
-   * (which hides the native surface). Cleared by every HTML attach so an
-   * engine flip never leaves a zombie surface behind.
+   * The native backend whose load is current, if any — set by attachMpv on a
+   * successful load, stopped (which hides the native surface) by teardown.
+   * The HTML attaches clear the reference without stopping anything, so an
+   * engine flip relies on the call site's teardown to stop a previously
+   * loaded engine.
    */
   private mpvBackend: MpvBackend | null = null
   private stallTimer: ReturnType<typeof setTimeout> | null = null

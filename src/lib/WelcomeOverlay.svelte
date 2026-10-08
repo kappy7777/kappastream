@@ -8,14 +8,15 @@
   // App.svelte's global handler) and writes `lastSeenVersion` so the screen
   // never re-shows for the current version. It is purely additive DOM: it
   // does not delay startup, block playback, or interrupt any in-progress
-  // action — everything else (IRC, HLS, favorites polling) is user-triggered
-  // and runs after the user dismisses.
+  // action. Nothing waits for dismissal — the favorites poll, the startup
+  // update check and the weekly badge refresh all start at mount and keep
+  // running behind it (IRC and HLS remain user-triggered).
   //
   // Non-conflict: the overlay's backdrop (z-index 1000, same as the About
   // modal) covers the top bar, so the About modal, multi-view toggle, and
   // the update banner cannot be reached while this is up. The update banner
-  // will not co-occur anyway: on a first install or right after an update the
-  // startup update check finds the current version is latest → no banner.
+  // CAN co-occur (a release published after this build was shipped surfaces
+  // on the startup check); it sits under the backdrop until dismissal.
   import { onMount } from 'svelte'
   import { invoke, isTauri } from '@tauri-apps/api/core'
   import { t } from './i18n/index.svelte'

@@ -1,10 +1,12 @@
 // Chat panel size bounds + the keyboard stepper for App.svelte's drag
-// resizer. The resizer exposes role="slider" + tabindex, so it must react
-// to keys: Arrow Up/Right grow the panel, Down/Left shrink it (matching
-// the drag semantics in both layouts), Page steps by 100, Home/End jump
-// to the bounds — the same shape as the UI-scale slider's keys in
-// Settings.svelte. Returns null for unhandled keys so the caller can skip
-// preventDefault.
+// resizer. The resizer exists only in the side-by-side layout (stacked mode
+// hides it) and exposes role="slider" + tabindex, so it must react to keys:
+// Arrow Up/Right grow the panel, Down/Left shrink it, Page steps by 100,
+// Home/End jump to the bounds — the same shape as the UI-scale slider's
+// keys in Settings.svelte. The horizontal arrows deliberately follow the
+// slider convention (right = more), the OPPOSITE of the drag (dragging the
+// divider left widens the chat column). Returns null for unhandled keys so
+// the caller can skip preventDefault.
 export const CHAT_SIZE_MIN = 200
 export const CHAT_SIZE_MAX = 1500
 export const CHAT_SIZE_STEP = 20

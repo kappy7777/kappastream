@@ -61,10 +61,10 @@ export interface FavoriteStatus {
 export const MAX_FAVORITES = 1000
 
 // Favorites resolve from ONE source: Twitch's anonymous GQL endpoint, polled as
-// a single batched `users(logins:)` request per refresh (see gql.ts). That one
-// request carries live/offline + title/game/viewers/avatar/stream-start for the
-// whole list, so there is no per-channel enrichment pass and no second data
-// source to fall over to.
+// batched `users(logins:)` requests per refresh — ceil(N/100) sequential chunks
+// (see gql.ts). The batch carries live/offline + title/game/viewers/avatar/
+// stream-start for the whole list, so there is no per-channel enrichment pass
+// and no second data source to fall over to.
 //
 // On a GQL transport failure (network / non-2xx / timeout / malformed body)
 // there is NO fallback service. The store keeps every channel's LAST-KNOWN
@@ -529,7 +529,7 @@ export class FavoritesStore {
       this.entries = [...this.entries, ...newEntries]
       saveToStorage(this.entries)
       this.notify()
-      // Resolve via the GQL batch poll (covers the whole list in one request).
+      // Resolve via the GQL batch poll (one poll covers the whole list).
       this.scheduleNextPoll()
       void this.pollOnce()
     }
@@ -548,7 +548,7 @@ export class FavoritesStore {
     if (this.disposed) return
     if (this.started) return
     this.started = true
-    // Initial pass: one GQL request classifies the whole favorites list. On a
+    // Initial pass: one batched GQL poll classifies the whole favorites list. On a
     // transport failure the breaker trips and a backoff retry is scheduled.
     if (this.entries.length > 0) void this.pollOnce()
     this.scheduleNextPoll()
@@ -579,7 +579,7 @@ export class FavoritesStore {
   private scheduleNextPoll(): void {
     if (this.disposed) return
     if (this.pollTimer) clearTimeout(this.pollTimer)
-    // One GQL request per refresh covers the WHOLE favorites list, so every
+    // One batched GQL poll per refresh covers the WHOLE favorites list, so every
     // channel is cheaply re-resolved every GQL_REFRESH_INTERVAL_MS.
     this.pollTimer = setTimeout(() => {
       this.pollTimer = null

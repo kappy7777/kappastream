@@ -125,10 +125,11 @@ class UpdateStore {
         }
       })
       // On Windows the NSIS installer exits the app during install, so this
-      // line is reached only on Linux (AppImage/.deb/.rpm). Relaunch there;
-      // if it fails the update IS installed but the old process is still
-      // running — switch to the restart state so the banner says so instead
-      // of spinning on "Installing" for the rest of the session.
+      // line is reached on every other target (Linux AppImage/.deb/.rpm and
+      // macOS). Relaunch there; if it fails the update IS installed but the
+      // old process is still running — switch to the restart state so the
+      // banner says so instead of spinning on "Installing" for the rest of
+      // the session.
       this.status = 'installing'
       try {
         await relaunch()

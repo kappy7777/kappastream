@@ -127,8 +127,3 @@ libc = { version = "0.2", optional = true }
 # `cairo::…`; version matches what gtk already resolves to so the trees
 # unify.
 cairo = { version = "0.18", package = "cairo-rs", optional = true }
-
-[dev-dependencies]
-# Used in resolve.rs tests to set/unset env vars without mutating the global
-# process environment (which would race under `cargo test`'s parallel runner).
-temp-env = "0.3"

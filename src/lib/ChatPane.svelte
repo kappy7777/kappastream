@@ -9,10 +9,10 @@
   // Owns: the scroll container, the notice + message branches, the auto-follow
   // logic (follow while at bottom, count new messages while scrolled up, the
   // "back to bottom" pill), and the errored-art sets. Callers keep everything
-  // pane-specific AROUND it as absolutely-positioned overlays anchored to their
-  // own positioned container (App's `.chat` / MultiView's `.mv-chat-body`): the
-  // pinned-message banner, the chat-mode pill, the tab strip, the resizer, the
-  // open-on-Twitch pill.
+  // pane-specific AROUND it, anchored to their own positioned container
+  // (App's `.chat` / MultiView's `.mv-chat-body`): layout chrome in flow
+  // (App's resizer, MultiView's tab strip) and absolutely-positioned overlays
+  // (the pinned-message banner, the chat-mode pill, the open-on-Twitch pill).
   //
   // Input is a ChatEntry[] (merged-chat.ts) rather than a bare ChatMessage[]:
   // the entry carries the per-message badge override (per-channel art) and, in

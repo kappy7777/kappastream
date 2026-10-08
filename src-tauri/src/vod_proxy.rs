@@ -7,7 +7,10 @@ use std::time::Duration;
 // d2nvs31859zcd8.cloudfront.net) which does NOT send CORS headers.  In the
 // Tauri WebView hls.js uses XHR/fetch which is CORS-blocked, so VOD playback
 // fails with a networkError.  The live CDN (ttvnw.net) DOES send
-// Access-Control-Allow-Origin: * which is why live works without a proxy.
+// Access-Control-Allow-Origin: *, so live rides the proxy only on Windows
+// (WebView2 CORS-blocks it from the tauri.localhost origin and the frontend
+// rewrites live URLs through ksvod there); Linux and macOS fetch live
+// manifests directly — hence ttvnw hosts in the allowlist below.
 //
 // Solution: register a custom URI scheme `ksvod` that proxies HLS requests
 // through Rust (reqwest — no browser CORS involved) and adds the missing CORS
@@ -25,7 +28,8 @@ const PROXY_TIMEOUT: Duration = Duration::from_secs(30);
 // fails fast instead of holding the handler for the full PROXY_TIMEOUT. The
 // overall `.timeout()` still bounds headers + body; with Range support the body
 // is a small byte-range segment, so 30 s overall is ample for a progressing
-// download. (See finding #12: `.timeout()` alone covers the whole request.)
+// download. (`.timeout()` alone covers the whole request, connect phase
+// included.)
 const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 // Upper bound on a single proxied response (manifest or segment). hls.js fetches
@@ -255,7 +259,8 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
                             Ok(c) => c,
                             Err(_) => {
                                 // Mid-transfer read failure: surface as 502, not
-                                // a 200 with an empty body (see #4 rationale).
+                                // a 200 with an empty body (which hls.js would
+                                // read as a truncated-but-valid segment).
                                 responder.respond(
                                     tauri::http::Response::builder()
                                         .status(502u16)

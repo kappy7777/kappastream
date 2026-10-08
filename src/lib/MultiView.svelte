@@ -1,7 +1,8 @@
 <script lang="ts">
   // The multi-stream split view: a tile grid (1/2/3/4 layouts), a tabbed chat
-  // pane with ONE persistent IRC connection per tile (scrollback survives tab
-  // switches), and a status bar showing every open stream with the
+  // pane with ONE persistent IRC connection per source (each tile, plus any
+  // chat-only merged member — scrollback survives tab switches), and a status
+  // bar showing every open stream with the
   // audio-authority tile most prominent. Rendered INSTEAD of App.svelte's
   // single-stream `.main` when multi-view is on. Both views render chat
   // through the SAME shared ChatPane component.
@@ -12,7 +13,8 @@
   // chat-tab click deliberately does NOT move audio.
   //
   // Chat sessions are owned here (not in Tile.svelte) so a session outlives tab
-  // switches — only tile CLOSE (or a channel replace) disposes it. The
+  // switches — only tile CLOSE (or a channel replace), or a chat-only member
+  // leaving its merge group, disposes one. The
   // client-side mute list + Tier 2 toggles are applied at RENDER time reading
   // `settings`, exactly as App.svelte does, so the session always stores every
   // event and toggles apply retroactively.
@@ -362,7 +364,7 @@
   // disposed the moment it leaves (unticked, group collapse, or migration to
   // a tile — mergedExtras then no longer lists the channel; because the
   // mergedIds reconcile above is a plain $effect, that release lands one
-  // flush after the migration, which only shortens the session's life).
+  // flush after the migration — the session merely lives one flush longer).
   // $effect.pre + untrack for the same reasons as the tile reconcile.
   $effect.pre(() => {
     const wanted = new Set(mergedExtras)
@@ -673,11 +675,9 @@
     }
   }
 
-  // ---- hideable status bar (#3) ----
-  // Persisted via settings.mvStatusBarHidden. When hidden the bar collapses to
-  // a thin strip below the grid whose centered "show" button is ALWAYS visible
-  // (the old hover-to-reveal button was undiscoverable). The
-  // strip is its own flex row so it never steals clicks from tiles/controls.
+  // ---- hideable status bar ----
+  // Persisted via settings.mvStatusBarHidden; the hidden-state reveal strip
+  // is described at its markup further below.
 
   // The status rows' "Up …" lines format from each stream's startedAt against
   // a ticking clock — the polled `uptime` string is frozen between tile
@@ -872,9 +872,9 @@
          liveStatus so it refreshes with the favorites poll cadence and updates
          on authority change. Clicking a row makes that tile the authority (and
          moves chat to it) — a tile-level interaction.
-         Hideable (#3): a hide button collapses it; when hidden, a thin hover
-         strip below the grid reveals a focusable "show" button (mouse hover OR
-         Tab). Scope: MULTI-VIEW ONLY — the single-stream `.stream-info` bar
+         Hideable: a hide button collapses it; when hidden, a thin strip
+         below the grid carries an always-visible focusable "show" button.
+         Scope: MULTI-VIEW ONLY — the single-stream `.stream-info` bar
          integrates favorite/notification actions that must stay accessible, and
          keeping it untouched preserves the byte-identical multi-view-OFF
          baseline. -->

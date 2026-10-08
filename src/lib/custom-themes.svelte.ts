@@ -167,7 +167,7 @@ export function hslToHex(h: number, s: number, l: number): string {
 
 /**
  * The swatch palette: a systematic HSL grid (12 hues × 6 tones, dark→light)
- * plus a neutral column — 90 swatches, all canonical hex by construction.
+ * plus a neutral column — 80 swatches, all canonical hex by construction.
  */
 export const THEME_PALETTE: readonly string[] = (() => {
   const out: string[] = ['#000000', '#1A1A1A', '#333333', '#555555', '#808080', '#B0B0B0', '#DCDCDC', '#FFFFFF']
@@ -454,10 +454,11 @@ export function hasCustomTheme(id: string): boolean {
 }
 
 /**
- * Add or update a custom theme. The theme must already be fully valid
- * (validate/normalize at the call site via normalizeCustomTheme). Returns the
- * stored theme, or null when the list is full (a new theme past the cap is
- * rejected with the list unchanged).
+ * Add or update a custom theme. The theme is stored AS-IS — no validation or
+ * normalization happens here; the editor's slider/swatch-generated values are
+ * valid by construction and theme imports are validated at their own boundary.
+ * Returns the stored theme, or null when the list is full (a new theme past
+ * the cap is rejected with the list unchanged).
  */
 export function upsertCustomTheme(theme: CustomTheme): CustomTheme | null {
   const existing = customThemes.findIndex((t) => t.id === theme.id)

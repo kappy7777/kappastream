@@ -18,12 +18,12 @@
    * have no clips); only a transport failure shows an error.
    *
    * Pagination is client-side reveal (browse-reveal): each list over-fetches
-   * its 100-row hard cap up front and reveals a few at a time — no `after`
-   * cursor (anonymous GQL cursors fail IntegrityCheckFailed).
+   * its 100-row hard cap up front and reveals 30 more rows per click — no
+   * `after` cursor (anonymous GQL cursors fail IntegrityCheckFailed).
    */
 
-  // VOD sections show more initially; clip sections show fewer (5 each) since
-  // there are two of them stacked.
+  // Initial visible rows per section (identical for VODs and clips); each
+  // reveal adds REVEAL_STEP (30) more.
   const CC_VOD_INITIAL = 5
   const CC_CLIP_INITIAL = 5
 

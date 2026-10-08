@@ -25,10 +25,9 @@
 
   interface Props {
     onselect: (login: string) => void
-    disabled?: boolean
   }
 
-  const { onselect, disabled = false }: Props = $props()
+  const { onselect }: Props = $props()
 
   const DEBOUNCE_MS = 300
 
@@ -221,11 +220,6 @@
     onfocus={onFocus}
     onblur={onBlur}
     onkeydown={onKeyDown}
-    oninput={() => {
-      // Typing reopens the panel if Escape had collapsed it.
-      if (!focused) focused = true
-    }}
-    {disabled}
     role="combobox"
     aria-expanded={show}
     aria-controls="search-listbox"
@@ -314,10 +308,6 @@
   .channel-input:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent);
-  }
-
-  .channel-input:disabled {
-    opacity: 0.5;
   }
 
   .search-dropdown {

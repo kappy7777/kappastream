@@ -7,7 +7,7 @@
  * the baseline (or a stale cache) is used and a refresh is fired off.
  *
  * Resolution order for a GLOBAL badge (per-channel override applied separately
- * at render in App.svelte): cached/refreshed global map -> BASELINE -> drop.
+ * at render in ChatPane): cached/refreshed global map -> BASELINE -> drop.
  *
  * Privacy / no-new-host: this hits gql.twitch.tv with the SAME pinned Client-ID
  * already contacted every 150s by favorites polling — no new host, no new

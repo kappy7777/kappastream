@@ -4,10 +4,11 @@
  * Rules of engagement:
  *  - NEVER change a key's string value. localStorage has no migration layer:
  *    renaming a key silently wipes that slice of state for every existing
- *    user on their next launch. Three keys predate the `app-*-v1` convention
+ *    user on their next launch. Four keys predate the `app-*-v1` convention
  *    (`twitch-favorites-v1`, `twitch-sidebar-visible-v3`,
- *    `fav-notif-channels-v1`) and keep their historical names on purpose;
- *    unifying them is a deliberate future migration, not a refactor.
+ *    `fav-notif-channels-v1`, `pip-window-rect-v1`) and keep their
+ *    historical names on purpose; unifying them is a deliberate future
+ *    migration, not a refactor.
  *  - Every read/write/remove anywhere under src/ goes through this registry
  *    (enforced by storage-keys.test.ts — no string literals at call sites).
  *    One feature, one key: a duplicate value would mean two features
@@ -28,6 +29,7 @@ export const STORAGE_KEYS = {
   qualityPrefix: 'app-quality:',
   lowLatency: 'app-low-latency-v1',
   vodPositions: 'app-vod-positions-v1',
+  // Historical name (predates the app- prefix); see header note.
   pipWindowRect: 'pip-window-rect-v1',
   // Experimental native video engine (feature-gated mpv build only)
   mpvEngine: 'app-mpv-engine-v1',

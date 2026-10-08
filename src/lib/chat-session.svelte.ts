@@ -1,7 +1,8 @@
 // One IRC chat connection. Used by BOTH chat surfaces:
-//  - Multi-view keeps a SEPARATE ChatSession per open tile so switching chat
-//    tabs never loses scrollback and each channel's ROOMSTATE / moderation /
-//    badges are tracked independently.
+//  - Multi-view keeps a SEPARATE ChatSession per source (each open tile, plus
+//    a headless one per chat-only merged member) so switching chat tabs never
+//    loses scrollback and each channel's ROOMSTATE / moderation / badges are
+//    tracked independently.
 //  - App.svelte's single-stream chat runs on ONE session (created per
 //    channel-connect, socket-closed on a VOD/clip takeover via closeSocket,
 //    disposed on disconnect) and hooks into it via the constructor option

@@ -1,7 +1,8 @@
 <script lang="ts">
   // Renders one text run, turning twitch.tv URLs into interactive buttons.
-  // Shared by the chat message renderer (App.svelte + MultiView.svelte) and
-  // the pinned-message banner so all chat text linkifies identically. Only
+  // Shared by the chat message renderer (ChatPane.svelte, used by App.svelte
+  // and MultiView.svelte) and the pinned-message banner so all chat text
+  // linkifies identically. Only
   // twitch.tv links ever become interactive (see chat-links.ts — that is
   // exactly what the existing open_url_robust validator accepts, and it keeps
   // javascript:/data: URLs impossible); every other URL stays plain text.

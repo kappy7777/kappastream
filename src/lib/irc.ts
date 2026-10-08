@@ -29,15 +29,14 @@ const ACTION_PREFIX = '\u0001ACTION '
 // Tier 2 chat completeness — event parsing.
 //
 // `parseIrcLine` below still returns ONLY PRIVMSG (back-compat: the existing
-// tests and the baseline chat path call it). `parseIrcEvent` is the new entry
-// point that also surfaces USERNOTICE / ROOMSTATE / CLEARMSG / CLEARCHAT. It
-// shares the exact same PRIVMSG builder, so PRIVMSG output is byte-identical
-// to the legacy function (plus the two new nullable fields). The baseline
-// chat (all toggles off) never calls into the new render paths.
+// test suites call it). `parseIrcEvent` is the production entry point that
+// also surfaces USERNOTICE / ROOMSTATE / CLEARMSG / CLEARCHAT. It shares the
+// exact same PRIVMSG builder, so PRIVMSG output is byte-identical to the
+// legacy function (plus the two new nullable fields).
 //
 // Per the architecture rule, PARSING IS UNGATED: every supported event is
 // parsed and stored by the caller regardless of settings; only PRESENTATION is
-// gated. See App.svelte.
+// gated. See ChatPane.svelte.
 // ---------------------------------------------------------------------------
 
 export type IrcEvent =
@@ -300,9 +299,9 @@ export function mergeRoomState(prev: RoomState, ev: RoomstateEvent): RoomState {
 // rules come from ROOMSTATE semantics: followersOnly is a minimum
 // follow-duration in minutes where -1 means OFF and >= 0 ON (0 = any
 // follower), and slow is a per-user delay in seconds where 0 means OFF.
-// Single source of truth for App.svelte's and MultiView.svelte's chat-mode
-// pills AND their "any mode active?" checks, so the conditions can never
-// drift between the two views.
+// Single source of truth for the chat-mode pills (ChatModesPill, rendered in
+// both chat surfaces) AND their "any mode active?" checks, so the conditions
+// can never drift between the two views.
 export type RoomModeKey = 'subsOnly' | 'followersOnly' | 'slow' | 'emoteOnly' | 'r9k'
 
 export function activeRoomModes(rs: RoomState): RoomModeKey[] {
@@ -509,8 +508,8 @@ export interface BadgeMeta {
 // (src/lib/badges.svelte.ts). Resolution order for a global badge:
 //   cached/refreshed global map -> THIS baseline -> drop.
 // The baseline is the floor so a GQL failure or cold first run still renders
-// every known badge. Per-channel custom art (subscriber/founder) is applied on
-// top at RENDER time via a reactive override in App.svelte.
+// every known badge. Per-channel custom art (subscriber/founder) rides each
+// rendered entry's override and is applied on top at RENDER time in ChatPane.
 import { BASELINE_BADGES } from './badges.generated'
 
 let globalBadges: Record<string, BadgeMeta> = BASELINE_BADGES
@@ -535,9 +534,9 @@ export function badgeImageUrl(uuid: string): string {
  * uuid}) carries a channel's custom subscriber/founder art; when present it
  * replaces the global default image for that (setID, version). Returns the
  * badge's global imageUrl when no override applies (including null, which
- * drops the badge). Pure function — App.svelte calls it per-badge at render
- * against a REACTIVE override so buffered messages re-resolve when the channel
- * badge fetch lands.
+ * drops the badge). Pure function — ChatPane calls it per-badge at render
+ * against each entry's override so buffered messages re-resolve when the
+ * channel badge fetch lands.
  */
 export function resolveBadgeImageUrl(
   badge: Pick<BadgeInfo, 'id' | 'version' | 'imageUrl'>,
