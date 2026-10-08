@@ -62,6 +62,8 @@
   import PinnedMessage from './lib/PinnedMessage.svelte'
   import { pinnedChat } from './lib/pinned-chat.svelte'
   import { parseTwitchClipUrl } from './lib/chat-links'
+  import { openExternal } from './lib/open-url'
+  import { toast, currentToast } from './lib/toast.svelte'
   import { t } from './lib/i18n/index.svelte'
   import { initStreamlinkVersion, installedStreamlinkVersion, streamlinkFloorHint } from './lib/streamlink-floor'
   import { formatCompact, formatAge } from './lib/format'
@@ -138,7 +140,7 @@
         // Multi-view: the sleep timer stops ALL tiles (every tile's hls.js +
         // streamlink resolve + IRC session). Mode stays on with an empty grid.
         tileStore.exitAll()
-        showNotifToast(t('toast_sleepStopped'))
+        toast(t('toast_sleepStopped'))
         return
       }
       if (playback.kind === 'live') {
@@ -146,7 +148,7 @@
       } else {
         disconnectStream()
       }
-      showNotifToast(t('toast_sleepStopped'))
+      toast(t('toast_sleepStopped'))
     })
   })
 
@@ -775,7 +777,7 @@
   // down to a no-op.
   function armSleep(minutes: number): void {
     if (!multiView && (playerStatus === 'idle' || playerStatus === 'offline' || playerStatus === 'error')) {
-      showNotifToast(t('toast_sleepNothingPlaying'))
+      toast(t('toast_sleepNothingPlaying'))
       return
     }
     sleepTimer.arm({ channel: channelJoined, playbackKind: playback.kind }, minutes)
@@ -1836,13 +1838,13 @@
         // mpv is now the sole player; stop the in-app stream (HLS + video) to
         // free network/system resources. The IRC chat connection is left intact.
         disconnectStream()
-        showNotifToast(t('toast_launchingMpv'))
+        toast(t('toast_launchingMpv'))
       } else {
-        showNotifToast(r.error || t('toast_mpvFailed'))
+        toast(r.error || t('toast_mpvFailed'))
       }
     } catch (err) {
       const msg = typeof err === 'string' ? err : ((err as Error)?.message ?? t('toast_mpvFailed'))
-      showNotifToast(msg)
+      toast(msg)
     }
   }
 
@@ -1887,7 +1889,7 @@
         nativeVideoActive = true
         return attach
       }
-      showNotifToast(t('toast_mpvEngineFailed', { error: attach.error }))
+      toast(t('toast_mpvEngineFailed', { error: attach.error }))
     }
 
     if (token !== loadToken) return { ok: false, error: 'stale stream request' }
@@ -2024,7 +2026,7 @@
         // surfaces as an error.
         if (q !== 'best') {
           quality = 'best'
-          showNotifToast(t('toast_qualityFallback', { q, source: t('pc_sourceQuality') }))
+          toast(t('toast_qualityFallback', { q, source: t('pc_sourceQuality') }))
           // The probe list just proved stale (it offered a variant that
           // vanished) — re-probe so the menu stops offering it.
           void refreshAvailableQualities(channel)
@@ -2097,7 +2099,7 @@
   function connect(): void {
     const channel = normalizeChannelName(channelInput)
     if (!isValidChannelName(channel)) {
-      showNotifToast(t('toast_invalidChannel'))
+      toast(t('toast_invalidChannel'))
       return
     }
     // Any (re)connect returns to live mode — clears a prior VOD/clip playback
@@ -2161,7 +2163,7 @@
   function openChannel(name: string): void {
     const channel = normalizeChannelName(name)
     if (!isValidChannelName(channel)) {
-      showNotifToast(t('toast_invalidChannel'))
+      toast(t('toast_invalidChannel'))
       return
     }
     if (multiView) {
@@ -2388,7 +2390,7 @@
         // best for this load only, without persisting the choice.
         if (q !== 'best') {
           quality = 'best'
-          showNotifToast(t('toast_qualityFallback', { q, source: t('pc_sourceQuality') }))
+          toast(t('toast_qualityFallback', { q, source: t('pc_sourceQuality') }))
           return await loadVod(videoId, 'best')
         }
       }
@@ -2439,7 +2441,7 @@
           })
         return true
       }
-      showNotifToast(t('toast_mpvEngineFailed', { error: attach.error }))
+      toast(t('toast_mpvEngineFailed', { error: attach.error }))
     }
     // Rewrite the cloudfront/ttvnw URL through the ksvod proxy: the VOD CDN
     // doesn't send CORS headers so hls.js's XHR is blocked. The ksvod scheme
@@ -2586,7 +2588,7 @@
           })
         return
       }
-      showNotifToast(t('toast_mpvEngineFailed', { error: attach.error }))
+      toast(t('toast_mpvEngineFailed', { error: attach.error }))
     }
     const attach = await attachClipMp4(raw.url, () => token === loadToken)
     if (token !== loadToken) return
@@ -3012,9 +3014,6 @@
     }
   }
 
-  let notifToast = $state<string | null>(null)
-  let notifToastTimer: ReturnType<typeof setTimeout> | null = null
-
   // Channel membership/notification state for the JOINED channel. Both read
   // the favorites store reactively ($state.raw entries + SvelteSet), so they
   // flip no matter WHERE the change came from (sidebar, import) — not just
@@ -3064,47 +3063,12 @@
         return
       }
     }
-    void (async () => {
-      if (!isTauri()) return
-      try {
-        await invoke('open_url_robust', { url })
-      } catch (err) {
-        if (import.meta.env.DEV) console.error('chat-link: open_url_robust threw', err)
-      }
-    })()
+    openExternal(url)
   }
 
-  async function openChatPopout(): Promise<void> {
+  function openChatPopout(): void {
     if (!channelJoined) return
-    const url = `https://twitch.tv/${channelJoined}`
-    try {
-      const result = await invoke('open_url_robust', { url })
-      if (import.meta.env.DEV) console.log('chat-link: opener result', result)
-      const r = result as {
-        ok: boolean
-        method: string
-        path: string | null
-        exit_code: number | null
-        stderr: string
-        url: string
-        inherited_path: string | null
-      }
-      if (!r.ok) {
-        const detail = import.meta.env.DEV
-          ? r.path
-            ? ` (${r.path}, exit ${r.exit_code})`
-            : r.inherited_path
-              ? ` (PATH was: ${r.inherited_path})`
-              : ''
-          : ''
-        const error = import.meta.env.DEV ? r.stderr || 'unknown error' : 'all opener methods failed'
-        showNotifToast(`Couldn't open channel via ${r.method}${detail}: ${error}`)
-      }
-    } catch (err) {
-      if (import.meta.env.DEV) console.error('chat-link: open_url_robust threw', err)
-      const detail = import.meta.env.DEV ? ` — error: ${err}` : ''
-      showNotifToast(`Couldn't open channel${detail}`)
-    }
+    openExternal(`https://twitch.tv/${channelJoined}`)
   }
 
   async function ensureNotifPermission(): Promise<boolean> {
@@ -3165,15 +3129,6 @@
     })
   }
 
-  function showNotifToast(msg: string): void {
-    notifToast = msg
-    if (notifToastTimer) clearTimeout(notifToastTimer)
-    notifToastTimer = setTimeout(() => {
-      notifToast = null
-      notifToastTimer = null
-    }, 3500)
-  }
-
   async function toggleChannelNotif(): Promise<void> {
     if (!channelJoined) return
     const channel = channelJoined
@@ -3183,11 +3138,11 @@
     }
     const granted = await ensureNotifPermission()
     if (!granted) {
-      showNotifToast(t('toast_notificationsDenied'))
+      toast(t('toast_notificationsDenied'))
       return
     }
     favoritesStore.setNotifEnabled(channel, true)
-    showNotifToast(t('toast_willNotify', { channel }))
+    toast(t('toast_willNotify', { channel }))
   }
 
   let channelIsFavorite = $derived.by(() => {
@@ -3199,21 +3154,12 @@
     const channel = channelJoined
     if (favoritesStore.has(channel)) {
       favoritesStore.remove(channel)
-      showNotifToast(t('toast_removedFavorite', { channel }))
+      toast(t('toast_removedFavorite', { channel }))
     } else {
       const ok = favoritesStore.add(channel)
-      showNotifToast(ok ? t('toast_addedFavorite', { channel }) : t('toast_favoritesLimit'))
+      toast(ok ? t('toast_addedFavorite', { channel }) : t('toast_favoritesLimit'))
     }
   }
-
-  $effect(() => {
-    return () => {
-      if (notifToastTimer) {
-        clearTimeout(notifToastTimer)
-        notifToastTimer = null
-      }
-    }
-  })
 
   const isPlayerBusy = $derived(playerStatus === 'resolving' || playerStatus === 'loading')
   // The player subtree (video + controls) renders while a channel is joined
@@ -3828,8 +3774,8 @@
       </div>
     {/if}
   </div>
-  {#if notifToast}
-    <div class="notif-toast" role="status" aria-live="polite">{notifToast}</div>
+  {#if currentToast()}
+    <div class="notif-toast" role="status" aria-live="polite">{currentToast()}</div>
   {/if}
 
   <!-- Global tooltip — driven by the `use:tooltip` action. Positioned with

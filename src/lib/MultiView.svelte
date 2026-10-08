@@ -19,7 +19,6 @@
 
   import { onDestroy, untrack } from 'svelte'
   import { SvelteMap } from 'svelte/reactivity'
-  import { invoke, isTauri } from '@tauri-apps/api/core'
   import { tileStore } from './tile-store.svelte'
   import { ChatSession } from './chat-session.svelte'
   import { settings } from './settings.svelte.ts'
@@ -45,6 +44,7 @@
     type MergeSource,
   } from './merged-chat'
   import { fetchChannelStatuses } from './gql'
+  import { openExternal } from './open-url'
   import { formatCompact } from './format'
   import { tooltip } from './tooltip.ts'
   import { t } from './i18n/index.svelte'
@@ -565,13 +565,12 @@
   // A twitch.tv link clicked in chat or the pinned banner. Multi-view has no
   // player of its own (each tile owns one, and hijacking a tile for a clip
   // would kill a live stream), so every link — clips included — opens the
-  // twitch page through the existing robust opener. Only twitch URLs are ever
-  // interactive in the first place (chat-links.ts).
+  // twitch page through the shared external opener (which toasts when no
+  // opener works; App.svelte renders the toast at the root, above this
+  // view). Only twitch URLs are ever interactive in the first place
+  // (chat-links.ts).
   function openChatLink(url: string): void {
-    if (!isTauri()) return
-    void invoke('open_url_robust', { url }).catch((e) => {
-      if (import.meta.env.DEV) console.error('chat-link: open_url_robust threw', e)
-    })
+    openExternal(url)
   }
 
   // Badge art resolves against each entry's OWN session override inside the

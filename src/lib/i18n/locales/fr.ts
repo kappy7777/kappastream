@@ -95,6 +95,7 @@ export const fr: Record<TKey, string> = {
   toast_removedFavorite: '{channel} retiré des favoris.',
   toast_addedFavorite: '{channel} ajouté aux favoris.',
   toast_favoritesLimit: 'Limite de favoris atteinte.',
+  toast_openLinkFailed: "Impossible d'ouvrir le lien — aucun lanceur de navigateur n'a fonctionné.",
 
   notif_mentioned: 'Mentionné dans {channel}',
   notif_mentionedBody: '{user} : {preview}',

@@ -108,6 +108,7 @@ export const en = {
   toast_removedFavorite: 'Removed {channel} from favorites.',
   toast_addedFavorite: 'Added {channel} to favorites.',
   toast_favoritesLimit: 'Favorites limit reached.',
+  toast_openLinkFailed: "Couldn't open the link — no browser opener worked.",
 
   // ---- App.svelte: OS / in-app notifications ------------------------------
   notif_mentioned: 'Mentioned in {channel}',
