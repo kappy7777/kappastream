@@ -190,7 +190,10 @@ async function fetchBTTVChannel(twitchUserId: string, signal?: AbortSignal): Pro
     for (const e of data.sharedEmotes ?? []) uniquePush(out, bttvEmote(e))
     return out
   } catch {
-    return []
+    // A thrown fetch (network error, timeout, bad JSON) is transient, not
+    // "no emotes": returning [] here used to cache the channel as emoteless
+    // for the whole process AND mask the all-providers-down outage.
+    return null
   }
 }
 
@@ -234,7 +237,8 @@ async function fetchFFZChannel(twitchUserId: string, signal?: AbortSignal): Prov
     }
     return out
   } catch {
-    return []
+    // Same contract as BTTV above: transient failure, never a cached [].
+    return null
   }
 }
 

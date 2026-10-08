@@ -281,6 +281,31 @@ describe('transient provider failures are not cached', () => {
     expect(res.emotes).toEqual([])
     expect(res.allFailed).toBe(true)
   })
+
+  it('channel-side provider failures count as failed and refetch', async () => {
+    tauriInvoke.handler = async (cmd: string) => {
+      if (cmd === 'gql_fetch') {
+        return JSON.stringify({ data: { users: [{ id: '12345', login: 'chan3' }] } })
+      }
+      throw new Error('unexpected invoke: ' + cmd)
+    }
+    // Every channel provider request throws. BTTV/FFZ used to turn a thrown
+    // fetch into a [] SUCCESS, so the outage never reported allFailed and
+    // the [] was cached — the channel silently kept no third-party emotes
+    // until restart.
+    let providerCalls = 0
+    fetchImpl = async () => {
+      providerCalls++
+      throw new Error('network down')
+    }
+    const first = await E.loadChannelEmotes('chan3')
+    expect(first.emotes).toEqual([])
+    expect(first.allFailed).toBe(true)
+
+    const second = await E.loadChannelEmotes('chan3')
+    expect(second.allFailed).toBe(true)
+    expect(providerCalls).toBe(6) // 3 providers x 2 loads — nothing cached
+  })
 })
 
 describe('ChatSession emoteStatus', () => {
