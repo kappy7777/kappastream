@@ -309,6 +309,7 @@ export class PinnedChatStore {
       }
       this.inFlight = true
       let superseded = false
+      let startedAt = 0
       try {
         const userId = await this.ensureUserId(channel)
         // Resolution pending (another refresh is already resolving this
@@ -316,6 +317,11 @@ export class PinnedChatStore {
         // memoized failure retries after userIdRetryMs, driven by the next
         // tick).
         if (!userId) return
+        // Stamp the throttle at REQUEST start: stamping at completion
+        // stretched the effective period to cadence + fetch duration, which
+        // made every tick land inside the throttle window of the previous
+        // cycle — pins refreshed every OTHER cycle (~5 min), not every 150 s.
+        startedAt = this.deps.now()
         const raw = await this.deps.fetch(userId)
         if (this.targetChannel !== channel) {
           // Superseded by a later join: drop the result (no `return` — the
@@ -338,11 +344,14 @@ export class PinnedChatStore {
         void this.refresh()
         return
       }
-      // Record the attempt only when a fetch actually happened this pass (the
+      // Record the attempt only when a fetch actually started this pass (the
       // resolution-pending return above must not count, or the retry it
-      // schedules would be throttled away).
-      this.lastFetchChannel = channel
-      this.lastFetchAt = this.deps.now()
+      // schedules would be throttled away); the recorded time is the request
+      // START captured above, not the completion.
+      if (startedAt > 0) {
+        this.lastFetchChannel = channel
+        this.lastFetchAt = startedAt
+      }
       this.updateExpiryTicker()
     })
   }
