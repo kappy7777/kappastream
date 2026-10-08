@@ -232,6 +232,15 @@
   // True while a stream is actually loaded on the native engine — drives the
   // page's transparent "video hole" (CSS at the bottom) and the rect pusher.
   let nativeVideoActive = $state(false)
+  // True while ANY native (mpv) surface is live: the single player's engine,
+  // OR multi-view tiles (native whenever the engine setting is on and the
+  // engine compiled in — the same condition MultiView derives as
+  // tilesNative). Drives the app--native-video root class, whose
+  // strip-styling overrides (opaque tooltip/toast/menu pills, disabled
+  // reveal animations) must hold in multi-view too: its tiles snapshot the
+  // same page strips over native surfaces, and a semi-transparent pill
+  // pre-blends with the dark page inside the snapshot bitmap.
+  const anyNativeSurface = $derived(nativeVideoActive || (multiView && settings.mpvEngine && mpvAvailable))
   // Intrinsic display aspect (width/height) of the CURRENT stream. NaN until
   // the active backend reports dimensions (hls: the <video>'s metadata;
   // mpv: video-params via mpv://aspect). Feeds the shared content rect
@@ -3145,7 +3154,7 @@
   class:app--sidebar-icons={effectiveSidebarMode === 'icons'}
   class:app--sidebar-hidden={effectiveSidebarMode === 'hidden'}
   class:app--fullscreen={isFullscreen}
-  class:app--native-video={nativeVideoActive}
+  class:app--native-video={anyNativeSurface}
 >
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <!-- Double-click on empty title-bar space toggles maximize (mouse-only
@@ -4710,8 +4719,13 @@
   /* Same reveal-freeze reasoning as the tooltip above: the toast's
      150 ms slide-fade would be captured mid-flight by the page-snapshot
      overlay. Dismissal is a 3.5 s state timer (element removal), so
-     nothing depends on the animation completing. */
+     nothing depends on the animation completing. The background also goes
+     opaque for the same reason as the tooltip's: its semi-transparent
+     --bg-overlay-strong would pre-blend with the dark page inside the
+     snapshot and read as darkened over the video. */
   .app--native-video .notif-toast {
+    background: var(--bg-panel);
+    box-shadow: none;
     animation: none;
   }
 

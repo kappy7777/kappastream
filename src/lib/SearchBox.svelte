@@ -337,8 +337,11 @@
      the video; the 120 ms slide-fade would be frozen mid-flight by the
      snapshot (see App.svelte's .global-tooltip override — same
      reasoning). The dropdown appears/leaves via {#if}, so nothing
-     depends on the animation ending. */
+     depends on the animation ending. The drop shadow goes too — it
+     pre-blends with the dark page inside the snapshot bitmap and reads
+     as a dark smudge over the picture. */
   :global(.app--native-video) .search-dropdown {
+    box-shadow: none;
     animation: none;
   }
 
