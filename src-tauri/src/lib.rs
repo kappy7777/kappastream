@@ -150,6 +150,7 @@ pub fn run() {
             resolve::resolve_vod,
             resolve::resolve_clip,
             resolve::stream_qualities,
+            resolve::vod_qualities,
             resolve::streamlink_status,
             player::launch_player,
             platform::target_os,

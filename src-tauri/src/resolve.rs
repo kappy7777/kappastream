@@ -597,6 +597,27 @@ pub async fn stream_qualities(
     }
 }
 
+/// The variant rungs a VOD actually offers — the same contract as
+/// stream_qualities (unordered rung ids, empty on ANY failure so the menu
+/// falls back to the full vocabulary instead of breaking), for the VOD
+/// quality menu. VODs transcode independently of the live stream: a channel
+/// live at 1080p60 can have a VOD capped at 720p, and the static vocabulary
+/// would offer rungs whose resolve is a guaranteed streamlink failure.
+#[tauri::command]
+pub async fn vod_qualities(video_id: String) -> Result<Vec<String>, String> {
+    let id = video_id.trim().to_string();
+    if !is_vod_id_valid(&id) {
+        return Ok(Vec::new());
+    }
+    let bin = streamlink_bin();
+    let url = format!("https://twitch.tv/videos/{}", id);
+    let args: Vec<String> = vec!["--loglevel".into(), "error".into(), "--json".into(), url];
+    match spawn_streamlink(&bin, args).await {
+        Ok(stdout) => Ok(parse_available_qualities(&stdout)),
+        Err(_) => Ok(Vec::new()),
+    }
+}
+
 /// The one URL validator every streamlink-output consumer uses —
 /// resolve_stream, resolve_vod, resolve_clip, validate_media_url (the
 /// mpv_load trust boundary) and the ksvod proxy's reconstructed targets:

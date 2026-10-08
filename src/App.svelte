@@ -1280,10 +1280,10 @@
       const label = name.slice('quality:'.length)
       // Reverse-map against the SAME list the OSC was fed (it can contain
       // real rungs outside the static vocabulary, e.g. 936p60) — the mpv
-      // variant, so audio_only (never offered) can't match either.
-      const id = mpvQualities(playback.kind === 'live' ? availableQualities : null).find(
-        (qid) => qualityLabel(qid) === label,
-      )
+      // variant, so audio_only (never offered) can't match either. Same
+      // source as the feed: the live probe for live, the VOD probe for a
+      // VOD (clips send no list and have no gear to click).
+      const id = mpvQualities(availableQualities).find((qid) => qualityLabel(qid) === label)
       if (id) void changeQuality(id)
     }
   }
@@ -1428,10 +1428,10 @@
     sendOsd(['ks-mode', playback.kind === 'live' ? 'live' : 'vod'])
   })
 
-  // Quality list (LIVE: the probed variant list; VOD: the full vocabulary —
-  // the same menu the hls.js control bar offers a VOD, since a VOD re-resolves
-  // at the picked rung and resumes from its checkpoint. CLIPS: none — clip
-  // quality is fixed (best), and an empty list hides the OSD gear).
+  // Quality list (LIVE: the probed variant list; VOD: its OWN probe — VODs
+  // transcode independently of the live stream, so the rungs differ per VOD.
+  // CLIPS: none — clip quality is fixed (best), and an empty list hides the
+  // OSD gear).
   $effect(() => {
     if (!nativeVideoActive) return
     if (playback.kind === 'clip') {
@@ -1441,12 +1441,13 @@
     void quality
     // This effect only runs while the native engine is up (nativeVideoActive),
     // so the list is always the mpv variant — audio_only never offered (no
-    // OSD canvas in audio-only → no way back; see mpvQualities).
+    // OSD canvas in audio-only → no way back; see mpvQualities). null (probe
+    // unknown) degrades to the full vocabulary, exactly like the live menu.
     sendOsd([
       'ks-qualities',
       t('quality'),
       qualityLabel(quality),
-      ...mpvQualities(playback.kind === 'live' ? availableQualities : null).map((qid) => qualityLabel(qid)),
+      ...mpvQualities(availableQualities).map((qid) => qualityLabel(qid)),
     ])
   })
 
@@ -1928,6 +1929,20 @@
     }
   }
 
+  /** Same probe for a VOD: each VOD transodes independently of the live
+   *  stream, so its menu needs its OWN variant list (a channel live at
+   *  1080p60 can have VODs capped at 720p). Fire-and-forget like the live
+   *  probe — until it answers the menu shows the full vocabulary. */
+  async function refreshVodQualities(videoId: string): Promise<void> {
+    try {
+      const r = (await invoke('vod_qualities', { videoId })) as unknown
+      if (playback.kind !== 'vod' || playback.id !== videoId) return
+      availableQualities = Array.isArray(r) ? (r as string[]) : null
+    } catch {
+      if (playback.kind === 'vod' && playback.id === videoId) availableQualities = null
+    }
+  }
+
   async function loadStream(channel: string, q: string): Promise<void> {
     const generation = playbackSession.nextGeneration()
     const token = ++loadToken
@@ -2293,6 +2308,17 @@
     }
     if (token !== loadToken) return false
     if (!raw.ok || !raw.url) {
+      if (raw.unavailable) {
+        // Same policy as the live path's one-shot fallback: the requested
+        // rung isn't offered for THIS VOD (a quality carried over from live
+        // is the usual culprit — VODs transcode independently). Fall back to
+        // best for this load only, without persisting the choice.
+        if (q !== 'best') {
+          quality = 'best'
+          showNotifToast(t('toast_qualityFallback', { q, source: t('pc_sourceQuality') }))
+          return await loadVod(videoId, 'best')
+        }
+      }
       playerStatus = 'error'
       const base = raw.error ?? 'failed to load video'
       const hint = raw.offline || raw.unavailable ? null : streamlinkFloorHint(installedStreamlinkVersion())
@@ -2386,6 +2412,10 @@
     stopChatOnly()
     playbackSession.userPaused = false
     if (videoScrollEl) videoScrollEl.scrollTop = 0
+    // The menu's variant list is per-VOD; unknown (null) until its probe
+    // answers, same transitional contract as the live probe.
+    availableQualities = null
+    void refreshVodQualities(video.id)
     // A superseded load must not start its follow-ups: the user already
     // moved on to another VOD/live/clip, and this VOD's chat replay loop +
     // extras would run over (and later overwrite) whatever replaced it.
@@ -3318,7 +3348,7 @@
                   backend={videoBackend}
                   visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')}
                   {quality}
-                  qualities={playback.kind === 'live' ? effectiveQualities(availableQualities) : undefined}
+                  qualities={playback.kind === 'clip' ? undefined : effectiveQualities(availableQualities)}
                   onqualitychange={(q) => void changeQuality(q)}
                   onmpv={onMpvClick}
                   onstop={onStopClick}
