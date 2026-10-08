@@ -162,6 +162,12 @@
   // VOD/clip takeover (stopChatOnly — the disposed object stays referenced
   // so its third-party emote map keeps feeding the VOD chat renderer).
   let chatSession = $state<ChatSession | null>(null)
+  // Bumped on every connect(): a DIRECT live-to-live switch swaps the session
+  // synchronously (disconnect + new session inside one handler), so the chat
+  // status never observably passes through 'idle'. The pane's reset key needs
+  // the JOIN identity (serial + channel), not just live-vs-idle, or the new
+  // channel's chat inherits the old follow state — scrolled up, stale pill.
+  let chatJoinSerial = $state(0)
   // UI reads of the session's reactive state; empty/idle fallbacks while no
   // session exists. All of these are only ever REASSIGNED inside the session
   // (never mutated in place), so property-read tracking is sufficient.
@@ -1650,9 +1656,9 @@
   })
 
   // Placeholder / reset keys for the shared ChatPane (state text is composed
-  // here; the pane owns the rendering). resetKey: swapping between "a chat is
-  // (or was) live" and idle resets the pane's follow state — channel changes,
-  // disconnects and VOD takeovers all pass through idle.
+  // here; the pane owns the rendering). resetKey changes at every session-
+  // swap boundary: idle (disconnect / VOD-clip takeover) or a new join serial
+  // (a direct live-to-live switch never passes through idle).
   const chatPlaceholder = $derived(
     playback.kind === 'vod'
       ? vodChat.failed
@@ -1664,7 +1670,7 @@
         ? t('chat_waitingMessages')
         : t('chat_joinToSee'),
   )
-  const chatResetKey = $derived(status === 'idle' ? 'idle' : 'live')
+  const chatResetKey = $derived(status === 'idle' ? 'idle' : `live:${chatJoinSerial}:${chatSession?.channel ?? ''}`)
 
   // The pane's follow state drives the chat buffer's trim. While the user is
   // scrolled UP reading history, the active buffer — the live session, or the
@@ -2107,6 +2113,7 @@
     channelJoined = channel
     void startStream(channel)
 
+    chatJoinSerial += 1
     chatSession = new ChatSession(channel, {
       // The self-check compares the LOGIN (the mention username setting is a
       // login); the display name may differ in case or entirely.
