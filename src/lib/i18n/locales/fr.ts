@@ -412,7 +412,7 @@ export const fr: Record<TKey, string> = {
   settings_sectionPlayback: 'Lecture',
   settings_sectionGeneral: 'Général',
   settings_sectionFavorites: 'Favoris',
-  settings_sectionChangelog: 'Nouveautés',
+  settings_sectionChangelog: 'Journal des modifications',
 
   // ---- Thèmes personnalisés (Settings + CustomThemeEditor) ----------------
   settings_customThemes: 'Thèmes personnalisés',

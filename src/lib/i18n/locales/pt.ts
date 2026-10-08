@@ -409,7 +409,7 @@ export const pt: Record<TKey, string> = {
   settings_sectionPlayback: 'Reprodução',
   settings_sectionGeneral: 'Geral',
   settings_sectionFavorites: 'Favoritos',
-  settings_sectionChangelog: 'Novidades',
+  settings_sectionChangelog: 'Registro de alterações',
 
   // ---- Temas personalizados (Settings + CustomThemeEditor) ----------------
   settings_customThemes: 'Temas personalizados',
