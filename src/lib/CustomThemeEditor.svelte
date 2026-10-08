@@ -379,12 +379,14 @@
   async function exportTheme(): Promise<void> {
     if (isNew) return
     exportError = ''
-    const json = exportThemeJson(
-      getCustomTheme(editing.id) ?? { ...editing, label: label.trim(), values: values as ThemeValues },
-    )
+    // The draft when it is saveable, else the last stored theme — the
+    // exported colours AND the file name must come from the SAME object, or
+    // "ocean-v2.json" ships the old saved "Ocean" colours inside.
+    const draft: CustomTheme = { id: editing.id, label: label.trim(), values: values as ThemeValues }
+    const exported = canSave ? draft : (getCustomTheme(editing.id) ?? draft)
+    const json = exportThemeJson(exported)
     const slug =
-      label
-        .trim()
+      exported.label
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '') || 'theme'
