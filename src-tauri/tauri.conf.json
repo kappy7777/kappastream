@@ -84,6 +84,7 @@
       "icons/icon.ico",
       "icons/icon.icns"
     ],
+    "category": "Video",
     "windows": {
       "minimumWebview2Version": "110.0.1531.0",
       "nsis": {
@@ -95,11 +96,17 @@
         "bundleMediaFramework": true
       },
       "deb": {
-        "depends": ["streamlink", "libmpv2", "gstreamer1.0-libav"]
+        "depends": ["streamlink", "libmpv2", "gstreamer1.0-libav"],
+        "files": {
+          "/usr/share/metainfo/dev.kappy.kappastream.metainfo.xml": "../packaging/shared/dev.kappy.kappastream.metainfo.xml"
+        }
       },
       "rpm": {
         "depends": ["streamlink", "libmpv.so.2()(64bit)"],
-        "recommends": ["(gstreamer1-plugin-libav or gstreamer-plugins-libav)"]
+        "recommends": ["(gstreamer1-plugin-libav or gstreamer-plugins-libav)"],
+        "files": {
+          "/usr/share/metainfo/dev.kappy.kappastream.metainfo.xml": "../packaging/shared/dev.kappy.kappastream.metainfo.xml"
+        }
       }
     },
     "macOS": {
