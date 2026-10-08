@@ -1152,9 +1152,22 @@ fn store_page_snapshot(crop: PageCrop) {
     );
     super::mask_keep_rects(&mut bgra, w as usize, h as usize, &keep);
     let bgra = std::sync::Arc::new(bgra);
-    // Stage + prepare in one brief locked section; nothing expensive and no
-    // libmpv call runs while it is held.
-    let (mpv, issue) = {
+    // The engine's overlay mutex spans the whole staging + re-issue unit so
+    // the event thread's ks-overlay hides can neither prepare nor run
+    // between this section's prepare and its overlay-add — a hide landing
+    // there would be overwritten by the add and strand the stale page UI.
+    // The registry lock still only ever guards cheap state: the resample
+    // and the overlay-add run outside it, under the (much narrower) overlay
+    // mutex.
+    let (mpv, overlay_mu) = {
+        let engines = super::lock_or_recover(super::engines());
+        let Some(engine) = engines.get(&id) else {
+            return;
+        };
+        (engine.mpv, std::sync::Arc::clone(&engine.overlay_mu))
+    };
+    let _overlay_guard = super::lock_or_recover(&overlay_mu);
+    let issue = {
         let mut engines = super::lock_or_recover(super::engines());
         let Some(engine) = engines.get_mut(&id) else {
             return;
@@ -1178,7 +1191,7 @@ fn store_page_snapshot(crop: PageCrop) {
                 grid: None,
             },
         );
-        (engine.mpv, engine.prepare_page_reissue(gen))
+        engine.prepare_page_reissue(gen)
     };
     if let Some(issue) = issue {
         match super::execute_overlay_issue(mpv, &issue) {

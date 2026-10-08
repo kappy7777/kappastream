@@ -259,6 +259,14 @@ struct Engine {
     /// newer one. Lives on the engine (not a static) so a rebuilt engine
     /// restarts the sequence cleanly.
     page_seq: u64,
+    /// Serializes each engine's overlay issuance (prepare → overlay-add /
+    /// overlay-remove → dedupe record) WITHOUT the registry lock. Without
+    /// it, a hide prepared by the event thread can interleave before a
+    /// snapshot worker's overlay-add — the add then lands after the remove
+    /// and the stale page UI stays composited until the next show/hide.
+    /// Arc so issuers can keep it held across the registry lock drops
+    /// between the phases.
+    overlay_mu: Arc<Mutex<()>>,
 }
 
 /// A BGRA bitmap uploaded by the frontend, keyed ("infoblock", "page", or
@@ -558,6 +566,7 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
         osd: (0, 0),
         page_geo: None,
         page_seq: 0,
+        overlay_mu: Arc::new(Mutex::new(())),
         bitmaps: HashMap::new(),
         bitmap_gen: 0,
         overlays: HashMap::new(),
@@ -838,32 +847,42 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                         // resample + overlay-add with NO lock held — a
                         // synchronous core call under the lock would stall
                         // every other command and worker behind the OSD's
-                        // 16 Hz message stream. Best-effort — a failed
-                        // overlay is a visual no-op, not an error the user
-                        // can act on.
-                        let cmds = {
-                            let mut engines = lock_or_recover(engines());
-                            match engines.get_mut(&id) {
-                                Some(engine) => {
-                                    engine.prepare_ks_overlay(&args[1..]).unwrap_or_default()
-                                }
-                                None => Vec::new(),
-                            }
+                        // 16 Hz message stream. The engine's overlay mutex
+                        // spans the whole unit so the page-snapshot worker
+                        // can neither prepare nor issue between this
+                        // section's prepare and its overlay-add/remove.
+                        // Best-effort — a failed overlay is a visual no-op,
+                        // not an error the user can act on.
+                        let overlay_mu = {
+                            let engines = lock_or_recover(engines());
+                            engines.get(&id).map(|e| Arc::clone(&e.overlay_mu))
                         };
-                        for cmd in cmds {
-                            match cmd {
-                                OverlayCmd::Issue(issue) => {
-                                    match execute_overlay_issue(mpv, &issue) {
-                                        Ok(entry) => record_overlay(id, issue.id, entry),
-                                        Err(err) => eprintln!("[mpv] overlay-add: {err}"),
+                        if let Some(overlay_mu) = overlay_mu {
+                            let _overlay_guard = lock_or_recover(&overlay_mu);
+                            let cmds = {
+                                let mut engines = lock_or_recover(engines());
+                                match engines.get_mut(&id) {
+                                    Some(engine) => {
+                                        engine.prepare_ks_overlay(&args[1..]).unwrap_or_default()
                                     }
+                                    None => Vec::new(),
                                 }
-                                OverlayCmd::Hide(overlay_id) => {
-                                    let id_s = overlay_id.to_string();
-                                    if let Err(err) =
-                                        mpv.command("overlay-remove", &[id_s.as_str()])
-                                    {
-                                        eprintln!("[mpv] overlay-remove {overlay_id}: {err}");
+                            };
+                            for cmd in cmds {
+                                match cmd {
+                                    OverlayCmd::Issue(issue) => {
+                                        match execute_overlay_issue(mpv, &issue) {
+                                            Ok(entry) => record_overlay(id, issue.id, entry),
+                                            Err(err) => eprintln!("[mpv] overlay-add: {err}"),
+                                        }
+                                    }
+                                    OverlayCmd::Hide(overlay_id) => {
+                                        let id_s = overlay_id.to_string();
+                                        if let Err(err) =
+                                            mpv.command("overlay-remove", &[id_s.as_str()])
+                                        {
+                                            eprintln!("[mpv] overlay-remove {overlay_id}: {err}");
+                                        }
                                     }
                                 }
                             }
