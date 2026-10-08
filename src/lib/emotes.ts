@@ -416,6 +416,17 @@ export function renderMessage({ message, thirdParty, twitchRanges = [] }: Render
   return parts
 }
 
+/**
+ * Whether a rendered message is nothing but emotes (and whitespace between
+ * them) — the renderer gives those messages the wider emote-only line height.
+ * Lives here next to renderMessage so every producer of ChatMessage
+ * (ChatSession's live path, App's VOD-replay path) applies the SAME predicate
+ * to the SAME parts instead of each keeping a private copy.
+ */
+export function isEmoteOnly(parts: RenderedMessagePart[]): boolean {
+  return parts.some((p) => p.type === 'emote') && parts.every((p) => p.type === 'emote' || p.text.trim() === '')
+}
+
 function thirdPartyRanges(message: string, thirdParty: Map<string, Emote>): EmoteRange[] {
   const ranges: EmoteRange[] = []
   let i = 0

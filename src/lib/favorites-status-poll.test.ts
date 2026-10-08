@@ -15,6 +15,8 @@ const gqlCalls = vi.hoisted(() => ({
   bodies: [] as string[],
 }))
 
+import { STREAMLINK_STATUS_OK } from './test-streamlink-status'
+
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
   invoke: vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
@@ -26,7 +28,7 @@ vi.mock('@tauri-apps/api/core', () => ({
       case 'resolve_stream':
         return { ok: true, url: 'https://cdn.example.invalid/live.m3u8' }
       case 'streamlink_status':
-        return { present: true, targetOs: 'linux' }
+        return STREAMLINK_STATUS_OK
       case 'stream_qualities':
         return []
       case 'gql_fetch': {
@@ -139,11 +141,13 @@ describe("un-favoriting the joined channel starts App's own status poll", () => 
       await vi.advanceTimersByTimeAsync(200)
 
       // Join the FAVORITE channel (the heart is on: it is a favorite).
+      const preJoin = chanFetches() // the mount's own favorites batch may already count here
       q('.fav').click()
       await vi.advanceTimersByTimeAsync(400)
       const joinedFetches = chanFetches()
-      // The join-time fetchLiveStatus fired once for the status bar.
-      expect(joinedFetches).toBeGreaterThanOrEqual(1)
+      // The join-time fetchLiveStatus fired exactly once for the status bar
+      // (a bare lower bound is satisfied by the mount's own batch alone).
+      expect(joinedFetches).toBe(preJoin + 1)
       // Its (offline) answer is on screen.
       expect(document.querySelector('.stream-info-offline')).toBeTruthy()
 

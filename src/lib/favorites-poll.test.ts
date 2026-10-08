@@ -13,6 +13,8 @@ const gqlCalls = vi.hoisted(() => ({
   bodies: [] as string[],
 }))
 
+import { STREAMLINK_STATUS_OK } from './test-streamlink-status'
+
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
   invoke: vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
@@ -24,7 +26,7 @@ vi.mock('@tauri-apps/api/core', () => ({
       case 'resolve_stream':
         return { ok: true, url: 'https://cdn.example.invalid/live.m3u8' }
       case 'streamlink_status':
-        return { present: true, targetOs: 'linux' }
+        return STREAMLINK_STATUS_OK
       case 'stream_qualities':
         return []
       case 'gql_fetch': {
@@ -96,9 +98,9 @@ HTMLMediaElement.prototype.load = function (): void {}
 
 // The favorites store is a module-level singleton constructed at import time
 // and reads localStorage in its constructor — the favorite must be seeded
-// BEFORE App (and its transitive favorites import) is loaded. Both tests use
-// the same channel; the sidebar mode is per-App-instance state and is set
-// inside each test.
+// BEFORE App (and its transitive favorites import) is loaded. The test uses
+// one channel; the sidebar mode is per-App-instance state and is set inside
+// the test.
 localStorage.setItem('twitch-favorites-v1', JSON.stringify([{ name: 'chan9', addedAt: 1, order: 1 }]))
 
 const App = (await import('../App.svelte')).default

@@ -11,6 +11,8 @@ const gqlState = vi.hoisted(() => ({
   failStatusQueries: false,
 }))
 
+import { STREAMLINK_STATUS_OK } from './test-streamlink-status'
+
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
   invoke: vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
@@ -22,7 +24,7 @@ vi.mock('@tauri-apps/api/core', () => ({
       case 'resolve_stream':
         return { ok: true, url: 'https://cdn.example.invalid/live.m3u8' }
       case 'streamlink_status':
-        return { present: true, targetOs: 'linux' }
+        return STREAMLINK_STATUS_OK
       case 'stream_qualities':
         return []
       case 'gql_fetch': {
@@ -144,5 +146,36 @@ describe('a failed status fetch keeps the last known status', () => {
     const title = document.querySelector('.stream-info-title')
     expect(title).toBeTruthy()
     expect(title!.textContent).toContain('Still Live Title')
+  }, 20000)
+
+  it('the non-favorite 150 s poll failing does not blank the live bar either', async () => {
+    // A channel that is NOT a favorite refreshes through its own direct
+    // fetchLiveStatus interval (the favorites batch never covers it), so the
+    // ignore-error rule has to hold on THAT path too. Fake timers drive the
+    // 150 s cadence without wall-clock waiting.
+    vi.useFakeTimers()
+    try {
+      const target = document.createElement('div')
+      document.body.appendChild(target)
+      view = mount(App, { target })
+      await vi.advanceTimersByTimeAsync(400)
+
+      const input = q('.channel-input') as HTMLInputElement
+      input.value = 'otherchan'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      await vi.advanceTimersByTimeAsync(600)
+
+      const title = (): string | null => document.querySelector('.stream-info-title')?.textContent ?? null
+      expect(title()).toContain('Still Live Title') // the join-time fetch landed
+
+      gqlState.failStatusQueries = true
+      await vi.advanceTimersByTimeAsync(150_001)
+      await vi.advanceTimersByTimeAsync(150_001)
+      // Two failed poll ticks later the bar still shows the last known title.
+      expect(title()).toContain('Still Live Title')
+    } finally {
+      vi.useRealTimers()
+    }
   }, 20000)
 })

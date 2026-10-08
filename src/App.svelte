@@ -4,7 +4,7 @@
   import { invoke, isTauri } from '@tauri-apps/api/core'
   import { listen } from '@tauri-apps/api/event'
   import { getCurrentWindow } from '@tauri-apps/api/window'
-  import { renderMessage, type Emote } from './lib/emotes'
+  import { renderMessage, isEmoteOnly, type Emote } from './lib/emotes'
   import './lib/emote.css'
   import { activeRoomModes, type ParsedMessage, type RoomState } from './lib/irc'
   import { ChatSession, type ChatMessage, type ChatConnectionStatus } from './lib/chat-session.svelte'
@@ -1598,8 +1598,7 @@
   // CLEARCHAT), so those toggles are simply inert during replay.
   function pmToChatMessage(pm: ParsedMessage): ChatMessage {
     const parts = renderMessage({ message: pm.message, thirdParty: thirdPartyMap, twitchRanges: pm.twitchEmotes })
-    const emoteOnly =
-      parts.some((p) => p.type === 'emote') && parts.every((p) => p.type === 'emote' || p.text.trim() === '')
+    const emoteOnly = isEmoteOnly(parts)
     return {
       kind: 'message',
       id: pm.id,

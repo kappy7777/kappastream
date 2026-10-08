@@ -57,6 +57,17 @@ function gqlErrors(): string {
   return JSON.stringify({ errors: [{ message: 'schema error' }] })
 }
 
+/**
+ * Build a GQL 200 envelope carrying BOTH a `data` object and a top-level
+ * `errors` array. The data-only half of the error fixtures ({errors} with no
+ * data) also trips the envelope check's `no data` arm, so it cannot tell the
+ * errors branch apart — only this shape can (with the errors check deleted it
+ * would parse the data and report "no results"/partial data as a success).
+ */
+function partialErrors(data: unknown): string {
+  return JSON.stringify({ data, errors: [{ message: 'schema error' }] })
+}
+
 /** Helper to read the variables object out of the last gql_fetch body. */
 function lastVars(): Record<string, unknown> {
   const body = gql.calls.at(-1) ?? '{}'
@@ -117,6 +128,15 @@ describe('gql favorites layer (refactor smoke)', () => {
     // committing a wrong status.
     gql.handler = async () => ok({ users: [] })
     await expect(G.fetchChannelStatuses(['alpha', 'beta'])).rejects.toThrow('gql short response')
+  })
+
+  it('throws with the GQL reason on a partial {data, errors} envelope', async () => {
+    // The batch carries usable data AND a top-level errors array: the errors
+    // win (the query failed to execute), and the thrown text carries the
+    // server's reason rather than a generic label.
+    gql.handler = async () =>
+      partialErrors({ users: [{ id: '1', login: 'alpha', displayName: 'alpha', stream: null }] })
+    await expect(G.fetchChannelStatuses(['alpha'])).rejects.toThrow('schema error')
   })
 })
 
@@ -203,6 +223,29 @@ describe('gql search (searchChannels)', () => {
   it('throws on a top-level GQL errors array (NOT an empty list)', async () => {
     gql.handler = async () => gqlErrors()
     await expect(G.searchChannels('x')).rejects.toThrow()
+  })
+
+  it('throws on a partial {data, errors} envelope even with usable items', async () => {
+    // Distinguishes the errors arm from the no-data arm: the envelope carries
+    // a perfectly parseable items list, so only the top-level errors check
+    // can turn this into the visible failure the caller needs.
+    gql.handler = async () =>
+      partialErrors({
+        searchFor: {
+          channels: {
+            items: [
+              {
+                id: '11',
+                login: 'chan1',
+                displayName: 'chan1',
+                profileImageURL: 'https://img/chan1.png',
+                stream: null,
+              },
+            ],
+          },
+        },
+      })
+    await expect(G.searchChannels('x')).rejects.toThrow('schema error')
   })
 
   it('throws on a transport (HTTP/network) failure rather than returning []', async () => {

@@ -27,6 +27,8 @@ const hlsMock = vi.hoisted(() => {
   return { instances }
 })
 
+import { STREAMLINK_STATUS_OK } from './test-streamlink-status'
+
 vi.mock('hls.js', () => {
   class FakeHls {
     static readonly Events = { MANIFEST_PARSED: 'hlsManifestParsed', ERROR: 'hlsError' }
@@ -54,7 +56,7 @@ vi.mock('@tauri-apps/api/core', () => ({
       case 'resolve_stream':
         return { ok: true, url: 'https://cdn.example.invalid/live.m3u8' }
       case 'streamlink_status':
-        return { present: true, targetOs: 'linux' }
+        return STREAMLINK_STATUS_OK
       case 'stream_qualities':
         return []
       case 'gql_fetch':
@@ -87,26 +89,23 @@ vi.mock('@tauri-apps/api/window', () => {
 
 vi.mock('./chat-session.svelte', () => {
   // Chat is not under test — a no-op session keeps the app offline (no
-  // sockets, no emote fetches). start() flips to connected and fires onOpen
-  // like the real socket-open coupling; the player no longer hangs off it
-  // (the stream starts in connect() itself), but nothing here depends on
-  // that either way.
+  // sockets, no emote fetches). start() just flips to connected: the real
+  // session takes no socket-open callback anymore (the stream starts in
+  // connect() itself, and nothing here depends on connection state either
+  // way).
   class ChatSession {
     channel: string
-    opts: { onOpen?: (isReconnect: boolean) => void }
     messages: unknown[] = []
     status = 'idle'
     emoteStatus = 'idle'
     roomState: Record<string, unknown> = {}
     badgeOverride = null
     thirdParty = new Map()
-    constructor(channel: string, opts: { onOpen?: (isReconnect: boolean) => void } = {}) {
+    constructor(channel: string) {
       this.channel = channel
-      this.opts = opts
     }
     start(): void {
       this.status = 'connected'
-      this.opts.onOpen?.(false)
     }
     setHoldTrim(_hold: boolean): void {}
     dispose(): void {}

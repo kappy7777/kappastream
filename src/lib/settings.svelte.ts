@@ -49,7 +49,7 @@ import {
   clearThemeProperties,
   type CustomThemeId,
 } from './custom-themes.svelte'
-import { STORAGE_KEYS } from './storage-keys'
+import { STORAGE_KEYS, type StorageKey, type StorageKeyArg } from './storage-keys'
 
 export type SortMode = 'auto' | 'manual'
 
@@ -119,7 +119,7 @@ export const UI_SCALE_STEP = 0.05
 export const UI_SCALE_DEFAULT = 1
 export const UI_SCALE_PRESETS: ReadonlyArray<number> = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4] as const
 
-function safeRead(key: string): string | null {
+function safeRead(key: StorageKeyArg): string | null {
   try {
     return localStorage.getItem(key)
   } catch {
@@ -127,7 +127,7 @@ function safeRead(key: string): string | null {
   }
 }
 
-function safeWrite(key: string, value: string): void {
+function safeWrite(key: StorageKeyArg, value: string): void {
   try {
     localStorage.setItem(key, value)
   } catch {
@@ -222,7 +222,7 @@ function readCheckUpdates(): boolean {
 // groups; each new key falls back to the legacy key while unset (a legacy
 // 'false' keeps that user's notices off), and only when both keys are unset
 // does the ON default apply.
-function readChatNoticeGroup(key: string): boolean {
+function readChatNoticeGroup(key: StorageKey): boolean {
   const own = safeRead(key)
   if (own !== null) return own !== 'false'
   const legacy = safeRead(STORAGE_KEYS.legacyChatSubnotices)
@@ -660,12 +660,14 @@ class SettingsStore {
   }
 
   getQualityFor(channel: string): string | null {
-    const v = safeRead(STORAGE_KEYS.qualityPrefix + channel.toLowerCase())
+    const key: StorageKeyArg = `${STORAGE_KEYS.qualityPrefix}${channel.toLowerCase()}`
+    const v = safeRead(key)
     return v
   }
 
   setQualityFor(channel: string, quality: string): void {
-    safeWrite(STORAGE_KEYS.qualityPrefix + channel.toLowerCase(), quality)
+    const key: StorageKeyArg = `${STORAGE_KEYS.qualityPrefix}${channel.toLowerCase()}`
+    safeWrite(key, quality)
   }
 }
 

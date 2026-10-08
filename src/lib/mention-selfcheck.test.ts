@@ -8,6 +8,8 @@ import { mount, unmount } from 'svelte'
 
 const mentionLog = vi.hoisted(() => [] as { title: string; channel: string }[])
 
+import { STREAMLINK_STATUS_OK } from './test-streamlink-status'
+
 vi.mock('./notifications.svelte.ts', () => ({
   notifications: {
     record: (kind: string, title: string, _body: string, channel: string) => {
@@ -27,7 +29,7 @@ vi.mock('@tauri-apps/api/core', () => ({
       case 'resolve_stream':
         return { ok: true, url: 'https://cdn.example.invalid/live.m3u8' }
       case 'streamlink_status':
-        return { present: true, targetOs: 'linux' }
+        return STREAMLINK_STATUS_OK
       case 'stream_qualities':
         return []
       case 'gql_fetch': {

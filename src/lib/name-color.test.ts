@@ -10,6 +10,7 @@ import {
 } from './name-color'
 import { parseColorToken } from './custom-themes.svelte'
 import { normalizeColor } from './irc'
+import { THEMES } from './settings.svelte'
 
 /*
  * Username-colour readability. The two load-bearing behaviours:
@@ -78,20 +79,14 @@ describe('readableNameColor', () => {
   })
 
   it('found the built-in theme panels in app.css', () => {
-    // Sanity for the sweep above: the built-in set (34 themes) must all be
+    // Sanity for the sweep above: EVERY theme in the registry must be
     // represented, including the light ones the fix is about.
-    expect(themePanels.length).toBeGreaterThanOrEqual(30)
-    for (const light of [
-      'slate',
-      'cream',
-      'mint',
-      'azure',
-      'blush',
-      'catppuccin-latte',
-      'solarized-light',
-      'gruvbox-light',
-    ]) {
-      expect(themePanels.some((t) => t.theme === light)).toBe(true)
+    expect(themePanels.length).toBe(THEMES.length)
+    for (const theme of THEMES) {
+      expect(
+        themePanels.some((t) => t.theme === theme.id),
+        theme.id,
+      ).toBe(true)
     }
   })
 

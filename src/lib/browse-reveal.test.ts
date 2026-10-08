@@ -48,8 +48,11 @@ describe('browse reveal policy', () => {
     let visible = revealMore(revealMore(initialVisible(), 100), 100) // 90
     expect(visible).toBe(90)
     visible = initialVisible() // simulate refetch / category switch
-    expect(visible).toBe(30)
-    // And the reset value never exceeds a list that is smaller than one page.
-    expect(initialVisible()).toBe(REVEAL_INITIAL)
+    expect(visible).toBe(REVEAL_INITIAL)
+    // A list smaller than one page: initialVisible() does not clamp (no such
+    // rule exists) — the reset value is made harmless by the gate and the
+    // step clamp instead: the button hides and a reveal cannot overshoot.
+    expect(hasMoreToShow(initialVisible(), 10)).toBe(false)
+    expect(revealMore(initialVisible(), 10)).toBe(10)
   })
 })

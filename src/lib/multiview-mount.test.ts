@@ -366,6 +366,106 @@ it('opening a chat-only member as a tile adopts its session without reconnecting
   expect(tileStore.count).toBe(3)
 })
 
+// Unticking a chat-only member from the picker must dispose its headless
+// session immediately — both while the group keeps enough members to survive
+// and when the untick is what collapses it below two (the merged tab goes
+// with it).
+function mergeRowFor(panel: HTMLElement, name: string): HTMLButtonElement {
+  const row = [...panel.querySelectorAll<HTMLButtonElement>('.mv-merge-row')].find(
+    (r) => r.querySelector('.mv-merge-name')?.textContent === name,
+  )
+  if (!row) throw new Error('no merge row for ' + name)
+  return row
+}
+
+function addChatOnlyMember(panel: HTMLElement, name: string): void {
+  const input = panel.querySelector<HTMLInputElement>('.mv-merge-add-input')!
+  input.value = name
+  input.dispatchEvent(new Event('input'))
+  panel.querySelector<HTMLFormElement>('.mv-merge-add')!.dispatchEvent(new Event('submit', { bubbles: true }))
+}
+
+/** The merged tab (title is the comma-joined member list; tile tabs use plain names). */
+function mergedTab(): HTMLElement | null {
+  const tab = [...document.querySelectorAll('.mv-chat-tab')].find((el) =>
+    (el.getAttribute('title') ?? '').includes(', '),
+  )
+  return (tab as HTMLElement | undefined) ?? null
+}
+
+it('unticking a chat-only member disposes its session while the group survives', async () => {
+  settings.setMpvEngine(false)
+  mountView(false)
+  await sleep(60)
+  tileStore.addOrReplace('chan1', 'best', 1)
+  tileStore.addOrReplace('chan2', 'best', 1)
+  await sleep(200)
+
+  // Group of two tiles + one chat-only member.
+  document.querySelector<HTMLButtonElement>('.mv-merge-btn')!.click()
+  await sleep(30)
+  const panel = document.querySelector<HTMLElement>('.mv-merge-panel')!
+  panel.querySelector<HTMLButtonElement>('.mv-merge-row')!.click() // chan1 (pending)
+  await sleep(30)
+  mergeRowFor(panel, 'chan2').click()
+  await sleep(30)
+  addChatOnlyMember(panel, 'chan9')
+  await sleep(80)
+  expect(chatMock.__constructed).toContain('chan9')
+
+  mergeRowFor(panel, 'chan9').click()
+  await sleep(100)
+  expect(chatMock.__disposed).toContain('chan9')
+  // The group itself survives with the two tiles.
+  expect(mergedTab()?.getAttribute('title')).toBe('chan1, chan2')
+})
+
+it('unticking down to a single member collapses the group and disposes the extras', async () => {
+  settings.setMpvEngine(false)
+  mountView(false)
+  await sleep(60)
+  tileStore.addOrReplace('chan1', 'best', 1)
+  await sleep(150)
+
+  document.querySelector<HTMLButtonElement>('.mv-merge-btn')!.click()
+  await sleep(30)
+  const panel = document.querySelector<HTMLElement>('.mv-merge-panel')!
+  panel.querySelector<HTMLButtonElement>('.mv-merge-row')!.click() // chan1 (pending)
+  await sleep(30)
+  addChatOnlyMember(panel, 'chan9')
+  await sleep(80)
+  expect(document.querySelector('.mv-chat-tab')).toBeTruthy()
+
+  // The untick that leaves one member collapses the whole group.
+  mergeRowFor(panel, 'chan9').click()
+  await sleep(100)
+  expect(chatMock.__disposed).toContain('chan9')
+  expect(mergedTab()).toBeNull()
+})
+
+it('unmounting the view disposes every session, chat-only members included', async () => {
+  settings.setMpvEngine(false)
+  mountView(false)
+  await sleep(60)
+  tileStore.addOrReplace('chan1', 'best', 1)
+  tileStore.addOrReplace('chan2', 'best', 1)
+  await sleep(200)
+
+  document.querySelector<HTMLButtonElement>('.mv-merge-btn')!.click()
+  await sleep(30)
+  const panel = document.querySelector<HTMLElement>('.mv-merge-panel')!
+  panel.querySelector<HTMLButtonElement>('.mv-merge-row')!.click()
+  await sleep(30)
+  addChatOnlyMember(panel, 'chan9')
+  await sleep(80)
+  expect(chatMock.__disposed).toEqual([])
+
+  if (view) void unmount(view)
+  view = null
+  await sleep(120)
+  expect(chatMock.__disposed).toEqual(expect.arrayContaining(['chan1', 'chan2', 'chan9']))
+})
+
 // A well-formed but nonexistent login (a typo) is accepted by the picker's
 // input shape check; the join's own status response then says the user does
 // not exist (empty userId placeholder row) and the member is dropped with

@@ -83,10 +83,12 @@ describe('save respects the thresholds', () => {
 describe('save updating an existing entry', () => {
   it('refreshes updatedAt and keeps the map size stable', () => {
     store.save('v1', 100, 600)
-    const t0 = store.get('v1')!.updatedAt
+    // Plant an OLD timestamp: a save that kept the stale value (the old
+    // >= comparison could not tell) must fail here.
+    store.positions['v1']!.updatedAt = 1
     store.save('v1', 200, 600)
     const t1 = store.get('v1')!.updatedAt
-    expect(t1).toBeGreaterThanOrEqual(t0)
+    expect(t1).toBeGreaterThan(1)
     expect(store.get('v1')!.position).toBe(200)
     expect(Object.keys(store.positions)).toHaveLength(1)
   })

@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import type { RenderedMessagePart } from './emotes'
 
 /*
  * Unit tests for src/lib/emotes.ts.
@@ -85,7 +84,9 @@ describe('7TV set-entry alias', () => {
     const res = await E.loadChannelEmotes('somenick')
     const map = E.buildEmoteMap(res.emotes)
     expect(map.has('erm')).toBe(true)
-    expect(map.has('caterm')).toBe(false)
+    // The emote's own data.name must NOT be the key — asserted at its exact
+    // case, where a lowercase-folding or data.name-keyed map would hit it.
+    expect(map.has('catErm')).toBe(false)
     expect(map.get('erm')?.id).toBe('abc')
   })
 })
@@ -357,6 +358,29 @@ describe('ChatSession emoteStatus', () => {
     s.dispose()
   })
 
+  it("is 'error' when Twitch's GQL answers but every provider is down", async () => {
+    // The id lookup SUCCEEDING is the case that actually calls the channel
+    // providers; with the lookup itself failing (the test above) they are
+    // never reached, so a provider-side-only outage went untested. The
+    // channel-side null-userId rule counts the lookup failure as failed too,
+    // so both paths must land on 'error'.
+    const { ChatSession } = await import('./chat-session.svelte')
+    tauriInvoke.handler = async (cmd: string) => {
+      if (cmd === 'gql_fetch') {
+        return JSON.stringify({ data: { users: [{ id: '12345', login: 'chan4' }] } })
+      }
+      throw new Error('unexpected invoke: ' + cmd)
+    }
+    fetchImpl = async () => {
+      throw new Error('network down')
+    }
+    const s = new ChatSession('chan4')
+    s.start()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(s.emoteStatus).toBe('error')
+    s.dispose()
+  })
+
   it("is 'ready' when a provider answers even if others fail", async () => {
     const { ChatSession } = await import('./chat-session.svelte')
     tauriInvoke.handler = async (cmd: string) => {
@@ -466,18 +490,11 @@ describe('renderMessage — overlapping ranges', () => {
   })
 })
 
-describe('emoteOnly predicate (mirrors App.svelte handleMessage)', () => {
-  // The predicate is inline in App.svelte's handleMessage and not exported,
-  // so the test reconstructs the same expression over the parts produced by
-  // renderMessage to verify its behavior.
-  function isEmoteOnly(parts: RenderedMessagePart[]): boolean {
-    return parts.some((p) => p.type === 'emote') && parts.every((p) => p.type === 'emote' || p.text.trim() === '')
-  }
-
+describe('isEmoteOnly (the exported predicate every ChatMessage producer uses)', () => {
   it('is true for a single-emote message', () => {
     const map = E.buildEmoteMap([{ id: 'kappa', name: 'Kappa', url: 'u', provider: 'twitch' }])
     const parts = E.renderMessage({ message: 'Kappa', thirdParty: map })
-    expect(isEmoteOnly(parts)).toBe(true)
+    expect(E.isEmoteOnly(parts)).toBe(true)
   })
 
   it('is true for two emotes separated by spaces', () => {
@@ -486,18 +503,18 @@ describe('emoteOnly predicate (mirrors App.svelte handleMessage)', () => {
       { id: 'pog', name: 'Pog', url: 'u', provider: 'twitch' },
     ])
     const parts = E.renderMessage({ message: 'Kappa Pog', thirdParty: map })
-    expect(isEmoteOnly(parts)).toBe(true)
+    expect(E.isEmoteOnly(parts)).toBe(true)
   })
 
   it('is false for "hi Kappa" (has non-emote text)', () => {
     const map = E.buildEmoteMap([{ id: 'kappa', name: 'Kappa', url: 'u', provider: 'twitch' }])
     const parts = E.renderMessage({ message: 'hi Kappa', thirdParty: map })
-    expect(isEmoteOnly(parts)).toBe(false)
+    expect(E.isEmoteOnly(parts)).toBe(false)
   })
 
   it('is false for a message with no emotes', () => {
     const map = E.buildEmoteMap([])
     const parts = E.renderMessage({ message: 'hello world', thirdParty: map })
-    expect(isEmoteOnly(parts)).toBe(false)
+    expect(E.isEmoteOnly(parts)).toBe(false)
   })
 })

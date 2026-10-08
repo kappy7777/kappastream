@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { RELEASE_NOTES, releaseNotesFor, releaseNoteVersions } from './release-notes'
 
 /*
@@ -45,6 +46,41 @@ describe('release-notes — sectioned, emoji-led highlights (maintainer conventi
 
   it('an unknown version falls back to empty sections (generic line in the UI)', () => {
     expect(releaseNotesFor('0.0.1-not-a-version')).toEqual({})
+  })
+})
+
+describe('release-notes mirror the CHANGELOG sections', () => {
+  // The header's sync rule is testable: for every version with curated
+  // notes, the non-empty sections here must be exactly the Added / Changed /
+  // Fixed headings its CHANGELOG block carries (0.3.0 once shipped its UI
+  // scaling fix under "fixed" while the CHANGELOG had it under Added).
+  const changelogSections = new Map<string, Set<string>>()
+  {
+    let version: string | null = null
+    for (const line of readFileSync('CHANGELOG.md', 'utf8').split('\n')) {
+      const v = /^## \[(\d+\.\d+\.\d+)\]/.exec(line)
+      if (v) {
+        version = v[1]!
+        changelogSections.set(version, new Set())
+        continue
+      }
+      const s = /^### (Added|Changed|Fixed)\s*$/.exec(line)
+      if (s && version) changelogSections.get(version)!.add(s[1]!.toLowerCase())
+    }
+  }
+
+  it('every recorded version has a CHANGELOG block', () => {
+    for (const version of Object.keys(RELEASE_NOTES)) {
+      expect(changelogSections.has(version), `${version} is not in CHANGELOG.md`).toBe(true)
+    }
+  })
+
+  it('the non-empty sections equal the CHANGELOG headings for that version', () => {
+    for (const [version, notes] of Object.entries(RELEASE_NOTES)) {
+      const expected = [...(changelogSections.get(version) ?? new Set<string>())].sort()
+      const present = SECTION_KEYS.filter((k) => notes[k] !== undefined).sort()
+      expect(present, `${version}: sections diverge from CHANGELOG.md`).toEqual(expected)
+    }
   })
 })
 

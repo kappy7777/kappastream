@@ -24,6 +24,8 @@ const hlsMock = vi.hoisted(() => {
   return { instances }
 })
 
+import { STREAMLINK_STATUS_OK } from './test-streamlink-status'
+
 vi.mock('hls.js', () => {
   class FakeHls {
     static readonly Events = { MANIFEST_PARSED: 'hlsManifestParsed', ERROR: 'hlsError' }
@@ -66,7 +68,7 @@ vi.mock('@tauri-apps/api/core', () => ({
         calls.vodQualities.push(String(args?.videoId))
         return ['best', '720p60', '160p']
       case 'streamlink_status':
-        return { present: true, targetOs: 'linux' }
+        return STREAMLINK_STATUS_OK
       case 'stream_qualities':
         return []
       case 'gql_fetch': {

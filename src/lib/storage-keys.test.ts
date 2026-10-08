@@ -56,12 +56,17 @@ describe('STORAGE_KEYS registry', () => {
 })
 
 describe('localStorage call sites go through the registry', () => {
-  it('no getItem/setItem/removeItem under src/ takes a string literal', () => {
+  it('no getItem/setItem/removeItem or storage helper under src/ takes a string literal', () => {
     // A literal first argument (quoted or template) bakes a key into the
     // call site, bypassing the registry. Dynamic keys must be built from
     // registry entries (concatenation/variables), which start with an
-    // identifier and pass.
-    const re = /localStorage\s*\.\s*(?:getItem|setItem|removeItem)\s*\(\s*['"`]/
+    // identifier and pass. The same rule covers the safeRead/safeWrite
+    // wrappers: a literal handed to a wrapper never appears at a
+    // localStorage call, so the first pattern alone cannot see it (the
+    // wrappers' key parameters are also typed to the registry —
+    // StorageKeyArg — making the bypass a compile error too).
+    const literalKeyAt = /localStorage\s*\.\s*(?:getItem|setItem|removeItem)\s*\(\s*['"`]/
+    const literalToHelper = /\bsafe(?:Read|Write)\s*\(\s*['"`]/
     const offenders: string[] = []
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -74,7 +79,9 @@ describe('localStorage call sites go through the registry', () => {
           continue
         }
         if (!/\.(svelte|ts|js)$/.test(entry.name) || entry.name.includes('.test.')) continue
-        if (re.test(readFileSync(full, 'utf8'))) offenders.push(full)
+        const src = readFileSync(full, 'utf8')
+        if (literalKeyAt.test(src)) offenders.push(`${full}: literal localStorage key`)
+        if (literalToHelper.test(src)) offenders.push(`${full}: literal key to a storage helper`)
       }
     }
     walk('src')

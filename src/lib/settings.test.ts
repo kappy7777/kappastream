@@ -85,7 +85,7 @@ describe('chat-feature toggle defaults', () => {
 })
 
 describe('notice-group split: legacy single-toggle migration', () => {
-  it('a legacy "true" turns ALL four groups on (the user had notices enabled)', async () => {
+  it('a legacy "true" turns ALL five groups on (the user had notices enabled)', async () => {
     localStorage.setItem(KEYS.legacySubnotices, 'true')
     vi.resetModules()
     const mod = await import('./settings.svelte')
@@ -159,19 +159,70 @@ describe('chat-feature toggle persistence + independence', () => {
 })
 
 describe('Toggle C is retroactive (live, no reconnect)', () => {
-  it('flipping chatModeration re-evaluates presentation immediately', () => {
-    // Start: moderation on (the default). A message deleted earlier in the
-    // session is stored as deleted=true (parsing is ungated) and presented.
-    const deletedStored = true
-    expect(S.settings.chatModeration).toBe(true)
-    // The render predicate is settings.chatModeration && msg.deleted.
-    let presented = S.settings.chatModeration && deletedStored
-    expect(presented).toBe(true)
+  it('flipping chatModeration re-evaluates presentation immediately', async () => {
+    // The REAL render path: a message deleted earlier in the session is
+    // stored with deleted=true (parsing is ungated by design), and ChatPane
+    // gates the strike-through at RENDER time — so the toggle must hide and
+    // reshow it on the already-mounted pane, with no reconnect or remount.
+    const { ChatPaneTestEntries } = await import('./chat-pane-test-entries.svelte')
+    const ChatPane = (await import('./ChatPane.svelte')).default
+    // Same module cycle as the pane: a statically imported mount() would
+    // carry the PRE-reset Svelte runtime and the component's effects would
+    // be orphans under it.
+    const { mount, unmount } = await import('svelte')
+    const entries = new ChatPaneTestEntries([
+      {
+        key: 'm1',
+        tileId: null,
+        channel: null,
+        override: null,
+        msg: {
+          kind: 'message',
+          id: 'm1',
+          username: 'user1',
+          color: '#FF0000',
+          raw: 'hello',
+          parts: [{ type: 'text', text: 'hello' }],
+          badges: [],
+          isAction: false,
+          emoteOnly: false,
+          timestamp: 1,
+          bits: null,
+          userId: null,
+          login: 'user1',
+          deleted: true,
+          deletedReason: 'removed by a moderator',
+          systemText: null,
+          noticeMsgId: null,
+        },
+      },
+    ])
+    const target = document.createElement('div')
+    document.body.appendChild(target)
+    const view = mount(ChatPane, {
+      target,
+      props: { entries: entries.current, placeholder: '', onlink: () => {}, resetKey: 'k' },
+    })
+    const flush = async (): Promise<void> => {
+      await new Promise((r) => setTimeout(r, 0))
+      await new Promise((r) => setTimeout(r, 0))
+    }
+    try {
+      const messageClass = (): string => target.querySelector('.message')!.className
+      expect(S.settings.chatModeration).toBe(true)
+      expect(messageClass()).toContain('message--deleted')
 
-    // User disables the toggle mid-stream — same stored deletion hides now.
-    S.settings.toggleChatModeration()
-    presented = S.settings.chatModeration && deletedStored
-    expect(presented).toBe(false)
+      S.settings.toggleChatModeration()
+      await flush()
+      expect(messageClass()).not.toContain('message--deleted')
+
+      S.settings.toggleChatModeration()
+      await flush()
+      expect(messageClass()).toContain('message--deleted')
+    } finally {
+      void unmount(view)
+      document.body.innerHTML = ''
+    }
   })
 })
 

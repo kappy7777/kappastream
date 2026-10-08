@@ -249,6 +249,22 @@ describe('pinned chat: response handling', () => {
     expect(h.store.visiblePin).toBeNull()
   })
 
+  it('a poll that returns an empty list UN-PINS (a removed pin stops showing)', async () => {
+    // The moderator un-pinned (or the pin expired server-side): the next
+    // poll's empty list must clear the banner. A store that ignored empty
+    // responses would keep the stale pin on screen indefinitely.
+    const h = makeHarness([[fixturePin()], []])
+    h.store.setTarget('chan', '1')
+    await flush()
+    expect(h.store.visiblePin).not.toBeNull()
+
+    h.advance(150_001)
+    h.store.tick()
+    await flush()
+    expect(h.store.pins).toEqual([])
+    expect(h.store.visiblePin).toBeNull()
+  })
+
   it('a transport failure degrades to no pin without breaking chat', async () => {
     const h = makeHarness([])
     h.fetch.mockRejectedValue(new Error('HTTP 503'))
@@ -475,12 +491,14 @@ describe('pinned chat: self-owned refresh interval', () => {
 })
 
 describe('pinned chat: render path hardening', () => {
-  it('contains no raw-HTML injection anywhere in src/', () => {
-    // Zero `{@ht` + `ml` injection is a repo-wide invariant (the pin text is
-    // remote content); assert it over the whole source tree so a future
-    // regression anywhere fails here, not in review. Test files are skipped
-    // (this assertion's own source contains the literal).
-    const needle = '{@' + 'html'
+  it('contains no raw-HTML sinks anywhere in src/', () => {
+    // Zero Svelte `{@html` AND zero direct HTML-assignment sinks
+    // (innerHTML / insertAdjacentHTML / outerHTML / document.write) is a
+    // repo-wide invariant (the pin text is remote content); assert it over
+    // the whole source tree so a future regression anywhere fails here, not
+    // in review. Test files are skipped (this assertion's own source
+    // contains the literals).
+    const sinks = ['{@' + 'html', 'innerHTML', 'insertAdjacentHTML', 'outerHTML', 'document.write']
     const offenders: string[] = []
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -488,13 +506,16 @@ describe('pinned chat: render path hardening', () => {
         if (entry.isDirectory()) {
           // A stray vitest/vite cache (node_modules) can appear under src/
           // after an odd-cwd run; it is not source and its sourcemaps false-
-          // positive the needle.
+          // positive the needles.
           if (entry.name === 'node_modules' || entry.name === '.vite') continue
           walk(full)
           continue
         }
         if (!/\.(svelte|ts|js)$/.test(entry.name) || entry.name.includes('.test.')) continue
-        if (readFileSync(full, 'utf8').includes(needle)) offenders.push(full)
+        const src = readFileSync(full, 'utf8')
+        for (const needle of sinks) {
+          if (src.includes(needle)) offenders.push(`${full}: ${needle}`)
+        }
       }
     }
     walk('src')

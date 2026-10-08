@@ -45,6 +45,10 @@ describe('chat links: allowlist', () => {
   it('rejects twitch URLs with credentials, ports, or backslash tricks', () => {
     expect(splitTwitchLinks('https://user@twitch.tv/x').every((c) => c.url === null)).toBe(true)
     expect(splitTwitchLinks('https://twitch.tv:444/x').every((c) => c.url === null)).toBe(true)
+    // The bare port shape dies at the host-prefix scan before the explicit
+    // no-port rule ever runs — this one (the path re-mentions twitch.tv/) is
+    // the shape only the no-port rule rejects, mirroring the Rust validator.
+    expect(splitTwitchLinks('https://twitch.tv:444/twitch.tv/x').every((c) => c.url === null)).toBe(true)
     expect(splitTwitchLinks('https://evil.example\\twitch.tv/').every((c) => c.url === null)).toBe(true)
     expect(splitTwitchLinks('https://notwitch.tv/channel').every((c) => c.url === null)).toBe(true)
   })
@@ -131,6 +135,11 @@ describe('chat links: malformed percent sequences', () => {
   })
 
   it('legitimately percent-encoded slugs still decode', () => {
+    // A decode that actually OBSERVABLY happens: %41 is 'A', so the slug
+    // must come back decoded (a parser that skips decodeURIComponent
+    // rejects '%' as a slug character and returns null instead).
+    expect(parseTwitchClipUrl('https://clips.twitch.tv/%41bc-x1')).toBe('Abc-x1')
+    expect(parseTwitchClipUrl('https://www.twitch.tv/chan9/clip/%41bc-x1')).toBe('Abc-x1')
     expect(parseTwitchClipUrl('https://clips.twitch.tv/Happy%2FSunny-x1')).toBeNull() // '/' is not a valid slug char after decode
     expect(parseTwitchClipUrl('https://clips.twitch.tv/HappySunnyOtter-x1')).toBe('HappySunnyOtter-x1')
   })

@@ -433,7 +433,7 @@ describe('moderation presentation predicate (Toggle C, retroactive)', () => {
   // The deletion is ALWAYS stored on the message (parsing is ungated). The
   // predicate keys presentation off the setting — so flipping the toggle on
   // mid-stream immediately strikes messages deleted earlier in the session.
-  it('hides a deleted message when the toggle is off', () => {
+  it('leaves a deleted message unstricken when the toggle is off', () => {
     expect(isMessageStricken(false, true)).toBe(false)
   })
 

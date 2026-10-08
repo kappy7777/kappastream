@@ -136,8 +136,10 @@ export const RELEASE_NOTES: Record<string, VersionNotes> = {
     ],
   },
   '0.3.0': {
-    added: ['🍎 macOS support (Apple Silicon) — a .dmg alongside the Linux and Windows builds.'],
-    fixed: ['🔍 Fixed UI scaling at non-1× zoom on macOS.'],
+    added: [
+      '🍎 macOS support (Apple Silicon) — a .dmg alongside the Linux and Windows builds.',
+      '🔍 Fixed UI scaling at non-1× zoom on macOS.',
+    ],
   },
   '0.2.9': {
     added: [

@@ -159,13 +159,19 @@ describe('storage — malformed data never throws, never partially applies', () 
     expect(S.createCustomTheme('ok', { ...validValues(), '--live': 'url(x)' })).toBeNull()
   })
 
-  it('ids are namespaced custom- and never collide (built-ins or each other)', () => {
+  it('ids are namespaced custom- and never collide (built-ins or each other)', async () => {
     const a = S.createCustomTheme('Night Shift', validValues())!
     const b = S.createCustomTheme('Night Shift', validValues())!
     expect(a.id.startsWith('custom-')).toBe(true)
     expect(a.id).not.toBe(b.id)
-    // Built-in ids can never be custom ids (namespace check).
-    expect('amethyst'.startsWith('custom-')).toBe(false)
+    // Built-in ids can never be custom ids — checked over the REAL registry,
+    // not one hand-picked literal.
+    const { THEMES } = await import('./settings.svelte')
+    expect(THEMES.length).toBeGreaterThan(0)
+    for (const theme of THEMES) {
+      expect(theme.id.startsWith('custom-')).toBe(false)
+      expect(a.id).not.toBe(theme.id)
+    }
   })
 })
 
@@ -299,23 +305,36 @@ describe('editor surface — only properties that actually change something', ()
   })
 
   it('REGRESSION GUARD: no surface consumes the hidden tokens — if you start using var(--bg-chat)/var(--bg-deep), re-add them to the editor first', () => {
+    // Both the var() form AND quoted by-name reads (getPropertyValue & kin),
+    // with stylesheets included: app.css only DEFINES the tokens (unquoted,
+    // invisible to these needles), but a stylesheet or script consuming one
+    // must trip the guard the same way. CustomThemeEditor names the tokens in
+    // its seed defaults — that is the maintenance surface, not a consumer.
+    const needles = ['var(--bg-chat', 'var(--bg-deep', "'--bg-chat'", "'--bg-deep'", '"--bg-chat"', '"--bg-deep"']
     const offenders: string[] = []
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = `${dir}/${entry.name}`
         if (entry.isDirectory()) {
+          // A stray vitest/vite cache (node_modules) can appear under src/
+          // after an odd-cwd run; it is not source and its sourcemaps false-
+          // positive the needles.
+          if (entry.name === 'node_modules' || entry.name === '.vite') continue
           walk(full)
           continue
         }
-        if (!/\.(svelte|ts|js)$/.test(entry.name) || entry.name.includes('.test.')) continue
+        if (!/\.(svelte|ts|js|css)$/.test(entry.name) || entry.name.includes('.test.')) continue
         if (
           full.includes('src/lib/custom-themes') ||
+          full.includes('src/lib/CustomThemeEditor') ||
           full.includes('src/lib/settings.svelte') ||
           full.includes('src/lib/themes.test')
         )
           continue
         const src = readFileSync(full, 'utf8')
-        if (src.includes('var(--bg-chat') || src.includes('var(--bg-deep')) offenders.push(full)
+        for (const needle of needles) {
+          if (src.includes(needle)) offenders.push(`${full}: ${needle}`)
+        }
       }
     }
     walk('src')
@@ -333,11 +352,24 @@ describe('colour math + palette (the editor generates every value)', () => {
   })
 
   it('colorToHsl round-trips through hslToHex within slider precision', () => {
+    // The sliders quantize H/S/L to integer percents, so the round trip may
+    // drift a couple of 8-bit units per channel — but never more, and the
+    // hue must land in the input colour's own quadrant. A converter that
+    // returned a constant (or swapped channels) passes a bare validity check.
+    const chan = (hex: string): number[] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
     for (const hex of ['#EFEFF1', '#6D5DD3', '#38B6FF', '#0A2440', '#FF6E8C']) {
       const hsl = S.colorToHsl(hex)
       expect(hsl).not.toBeNull()
-      expect(S.isValidColorValue(S.hslToHex(hsl!.h, hsl!.s, hsl!.l))).toBe(true)
+      const back = S.hslToHex(hsl!.h, hsl!.s, hsl!.l)
+      expect(S.isValidColorValue(back)).toBe(true)
+      const delta = chan(back).map((v, i) => Math.abs(v - chan(hex)[i]!))
+      expect(Math.max(...delta)).toBeLessThanOrEqual(2)
     }
+    // Hue fidelity: a green stays a green, a blue stays a blue.
+    expect(S.colorToHsl('#3FB950')!.h).toBeGreaterThanOrEqual(90)
+    expect(S.colorToHsl('#3FB950')!.h).toBeLessThanOrEqual(150)
+    expect(S.colorToHsl('#38B6FF')!.h).toBeGreaterThanOrEqual(180)
+    expect(S.colorToHsl('#38B6FF')!.h).toBeLessThanOrEqual(240)
     expect(S.colorToHsl('rgba(14, 14, 16, 0.85)')).toEqual(S.colorToHsl('#0E0E10'))
     expect(S.colorToHsl('garbage')).toBeNull()
   })

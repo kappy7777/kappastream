@@ -20,13 +20,13 @@
 // features.
 
 import { isVersionNewer } from './version'
-import { STORAGE_KEYS } from './storage-keys'
+import { STORAGE_KEYS, type StorageKey } from './storage-keys'
 
 declare const __APP_VERSION__: string
 
 export type LaunchScreen = 'welcome' | 'whats-new' | null
 
-function safeRead(key: string): string | null {
+function safeRead(key: StorageKey): string | null {
   try {
     return localStorage.getItem(key)
   } catch {
@@ -34,7 +34,7 @@ function safeRead(key: string): string | null {
   }
 }
 
-function safeWrite(key: string, value: string): void {
+function safeWrite(key: StorageKey, value: string): void {
   try {
     localStorage.setItem(key, value)
   } catch {

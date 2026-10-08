@@ -5,9 +5,11 @@ import { SleepTimerStore, formatSleepRemaining } from './sleep-timer.svelte'
  * Sleep timer — pause playback after N minutes. Three behaviours are load-
  * bearing and tested here: the timer FIRES (pauses via the onFire callback) on
  * expiry, an explicit CANCEL prevents it firing, and it AUTO-CANCELS when the
- * stream identity changes (channel / playback-kind / stream generation) so a
- * stale armed timer can never fire against a different stream than the one it
- * was set for. Uses fake timers (setTimeout + Date.now are both mocked).
+ * stream identity changes (channel / playback-kind) so a stale armed timer
+ * can never fire against a different stream than the one it was set for —
+ * while a SAME-channel reload (a quality switch, a new playback generation)
+ * deliberately keeps it armed. Uses fake timers (setTimeout + Date.now are
+ * both mocked).
  */
 
 let store: SleepTimerStore
@@ -90,16 +92,11 @@ describe('sleep timer auto-cancels on stream-identity change', () => {
     expect(store.armed).toBe(false)
   })
 
-  it('a same-stream reload (new playback generation) does NOT disarm', () => {
+  it('a same-stream reload (new playback generation) keeps the timer armed to fire', () => {
     // A quality switch, a low-latency toggle or the unavailable→best
     // fallback all reload the SAME channel+kind; the armed timer must
-    // survive them. The generation is no longer part of the identity.
-    store.arm(ctxA, 30)
-    store.cancelIfStale('alpha', 'live')
-    expect(store.armed).toBe(true)
-  })
-
-  it('cancelIfStale leaves the timer armed when the identity matches', () => {
+    // survive them (the generation is no longer part of the identity) and
+    // still fire on schedule.
     store.arm(ctxA, 30)
     store.cancelIfStale('alpha', 'live')
     expect(store.armed).toBe(true)

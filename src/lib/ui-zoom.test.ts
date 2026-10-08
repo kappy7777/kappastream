@@ -87,9 +87,13 @@ describe('ui-zoom CSS usage (viewport-unit terms only)', () => {
         total++
         const unitPreceded = /\d(?:vh|vw|dvh|svh|lvh|vmin|vmax) $/.test(css.slice(0, at))
         const group = precedingGroup(css, at)
-        const groupClean = group === null || !/\d\s*px\b/.test(group)
+        // No enclosing group means the divisor applies to whatever term sits
+        // directly before it — so ONLY a viewport unit may sit there. A bare
+        // px term with no group (calc(520px / var(--ui-zoom, 1))) is exactly
+        // the regression this guard exists for.
+        const ok = unitPreceded || (group !== null && !/\d\s*px\b/.test(group))
         expect(
-          unitPreceded || groupClean,
+          ok,
           `${rel}: division at offset ${at} divides a px term (site: …${css.slice(Math.max(0, at - 60), at + 20)}…)`,
         ).toBe(true)
         at = css.indexOf(marker, at + marker.length)

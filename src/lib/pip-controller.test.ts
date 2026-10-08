@@ -228,7 +228,7 @@ describe('pip-controller: closed-PiP storage semantics', () => {
     expect((p[0] as Record<string, unknown>).isLive).toBe(true)
   })
 
-  it('opening PiP creates the window exactly once; a second toggle is a no-op', async () => {
+  it('opening PiP creates the window exactly once; a second toggle asks it to close', async () => {
     P.pipController.setStream({ url: 'https://x/1.m3u8', channel: 'chan1', quality: 'best' })
     await P.pipController.toggle()
     expect(P.pipController.isOpen).toBe(true)
@@ -264,8 +264,19 @@ describe('pip-controller: clearStream + close lifecycle', () => {
     expect(P.pipController.isOpen).toBe(false)
   })
 
-  it('a ks://pip-closed report flips isOpen back and restores the main video audio', async () => {
+  it('a ks://pip-closed report flips isOpen back and resyncs the main video audio', async () => {
+    // Non-default audio state on BOTH sides, or the restore cannot fail: a
+    // muted session must STAY muted after the close (the resync follows the
+    // persisted truth, it is not a forced unmute), and a non-default volume
+    // must come back to the element.
+    const { settings } = await import('./settings.svelte')
+    // Volume FIRST, then the mute: a positive setVolume is an explicit unmute
+    // in the settings store, so the reverse order would not stay muted.
+    settings.setVolume(0.3)
+    settings.setMuted(true)
     const el = document.createElement('video')
+    el.muted = false
+    el.volume = 0.9
     P.pipController.setVideoElement(el)
     P.pipController.setStream({ url: 'https://x/1.m3u8', channel: 'chan1', quality: 'best' })
     await P.pipController.toggle()
@@ -275,7 +286,10 @@ describe('pip-controller: clearStream + close lifecycle', () => {
     deliver(EV_CLOSED, { rect: { x: 1, y: 2, width: 320, height: 180 } })
     expect(P.pipController.isOpen).toBe(false)
     expect(P.pipController.overridingMainMute).toBe(false)
-    expect(el.muted).toBe(false) // resynced to the persisted truth
+    expect(el.muted).toBe(true) // the persisted session was muted — stays muted
+    expect(el.volume).toBe(0.3) // resynced to the persisted truth
+    settings.setMuted(false)
+    settings.setVolume(1)
   })
 })
 

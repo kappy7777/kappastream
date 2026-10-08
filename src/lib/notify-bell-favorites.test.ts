@@ -6,6 +6,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount, unmount } from 'svelte'
 
+import { STREAMLINK_STATUS_OK } from './test-streamlink-status'
+
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
   invoke: vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
@@ -17,7 +19,7 @@ vi.mock('@tauri-apps/api/core', () => ({
       case 'resolve_stream':
         return { ok: true, url: 'https://cdn.example.invalid/live.m3u8' }
       case 'streamlink_status':
-        return { present: true, targetOs: 'linux' }
+        return STREAMLINK_STATUS_OK
       case 'stream_qualities':
         return []
       case 'gql_fetch': {

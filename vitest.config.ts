@@ -27,5 +27,8 @@ export default defineConfig({
     environment: 'happy-dom',
     clearMocks: true,
     restoreMocks: true,
+    // Inert global WebSocket (see src/test-setup.ts): happy-dom's is a real
+    // network client, and an unstubbed ChatSession would dial Twitch IRC.
+    setupFiles: ['./src/test-setup.ts'],
   },
 })

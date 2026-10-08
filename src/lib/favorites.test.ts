@@ -54,8 +54,6 @@ vi.mock('./settings.svelte.ts', () => ({ settings: { sortMode: 'manual' } }))
 type FavMod = typeof import('./favorites.svelte')
 let F: FavMod
 
-const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
-
 function seedFavorites(names: string[]): void {
   const now = Date.now()
   localStorage.setItem(
@@ -616,11 +614,16 @@ describe('live notifications — known offline→live only, no startup grace', (
 })
 
 describe('stale-response guard', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
   it('a channel removed + re-added resolves with the newer result (version isolation)', async () => {
-    // With a single batch transport there is no per-channel version counter,
-    // but a removed channel's late response is skipped (has() check) and a
-    // re-added channel gets a fresh poll. Verify the re-added channel lands on
-    // the live result rather than a stale offline one.
+    // The remove+re-add bumps the channel's entryVersions counter, so the
+    // batch the OLD poll snapshotted is discarded when it finally lands:
+    // has() alone could not skip it (the channel is present again by then),
+    // and the version mismatch is what keeps the stale offline result out.
+    // The re-added channel's fresh poll wins.
     seedFavorites(['stale'])
     let firstResolve!: (v: string) => void
     const firstPending = new Promise<string>((r) => {
@@ -637,19 +640,20 @@ describe('stale-response guard', () => {
     }
     const store = new F.FavoritesStore()
     store.start()
-    await delay(80) // let the old poll fire & hang
+    await vi.advanceTimersByTimeAsync(100) // the old poll fires & hangs
     store.remove('stale')
     store.add('stale') // fresh poll resolves to live
-    await delay(1200)
+    await vi.advanceTimersByTimeAsync(1_200)
     firstResolve(
       // ...now the OLD (pre-remove) response finally lands, reporting offline.
       JSON.stringify({
         data: { users: [{ id: '1', login: 'stale', displayName: 'stale', profileImageURL: '', stream: null }] },
       }),
     )
-    await delay(1200)
+    await vi.advanceTimersByTimeAsync(1_200)
     const s = store.getStatus('stale')!.status
     expect(s.state).toBe('live') // newer result wins; the stale offline was skipped
+    store.dispose()
   })
 })
 

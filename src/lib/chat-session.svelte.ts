@@ -34,6 +34,7 @@ import {
   loadGlobalEmotes,
   buildEmoteMap,
   renderMessage,
+  isEmoteOnly,
   parseTwitchEmoteTag,
   type Emote,
   type RenderedMessagePart,
@@ -373,8 +374,7 @@ export class ChatSession {
 
   private onPrivmsg(ev: Extract<IrcEvent, { type: 'PRIVMSG' }>): void {
     const parts = renderMessage({ message: ev.message, thirdParty: this.thirdParty, twitchRanges: ev.twitchEmotes })
-    const emoteOnly =
-      parts.some((p) => p.type === 'emote') && parts.every((p) => p.type === 'emote' || p.text.trim() === '')
+    const emoteOnly = isEmoteOnly(parts)
     this.push({
       kind: 'message',
       id: ev.id || crypto.randomUUID(),

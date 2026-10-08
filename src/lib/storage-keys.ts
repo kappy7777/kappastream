@@ -86,3 +86,11 @@ export const STORAGE_KEYS = {
 } as const
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS]
+
+/**
+ * What a storage helper may address: a registry key, or a per-channel entry
+ * in the `app-quality:` namespace (`qualityPrefix` + channel). Typing the
+ * safeRead/safeWrite wrappers with this makes an off-registry key a
+ * compile error instead of a silent state island.
+ */
+export type StorageKeyArg = StorageKey | `${typeof STORAGE_KEYS.qualityPrefix}${string}`

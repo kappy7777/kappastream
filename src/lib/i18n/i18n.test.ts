@@ -109,10 +109,12 @@ describe('t()', () => {
 
   it('falls back to English then the key (defence in depth)', async () => {
     const { t, setLocale } = await fresh()
-    // A key absent from the active catalogue but present in English must yield
-    // the English value; simulating a hole by calling with an English-only key
-    // after forcing a locale (all catalogues are complete, so this confirms the
-    // fallback chain is wired, not skipped).
+    // All real catalogues are complete (a hole is a compile error), so what
+    // this can confirm is that the chain is WIRED — the active catalogue's
+    // value wins and the English source of truth agrees for the same key.
+    // The hole tiers themselves (empty localized value → English; empty
+    // English → raw key) are exercised against mocked holed catalogues in
+    // i18n-fallback.test.ts.
     setLocale('de')
     expect(t('favorites')).toBe('Favoriten') // German wins when present
     // English is the source of truth value for the same key.
@@ -150,12 +152,9 @@ describe('locale detection', () => {
     expect(detectSystemLocale()).toBe('en')
     stubNavigator('zh-CN')
     expect(detectSystemLocale()).toBe('en')
-    // navigator.languages fallback: Japanese primary, English secondary.
-    stubNavigator('ja-JP', ['ja-JP', 'en-US'])
-    expect(detectSystemLocale()).toBe('en')
   })
 
-  it('falls back to English when navigator.language lists a supported language second', async () => {
+  it('detects a supported language listed SECOND in navigator.languages', async () => {
     const { detectSystemLocale } = await fresh()
     stubNavigator('ja', ['ja', 'de-DE'])
     expect(detectSystemLocale()).toBe('de')

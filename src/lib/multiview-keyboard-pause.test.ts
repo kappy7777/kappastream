@@ -18,6 +18,8 @@ const hlsMock = vi.hoisted(() => {
   return { instances }
 })
 
+import { STREAMLINK_STATUS_OK } from './test-streamlink-status'
+
 vi.mock('hls.js', () => {
   class FakeHls {
     static readonly Events = { MANIFEST_PARSED: 'hlsManifestParsed', ERROR: 'hlsError' }
@@ -45,7 +47,7 @@ vi.mock('@tauri-apps/api/core', () => ({
       case 'resolve_stream':
         return { ok: true, url: 'https://cdn.example.invalid/live.m3u8' }
       case 'streamlink_status':
-        return { present: true, targetOs: 'linux' }
+        return STREAMLINK_STATUS_OK
       case 'stream_qualities':
         return []
       case 'gql_fetch': {
@@ -257,9 +259,17 @@ describe('multi-view keyboard target survives sibling tiles', () => {
       expect(video).toBeTruthy()
       expect(video!.paused).toBe(false)
 
+      // The shortcut targets the AUDIO AUTHORITY only: every OTHER tile's
+      // video must keep playing through the pause (and never re-play()).
+      const others = [...document.querySelectorAll<HTMLVideoElement>('[data-tile-id] video')].filter((v) => v !== video)
+      const playsBefore = others.map((v) => playCalls.get(v) ?? 0)
+      for (const v of others) expect(v.paused).toBe(false)
+
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }))
       await sleep(50)
       expect(video!.paused).toBe(true)
+      for (const v of others) expect(v.paused).toBe(false)
+      expect(others.map((v) => playCalls.get(v) ?? 0)).toEqual(playsBefore)
 
       // Resume so the next iteration starts from a playing grid.
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }))
