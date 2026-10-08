@@ -154,6 +154,7 @@ export const pt: Record<TKey, string> = {
   mv_mergeAddInvalid: 'Nome de canal inválido',
   mv_mergeAddTileOpen: 'Já está aberto: use a caixa acima',
   mv_mergeAddDuplicate: 'Já está na mesclagem',
+  mv_mergeAddNotFound: 'Canal não encontrado',
   mv_mergeAddFull: 'No máximo {max} chats podem ser mesclados',
   mv_mergeChatOnly: 'Somente chat (sem stream)',
   mv_dragTile: 'Arrastar para reordenar',

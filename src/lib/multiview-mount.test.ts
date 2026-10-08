@@ -365,3 +365,39 @@ it('opening a chat-only member as a tile adopts its session without reconnecting
   expect(chatMock.__disposed).toEqual([])
   expect(tileStore.count).toBe(3)
 })
+
+// A well-formed but nonexistent login (a typo) is accepted by the picker's
+// input shape check; the join's own status response then says the user does
+// not exist (empty userId placeholder row) and the member is dropped with
+// the reason shown in the picker — instead of silently camping a dead room.
+it('merge picker: a nonexistent channel is dropped with the not-found error', async () => {
+  settings.setMpvEngine(false)
+  mountView(false)
+  await sleep(60)
+  tileStore.addOrReplace('chan1', 'best', 1)
+  await sleep(120)
+
+  vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    if (cmd === 'gql_fetch') return JSON.stringify({ data: { users: [null] } })
+    return { ok: true, url: 'https://example.invalid/x.m3u8' }
+  })
+
+  document.querySelector<HTMLButtonElement>('.mv-merge-btn')!.click()
+  await sleep(30)
+  const panel = document.querySelector<HTMLElement>('.mv-merge-panel')!
+  panel.querySelector<HTMLButtonElement>('.mv-merge-row')!.click() // chan1 (pending)
+  await sleep(30)
+  const input = panel.querySelector<HTMLInputElement>('.mv-merge-add-input')!
+  input.value = 'nosuch'
+  input.dispatchEvent(new Event('input'))
+  panel.querySelector<HTMLFormElement>('.mv-merge-add')!.dispatchEvent(new Event('submit', { bubbles: true }))
+  await sleep(120)
+
+  // The member was constructed, then dropped + disposed once the status
+  // landed; the picker says why.
+  expect(chatMock.__constructed).toContain('nosuch')
+  expect(chatMock.__disposed).toContain('nosuch')
+  const names = [...document.querySelectorAll('.mv-merge-panel .mv-merge-name')].map((el) => el.textContent)
+  expect(names).not.toContain('nosuch')
+  expect(document.querySelector('.mv-merge-error')?.textContent).toBe('Channel not found')
+})

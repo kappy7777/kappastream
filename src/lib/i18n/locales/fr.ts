@@ -154,6 +154,7 @@ export const fr: Record<TKey, string> = {
   mv_mergeAddInvalid: 'Nom de chaîne invalide',
   mv_mergeAddTileOpen: 'Déjà ouverte : utilisez sa case à cocher',
   mv_mergeAddDuplicate: 'Déjà dans la fusion',
+  mv_mergeAddNotFound: 'Chaîne introuvable',
   mv_mergeAddFull: '{max} chats maximum peuvent être fusionnés',
   mv_mergeChatOnly: 'Chat seul (sans stream)',
   mv_dragTile: 'Glisser pour réorganiser',

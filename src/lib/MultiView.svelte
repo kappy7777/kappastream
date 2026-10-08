@@ -44,7 +44,7 @@
     type ExtraChatAddReason,
     type MergeSource,
   } from './merged-chat'
-  import { fetchLiveStatus } from './favorites.svelte'
+  import { fetchChannelStatuses } from './gql'
   import { formatCompact } from './format'
   import { tooltip } from './tooltip.ts'
   import { t } from './i18n/index.svelte'
@@ -294,6 +294,16 @@
     mergeAddError = null
   }
 
+  // Remove a chat-only member outside the picker (today: the join-time
+  // nonexistent-login check below). Removal semantics via toggleMergedId —
+  // a group left below two collapses — and the reason surfaces in the
+  // picker's error line for the case the user just typed the name.
+  function removeExtraChat(channel: string, reason: ExtraChatAddReason): void {
+    mergedIds = toggleMergedId(mergedIds, extraChatId(channel))
+    mergedView = mergedIds.length >= 2
+    mergeAddError = reason
+  }
+
   function onMergeAdd(e: SubmitEvent): void {
     e.preventDefault()
     const plan = planExtraChatAdd(mergeAddValue, mergedIds, tileStore.tiles)
@@ -319,6 +329,8 @@
         return t('mv_mergeAddDuplicate')
       case 'full':
         return t('mv_mergeAddFull', { max: MAX_MERGED_SOURCES })
+      case 'not-found':
+        return t('mv_mergeAddNotFound')
       default:
         return ''
     }
@@ -373,13 +385,24 @@
         s.start()
         // Never throws; a miss (channel gone, GQL down) just keeps the
         // initial fallback. Guarded so a late resolve can't resurrect the
-        // avatar of a member that was removed meanwhile.
-        void fetchLiveStatus(channel).then((st) => {
-          if (!untrack(() => extraSessions.has(channel))) return
-          if ((st.state === 'live' || st.state === 'offline') && st.avatarUrl) {
-            extraAvatars.set(channel, st.avatarUrl)
-          }
-        })
+        // avatar of a member that was removed meanwhile. The batched status
+        // doubles as an existence check: a well-formed but nonexistent login
+        // comes back as a placeholder row with an EMPTY userId, and such a
+        // member is dropped (with the reason surfaced in the picker)
+        // instead of silently camping a dead room. A transport failure
+        // keeps the member (last-known posture).
+        void fetchChannelStatuses([channel])
+          .then((rows) => {
+            if (!untrack(() => extraSessions.has(channel))) return
+            const cs = rows[0]
+            if (!cs) return
+            if (!cs.userId) {
+              untrack(() => removeExtraChat(channel, 'not-found'))
+              return
+            }
+            if (cs.avatarUrl) extraAvatars.set(channel, cs.avatarUrl)
+          })
+          .catch(() => {})
       }
     })
   })

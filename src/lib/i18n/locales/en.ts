@@ -170,6 +170,7 @@ export const en = {
   mv_mergeAddInvalid: 'Not a valid channel name',
   mv_mergeAddTileOpen: 'Already open: use its checkbox above',
   mv_mergeAddDuplicate: 'Already in the merge',
+  mv_mergeAddNotFound: 'Channel not found',
   mv_mergeAddFull: 'At most {max} chats can be merged',
   mv_mergeChatOnly: 'Chat only (no stream)',
   mv_dragTile: 'Drag to reorder',

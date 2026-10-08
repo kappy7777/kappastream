@@ -155,6 +155,7 @@ export const de: Record<TKey, string> = {
   mv_mergeAddInvalid: 'Kein gültiger Kanalname',
   mv_mergeAddTileOpen: 'Bereits geöffnet: obige Checkbox verwenden',
   mv_mergeAddDuplicate: 'Bereits zusammengeführt',
+  mv_mergeAddNotFound: 'Kanal nicht gefunden',
   mv_mergeAddFull: 'Höchstens {max} Chats können zusammengefasst werden',
   mv_mergeChatOnly: 'Nur Chat (ohne Stream)',
   mv_dragTile: 'Ziehen zum Sortieren',

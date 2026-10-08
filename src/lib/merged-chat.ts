@@ -180,7 +180,7 @@ export function reconcileMergedIds(
   return kept.length >= 2 || !lost ? kept : []
 }
 
-export type ExtraChatAddReason = 'invalid' | 'tile-open' | 'already-merged' | 'full'
+export type ExtraChatAddReason = 'invalid' | 'tile-open' | 'already-merged' | 'full' | 'not-found'
 export type ExtraChatAddPlan = { ok: true; next: string[] } | { ok: false; reason: ExtraChatAddReason }
 
 /**
