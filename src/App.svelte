@@ -669,9 +669,13 @@
   // distinguishes a PiP-driven stop (auto-resumed) from a deliberate Stop-button
   // press (stays stopped until the user hits Resume).
   let mainStoppedForPip = false
+  // PiP is live-only END TO END, not just in this takeover: the floating
+  // window receives a bare URL with no position handoff, so a VOD/clip
+  // handed to it would restart at 0:00 while the main copy kept playing.
+  // The control is hidden during VOD/clip playback and the VOD/clip loaders
+  // never feed their URLs to the controller — only live attaches do.
   $effect(() => {
     const pipOpen = pipController.isOpen
-    // PiP takeover is live-only: never stop a VOD/clip to hand off to PiP.
     if (playback.kind !== 'live') return
     if (pipOpen) {
       if (channelJoined && (playerStatus === 'playing' || playerStatus === 'paused')) {
@@ -688,6 +692,20 @@
   })
 
   function resumeStream(): void {
+    // Replay whatever the idle overlay interrupted — a live stream is only
+    // one of the three kinds that can sit stopped behind it (mpv handoff,
+    // sleep timer). A VOD must go back through playVod (chat replay, extras,
+    // the saved resume position), a clip through playClip; loading the live
+    // stream here would play live under the VOD UI and let its timeupdate
+    // overwrite the VOD's saved position.
+    if (playback.kind === 'vod' && lastPlayedVideo && lastPlayedVideo.id === playback.id) {
+      void playVod(lastPlayedVideo)
+      return
+    }
+    if (playback.kind === 'clip' && lastPlayedClip && lastPlayedClip.slug === playback.slug) {
+      void playClip(lastPlayedClip)
+      return
+    }
     if (channelJoined) void loadStream(channelJoined, quality)
   }
 
@@ -912,9 +930,12 @@
   // position over (mpv's start option on the way in, the saved checkpoint on
   // the way out), clips just reload. PiP and multi-view manage their own
   // teardown + reload — never fight them here.
-  // (lastPlayedClip: playClip records the full ChannelClip object; the
-  // playback state only carries a subset, and playClip needs it all.)
+  // (lastPlayedClip / lastPlayedVideo: playClip/playVod record the full
+  // ChannelClip/ChannelVideo objects; the playback state only carries a
+  // subset, and replaying (engine flip, the idle overlay's Resume button)
+  // needs it all.)
   let lastPlayedClip: ChannelClip | null = null
+  let lastPlayedVideo: ChannelVideo | null = null
   let prevMpvSelected: boolean | null = null
   $effect(() => {
     const selected = mpvSelected
@@ -1769,7 +1790,13 @@
     generation: number,
     token: number,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    if (!isCurrentStream(generation, channel, q)) return { ok: false, error: 'stale stream request' }
+    // The token matters as much as the generation here: the native VOD/clip
+    // attaches run WITHOUT a generation bump, so a live load that lost the
+    // race to one still looks current by generation + channel + quality —
+    // and would fire its loadfile over the just-attached VOD before noticing.
+    if (token !== loadToken || !isCurrentStream(generation, channel, q)) {
+      return { ok: false, error: 'stale stream request' }
+    }
 
     // Native engine: the RAW resolved URL — mpv fetches it itself (no
     // browser, no CORS, no ksvod proxy). A failed load falls through to the
@@ -1898,7 +1925,7 @@
     }
 
     const resolved = await resolveLiveStream(channel, q, settings.lowLatency)
-    if (!isCurrentStream(generation, channel, q)) return
+    if (token !== loadToken || !isCurrentStream(generation, channel, q)) return
     if (!resolved.ok) {
       if (resolved.offline) {
         playerStatus = 'offline'
@@ -1934,7 +1961,7 @@
 
     playerStatus = 'loading'
     const attach = await attachStream(channel, q, resolved.url, generation, token)
-    if (!isCurrentStream(generation, channel, q)) return
+    if (token !== loadToken || !isCurrentStream(generation, channel, q)) return
     if (attach.ok) {
       // Hand the resolved playlist URL to the PiP controller. If the floating
       // window is open it reloads; otherwise it is ready for the next open.
@@ -2217,7 +2244,12 @@
   // VOD resume / save / restore / extras all live in vodCtl — the
   // VodPlaybackController near the top of this file.)
 
-  async function loadVod(videoId: string, q: string, startAt?: number): Promise<void> {
+  // Returns whether THIS load is still the current one when it finishes
+  // (false = superseded somewhere along the way — the caller must not run
+  // its per-VOD follow-ups against playback state that moved on). A load
+  // that fails while still current returns true: the failure UI belongs to
+  // this VOD.
+  async function loadVod(videoId: string, q: string, startAt?: number): Promise<boolean> {
     const token = ++loadToken
     playerError = ''
     playerStatus = 'resolving'
@@ -2232,19 +2264,19 @@
     try {
       raw = (await invoke('resolve_vod', { videoId, quality: q })) as ResolveRaw
     } catch (err) {
-      if (token !== loadToken) return
+      if (token !== loadToken) return false
       const msg = typeof err === 'string' ? err : err instanceof Error ? err.message : JSON.stringify(err)
       playerStatus = 'error'
       playerError = 'invoke failed: ' + msg
-      return
+      return true
     }
-    if (token !== loadToken) return
+    if (token !== loadToken) return false
     if (!raw.ok || !raw.url) {
       playerStatus = 'error'
       const base = raw.error ?? 'failed to load video'
       const hint = raw.offline || raw.unavailable ? null : streamlinkFloorHint(installedStreamlinkVersion())
       playerError = hint ? `${base}\n${hint}` : base
-      return
+      return true
     }
     playerStatus = 'loading'
     // Native engine: the RAW cloudfront/ttvnw URL (no proxy — mpv fetches it
@@ -2265,20 +2297,13 @@
         // Same ownership rule as attachStream's native branch: stop only
         // when no newer loadfile claimed the shared engine behind ours.
         if (seq === mpvLoadSeq) void mpv.stop()
-        return
+        return false
       }
       if (attach.ok) {
         playerStatus = 'playing'
         nativeVideoActive = true
         if (resume >= 30) vodCtl.showResumeBar(videoId, resume)
-        if (channelJoined)
-          pipController.setStream({
-            url: toKsvodProxyUrl(raw.url, isWindows),
-            channel: channelJoined,
-            quality: q,
-            isLive: false,
-          })
-        return
+        return true
       }
       showNotifToast(t('toast_mpvEngineFailed', { error: attach.error }))
     }
@@ -2290,21 +2315,21 @@
     // scheme form differs per platform (see toKsvodProxyUrl).
     const proxyUrl = toKsvodProxyUrl(raw.url, isWindows)
     const attach = await attachMediaHls(proxyUrl, () => token === loadToken)
-    if (token !== loadToken) return
+    if (token !== loadToken) return false
     if (attach.ok) {
       playerStatus = 'playing'
-      if (channelJoined)
-        pipController.setStream({ url: proxyUrl, channel: channelJoined, quality: q, isLive: playback.kind === 'live' })
       vodCtl.restore(videoId)
-      return
+      return true
     }
     playerStatus = 'error'
     playerError = attach.error
+    return true
   }
 
   async function playVod(video: ChannelVideo): Promise<void> {
     if (!channelJoined) return
     vodChat.stop()
+    lastPlayedVideo = video
     playback = {
       kind: 'vod',
       id: video.id,
@@ -2316,7 +2341,10 @@
     stopChatOnly()
     playbackSession.userPaused = false
     if (videoScrollEl) videoScrollEl.scrollTop = 0
-    await loadVod(video.id, quality)
+    // A superseded load must not start its follow-ups: the user already
+    // moved on to another VOD/live/clip, and this VOD's chat replay loop +
+    // extras would run over (and later overwrite) whatever replaced it.
+    if (!(await loadVod(video.id, quality))) return
     void vodCtl.loadExtras(video.id)
     // Begin replay chat at the saved resume offset (or 0). restoreVodPosition
     // (inside loadVod) seeks the video to the same spot BEFORE this point, so
@@ -2388,16 +2416,6 @@
       if (attach.ok) {
         playerStatus = 'playing'
         nativeVideoActive = true
-        // isLive is a literal false here by necessity: playClip flow-narrows
-        // `playback` to the clip variant (same as the HTML path below).
-        if (channelJoined)
-          pipController.setStream({
-            url: raw.url,
-            channel: channelJoined,
-            quality: 'best',
-            mediaKind: 'mp4',
-            isLive: false,
-          })
         return
       }
       showNotifToast(t('toast_mpvEngineFailed', { error: attach.error }))
@@ -2406,18 +2424,6 @@
     if (token !== loadToken) return
     if (attach.ok) {
       playerStatus = 'playing'
-      // isLive is a literal false here by necessity: playClip flow-narrows
-      // `playback` to the clip variant, so the `playback.kind === 'live'`
-      // derivation used at the other call sites is a TS no-overlap error in
-      // this scope — the type system proves a clip is never live.
-      if (channelJoined)
-        pipController.setStream({
-          url: raw.url,
-          channel: channelJoined,
-          quality: 'best',
-          mediaKind: 'mp4',
-          isLive: false,
-        })
       return
     }
     playerStatus = 'error'

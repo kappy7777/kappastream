@@ -593,7 +593,13 @@
         {/if}
       </div>
 
-      {#if pipSupported}
+      {#if pipSupported && (live || pipActive)}
+        <!-- PiP is live-only: the floating window receives a bare URL with no
+             position handoff, so a VOD/clip handed to it would restart at
+             0:00 while the main copy kept playing. The control hides during
+             VOD/clip playback — EXCEPT while PiP already holds the live
+             stream (the main player may have moved on to a VOD in the
+             meantime), where the button must stay available to exit. -->
         <button
           type="button"
           class="ctrl-btn"
