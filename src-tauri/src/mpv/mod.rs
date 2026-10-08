@@ -772,21 +772,21 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                     // normally instead of being covered by a black box.
                     // Suppressed while a blocking overlay owns the screen
                     // (mpv_set_surface_visible re-shows on its dismissal).
-                    // The surface call runs OUTSIDE the lock (it dispatches
-                    // to the GTK main thread).
-                    let reveal = {
+                    // The surface call runs INSIDE the lock: it only posts
+                    // to the GTK main loop, and pairing the want-flag write
+                    // with the suppression check under one registry grab
+                    // keeps this reveal totally ordered against
+                    // mpv_set_surface_visible's broadcasts (the dispatched
+                    // closure re-checks the flag, so a stale dispatch of
+                    // either side can never win).
+                    {
                         let mut engines = lock_or_recover(engines());
-                        engines.get_mut(&id).and_then(|engine| {
+                        if let Some(engine) = engines.get_mut(&id) {
                             engine.active = true;
-                            if engine.overlay_suppressed {
-                                None
-                            } else {
-                                Some(Arc::clone(&engine.surface))
+                            if !engine.overlay_suppressed {
+                                engine.surface.show();
                             }
-                        })
-                    };
-                    if let Some(surface) = reveal {
-                        surface.show();
+                        }
                     }
                 }
                 Ok(Event::FileLoaded) => {
@@ -1834,24 +1834,20 @@ pub async fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Resul
 /// surface calls dispatch to the main thread from wherever they run.
 #[tauri::command]
 pub fn mpv_set_surface_visible(visible: bool) -> Result<(), String> {
-    // Under the lock: flip each engine's suppression flag + collect the
-    // show/hide decisions. The surface calls run OUTSIDE it (each dispatches
-    // to the GTK main thread).
-    let actions: Vec<(Arc<dyn VideoSurface>, bool)> = {
-        let mut engines = lock_or_recover(engines());
-        engines
-            .values_mut()
-            .map(|engine| {
-                engine.overlay_suppressed = !visible;
-                (Arc::clone(&engine.surface), visible && engine.active)
-            })
-            .collect()
-    };
-    for (surface, show) in actions {
-        if show {
-            surface.show();
+    // Decision AND surface call under the lock: the surface call only posts
+    // to the GTK main loop, and pairing it with the suppression flip under
+    // one registry grab keeps every visibility decision totally ordered —
+    // two racing broadcasts (or a broadcast racing the event thread's
+    // PlaybackRestart reveal) write the wanted-state flag in decision
+    // order, and each dispatched closure re-checks that flag at execution
+    // time, so the staler dispatch can never land last.
+    let mut engines = lock_or_recover(engines());
+    for engine in engines.values_mut() {
+        engine.overlay_suppressed = !visible;
+        if visible && engine.active {
+            engine.surface.show();
         } else {
-            surface.hide();
+            engine.surface.hide();
         }
     }
     Ok(())
