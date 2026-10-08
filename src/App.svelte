@@ -4369,16 +4369,18 @@
     border-top: 1px solid var(--border);
   }
   /* The banner + resume bar become in-flow rows (their overlay CSS is
-     absolute/positioned over the player, which the native surface covers). */
+     absolute/positioned over the player, which the native surface covers).
+     Symmetric vertical margins so each row centers in the strip band —
+     the panel background shows on all sides of the pill. */
   .native-strip .playback-banner--strip {
     position: static;
     max-width: none;
-    margin: 6px 8px 0;
+    margin: 6px 8px;
     animation: none;
   }
   .native-strip .resume-bar--strip {
     position: static;
-    margin: 6px 8px 0;
+    margin: 6px 8px;
   }
 
   /* Status bar: the bottom flex child of .player-stage (NOT of .video-pane),
