@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { fetchTopStreams, fetchTopCategories, fetchGameStreams, type BrowseStream, type BrowseCategory } from './gql'
   import { initialVisible, revealMore, hasMoreToShow } from './browse-reveal'
+  import { dialogFocus } from './dialog-focus'
   import { t } from './i18n/index.svelte'
   import { formatCompact } from './format'
 
@@ -176,7 +177,7 @@
 </script>
 
 <div class="browse-backdrop" onclick={close} role="presentation"></div>
-<div class="browse-modal" role="dialog" aria-modal="true" aria-label={t('browse_aria')}>
+<div class="browse-modal" role="dialog" aria-modal="true" aria-label={t('browse_aria')} tabindex="-1" use:dialogFocus>
   <header class="browse-head">
     <div class="browse-head-left">
       {#if view === 'category' && activeCategory}

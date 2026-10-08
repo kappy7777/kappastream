@@ -27,6 +27,7 @@
 
   import { onDestroy } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
+  import { dialogFocus } from './dialog-focus'
   import {
     THEME_PROP_GROUPS,
     THEME_PALETTE,
@@ -395,7 +396,14 @@
     if (e.target === e.currentTarget) close()
   }}
 >
-  <div class="ct-panel" role="dialog" aria-modal="true" aria-label={t('settings_customThemes')}>
+  <div
+    class="ct-panel"
+    role="dialog"
+    aria-modal="true"
+    aria-label={t('settings_customThemes')}
+    tabindex="-1"
+    use:dialogFocus
+  >
     <header class="ct-head">
       <h2 class="ct-title">{isNew ? t('settings_ctNew') : t('settings_ctEdit') + ' — ' + editing.label}</h2>
       <button type="button" class="ct-x" onclick={close} aria-label={t('settings_ctClose')}>×</button>

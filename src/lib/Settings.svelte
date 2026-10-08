@@ -14,6 +14,7 @@
     type ThemeId,
   } from './settings.svelte.ts'
   import { favoritesStore, type FavoriteStatus } from './favorites.svelte'
+  import { dialogFocus } from './dialog-focus'
   import { sleepTimer, formatSleepRemaining, SLEEP_PRESETS } from './sleep-timer.svelte'
   import { t, getLocale, setLocale, LOCALES } from './i18n/index.svelte'
   import {
@@ -477,7 +478,14 @@
 
   {#if open}
     <div class="settings-backdrop" onclick={closePanel} role="presentation"></div>
-    <div class="settings-modal settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div
+      class="settings-modal settings-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+      tabindex="-1"
+      use:dialogFocus
+    >
       <div class="settings-head">
         <span id="settings-title" class="settings-title">{t('settings')}</span>
         <button type="button" class="settings-close" onclick={closePanel} aria-label={t('close')}>
