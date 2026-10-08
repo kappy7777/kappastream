@@ -25,7 +25,7 @@ kappastream is a native desktop client for watching Twitch without signing in or
 
 It is designed for people who want to open a stream, read the real chat, and get out of the way. There is no login flow, social feed, recommendation engine, account integration, or kappastream backend.
 
-Chat is read anonymously through Twitch IRC. Stream playback is resolved locally with [streamlink](https://streamlink.github.io/) and played through `hls.js`. Favorites, settings, notifications, themes, and cached state remain on your device.
+Chat is read anonymously through Twitch IRC. Stream playback is resolved locally with [streamlink](https://streamlink.github.io/) and played through `hls.js`, or — on Linux — an experimental embedded mpv engine. Favorites, settings, notifications, themes, and cached state remain on your device.
 
 <p align="center">
   <img src="docs/screenshots/2.png" alt="kappastream interface" width="100%">
@@ -49,10 +49,11 @@ Chat is read anonymously through Twitch IRC. Stream playback is resolved locally
 | | |
 |---|---|
 | 📺 **Live playback** | HLS playback with quality selection, fullscreen, theater mode, per-channel quality preferences, an optional low-latency mode, player keyboard shortcuts, and a sleep timer. |
+| 🎞️ **Native video engine** | Experimental, Linux only: play video through an embedded mpv instead of hls.js — opt in under Settings → Playback. Works in the single view and multi-view tiles, with its own on-screen control bar. |
 | 🗂️ **Multi-stream view** | Watch up to four live streams at once in a draggable, resizable tile grid. Each tile has its own chat tab, quality, and volume, and any subset of the chats can be merged into one interleaved stream. |
 | 🎬 **VODs and clips** | Browse a channel's past broadcasts, highlights, recent and popular clips, and play them in the main player — with mpv handoff and Picture-in-Picture support. A Back-to-live control returns to the stream. Past broadcasts resume from where you left off, with a one-click restart, and the scrub bar shows chapters, muted segments, and storyboard seek previews. |
 | 💬 **Anonymous chat** | Read-only Twitch IRC chat with native Twitch emotes, 7TV, BTTV and FFZ emotes, badges, colored usernames, timestamps, mention highlighting, and a client-side mute list. Twitch links in chat are clickable, and clip links play in-app. |
-| 🎛️ **Chat-event filters** | Individually toggle sub, gift, raid and announcement notices, the chat-mode indicator, moderation actions, and bits. All are on by default. |
+| 🎛️ **Chat-event filters** | Individually toggle sub, gift, raid, announcement and watch-streak notices, the chat-mode indicator, moderation actions, and bits. All are on by default. |
 | 📍 **Pinned chat messages** | Show the channel's pinned message above chat. Off by default; while off, no pinned-message request is made. |
 | ⭐ **Favorites** | Save channels locally, drag to reorder them, and see live status, viewer count, game, and stream title at a glance. |
 | 👥 **Stream Together** | Channels in a Stream Together session show stacked co-streamer avatars, a member count, and combined viewership in the sidebar; one click opens the whole session in the multi-stream grid. |
@@ -180,14 +181,14 @@ kappastream uses [streamlink](https://streamlink.github.io/) as a local helper t
 
 **streamlink 6.0.0 or newer is required.** Older installs fail to resolve today's Twitch streams; when a resolve fails and the installed streamlink is older, kappastream appends an update hint to the error message.
 
-The `.deb` and `.rpm` packages install it as a dependency. AppImage, Windows, and macOS users must install it separately:
+The `.deb` and `.rpm` packages install it as a dependency, and the Windows installer bundles a portable copy. AppImage and macOS users must install it separately:
 
 ```bash
 sudo pacman -S streamlink       # Arch Linux
 sudo apt install streamlink     # Debian / Ubuntu
 sudo dnf install streamlink     # Fedora
 brew install streamlink         # macOS
-pip install --user streamlink   # Python fallback
+pipx install streamlink         # Python fallback (installs to ~/.local/bin)
 ```
 
 If `streamlink` is installed outside your normal `PATH`, set its location before starting kappastream:
@@ -232,15 +233,15 @@ kappastream does not use Twitch Helix or Kraken and cannot authenticate as you.
 
 Release packages are built by GitHub Actions from the repository source. The [release workflow](.github/workflows/release.yml) and its [public build logs](../../actions) can be inspected directly.
 
-Each release includes a `SHA256SUMS` file covering every published artifact: the AppImage, Debian package, RPM package, Windows installer, macOS disk image and app bundle, and source tarball.
+Each release includes a `SHA256SUMS` file covering every published artifact: the AppImage, Debian package, RPM package, Windows installer, macOS disk image and app bundle, and the prebuilt Linux tarball (the payload the AUR `kappastream-bin` package installs).
 
 Download the artifacts into the same directory and verify them with:
 
 ```bash
-sha256sum -c SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
 ```
 
-A successful result confirms that the downloaded file matches the checksum published with the release. Checksums detect corruption or replacement after publication; they are not a substitute for reviewing the source and build workflow.
+`--ignore-missing` skips the artifacts you didn't download; without it, `sha256sum -c` reports every absent file as a failure. A successful result confirms that the downloaded file matches the checksum published with the release. Checksums detect corruption or replacement after publication; they are not a substitute for reviewing the source and build workflow.
 
 
 ## ⚠️ Known limitations
@@ -334,7 +335,8 @@ The first Rust build can take considerably longer than subsequent builds.
 - **Tauri 2 and Rust** — native shell, window management, subprocess handling, notifications, tray integration, and native packaging
 - **Svelte 5 and TypeScript** — user interface and local application state
 - **Vite** — frontend compilation
-- **hls.js** — HLS playback
+- **hls.js** — HLS playback in the webview (the default engine)
+- **libmpv** — optional native video engine on Linux (opt in under Settings → Playback)
 - **Twitch IRC over WebSocket** — anonymous, read-only chat
 - **streamlink** — local stream resolution
 - **System webview** — WebKitGTK on Linux, WKWebView on macOS, and WebView2 on Windows, avoiding a bundled Chromium runtime
