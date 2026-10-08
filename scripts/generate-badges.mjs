@@ -87,12 +87,13 @@ const LEGACY_STANDALONE = {
 // Per-version label derivation for families whose Twitch titles are noisy
 // ('cheer 1000', '25 Gift Subs'). A clean uniform form reads better in a
 // tooltip and covers high tiers Twitch added after the original hand-curated
-// map. Everything else takes Twitch's own title.
+// map. Only true AMOUNT families derive: the leaderboard sets
+// (bits-leader / sub-gift-leader) number their versions by RANK, so they keep
+// Twitch's own titles ('Bits Leader 1') instead of a derived amount ('1 bit').
+// Everything else takes Twitch's own title.
 function deriveVersionLabel(setID, version, title) {
-  if (setID === 'bits' || setID === 'bits-leader') return formatBits(version)
-  if (setID === 'sub-gifter' || setID === 'sub-gift-leader') {
-    return `${version} subs gifted`
-  }
+  if (setID === 'bits') return formatBits(version)
+  if (setID === 'sub-gifter') return `${version} sub${version === '1' ? '' : 's'} gifted`
   return title
 }
 
@@ -106,7 +107,7 @@ function formatBits(v) {
   ]) {
     if (n >= div) {
       const r = n / div
-      const out = Number.isInteger(r) ? String(r) : (Math.round(r * 10) / 10).toString()
+      const out = Number.isInteger(r) ? String(r) : (Math.round(r * 100) / 100).toString()
       return `${out}${suf} bits`
     }
   }
