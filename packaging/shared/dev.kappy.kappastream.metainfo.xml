@@ -32,9 +32,10 @@
       user credentials. Chat is read from the public IRC WebSocket; live
       status and metadata come from Twitch's anonymous GQL endpoint,
       queried with the same public Client-ID twitch.tv's own web client
-      uses (pinned in the native binary, never user-supplied). Streams are
-      resolved locally via streamlink and played back with hls.js in a
-      Tauri WebView.
+      uses (pinned in the native binary, never user-supplied). Streams
+      are resolved locally via streamlink and played back with hls.js in
+      a Tauri WebView, or — on Linux — through an opt-in embedded mpv
+      engine.
     </p>
     <p>
       Favorites poll Twitch GQL in a single batched request; on a transport
