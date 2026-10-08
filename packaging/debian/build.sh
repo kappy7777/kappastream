@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Build a native kappastream .deb — a standalone release artifact.
+# Build a native kappastream .deb — the local reproducible alternative to the
+# release.yml package.
 #
 # Mirrors packaging/aur/PKGBUILD: builds the frontend with Vite, then
 # `cargo build --release` embeds it into the Rust binary via tauri-build, and
@@ -121,7 +122,10 @@ chmod 755 "$STAGE"
 # --- 3. Build the .deb ------------------------------------------------------
 mkdir -p "$SCRIPT_DIR/dist"
 rm -f "$SCRIPT_DIR/dist/$OUT"
-dpkg-deb --build -Zzstd "$STAGE" "$SCRIPT_DIR/dist/$OUT"
+# --root-owner-group records root:root ownership regardless of the building
+# uid, so the container can run as the host user without the package shipping
+# files owned by that uid.
+dpkg-deb --build --root-owner-group -Zzstd "$STAGE" "$SCRIPT_DIR/dist/$OUT"
 
 echo "==> Wrote $SCRIPT_DIR/dist/$OUT"
 echo "    Inspect:  dpkg-deb -I $SCRIPT_DIR/dist/$OUT"

@@ -6,8 +6,9 @@
 #
 # Mirrors packaging/aur/PKGBUILD: builds the frontend with Vite, then
 # `cargo build --release` embeds dist/ into the Rust binary via tauri-build.
-# A standalone release artifact (no COPR repo); install with `rpm -i` or
-# `dnf install ./kappastream-*.rpm`.
+# The local rpmbuild package (no COPR repo), an alternative to the
+# tauri-bundler .rpm that release.yml ships; install with
+# `dnf install ./kappastream-*.rpm` so the Requires resolve.
 
 Name:           kappastream
 Version:        @VERSION@
@@ -157,6 +158,10 @@ appstream-util validate-relax --nonet \
     %{buildroot}%{_datadir}/metainfo/dev.kappy.kappastream.metainfo.xml || :
 
 %files
+# rpmbuild records each buildroot file's owner; %defattr forces root:root so a
+# container build running as the host uid (see README) still ships root-owned
+# files. The `-` mode keeps each file's installed mode.
+%defattr(-,root,root)
 %license LICENSE
 %{_bindir}/%{name}
 %dir %{_prefix}/lib/%{name}

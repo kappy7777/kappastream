@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Build a native kappastream .rpm — a standalone release artifact.
+# Build a native kappastream .rpm — the local rpmbuild alternative to the
+# release.yml package.
 #
 # Tars the source tree, generates the real .spec from kappastream.spec.in
 # (@VERSION@ from package.json), and invokes `rpmbuild -bb`. The actual

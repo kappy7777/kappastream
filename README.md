@@ -95,6 +95,8 @@ chmod +x kappastream*.AppImage
 ./kappastream*.AppImage
 ```
 
+The AppImage is built on Ubuntu 24.04 and needs **glibc 2.39 or newer** — it will not start on older distributions such as Debian 12 or Ubuntu 22.04. Use the matching native package below for those instead.
+
 > [!NOTE]
 > **For the best experience, use a native package whenever your distribution is supported.**
 >
@@ -110,7 +112,7 @@ Download the `.deb` package from the [latest release](../../releases/latest), th
 sudo apt install ./kappastream_*_amd64.deb
 ```
 
-The package declares `streamlink`, `libmpv` and the GStreamer libav codecs as dependencies. It is built on Debian 12 and needs **glibc 2.36 or newer** (Debian 12+, Ubuntu 24.04+).
+The package declares `streamlink`, `libmpv` and the GStreamer libav codecs as dependencies. It is built on Debian 12 and needs **glibc 2.36 or newer** (Debian 12+, Ubuntu 24.04+). Ubuntu 22.04's glibc 2.35 is below both the `.deb` floor and the AppImage floor (2.39), so no kappastream artifact runs there.
 
 ### 🐧 Fedora
 

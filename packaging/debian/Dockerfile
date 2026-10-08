@@ -22,9 +22,16 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # 2) Current Rust (crate rust-version >=1.89.0; noble only ships 1.75).
+#    Installed under /usr/local (the official rust-image layout) so the
+#    container can also run as an arbitrary host uid: /root is unreadable to
+#    other users. Cargo's registry/cache still goes to $CARGO_HOME — point it
+#    somewhere writable when running with --user (see README).
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
- | sh -s -- -y --profile minimal
-ENV PATH="/root/.cargo/bin:${PATH}"
+ | sh -s -- -y --profile minimal \
+      --rustup-home /usr/local/rustup --cargo-home /usr/local/cargo
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH="/usr/local/cargo/bin:${PATH}"
 
 # 3) Build deps: the Tauri WebView stack + dpkg-deb tooling.
 RUN apt-get update && apt-get install -y --no-install-recommends \

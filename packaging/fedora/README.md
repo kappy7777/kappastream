@@ -4,8 +4,11 @@ Builds a **native** `.rpm` from source (not the AppImage): the frontend is built
 with Vite, then `cargo build --release` embeds `dist/` into the Rust binary via
 tauri-build, packaged with `rpmbuild` from `kappastream.spec.in`.
 
-This is a standalone release artifact — there is **no** COPR repo. Users
-install it with `rpm -i` or `dnf install ./kappastream-*.rpm`.
+This is the local rpmbuild package, not the released `.rpm` (that one is
+built by release.yml via tauri-bundler — see "Runtime dependencies" below for
+how the two differ). There is **no** COPR repo. Install a built `.rpm` with
+`dnf install ./kappastream-*.rpm` so the declared dependencies resolve;
+`rpm -i` alone does not resolve them.
 
 ## Targets
 
@@ -99,14 +102,21 @@ the only robust path, and it carries the build logic the same way the AUR
 ## Local build & test
 
 The build runs in the Docker container (it needs `webkit2gtk4.1-devel` and
-`rpm-build`, which the Dockerfile provides):
+`rpm-build`, which the Dockerfile provides). The command below runs it as the
+invoking host user, with a writable `HOME` (which also relocates cargo's and
+npm's caches), so `node_modules/`, `dist/`, `target/` and the output `.rpm`
+are not left root-owned in the checkout:
 
 ```bash
 # from the repo root:
 docker build -t kappastream-rpm packaging/fedora
-docker run --rm -v "$PWD":/src kappastream-rpm
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
+  -v "$PWD":/src kappastream-rpm
 # → packaging/fedora/dist/kappastream-<version>-1.fc44.x86_64.rpm
 ```
+
+If an earlier root-run already left root-owned `node_modules/` or `target/`
+behind, remove them first — the unprivileged build cannot overwrite them.
 
 Then inspect and validate:
 
@@ -122,6 +132,9 @@ notifications, external links, fullscreen, favorites persistence).
 
 ## Release
 
-Ship `kappastream-<version>-1.fc<NN>.x86_64.rpm` as a GitHub release asset
-alongside the AppImage and `.deb`, with a SHA-256 in `SHA256SUMS`. GPG signing
-(`rpm --addsign`) is optional and can be added later without restructuring.
+The GitHub release `.rpm` is built by release.yml (tauri-bundler), not by this
+directory — the local build is the reproducible alternative, and it behaves
+differently (see "Runtime dependencies"). If a locally built `.rpm` ever needs
+to ship instead, publish it with a matching SHA-256 in `SHA256SUMS`. GPG
+signing (`rpm --addsign`) is optional and can be added later without
+restructuring.
