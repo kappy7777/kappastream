@@ -379,8 +379,11 @@ export class FavoritesStore {
       updateDelayed: false,
     })
     this.notify()
+    // resolveSingle covers the new channel at once; the scheduled batch poll
+    // keeps its ORIGINAL deadline. Rescheduling here would push the whole
+    // list's next batch a full interval out per add — curating from Browse
+    // stalled every other favorite's status and go-live notifications.
     void this.resolveSingle(n)
-    this.scheduleNextPoll()
     return true
   }
 

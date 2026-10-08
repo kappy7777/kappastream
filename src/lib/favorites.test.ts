@@ -523,6 +523,24 @@ describe('startup polling cadence', () => {
     await vi.advanceTimersByTimeAsync(135_000) // < 150s interval
     expect(gql.calls).toHaveLength(1) // only the initial poll
   })
+
+  it('add() does not defer the scheduled batch poll', async () => {
+    seedFavorites(['alpha'])
+    gql.handler = gqlStatusHandler({ alpha: { live: false }, newchan: { live: false } })
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(gql.calls).toHaveLength(1) // the startup batch
+    // Add well inside the interval: the new channel resolves on its own, and
+    // the already-scheduled batch must still fire at its original deadline
+    // (a reschedule per add stalled every other favorite for a full
+    // interval each time).
+    store.add('newchan')
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(gql.calls).toHaveLength(2) // + resolveSingle
+    await vi.advanceTimersByTimeAsync(142_000) // t = 152s since start()
+    expect(gql.calls).toHaveLength(3) // the batch fired ON TIME (150s, not deferred)
+  })
 })
 
 describe('live notifications — known offline→live only, no startup grace', () => {
