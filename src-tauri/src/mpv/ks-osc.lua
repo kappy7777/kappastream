@@ -30,7 +30,8 @@
 --     channel label top-left (ks-label), never a seek strip.
 --     live: single-view live — never a seek strip (mpv's HLS demuxer
 --     reports a playlist pseudo-duration even on live).
---     vod:  single-view VOD/clip — full bar with seek strip + time.
+--     vod:  single-view VOD/clip — full bar with seek strip + time; the
+--     mpv-handoff button hides (external handoff is live-only).
 --   ks-label <name>
 --     The tile chrome label (the channel name).
 -- Actions go OUT as script messages the Rust event thread relays:
@@ -613,15 +614,17 @@ local function render()
 
     -- right-aligned group (hls.js order): gear(quality), pip, mpv, theater,
     -- fullscreen — drawn RIGHT-TO-LEFT, so the array runs fullscreen→gear.
-    -- The gear renders only when the app sent a quality list. TILE mode
-    -- adds the reorder arrows (◀/▶ swap with the neighbouring slot) and
-    -- the close X, and drops the app-global buttons + fullscreen.
+    -- The gear renders only when the app sent a quality list. The mpv
+    -- handoff button is LIVE-ONLY (mirrors the hls.js control bar; VOD/clip
+    -- playback stays in-app). TILE mode adds the reorder arrows (◀/▶ swap
+    -- with the neighbouring slot) and the close X, and drops the
+    -- app-global buttons + fullscreen.
     local rx = w - pad
     local buttons = {
         { id = "close",      icon = icon_close,      active = false,            enabled = state.tile },
         { id = "fullscreen", icon = icon_fullscreen, active = state.fullscreen, enabled = not state.tile },
         { id = "theater",    icon = icon_theater,    active = state.theater,    enabled = not state.tile },
-        { id = "mpv",        icon = icon_external,   active = false,            enabled = not state.tile },
+        { id = "mpv",        icon = icon_external,   active = false,            enabled = not state.tile and state.live },
         { id = "pip",        icon = icon_pip,        active = state.pip,        enabled = not state.tile },
         { id = "quality",    icon = icon_gear,       active = false, enabled = state.qualities ~= nil },
         { id = "moveright",  icon = icon_arr_right,  active = false,            enabled = state.tile },

@@ -1770,9 +1770,12 @@
   // lib/playback-session.svelte.ts — same class module the tiles use.)
 
   async function handoffToPlayer(): Promise<void> {
-    // Live-only by design (the control hides during VOD/clip playback): the
-    // external mpv gets the live stream; VODs and clips stay in-app, where
-    // the PiP handoff covers floating-window playback instead.
+    // Live-only by design (both control bars hide the button during
+    // VOD/clip playback; this guard also covers the native OSD's ks-action
+    // relay, which can fire before a ks-mode feed lands): the external mpv
+    // gets the live stream; VODs and clips stay in-app, where the PiP
+    // handoff covers floating-window playback instead.
+    if (playback.kind !== 'live') return
     const channel = channelJoined
     if (!channel) return
     try {
