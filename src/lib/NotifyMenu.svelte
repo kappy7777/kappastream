@@ -380,6 +380,13 @@
     opacity: 1;
   }
 
+  /* Keyboard parity with the hover reveal: opacity 0 otherwise hides the
+     button from sighted keyboard users reaching it by Tab. */
+  .notif-item:focus-within .notif-dismiss,
+  .notif-dismiss:focus-visible {
+    opacity: 1;
+  }
+
   .notif-dismiss:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
