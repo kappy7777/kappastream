@@ -1428,11 +1428,13 @@
     sendOsd(['ks-mode', playback.kind === 'live' ? 'live' : 'vod'])
   })
 
-  // Quality list (live only — VODs/clips have no quality menu; an empty list
-  // hides the OSD gear). Labels re-resolve on language switches.
+  // Quality list (LIVE: the probed variant list; VOD: the full vocabulary —
+  // the same menu the hls.js control bar offers a VOD, since a VOD re-resolves
+  // at the picked rung and resumes from its checkpoint. CLIPS: none — clip
+  // quality is fixed (best), and an empty list hides the OSD gear).
   $effect(() => {
     if (!nativeVideoActive) return
-    if (playback.kind !== 'live') {
+    if (playback.kind === 'clip') {
       sendOsd(['ks-qualities', t('quality'), ''])
       return
     }
