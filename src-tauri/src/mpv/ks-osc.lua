@@ -55,6 +55,13 @@
 local mp = require 'mp'
 local assdraw = require 'mp.assdraw'
 
+-- Outbound traffic (ks-action presses, ks-overlay geometry) is ADDRESSED to
+-- the host client, never broadcast: the embedder's mpv handle from
+-- mpv_create() is always named "main" (mpv hardcodes it), and targeting
+-- keeps unrelated clients from injecting or overhearing the app's control
+-- traffic.
+local HOST_CLIENT = "main"
+
 -- ---------------------------------------------------------------------------
 -- state
 
@@ -417,7 +424,7 @@ local function send_overlay(kind, action, ...)
     for _, v in ipairs({ ... }) do
         args[#args + 1] = tostring(math.floor(v + 0.5))
     end
-    mp.commandv("script-message", unpack_fn(args))
+    mp.commandv("script-message-to", HOST_CLIENT, unpack_fn(args))
 end
 
 -- The chapter in effect at t (latest start <= t), or nil — mirrors
@@ -810,7 +817,7 @@ tick_timer:kill()
 --     cadence) ever lands there; a deliberate re-tap is later and works.
 
 local function action(name)
-    mp.commandv("script-message", "ks-action", name)
+    mp.commandv("script-message-to", HOST_CLIENT, "ks-action", name)
 end
 
 local function apply_volume(frac)

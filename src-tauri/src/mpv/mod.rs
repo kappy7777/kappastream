@@ -106,6 +106,14 @@ const MPV_USER_AGENT: &str = crate::gql::USER_AGENT;
 /// passes it via the `scripts` list option.
 const KS_OSC_LUA: &str = include_str!("ks-osc.lua");
 
+/// The OSC script's mpv client name. Client names derive from the script
+/// FILENAME with every non-alphanumeric character replaced by '_' (mpv's
+/// client-name sanitization), so "kappastream-osc.lua" loads as
+/// "kappastream_osc". Addressing the feed with `script-message-to` instead
+/// of a `script-message` broadcast keeps every other client — this host's
+/// own event thread included — from receiving the app's OSD traffic.
+const KS_OSC_CLIENT: &str = "kappastream_osc";
+
 /// Min interval between `mpv://time` emits (~4 Hz).
 const TIME_EMIT_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -1803,9 +1811,10 @@ pub async fn mpv_script_msg(id: Option<u32>, args: Vec<String>) -> Result<(), St
         return Err("empty script message".to_string());
     }
     with_core(engine_id(id)?, move |mpv| {
-        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-        mpv.command("script-message", &argv)
-            .map_err(|err| format!("script-message: {err}"))
+        let mut argv: Vec<&str> = vec![KS_OSC_CLIENT];
+        argv.extend(args.iter().map(String::as_str));
+        mpv.command("script-message-to", &argv)
+            .map_err(|err| format!("script-message-to: {err}"))
     })
     .await
 }
