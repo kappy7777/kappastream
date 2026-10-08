@@ -191,7 +191,7 @@ pub(crate) fn streamlink_missing_message(bin: &std::path::Path) -> String {
         )
     } else if cfg!(target_os = "macos") {
         format!(
-            "streamlink is not installed or not on PATH{detail}. Install it with Homebrew ('brew install streamlink'), or run 'pip install streamlink', then restart kappastream. To point at a specific location, set the STREAMLINK_BIN environment variable to streamlink's full path."
+            "streamlink is not installed or not on PATH{detail}. Install it with Homebrew ('brew install streamlink'), or run 'pipx install streamlink', then restart kappastream. To point at a specific location, set the STREAMLINK_BIN environment variable to streamlink's full path."
         )
     } else {
         format!(
