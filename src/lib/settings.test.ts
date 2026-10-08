@@ -382,3 +382,24 @@ describe('restoreVolume (unmute at volume 0)', () => {
     expect(fresh.settings.restoreVolume()).toBe(0.5)
   })
 })
+
+describe('theme revision (re-saving the active custom theme)', () => {
+  // Effects that re-read computed theme colours (chat name contrast, the
+  // mpv OSC / infoblock feeds, tile OSC feeds) key on themeRev, because the
+  // reactive `theme` id does NOT change when the active custom theme is
+  // saved again with new values — Svelte skips the equal write.
+  it('every setTheme bumps the revision, including the SAME id', () => {
+    const rev0 = S.settings.themeRev
+    S.settings.setTheme('nord')
+    expect(S.settings.theme).toBe('nord')
+    expect(S.settings.themeRev).toBe(rev0 + 1)
+    S.settings.setTheme('nord') // same id again — still a new application
+    expect(S.settings.themeRev).toBe(rev0 + 2)
+  })
+
+  it('reapplyTheme (editor cancel/close) bumps too', () => {
+    const rev0 = S.settings.themeRev
+    S.settings.reapplyTheme()
+    expect(S.settings.themeRev).toBe(rev0 + 1)
+  })
+})

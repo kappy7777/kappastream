@@ -210,7 +210,9 @@
   $effect(() => {
     if (!nativeActive) return
     void mpvId // re-feed when the tile is re-homed onto another engine
-    void settings.theme
+    // themeRev, not theme: re-saving the ACTIVE custom theme keeps the id,
+    // and the equal id write would never re-run this feed.
+    void settings.themeRev
     const cs = getComputedStyle(document.documentElement)
     // Same 6-hex requirement as App's theme feed: the OSD lua's bgr() turns
     // any non-6-hex token white, and custom themes store rgba()/short-hex.

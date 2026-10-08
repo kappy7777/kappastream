@@ -1382,7 +1382,9 @@
       extra = bits.filter(Boolean).join(' · ')
     }
     const url = showInfo ? st.avatarUrl : undefined
-    void settings.theme
+    // themeRev, not theme: re-saving the ACTIVE custom theme keeps the id,
+    // and the equal id write would never re-render the bitmap.
+    void settings.themeRev
     void settings.uiScale
     // Re-render when the OSD's shape changes: the box (resize, layout
     // toggles) and the video aspect both feed the fit below.
@@ -1444,7 +1446,9 @@
   // Theme colors (the OSD can't read CSS vars; send the resolved ones).
   $effect(() => {
     if (!nativeVideoActive) return
-    void settings.theme
+    // themeRev, not theme: re-saving the ACTIVE custom theme keeps the id,
+    // and the equal id write would never re-send the colours.
+    void settings.themeRev
     const cs = getComputedStyle(document.documentElement)
     // The OSD lua needs exactly 6 hex chars per color (bgr()); a custom
     // theme's rgba()/short-hex/#rrggbbaa tokens must be converted, or every

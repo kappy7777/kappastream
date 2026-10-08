@@ -274,7 +274,9 @@
   // measurement lands.
   let chatBg = $state('#18181b')
   $effect(() => {
-    void settings.theme
+    // themeRev, not theme: re-saving the ACTIVE custom theme keeps the id,
+    // and the equal id write would never re-measure the background.
+    void settings.themeRev
     const cs = getComputedStyle(document.documentElement)
     const panel = parseColorToken(cs.getPropertyValue('--bg-panel'))
     if (!panel) return
