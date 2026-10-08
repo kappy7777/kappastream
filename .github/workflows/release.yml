@@ -385,13 +385,39 @@ jobs:
           # AppImage. The plugin maps LDAI_RUNTIME_FILE to appimagetool's
           # --runtime-file; the seeded, hash-checked copy is used instead.
           export LDAI_RUNTIME_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/tauri/runtime-x86_64"
-          npm run tauri -- build --bundles appimage 2>&1 | tee appimage-build.log
-          # The runtime must come only from the seeded file. If anything
-          # downloaded a runtime mid-build, the pin was not honored.
-          if grep -q 'Downloading runtime file' appimage-build.log; then
-            echo "ERROR: appimagetool downloaded its runtime during the build — LDAI_RUNTIME_FILE was not honored" >&2
+          npm run tauri -- build --bundles appimage
+          # The shipped AppImage must be headed by the seeded runtime, and
+          # only that — verified on the product bytes, not on build logs:
+          # tauri-cli runs linuxdeploy with its stdout/stderr captured and
+          # discarded when it succeeds, so an appimagetool runtime download
+          # is invisible in this step's output. A type-2 AppImage is the
+          # runtime ELF with the squashfs appended, and appimagetool patches
+          # exactly one region while embedding it — the runtime's 16-byte
+          # MD5 digest (delta-update bookkeeping). Comparing the AppImage's
+          # first len(runtime) bytes against the seeded file must therefore
+          # show at most 16 differing bytes (a real build shows exactly 16);
+          # anything more means a different runtime, e.g. a type2-runtime
+          # `continuous` download, became the head of the shipped AppImage.
+          runtime="$LDAI_RUNTIME_FILE"
+          runtime_size="$(stat -c %s "$runtime")"
+          images="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' -type f)"
+          if [ -z "$images" ]; then
+            echo "ERROR: no AppImage was produced" >&2
             exit 1
           fi
+          for image in $images; do
+            if [ "$(stat -c %s "$image")" -lt "$runtime_size" ]; then
+              echo "ERROR: $image is smaller than the runtime — it cannot be headed by it" >&2
+              exit 1
+            fi
+            # cmp exits 1 on any difference; only the line count matters here.
+            diffs="$(cmp -l -n "$runtime_size" "$image" "$runtime" | wc -l || true)"
+            echo "runtime pin: $(basename "$image") differs from the seeded runtime in $diffs bytes (max 16)"
+            if [ "$diffs" -gt 16 ]; then
+              echo "ERROR: $image is not headed by the pinned runtime — LDAI_RUNTIME_FILE was not honored" >&2
+              exit 1
+            fi
+          done
           # And the tool cache must contain nothing but the six seeded
           # files: a tauri-cli bump that adds or renames a tool would have
           # downloaded it unpinned. Name-based on purpose — prepare_tools
