@@ -95,10 +95,16 @@
   let chatEl = $state<HTMLElement | undefined>(undefined)
   let stickyBottom = $state(true)
   let newMessageCount = $state(0)
-  // Last entry key the user has SEEN (followed to, or scrolled past). The
-  // new-message count keys off this instead of the buffer LENGTH — the
-  // buffer is capped at 500, so past the cap the length freezes and a
-  // length difference would report nothing new ever again.
+  // Last entry key already ACCOUNTED FOR as seen. It advances on every
+  // bottom snap, jump, and at-bottom scroll (the user is looking at the
+  // newest entry), and — while the pane is NOT following — the arrival
+  // counter itself advances it per counted message (each unseen message is
+  // accounted exactly once). Detaching must NOT touch it: messages that
+  // arrived during the scroll grace were counted unseen, and re-baselining
+  // at detach would erase them from the pill. The count keys off this
+  // instead of the buffer LENGTH — the buffer is capped at 500, so past
+  // the cap the length freezes and a length difference would report
+  // nothing new ever again.
   let scrollBaselineKey: string | null = null
   const SCROLL_BOTTOM_THRESHOLD = 32
 
@@ -128,8 +134,7 @@
       const el = chatEl
       if (!el) return
       if (stickyBottom && performance.now() >= userScrollUntil) {
-        el.scrollTop = el.scrollHeight
-        scrollBaselineKey = lastKeyOf(entries)
+        snapToBottom(el)
       }
     }, USER_SCROLL_GRACE_MS)
   }
@@ -152,27 +157,35 @@
     return list.length > 0 ? list[list.length - 1]!.key : null
   }
 
+  // Force the view to the bottom and mark everything seen. Every path that
+  // puts the newest message on screen (message-arrival follow, grace-end
+  // re-check, resize re-fit, the jump pill) goes through here, so the
+  // unseen count can never disagree with what the user is looking at.
+  function snapToBottom(el: HTMLElement): void {
+    el.scrollTop = el.scrollHeight
+    newMessageCount = 0
+    scrollBaselineKey = lastKeyOf(entries)
+  }
+
   function onChatScroll(): void {
     const el = chatEl
     if (!el) return
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    const wasSticky = stickyBottom
     stickyBottom = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD
     if (stickyBottom) {
+      // Arriving at the bottom by scrolling is seeing everything.
       newMessageCount = 0
       scrollBaselineKey = lastKeyOf(entries)
-    } else if (wasSticky && !stickyBottom) {
-      scrollBaselineKey = lastKeyOf(entries)
-      newMessageCount = 0
     }
+    // Detaching is deliberately a no-op here: the baseline and count
+    // already hold whatever arrived unseen (through the grace), and
+    // resetting them is exactly the undercount this must not do.
   }
 
   function jumpToPresent(): void {
     if (chatEl) {
-      chatEl.scrollTop = chatEl.scrollHeight
+      snapToBottom(chatEl)
       stickyBottom = true
-      newMessageCount = 0
-      scrollBaselineKey = lastKeyOf(entries)
     }
   }
 
@@ -184,8 +197,7 @@
     void tick().then(() => {
       if (!chatEl) return
       if (stickyBottom && performance.now() >= userScrollUntil) {
-        chatEl.scrollTop = chatEl.scrollHeight
-        scrollBaselineKey = lastKeyOf(entries)
+        snapToBottom(chatEl)
       } else {
         const added = newChatEntryCount(entries, scrollBaselineKey)
         if (added > 0) newMessageCount += added
@@ -203,7 +215,7 @@
     if (!el || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => {
       if (stickyBottom && performance.now() >= userScrollUntil) {
-        el.scrollTop = el.scrollHeight
+        snapToBottom(el)
       }
     })
     ro.observe(el)
