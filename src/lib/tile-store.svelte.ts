@@ -115,6 +115,25 @@ export function tileAudible(isAuthority: boolean, manualUnmute: boolean, globalM
 }
 
 /**
+ * Whether a native tile's REPORTED mute state is the app's own echo rather
+ * than a user action on the OSC. The audio-authority effect writes mpv's
+ * mute property on every authority/global-mute change, and that write
+ * reports back through 'volumechange'; treating the report as user intent
+ * wiped a listen-along tile's manual unmute the moment the global mute
+ * toggled (pressing M twice silenced the tile for good — only the
+ * authority ever came back). A report that MATCHES the model's expected
+ * mute state is that echo; only a mismatch is a real interaction.
+ */
+export function isTileMuteEcho(
+  isAuthority: boolean,
+  manualUnmute: boolean,
+  globalMuted: boolean,
+  reportedMuted: boolean,
+): boolean {
+  return reportedMuted === !tileAudible(isAuthority, manualUnmute, globalMuted)
+}
+
+/**
  * Decision for a tile's mute-button click, derived from the tile's EFFECTIVE
  * audibility (tileAudible), never from the raw `manualUnmute` flag.
  *

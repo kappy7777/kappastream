@@ -747,3 +747,35 @@ describe('nextTileRetryDelayMs — bounded doubling backoff', () => {
     expect(S.nextTileRetryDelayMs(50)).toBe(S.TILE_RETRY_MAX_MS)
   })
 })
+
+// ---- native mute-report echo detection --------------------------------------
+// The OSC-sync bug: the audio-authority effect writes mpv's mute property on
+// every authority/global-mute change and that write reports back through
+// 'volumechange'; treating the report as user intent wiped a listen-along
+// tile's manual unmute the moment the global mute toggled (only the authority
+// ever came back — pressing M twice permanently silenced the tile).
+describe('isTileMuteEcho — app-caused mute reports absorb, user flips act', () => {
+  it('THE REPORTED BUG: the forced mute under a global mute is an echo', () => {
+    // Non-authority listen-along tile (manualUnmute) + global mute on: the
+    // model expects muted, so the mute report the app itself caused must be
+    // an echo — the manual unmute survives the M toggle.
+    expect(S.isTileMuteEcho(false, true, true, true)).toBe(true)
+    // And the forced UNmute report when the global mute clears (M again).
+    expect(S.isTileMuteEcho(false, true, false, false)).toBe(true)
+  })
+
+  it('a report that DISAGREES with the model is a real user action', () => {
+    // User mutes an audible listen-along tile from the OSC.
+    expect(S.isTileMuteEcho(false, true, false, true)).toBe(false)
+    // User unmutes a muted tile from the OSC (incl. under a global mute,
+    // which the explicit-unmute rule then clears).
+    expect(S.isTileMuteEcho(false, false, false, false)).toBe(false)
+    expect(S.isTileMuteEcho(false, false, true, false)).toBe(false)
+  })
+
+  it('authority-tile reports follow the same rule (expected = global mute)', () => {
+    expect(S.isTileMuteEcho(true, false, false, false)).toBe(true)
+    expect(S.isTileMuteEcho(true, false, true, true)).toBe(true)
+    expect(S.isTileMuteEcho(true, false, false, true)).toBe(false)
+  })
+})

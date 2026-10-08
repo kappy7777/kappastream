@@ -55,6 +55,7 @@
     tileStore,
     tileAudible,
     tileControlsIdle,
+    isTileMuteEcho,
     nextTileRetryDelayMs,
     planTileMuteToggle,
     planTileVolumeInput,
@@ -313,7 +314,11 @@
   // without it the audio effect re-mutes the tile immediately and the click
   // "sometimes does nothing" depending on the mute state. Echoes absorb:
   // the audio effect writes the same values back, mpv reports them, and the
-  // equality checks turn the second write into a no-op.
+  // equality checks turn the second write into a no-op. A mute report that
+  // MATCHES the model's expected state is such an echo (isTileMuteEcho) —
+  // the app-caused forced mute used to land here as a fake "user muted this
+  // tile", wiping a listen-along tile's manual unmute on every global-mute
+  // toggle.
   $effect(() => {
     const b = mpvBackend
     if (!b || !nativeActive) return
@@ -324,6 +329,7 @@
         return
       }
       if (tile.volume !== b.volume) tileStore.setTileVolume(tile.id, b.volume)
+      if (isTileMuteEcho(isAuthority, tile.manualUnmute, settings.muted, b.muted)) return
       const unmuted = !b.muted
       if (unmuted) {
         if (!tile.manualUnmute) tileStore.setManualUnmute(tile.id, true)
