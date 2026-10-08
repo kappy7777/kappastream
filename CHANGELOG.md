@@ -78,6 +78,12 @@ Ubuntu 22.04, RHEL 9 — can no longer run either.
   "Watch streaks" toggle under Settings → Chat (on by default, like
   every notice group).
 
+- **The Windows installer bundles streamlink.** A portable streamlink
+  ships inside the installer and kappastream prefers it over anything
+  on `PATH`, so stream resolution works out of the box — installing
+  streamlink separately on Windows is no longer necessary. Set
+  `STREAMLINK_BIN` to point at a different copy.
+
 ### Changed
 
 - **Redesigned Settings.** The panel is organized into titled sections

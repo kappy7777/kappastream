@@ -47,6 +47,7 @@ export const RELEASE_NOTES: Record<string, VersionNotes> = {
       '🪞 In mpv mode, page UI over the video (tooltips, banners, toasts) is snapshot-composited — it can appear a beat late and move less fluidly than in hls.js mode. That trade-off is why hls.js stays the default.',
       "🎚️ Quality menus list the variants the channel actually offers, intermediate rungs like 936p60 included (audio-only isn't offered in mpv mode).",
       '🔥 Watch-streak notices ("watched N streams in a row") in chat, with their own "Watch streaks" toggle in Settings → Chat.',
+      '🧰 The Windows installer bundles streamlink — streams resolve out of the box, nothing to install separately.',
     ],
     changed: [
       '⚙️ Settings, redesigned: titled sections, a draggable UI-scale line (0.5×–4×) with keyboard access, an even language grid — and the changelog now lives there instead of in the About dialog.',
