@@ -984,6 +984,32 @@ fn record_overlay(id: u32, overlay_id: u8, entry: (u64, u64, i32, i32, u32, u32)
     }
 }
 
+/// Fallback overlay-size cap for the window before the first presented
+/// frame establishes the osd pair (and after idle clears it): generous
+/// beyond any real display, while bounding a hostile request's resample
+/// allocation to something the process survives.
+const OVERLAY_MAX_DIM_FALLBACK: i64 = 8192;
+
+/// Clamp untrusted overlay dimensions to the render size. Dims arrive as
+/// script-message arguments (frontend-fed IPC), and the issue path
+/// allocates w*h*4 bytes before mpv validates anything — without a cap a
+/// single crafted call requests a ~14 GB resample and aborts the process.
+/// Nothing legit renders larger than the video, so the observed osd size is
+/// the honest ceiling per axis.
+fn clamp_overlay_dims(osd: (i64, i64), w: i64, h: i64) -> (u32, u32) {
+    let cap = |v: i64, known: i64| {
+        v.clamp(
+            1,
+            if known > 0 {
+                known
+            } else {
+                OVERLAY_MAX_DIM_FALLBACK
+            },
+        )
+    };
+    (cap(w, osd.0) as u32, cap(h, osd.1) as u32)
+}
+
 /// Dedupe + source lookup for one overlay (re)issuance. Ok(None) = nothing
 /// to do (the OSD's 16 Hz render tick sent identical geometry); Err = the
 /// bitmap is not decoded yet.
@@ -1032,18 +1058,21 @@ impl Engine {
                 .ok_or_else(|| format!("bad ks-overlay arg {i}: {p:?}"))
         };
         match (p.first().copied(), p.get(1).copied()) {
-            (Some("thumb"), Some("show")) => self.prepare_thumb(
-                geti(2)? as i32,
-                geti(3)? as i32,
-                geti(4)?.max(1) as u32,
-                geti(5)?.max(1) as u32,
-                geti(6)?.max(0) as u32,
-                geti(7)?.max(0) as u32,
-            ),
+            (Some("thumb"), Some("show")) => {
+                let dims = clamp_overlay_dims(self.osd, geti(4)?, geti(5)?);
+                self.prepare_thumb(
+                    geti(2)? as i32,
+                    geti(3)? as i32,
+                    dims.0,
+                    dims.1,
+                    geti(6)?.max(0) as u32,
+                    geti(7)?.max(0) as u32,
+                )
+            }
             (Some("thumb"), Some("hide")) => self.prepare_hide(OVERLAY_THUMB),
             (Some("page"), Some("show")) => {
                 let pos = (geti(2)? as i32, geti(3)? as i32);
-                let dims = (geti(4)?.max(1) as u32, geti(5)?.max(1) as u32);
+                let dims = clamp_overlay_dims(self.osd, geti(4)?, geti(5)?);
                 self.page_geo = Some((pos, dims));
                 match prepare_overlay_issue(
                     &self.overlays,
@@ -1068,7 +1097,7 @@ impl Engine {
             }
             (Some("infoblock"), Some("show")) => {
                 let pos = (geti(2)? as i32, geti(3)? as i32);
-                let dims = (geti(4)?.max(1) as u32, geti(5)?.max(1) as u32);
+                let dims = clamp_overlay_dims(self.osd, geti(4)?, geti(5)?);
                 prepare_overlay_issue(
                     &self.overlays,
                     &self.bitmaps,
@@ -1211,12 +1240,20 @@ fn b64_decode(s: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Nearest-neighbor BGRA resample — display-size targets change with the
-/// window, and this never touches more than a ~1 MP source.
+/// window, and this never touches more than a ~1 MP source. The size math
+/// is checked: an oversized (hostile) target yields an empty bitmap for mpv
+/// to reject instead of an arithmetic overflow.
 fn resample_bgra(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
     if sw == 0 || sh == 0 || dw == 0 || dh == 0 {
         return Vec::new();
     }
-    let mut out = vec![0u8; dw as usize * dh as usize * 4];
+    let Some(total) = (dw as usize)
+        .checked_mul(dh as usize)
+        .and_then(|px| px.checked_mul(4))
+    else {
+        return Vec::new();
+    };
+    let mut out = vec![0u8; total];
     for dy in 0..dh {
         let sy = u64::from(dy) * u64::from(sh) / u64::from(dh);
         for dx in 0..dw {
@@ -1964,6 +2001,40 @@ mod tests {
         // Genuinely nothing to hit-test (fresh engine, never rendered).
         assert_eq!(resolve_osd_dims((0, 0), Ok((0, 0))), None);
         assert_eq!(resolve_osd_dims((0, 0), Err("unavailable".into())), None);
+    }
+
+    #[test]
+    fn overlay_dims_clamp_to_the_render_size() {
+        // Known osd pair: each axis caps at the display size — nothing
+        // legit renders larger than the video, and the resample allocates
+        // w*h*4 bytes before mpv validates anything.
+        assert_eq!(clamp_overlay_dims((1920, 1080), 4000, 2000), (1920, 1080));
+        assert_eq!(clamp_overlay_dims((1920, 1080), 640, 360), (640, 360));
+        // Zero, negative and i64-extreme requests all land inside [1, cap].
+        assert_eq!(clamp_overlay_dims((1920, 1080), 0, -5), (1, 1));
+        assert_eq!(
+            clamp_overlay_dims((1920, 1080), i64::MAX, i64::MAX),
+            (1920, 1080)
+        );
+    }
+
+    #[test]
+    fn overlay_dims_use_the_fallback_cap_before_the_osd_is_known() {
+        // Fresh engine / after idle the osd pair is 0x0: the fixed
+        // fallback bounds the request instead (a hostile 60000x60000 ask
+        // would otherwise allocate ~14 GB).
+        assert_eq!(clamp_overlay_dims((0, 0), 60000, 60000), (8192, 8192));
+        assert_eq!(clamp_overlay_dims((0, 0), i64::MAX, 2), (8192, 2));
+    }
+
+    #[test]
+    fn resample_returns_empty_for_unrepresentable_targets() {
+        let src = vec![0u8; 4 * 4 * 4];
+        // w*h*4 overflows usize for extreme targets — an empty bitmap mpv
+        // rejects, not an arithmetic overflow that kills the process.
+        assert!(resample_bgra(&src, 4, 4, u32::MAX, u32::MAX).is_empty());
+        // A sane downscale still produces exactly w*h*4 bytes.
+        assert_eq!(resample_bgra(&src, 4, 4, 2, 2).len(), 2 * 2 * 4);
     }
 
     #[test]
