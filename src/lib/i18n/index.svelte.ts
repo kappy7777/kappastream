@@ -109,9 +109,12 @@ export function t(key: TKey, params?: Record<string, string | number>): string {
   const localized = CATALOGUES[currentLocale]?.[key]
   let str = localized || en[key] || key
   if (params) {
-    for (const name of Object.keys(params)) {
-      str = str.replaceAll(`{${name}}`, String(params[name]))
-    }
+    // One pass with a replacer FUNCTION. A replacement STRING would have
+    // its $-patterns ($$, $&, $`, $') expanded by replaceAll — and
+    // parameter values are user-controlled text (chat previews in mention
+    // notifications, imported theme names), so "you owe me $$5" rendered
+    // as "$5" and "$&" as the matched placeholder.
+    str = str.replace(/\{([a-zA-Z0-9_]+)\}/g, (brace, name: string) => (name in params ? String(params[name]) : brace))
   }
   return str
 }

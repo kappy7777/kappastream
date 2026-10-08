@@ -62,6 +62,20 @@ describe('t()', () => {
     expect(t('sidebar_favoritesLimit', { n: 1000 })).toBe('Favorites are limited to 1000')
   })
 
+  it('substitutes values verbatim, never expanding $-patterns in them', async () => {
+    // A replacement STRING is itself pattern-expanded by replaceAll: "$$"
+    // becomes "$", "$&" the matched placeholder, "$`"/"$'" the surrounding
+    // text. Parameter values are user-controlled (chat previews in mention
+    // notifications, imported theme names), so they must go in literally.
+    const { t, setLocale } = await fresh()
+    setLocale('en')
+    expect(t('update_available', { version: '$$5' })).toBe('kappastream v$$5 is available')
+    expect(t('notif_mentionedBody', { user: '$&', preview: 'you owe me $$5' })).toBe('$&: you owe me $$5')
+    expect(t('toast_willNotify', { channel: "$`$'" })).toBe("Will notify when $`$' goes live.")
+    // A placeholder with no matching param stays literal, as before.
+    expect(t('notif_mentionedBody', { user: 'chan1' })).toBe('chan1: {preview}')
+  })
+
   it('switching the locale changes the output live', async () => {
     const { t, setLocale } = await fresh()
     setLocale('en')
