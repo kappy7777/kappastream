@@ -237,6 +237,64 @@ describe('pip-controller: clearStream + close lifecycle', () => {
   })
 })
 
+describe('pip-controller: VOD resume handoff', () => {
+  it('setStream passes a VOD startAt through; absent stays absent', async () => {
+    P.pipController.setStream({ url: 'https://x/1.m3u8', channel: 'chan1', quality: 'best' })
+    await P.pipController.toggle()
+    P.pipController.setStream({ url: 'https://x/2.m3u8', channel: 'chan1', quality: 'best' })
+    P.pipController.setStream({ url: 'https://x/3.m3u8', channel: 'chan1', quality: 'best', startAt: 42 })
+    expect(payloadsOf(EV_STREAM)).toEqual([
+      { url: 'https://x/2.m3u8', mediaKind: 'hls', isLive: false },
+      { url: 'https://x/3.m3u8', mediaKind: 'hls', isLive: false, startAt: 42 },
+    ])
+  })
+
+  it('a live stream never carries a startAt, even if one is set', async () => {
+    P.pipController.setStream({ url: 'https://x/live.m3u8', channel: 'chan1', quality: 'best' })
+    await P.pipController.toggle()
+    P.pipController.setStream({
+      url: 'https://x/live.m3u8',
+      channel: 'chan1',
+      quality: 'best',
+      isLive: true,
+      startAt: 42,
+    })
+    expect(payloadsOf(EV_STREAM)).toEqual([{ url: 'https://x/live.m3u8', mediaKind: 'hls', isLive: true }])
+  })
+
+  it('updatePosition refreshes the stored startAt for the init handshake', () => {
+    // The position as PiP takes over a VOD mid-playback must reach the
+    // floating window through ks://pip-init — that is the whole handoff.
+    P.pipController.setStream({ url: 'https://x/v.m3u8', channel: 'chan1', quality: 'best', startAt: 5 })
+    P.pipController.updatePosition(1234.5)
+    deliver(EV_READY)
+    const p = payloadsOf(EV_INIT)[0] as Record<string, unknown>
+    expect(p.startAt).toBe(1234.5)
+  })
+
+  it('updatePosition is a no-op for live streams and without a stored stream', () => {
+    P.pipController.setStream({ url: 'https://x/live.m3u8', channel: 'chan1', quality: 'best', isLive: true })
+    P.pipController.updatePosition(99)
+    deliver(EV_READY)
+    const p = payloadsOf(EV_INIT)[0] as Record<string, unknown>
+    expect(p.startAt).toBeUndefined()
+  })
+
+  it('ks://pip-closed carries the media position into closedMedia (non-live only)', async () => {
+    P.pipController.setStream({ url: 'https://x/v.m3u8', channel: 'chan1', quality: 'best' })
+    await P.pipController.toggle()
+    deliver(EV_CLOSED, { position: 321, duration: 3600, isLive: false })
+    expect(P.pipController.closedMedia).toEqual({ position: 321, duration: 3600 })
+
+    // A live close reports no resumable position (a live playhead is not a
+    // checkpoint) — the stale VOD value must not survive it.
+    P.pipController.setStream({ url: 'https://x/live.m3u8', channel: 'chan1', quality: 'best', isLive: true })
+    await P.pipController.toggle()
+    deliver(EV_CLOSED, { position: 500, isLive: true })
+    expect(P.pipController.closedMedia).toBeNull()
+  })
+})
+
 describe('pip-controller: hung-window close fallback', () => {
   it('destroys the orphan window when ks://pip-closed never arrives', async () => {
     P.pipController.setStream({ url: 'https://x/1.m3u8', channel: 'chan1', quality: 'best' })

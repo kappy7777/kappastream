@@ -1,15 +1,16 @@
 // Pins the idle overlay's Resume button during VOD/clip playback. The
-// overlay appears in VOD/clip mode after "Play in mpv" or a sleep-timer
-// stop (both keep `playback` in its VOD/clip kind while the player goes
-// idle). Resume used to call loadStream unconditionally, so the LIVE
-// stream played under the still-VOD UI (badge, title, scrubber) and the
-// timeupdate handler kept saving the live playhead under the VOD id,
-// overwriting its saved resume position. Resume now replays what was
-// interrupted: playVod/playClip, live only for live.
+// overlay appears in VOD/clip mode after a sleep-timer stop (which keeps
+// `playback` in its VOD/clip kind while the player goes idle). Resume used
+// to call loadStream unconditionally, so the LIVE stream played under the
+// still-VOD UI (badge, title, scrubber) and the timeupdate handler kept
+// saving the live playhead under the VOD id, overwriting its saved resume
+// position. Resume now replays what was interrupted: playVod/playClip, live
+// only for live.
 //
-// Also pins the PiP control's live-only gating in the same mounted
-// scenario: the floating PiP window receives a bare URL with no position
-// handoff, so the control must stay hidden while a VOD/clip plays.
+// Also pins the two control postures around VOD/clip playback: PiP takes a
+// VOD over with a position handoff (main stops; the floating window's last
+// position on close becomes the checkpoint main resumes from), and the
+// external-mpv handoff button is live-only.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount, unmount } from 'svelte'
 
@@ -186,6 +187,10 @@ localStorage.setItem('twitch-favorites-v1', JSON.stringify([{ name: 'chan2', add
 const App = (await import('../App.svelte')).default
 const { settings } = await import('./settings.svelte.ts')
 const { t } = await import('./i18n/index.svelte')
+const { sleepTimer } = await import('./sleep-timer.svelte.ts')
+const { pipController } = await import('./pip-controller.svelte.ts')
+const { STORAGE_KEYS } = await import('./storage-keys')
+const { vodPositions } = await import('./vod-positions.svelte.ts')
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -221,10 +226,16 @@ function pipButton(): HTMLButtonElement | null {
   return document.querySelector<HTMLButtonElement>(`button[aria-label="${t('pc_pip')}"]`)
 }
 
-function mpvButton(): HTMLButtonElement {
-  const el = document.querySelector<HTMLButtonElement>(`button[aria-label="${t('pc_mpv')}"]`)
-  if (!el) throw new Error('missing mpv handoff button')
-  return el
+function mpvButton(): HTMLButtonElement | null {
+  return document.querySelector<HTMLButtonElement>(`button[aria-label="${t('pc_mpv')}"]`)
+}
+
+/** Stop playback the way the sleep timer does on a VOD/clip (minutes=0 fires
+ *  on the next macrotask): the ONLY remaining path that leaves the idle
+ *  overlay + Resume button under the still-VOD/clip UI. */
+async function fireSleepTimer(kind: 'vod' | 'clip'): Promise<void> {
+  sleepTimer.arm({ channel: 'chan2', playbackKind: kind }, 0)
+  await sleep(120)
 }
 
 async function mountApp(): Promise<ReturnType<typeof mount>> {
@@ -247,6 +258,9 @@ afterEach(() => {
   if (view) void unmount(view)
   view = null
   settings.setMpvEngine(false)
+  sleepTimer.cancel()
+  pipController.isOpen = false
+  pipController.closedMedia = null
   localStorage.clear()
   localStorage.setItem('twitch-favorites-v1', JSON.stringify([{ name: 'chan2', addedAt: 1, order: 1 }]))
   hlsMock.instances.length = 0
@@ -259,8 +273,9 @@ describe('idle overlay Resume during VOD playback', () => {
   it('replays the VOD instead of loading the live stream', async () => {
     view = await mountApp()
     expect(calls.resolveStream).toBe(1)
-    // Live playing: the PiP control is offered.
+    // Live playing: both floating-window controls are offered.
     expect(pipButton()).toBeTruthy()
+    expect(mpvButton()).toBeTruthy()
 
     // Open the channel's VOD.
     ;(await cardByTitle('Some VOD')).click()
@@ -268,15 +283,14 @@ describe('idle overlay Resume during VOD playback', () => {
     emitManifestParsed()
     await sleep(120)
     expect(calls.resolveVod).toBe(1)
-    // THE PiP PIN: controls are visible over the playing VOD, but the PiP
-    // button must not be among them (live-only control).
-    expect(pipButton()).toBeNull()
-    expect(mpvButton()).toBeTruthy()
+    // THE CONTROL PINS: PiP is offered during a VOD (position handoff); the
+    // external-mpv handoff is live-only and must be gone.
+    expect(pipButton()).toBeTruthy()
+    expect(mpvButton()).toBeNull()
 
-    // "Play in mpv" hands the VOD off and stops the in-app player — the
-    // idle overlay (with Resume) appears while the UI stays in VOD mode.
-    mpvButton().click()
-    await sleep(150)
+    // The sleep timer stops the VOD — the idle overlay (with Resume)
+    // appears while the UI stays in VOD mode.
+    await fireSleepTimer('vod')
     expect(document.querySelector('.overlay-action')).toBeTruthy()
 
     // THE RESUME PIN: Replay must re-resolve the VOD, never the live stream.
@@ -292,11 +306,45 @@ describe('idle overlay Resume during VOD playback', () => {
     await sleep(300)
     expect(calls.resolveClip).toBe(1)
 
-    mpvButton().click()
-    await sleep(150)
+    await fireSleepTimer('clip')
     ;(q('.overlay-action') as HTMLButtonElement).click()
     await sleep(300)
     expect(calls.resolveClip).toBe(2)
     expect(calls.resolveStream).toBe(1)
+  }, 20000)
+})
+
+describe('PiP takeover during VOD playback (position handoff)', () => {
+  it('stops the main player and restores the VOD at the floating window position on close', async () => {
+    view = await mountApp()
+    ;(await cardByTitle('Some VOD')).click()
+    await sleep(250)
+    emitManifestParsed()
+    await sleep(120)
+    expect(calls.resolveVod).toBe(1)
+
+    // Simulate the floating window opening (the window-creation side of
+    // pipController is not under test here — only the main-player takeover).
+    pipController.isOpen = true
+    await sleep(120)
+    // Main stopped: the PiP-active overlay shows, no Resume button while
+    // PiP owns the player.
+    expect(q('.overlay-title').textContent).toBe(t('player_pipActive'))
+    expect(document.querySelector('.overlay-action')).toBeNull()
+    expect(calls.resolveVod).toBe(1)
+
+    // Simulate the window closing with its last reported position.
+    pipController.closedMedia = { position: 123, duration: 3600 }
+    pipController.isOpen = false
+    await sleep(400)
+    // THE HANDOFF PIN: the VOD is re-resolved (not live) and the floating
+    // window's position landed as the resume checkpoint.
+    expect(calls.resolveVod).toBe(2)
+    expect(calls.resolveStream).toBe(1)
+    const saved = vodPositions.get('v1')
+    expect(saved?.position).toBe(123)
+    expect(saved?.duration).toBe(3600)
+    // The checkpoint is live in storage too (resume survives a restart).
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.vodPositions) ?? '{}')).toHaveProperty('v1')
   }, 20000)
 })

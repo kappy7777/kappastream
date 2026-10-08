@@ -593,13 +593,7 @@
         {/if}
       </div>
 
-      {#if pipSupported && (live || pipActive)}
-        <!-- PiP is live-only: the floating window receives a bare URL with no
-             position handoff, so a VOD/clip handed to it would restart at
-             0:00 while the main copy kept playing. The control hides during
-             VOD/clip playback — EXCEPT while PiP already holds the live
-             stream (the main player may have moved on to a VOD in the
-             meantime), where the button must stay available to exit. -->
+      {#if pipSupported}
         <button
           type="button"
           class="ctrl-btn"
@@ -618,14 +612,20 @@
         </button>
       {/if}
 
-      <button type="button" class="ctrl-btn" onclick={onmpv} aria-label={t('pc_mpv')} use:tooltip={t('pc_mpv')}>
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path
-            d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h6v2h6v-2h6c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM10 15l7-4-7-4z"
-            fill="currentColor"
-          />
-        </svg>
-      </button>
+      <!-- External-player handoff is live-only: the mpv button hides during
+           VOD/clip playback (the launch_player path covers live streams;
+           floating-window playback of VODs/clips is PiP's job, position
+           handoff included). -->
+      {#if live}
+        <button type="button" class="ctrl-btn" onclick={onmpv} aria-label={t('pc_mpv')} use:tooltip={t('pc_mpv')}>
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h6v2h6v-2h6c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM10 15l7-4-7-4z"
+              fill="currentColor"
+            />
+          </svg>
+        </button>
+      {/if}
 
       <button
         type="button"

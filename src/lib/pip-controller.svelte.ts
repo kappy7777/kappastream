@@ -11,17 +11,19 @@ import { STORAGE_KEYS } from './storage-keys'
 // while open and the main video is force-muted (without persisting that mute).
 //
 // Everything is coordinated over Tauri global events:
-//   main -> pip   ks://pip-init       { url, channel, quality, volume, muted, mediaKind?, isLive? }
-//   main -> pip   ks://pip-stream     { url, mediaKind?, isLive? }    (channel/quality change)
+//   main -> pip   ks://pip-init       { url, channel, quality, volume, muted, mediaKind?, isLive?, startAt? }
+//   main -> pip   ks://pip-stream     { url, mediaKind?, isLive?, startAt? }    (channel/quality change)
 //   main -> pip   ks://pip-do-close                        (main requests close)
 //   pip  -> main  ks://pip-ready                           (pip listening, wants init)
 //   pip  -> main  ks://pip-volume     { volume, muted }    (pip is audio authority)
-//   pip  -> main  ks://pip-closed     { rect? }            (pip window closed)
+//   pip  -> main  ks://pip-closed     { rect?, position?, duration?, isLive? }  (pip window closed)
 //
 // `isLive` (absent = false) gates the PiP stall recovery: a live edge snap
 // must never force-seek a paused VOD (its seekable end is the END of the
 // video). The main window derives it from its playback kind at every
-// setStream call site.
+// setStream call site. `startAt` / the closed position report are the VOD
+// resume handoff: PiP continues where the main player was, and the main
+// player resumes where PiP left off.
 
 const PIP_LABEL = 'pip'
 
@@ -46,6 +48,10 @@ interface StreamInfo {
   mediaKind?: 'hls' | 'mp4'
   /** Whether the URL is a LIVE stream (gates PiP stall recovery). Absent = false. */
   isLive?: boolean
+  /** VOD position (seconds) the floating window should start at — the resume
+   *  half of the PiP position handoff. Absent or <= 0.5 = play from the
+   *  start; live streams never carry one. */
+  startAt?: number
 }
 
 function readRect(): PipRect | null {
@@ -75,6 +81,18 @@ function writeRect(rect: PipRect): void {
   }
 }
 
+/** The startAt payload field only when it carries a real position — payloads
+ *  (and the tests pinning their exact shape) stay identical when no resume
+ *  applies, and a live stream can never grow one. */
+function startAtProp(info: StreamInfo): { startAt?: number } {
+  return info.isLive === true ||
+    typeof info.startAt !== 'number' ||
+    !Number.isFinite(info.startAt) ||
+    info.startAt <= 0.5
+    ? {}
+    : { startAt: info.startAt }
+}
+
 class PipController {
   /** Reactive: true while the PiP window is open. */
   isOpen = $state(false)
@@ -83,6 +101,14 @@ class PipController {
    * to be muted. PlayerControls reads this to skip persisting the forced mute.
    */
   overridingMainMute = $state(false)
+  /**
+   * The floating window's last reported media position on close — the
+   * main-player resume half of the VOD handoff, set from ks://pip-closed
+   * right before isOpen flips false. Null when the window played live (or
+   * reported nothing): there is no meaningful position to resume to. App
+   * consumes it when restoring the stopped main player.
+   */
+  closedMedia: { position: number; duration: number } | null = null
 
   private videoEl: HTMLVideoElement | null = null
   private currentStream: StreamInfo | null = null
@@ -107,8 +133,16 @@ class PipController {
     }).then((u) => {
       this.unlistenVolume = u
     })
-    void listen<{ rect?: PipRect }>(EV_CLOSED, (e) => {
+    void listen<{ rect?: PipRect; position?: number; duration?: number; isLive?: boolean }>(EV_CLOSED, (e) => {
       if (e.payload?.rect) writeRect(e.payload.rect)
+      const p = e.payload
+      this.closedMedia =
+        p && typeof p.position === 'number' && Number.isFinite(p.position) && p.isLive !== true
+          ? {
+              position: p.position,
+              duration: typeof p.duration === 'number' && Number.isFinite(p.duration) ? p.duration : 0,
+            }
+          : null
       void this.onPipClosed()
     }).then((u) => {
       this.unlistenClosed = u
@@ -125,7 +159,21 @@ class PipController {
     this.currentStream = info
     if (!this.isOpen) return
     if (!isTauri()) return
-    void emit(EV_STREAM, { url: info.url, mediaKind: info.mediaKind ?? 'hls', isLive: info.isLive === true })
+    void emit(EV_STREAM, {
+      url: info.url,
+      mediaKind: info.mediaKind ?? 'hls',
+      isLive: info.isLive === true,
+      ...startAtProp(info),
+    })
+  }
+
+  /** Refresh the resume position on the stored stream as PiP takes over a
+   *  VOD/clip mid-playback: the floating window must continue at the WATCHED
+   *  position, not the attach-time one the loader primed. No event — the
+   *  window is still booting and reads this through the init handshake. */
+  updatePosition(startAt: number): void {
+    if (!this.currentStream || this.currentStream.isLive === true) return
+    this.currentStream = { ...this.currentStream, startAt }
   }
 
   /** Called when the stream tears down (channel change, stop). Closes PiP. */
@@ -185,6 +233,7 @@ class PipController {
       quality: this.currentStream.quality,
       mediaKind: this.currentStream.mediaKind ?? 'hls',
       isLive: this.currentStream.isLive === true,
+      ...startAtProp(this.currentStream),
       volume: settings.volume,
       muted: false,
     })

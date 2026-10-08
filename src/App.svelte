@@ -669,26 +669,45 @@
   // distinguishes a PiP-driven stop (auto-resumed) from a deliberate Stop-button
   // press (stays stopped until the user hits Resume).
   let mainStoppedForPip = false
-  // PiP is live-only END TO END, not just in this takeover: the floating
-  // window receives a bare URL with no position handoff, so a VOD/clip
-  // handed to it would restart at 0:00 while the main copy kept playing.
-  // The control is hidden during VOD/clip playback and the VOD/clip loaders
-  // never feed their URLs to the controller — only live attaches do.
+  // PiP is the player while it is open, for live AND VOD/clip alike: the main
+  // copy stops (freeing its segment fetches +, on the native engine, hiding
+  // the surface — no half-alive blank hole) and resumes when PiP closes. The
+  // handoff carries the position BOTH ways: the floating window continues a
+  // VOD/clip at the watched position (updatePosition below), and its last
+  // position on close becomes the checkpoint the main player resumes from.
+  // The stop is idempotent through mainStoppedForPip rather than keyed to the
+  // isOpen transition: a VOD opened in the main window while PiP already
+  // holds the LIVE stream (PiP owned the player since before the load) must
+  // keep playing in main, not be stopped the moment it reaches 'playing'.
   $effect(() => {
     const pipOpen = pipController.isOpen
-    if (playback.kind !== 'live') return
     if (pipOpen) {
-      if (channelJoined && (playerStatus === 'playing' || playerStatus === 'paused')) {
-        disconnectStream(true)
-        mainStoppedForPip = true
+      if (mainStoppedForPip) return
+      if (playerStatus !== 'playing' && playerStatus !== 'paused') return
+      if (playback.kind === 'live' && !channelJoined) return
+      if (playback.kind !== 'live' && lastVideoPosition > 0.5) {
+        // lastVideoPosition, not a live backend read: on the native engine
+        // the backend disposal runs EARLIER in this same flush (PiP
+        // unselects mpv), and the inert <video> would report 0.
+        pipController.updatePosition(lastVideoPosition)
       }
-    } else if (mainStoppedForPip) {
-      mainStoppedForPip = false
-      // channelJoined only — the chat socket's state must not gate the
-      // player's recovery (an IRC outage while PiP is open would otherwise
-      // strand the main player stopped).
-      if (channelJoined) void loadStream(channelJoined, quality)
+      disconnectStream(true)
+      mainStoppedForPip = true
+      return
     }
+    if (!mainStoppedForPip) return
+    mainStoppedForPip = false
+    // Restore only a main player actually sitting stopped from the takeover
+    // (see above — the VOD-opened-while-PiP-held-live case keeps playing).
+    if (playerStatus !== 'idle') return
+    const closed = pipController.closedMedia
+    if (playback.kind === 'vod' && closed && closed.position >= 1) {
+      // Land the floating window's last position as the checkpoint the
+      // restore replays from (mpv's start option / vodCtl.restore both read
+      // it, and the replayed chat aligns to it too).
+      vodPositions.save(playback.id, closed.position, closed.duration)
+    }
+    if (channelJoined) resumeStream()
   })
 
   function resumeStream(): void {
@@ -937,15 +956,24 @@
   let lastPlayedClip: ChannelClip | null = null
   let lastPlayedVideo: ChannelVideo | null = null
   let prevMpvSelected: boolean | null = null
+  let prevPipOpen: boolean | null = null
   $effect(() => {
     const selected = mpvSelected
+    const pipOpen = pipController.isOpen
+    // A selection flip CAUSED by PiP opening/closing belongs to the PiP
+    // takeover effect: on close it restores the item itself (landing the
+    // floating window's position first), and a re-home here would race it
+    // with a second, position-less load that also overwrites the
+    // just-saved checkpoint with the stale pre-PiP one.
+    const pipDroveIt = prevPipOpen !== null && prevPipOpen !== pipOpen
+    prevPipOpen = pipOpen
     if (prevMpvSelected === null) {
       prevMpvSelected = selected
       return
     }
     if (selected === prevMpvSelected) return
     prevMpvSelected = selected
-    if (pipController.isOpen || multiView) return
+    if (pipDroveIt || pipOpen || multiView) return
     if (playback.kind === 'vod') {
       const pos = lastVideoPosition
       if (pos > 1) vodCtl.save(playback.id, true)
@@ -1742,29 +1770,17 @@
   // lib/playback-session.svelte.ts — same class module the tiles use.)
 
   async function handoffToPlayer(): Promise<void> {
+    // Live-only by design (the control hides during VOD/clip playback): the
+    // external mpv gets the live stream; VODs and clips stay in-app, where
+    // the PiP handoff covers floating-window playback instead.
+    const channel = channelJoined
+    if (!channel) return
     try {
-      let r: { ok: boolean; error?: string | null }
-      if (playback.kind === 'vod') {
-        r = (await invoke('launch_player', {
-          vodId: playback.id,
-          quality,
-          lowLatency: settings.lowLatency,
-        })) as { ok: boolean; error?: string | null }
-      } else if (playback.kind === 'clip') {
-        r = (await invoke('launch_player', {
-          clipSlug: playback.slug,
-          quality: 'best',
-          lowLatency: settings.lowLatency,
-        })) as { ok: boolean; error?: string | null }
-      } else {
-        const channel = channelJoined
-        if (!channel) return
-        r = (await invoke('launch_player', {
-          channel,
-          quality,
-          lowLatency: settings.lowLatency,
-        })) as { ok: boolean; error?: string | null }
-      }
+      const r = (await invoke('launch_player', {
+        channel,
+        quality,
+        lowLatency: settings.lowLatency,
+      })) as { ok: boolean; error?: string | null }
       if (r.ok) {
         // mpv is now the sole player; stop the in-app stream (HLS + video) to
         // free network/system resources. The IRC chat connection is left intact.
@@ -2303,6 +2319,18 @@
         playerStatus = 'playing'
         nativeVideoActive = true
         if (resume >= 30) vodCtl.showResumeBar(videoId, resume)
+        // Prime PiP with this VOD (resume position included) unless an OPEN
+        // PiP already owns the main player — pushing then would restart the
+        // floating window (which is holding live) at the VOD while main
+        // keeps it too.
+        if (channelJoined && (!pipController.isOpen || !mainStoppedForPip))
+          pipController.setStream({
+            url: toKsvodProxyUrl(raw.url, isWindows),
+            channel: channelJoined,
+            quality: q,
+            isLive: false,
+            startAt: resume,
+          })
         return true
       }
       showNotifToast(t('toast_mpvEngineFailed', { error: attach.error }))
@@ -2318,6 +2346,18 @@
     if (token !== loadToken) return false
     if (attach.ok) {
       playerStatus = 'playing'
+      // Prime PiP with this VOD — same ownership gate as the native branch
+      // above (an open PiP that already owns the main player keeps live).
+      if (channelJoined && (!pipController.isOpen || !mainStoppedForPip)) {
+        const pipStart = startAt ?? vodPositions.get(videoId)?.position ?? 0
+        pipController.setStream({
+          url: proxyUrl,
+          channel: channelJoined,
+          quality: q,
+          isLive: false,
+          startAt: pipStart > 0.5 ? pipStart : undefined,
+        })
+      }
       vodCtl.restore(videoId)
       return true
     }
@@ -2416,6 +2456,17 @@
       if (attach.ok) {
         playerStatus = 'playing'
         nativeVideoActive = true
+        // Prime PiP with the clip (same ownership gate as loadVod's
+        // branches); isLive is a literal false by necessity — playClip
+        // flow-narrows `playback` to the clip variant.
+        if (channelJoined && (!pipController.isOpen || !mainStoppedForPip))
+          pipController.setStream({
+            url: raw.url,
+            channel: channelJoined,
+            quality: 'best',
+            mediaKind: 'mp4',
+            isLive: false,
+          })
         return
       }
       showNotifToast(t('toast_mpvEngineFailed', { error: attach.error }))
@@ -2424,6 +2475,18 @@
     if (token !== loadToken) return
     if (attach.ok) {
       playerStatus = 'playing'
+      // isLive is a literal false here by necessity: playClip flow-narrows
+      // `playback` to the clip variant, so the `playback.kind === 'live'`
+      // derivation used at the other call sites is a TS no-overlap error in
+      // this scope — the type system proves a clip is never live.
+      if (channelJoined && (!pipController.isOpen || !mainStoppedForPip))
+        pipController.setStream({
+          url: raw.url,
+          channel: channelJoined,
+          quality: 'best',
+          mediaKind: 'mp4',
+          isLive: false,
+        })
       return
     }
     playerStatus = 'error'

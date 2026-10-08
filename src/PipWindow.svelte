@@ -28,14 +28,21 @@
     muted: boolean
     mediaKind?: 'hls' | 'mp4'
     isLive?: boolean
+    startAt?: number
   }
   interface StreamPayload {
     url: string
     mediaKind?: 'hls' | 'mp4'
     isLive?: boolean
+    startAt?: number
   }
 
   let videoEl: HTMLVideoElement | undefined = $state()
+  // VOD resume handoff: where this window should start (set per loadSource),
+  // and where it actually got to (reported to main on close).
+  let pendingStart: number | null = null
+  let lastPosition = 0
+  let lastDuration = 0
   // The playback engine (hls.js attach / manifest timeout / stall recovery /
   // teardown) — the same PlaybackSession the main player and every multi-view
   // tile run on. PiP keeps only its own policy: gesture handling, aspect-lock
@@ -62,9 +69,12 @@
   let snapTimer: ReturnType<typeof setTimeout> | null = null
   let suppressSnapUntil = 0
 
-  function loadSource(url: string, mediaKind: 'hls' | 'mp4' = 'hls', live?: boolean): void {
+  function loadSource(url: string, mediaKind: 'hls' | 'mp4' = 'hls', live?: boolean, startAt?: number): void {
     if (!videoEl) return
     isLive = live === true
+    pendingStart = typeof startAt === 'number' && Number.isFinite(startAt) && startAt > 0.5 ? startAt : null
+    lastPosition = 0
+    lastDuration = 0
     // Tear down the PREVIOUS engine before anything else: the mp4 branch
     // assigns videoEl.src directly, and an hls.js instance left attached to
     // the element keeps its whole pipeline alive (segment fetches, timers,
@@ -142,6 +152,23 @@
     }
     errorMsg = t('pip_hlsNotSupported')
     loading = false
+  }
+
+  // Seek to the handed-off resume position once the seekable range covers
+  // it. Called from loadedmetadata and then from every append (progress)
+  // until it lands — an hls.js VOD's seekable window grows with the first
+  // fragments, so the metadata pass alone can be too early.
+  function applyPendingStart(): void {
+    if (pendingStart == null || isLive || !videoEl) return
+    const seekable = videoEl.seekable
+    if (seekable.length === 0 || pendingStart > seekable.end(seekable.length - 1)) return
+    const target = pendingStart
+    pendingStart = null
+    try {
+      videoEl.currentTime = target
+    } catch {
+      /* ignore — stay at the start rather than fight the element */
+    }
   }
 
   function emitVolume(): void {
@@ -245,7 +272,15 @@
       /* ignore — send closed without rect */
     }
     try {
-      await emit(EV_CLOSED, { rect })
+      // The media position/duration ride along so main can resume a VOD
+      // where this window left off (isLive lets main ignore a meaningless
+      // live playhead).
+      await emit(EV_CLOSED, {
+        rect,
+        position: lastPosition,
+        duration: lastDuration,
+        isLive,
+      })
     } catch {
       /* ignore */
     }
@@ -330,12 +365,12 @@
         videoEl.volume = volume
         videoEl.muted = muted
       }
-      loadSource(p.url, p.mediaKind ?? 'hls', p.isLive)
+      loadSource(p.url, p.mediaKind ?? 'hls', p.isLive, p.startAt)
     })
     unlisteners.push(uInit)
 
     const uStream = await listen<StreamPayload>(EV_STREAM, (e) => {
-      loadSource(e.payload.url, e.payload.mediaKind ?? 'hls', e.payload.isLive)
+      loadSource(e.payload.url, e.payload.mediaKind ?? 'hls', e.payload.isLive, e.payload.startAt)
     })
     unlisteners.push(uStream)
 
@@ -412,6 +447,14 @@
     playsinline
     data-tauri-drag-region
     onclick={gesturePlay}
+    onloadedmetadata={applyPendingStart}
+    onprogress={applyPendingStart}
+    ontimeupdate={() => {
+      if (videoEl && Number.isFinite(videoEl.currentTime)) lastPosition = videoEl.currentTime
+    }}
+    ondurationchange={() => {
+      if (videoEl && Number.isFinite(videoEl.duration)) lastDuration = videoEl.duration
+    }}
     onplay={() => {
       paused = false
       bumpControls()
