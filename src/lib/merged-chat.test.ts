@@ -172,6 +172,8 @@ describe('reconcileMergedIds — keep the group valid as tiles change', () => {
 })
 
 describe('planExtraChatAdd — the picker input decision', () => {
+  const t = (id: string, channel: string): { id: string; channel: string } => ({ id, channel })
+
   it('normalizes like the favorites add field: trim, strip #, lowercase', () => {
     expect(planExtraChatAdd('  #SomeChan ', [], [])).toEqual({ ok: true, next: ['chat:somechan'] })
   })
@@ -183,7 +185,13 @@ describe('planExtraChatAdd — the picker input decision', () => {
   })
 
   it('rejects channels that already have a tile (merge the TILE instead)', () => {
-    expect(planExtraChatAdd('chan1', ['t2'], ['chan1'])).toEqual({ ok: false, reason: 'tile-open' })
+    expect(planExtraChatAdd('chan1', ['t2'], [t('t9', 'chan1')])).toEqual({ ok: false, reason: 'tile-open' })
+  })
+
+  it("a MERGED tile's channel is already-merged, not tile-open (the checkbox is ticked)", () => {
+    // Typing a merged tile's channel used to be advised to "use its
+    // checkbox" — which it already is. The duplicate check must win.
+    expect(planExtraChatAdd('chan1', ['t9'], [t('t9', 'chan1')])).toEqual({ ok: false, reason: 'already-merged' })
   })
 
   it('rejects a channel already merged chat-only', () => {
@@ -196,7 +204,7 @@ describe('planExtraChatAdd — the picker input decision', () => {
   })
 
   it('appends the pseudo-id, preserving member order', () => {
-    expect(planExtraChatAdd('chan3', ['t1', 'chat:c2'], ['chan1'])).toEqual({
+    expect(planExtraChatAdd('chan3', ['t1', 'chat:c2'], [t('t1', 'chan1')])).toEqual({
       ok: true,
       next: ['t1', 'chat:c2', 'chat:chan3'],
     })

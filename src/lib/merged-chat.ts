@@ -186,20 +186,24 @@ export type ExtraChatAddPlan = { ok: true; next: string[] } | { ok: false; reaso
 /**
  * Decide a picker-input submission: normalize the typed name (trim / strip a
  * leading '#' / lowercase, exactly like the favorites add field), then reject
- * names that are not channel logins, channels that already have a tile
- * (merge the TILE instead — two connections to one channel would double
- * every message), channels already in the group, and submissions past the
- * group cap. Pure so the whole rejection matrix is unit-testable; the caller
- * only maps the reason to an i18n string.
+ * names that are not channel logins, channels already in the group — checked
+ * BEFORE the tile-open rejection, because typing a MERGED tile's channel
+ * must say "already in the merge", not "use its checkbox" (it IS ticked) —
+ * channels that already have a tile (merge the TILE instead — two
+ * connections to one channel would double every message), and submissions
+ * past the group cap. Pure so the whole rejection matrix is unit-testable;
+ * the caller only maps the reason to an i18n string.
  */
 export function planExtraChatAdd(
   rawName: string,
   mergedIds: string[],
-  tileChannels: ReadonlyArray<string>,
+  tiles: ReadonlyArray<{ id: string; channel: string }>,
 ): ExtraChatAddPlan {
   const channel = normalizeChannelName(rawName)
   if (!isValidChannelName(channel)) return { ok: false, reason: 'invalid' }
-  if (tileChannels.includes(channel)) return { ok: false, reason: 'tile-open' }
+  const tile = tiles.find((t) => t.channel === channel)
+  if (tile && mergedIds.includes(tile.id)) return { ok: false, reason: 'already-merged' }
+  if (tile) return { ok: false, reason: 'tile-open' }
   if (mergedIds.includes(extraChatId(channel))) return { ok: false, reason: 'already-merged' }
   if (mergedIds.length >= MAX_MERGED_SOURCES) return { ok: false, reason: 'full' }
   return { ok: true, next: [...mergedIds, extraChatId(channel)] }

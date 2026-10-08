@@ -280,19 +280,23 @@
   let mergeAddError = $state<ExtraChatAddReason | null>(null)
 
   function toggleMerged(id: string): void {
+    mergeAddError = null // any membership change retires a stale picker error
     mergedIds = toggleMergedId(mergedIds, id)
     // Forming a group jumps to the merged stream; falling below two
     // members (or un-merging entirely) drops back to the active tab.
     mergedView = mergedIds.length >= 2
   }
 
+  // Toggle the picker with a CLEAN error line: a rejection from a previous
+  // open must not sit there stale.
+  function toggleMergePicker(): void {
+    mergePickerOpen = !mergePickerOpen
+    mergeAddError = null
+  }
+
   function onMergeAdd(e: SubmitEvent): void {
     e.preventDefault()
-    const plan = planExtraChatAdd(
-      mergeAddValue,
-      mergedIds,
-      tileStore.tiles.map((tile) => tile.channel),
-    )
+    const plan = planExtraChatAdd(mergeAddValue, mergedIds, tileStore.tiles)
     if (!plan.ok) {
       mergeAddError = plan.reason
       return
@@ -946,7 +950,7 @@
               type="button"
               class="mv-merge-btn"
               class:mv-merge-btn--on={mergedIds.length >= 2}
-              onclick={() => (mergePickerOpen = !mergePickerOpen)}
+              onclick={toggleMergePicker}
               title={t('mv_mergeChats')}
               aria-label={t('mv_mergeChats')}
               aria-expanded={mergePickerOpen}
@@ -1036,6 +1040,7 @@
                     placeholder={t('mv_mergeAddPlaceholder')}
                     aria-label={t('mv_mergeAdd')}
                     bind:value={mergeAddValue}
+                    oninput={() => (mergeAddError = null)}
                     autocomplete="off"
                     spellcheck="false"
                     maxlength="32"
