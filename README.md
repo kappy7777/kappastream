@@ -98,13 +98,6 @@ chmod +x kappastream*.AppImage
 
 The AppImage is built on Ubuntu 24.04 and needs **glibc 2.39 or newer** — it will not start on older distributions such as Debian 12 or Ubuntu 22.04. Use the matching native package below for those instead.
 
-> [!NOTE]
-> **For the best experience, use a native package whenever your distribution is supported.**
->
-> The AppImage is provided as a portable fallback, but it may offer worse startup time, UI responsiveness, video performance, desktop integration, and hardware compatibility than the native AUR, DEB, or RPM packages. This is because it bundles its own WebKitGTK and GStreamer runtime while still interacting with the host system’s graphics drivers and desktop environment.
->
-> Arch Linux, Debian/Ubuntu, and Fedora users are therefore strongly encouraged to install the corresponding native package below. Use the AppImage mainly when no suitable native package is available or when you specifically need a portable build.
-
 ### 🐧 Debian and Ubuntu
 
 Download the `.deb` package from the [latest release](../../releases/latest), then install it with:
