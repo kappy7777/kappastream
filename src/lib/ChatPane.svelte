@@ -102,18 +102,50 @@
   let scrollBaselineKey: string | null = null
   const SCROLL_BOTTOM_THRESHOLD = 32
 
-  // A wheel gesture is user scroll intent: while one runs (plus a short
-  // grace after the last tick), the follow effect below must NOT snap to
-  // the bottom. WebKitGTK ANIMATES wheel scrolls, and assigning scrollTop
+  // A scroll gesture is user intent: while one runs (plus a short grace
+  // after the last tick), the follow effect below must NOT snap to the
+  // bottom. WebKitGTK ANIMATES wheel scrolls, and assigning scrollTop
   // mid-animation cancels it — in a busy merged chat a message arrives
   // between wheel ticks, every snap killed the in-flight scroll, and the
   // user could never reach the 32px from the bottom that disengages the
-  // follow in the first place.
+  // follow in the first place. Only an UPWARD gesture needs the grace: a
+  // wheel-down at the bottom scrolls nothing (and Ctrl+wheel is the
+  // browser zoom), so arming on every wheel event let a harmless wheel-
+  // down strand the next message below the fold until another arrived.
   let userScrollUntil = 0
+  let graceTimer: ReturnType<typeof setTimeout> | null = null
   const USER_SCROLL_GRACE_MS = 350
 
-  function onChatWheel(): void {
+  function armScrollGrace(): void {
     userScrollUntil = performance.now() + USER_SCROLL_GRACE_MS
+    // One deferred re-check when the grace ends: a message that arrived
+    // inside the window left the still-following pane off the bottom, and
+    // in a quiet chat the next message (and with it the next snap) can be
+    // minutes away. Idempotent — re-arming just pushes the check back.
+    if (graceTimer) clearTimeout(graceTimer)
+    graceTimer = setTimeout(() => {
+      graceTimer = null
+      const el = chatEl
+      if (!el) return
+      if (stickyBottom && performance.now() >= userScrollUntil) {
+        el.scrollTop = el.scrollHeight
+        scrollBaselineKey = lastKeyOf(entries)
+      }
+    }, USER_SCROLL_GRACE_MS)
+  }
+
+  function onChatWheel(e: WheelEvent): void {
+    if (e.ctrlKey || e.deltaY >= 0) return
+    armScrollGrace()
+  }
+
+  // Keyboard scrolls need the grace for the same reason (a snap mid-scroll
+  // cancels the animated scroll on WebKitGTK). The container is click-
+  // focusable (tabindex -1: no tab stop) so PageUp/Home actually reach it.
+  const SCROLL_KEYS: ReadonlySet<string> = new Set(['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown'])
+
+  function onChatKeyDown(e: KeyboardEvent): void {
+    if (SCROLL_KEYS.has(e.key)) armScrollGrace()
   }
 
   function lastKeyOf(list: ChatEntry[]): string | null {
@@ -160,6 +192,28 @@
         scrollBaselineKey = lastKeyOf(entries)
       }
     })
+  })
+
+  // A resize re-fits the bottom: while following, a smaller pane (window
+  // resize, chat-width drag, splitter move) leaves the last messages below
+  // the fold — clientHeight shrank without any scroll event to re-check, so
+  // nothing would snap until the next message arrived.
+  $effect(() => {
+    const el = chatEl
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      if (stickyBottom && performance.now() >= userScrollUntil) {
+        el.scrollTop = el.scrollHeight
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  })
+
+  $effect(() => {
+    return () => {
+      if (graceTimer) clearTimeout(graceTimer)
+    }
   })
 
   // A resetKey change swaps the rendered buffer wholesale (channel change, chat
@@ -227,7 +281,18 @@
   }
 </script>
 
-<div class="chat-pane-scroll" bind:this={chatEl} onscroll={onChatScroll} onwheel={onChatWheel} style:padding>
+<!-- The keydown handler only arms the scroll grace around the container's
+     OWN native keyboard scrolling — it introduces no new interaction. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+  class="chat-pane-scroll"
+  bind:this={chatEl}
+  tabindex="-1"
+  onscroll={onChatScroll}
+  onwheel={onChatWheel}
+  onkeydown={onChatKeyDown}
+  style:padding
+>
   {#if entries.length === 0}
     <p class="chat-pane-placeholder">{placeholder}</p>
   {:else}
