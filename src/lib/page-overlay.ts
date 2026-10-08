@@ -92,13 +92,44 @@ export function rectsOverlap(el: OverlayBox, box: OverlayBox): boolean {
 
 /** The keep rect for one strip element clamped to the surface: the bitmap
  *  is masked to exactly these, so the union crop carries no dark
- *  empty-player padding between or around elements. Flat [x, y, w, h]. */
-export function keepRect(r: OverlayBox, box: OverlayBox): [number, number, number, number] {
+ *  empty-player padding between or around elements.
+ *  Flat [x, y, w, h, radius, corners]: `radius` is the element's uniform
+ *  border radius (px, 0 when absent) and `corners` a bitset (1=TL, 2=TR,
+ *  4=BL, 8=BR) of the keep's corners that are the ELEMENT'S OWN rounded
+ *  corners — i.e. NOT clipped off by the surface edge. The engine carves
+ *  those corners out of the mask: a rounded pill's bounding box shows the
+ *  opaque page backdrop in its corner wedges, which would composite as
+ *  small dark corners over the video (only the masked bitmap can be
+ *  transparent there — the page itself is opaque by design). */
+export function keepRect(el: HTMLElement, box: OverlayBox): [number, number, number, number, number, number] {
+  const r = el.getBoundingClientRect()
   const ax = Math.max(r.left, box.left)
   const ay = Math.max(r.top, box.top)
   const bx = Math.min(r.right, box.right)
   const by = Math.min(r.bottom, box.bottom)
-  return [Math.round(ax), Math.round(ay), Math.round(bx - ax), Math.round(by - ay)]
+  const eps = 0.01
+  const leftOk = r.left >= box.left - eps
+  const rightOk = r.right <= box.right + eps
+  const topOk = r.top >= box.top - eps
+  const bottomOk = r.bottom <= box.bottom + eps
+  const corners =
+    (leftOk && topOk ? 1 : 0) |
+    (rightOk && topOk ? 2 : 0) |
+    (leftOk && bottomOk ? 4 : 0) |
+    (rightOk && bottomOk ? 8 : 0)
+  const radius = parseRadiusPx(getComputedStyle(el).borderTopLeftRadius)
+  return [Math.round(ax), Math.round(ay), Math.round(bx - ax), Math.round(by - ay), radius, corners]
+}
+
+/** Uniform px corner radius of an element for mask carving; anything not a
+ *  plain px length (percentages, compound values, "0") yields 0 — today's
+ *  square-corner masking. Capped so a pathological value can't eat the
+ *  keep rect. */
+function parseRadiusPx(value: string): number {
+  if (!value.endsWith('px')) return 0
+  const px = Math.round(Number.parseFloat(value))
+  if (!Number.isFinite(px) || px <= 0) return 0
+  return Math.min(px, 24)
 }
 
 /** The window-space union box as fractions of the surface's OSD space —
@@ -218,9 +249,9 @@ export function startPageOverlayManager(getSurfaces: () => OverlaySurface[]): ()
       let y2 = -Infinity
       const keeps: number[] = []
       for (const el of document.querySelectorAll<HTMLElement>(SNAP_OVERLAY_SELECTOR)) {
-        if (!rectsOverlap(el.getBoundingClientRect(), pr)) continue
         const r = el.getBoundingClientRect()
-        keeps.push(...keepRect(r, pr))
+        if (!rectsOverlap(r, pr)) continue
+        keeps.push(...keepRect(el, pr))
         x1 = Math.min(x1, Math.max(r.left, pr.left))
         y1 = Math.min(y1, Math.max(r.top, pr.top))
         x2 = Math.max(x2, Math.min(r.right, pr.right))

@@ -963,8 +963,9 @@ pub(super) fn page_snapshot(
 
 /// Everything the snapshot completion needs: the target engine id, the
 /// webview's LOGICAL px allocation (the CSS-px space the crop rect arrives
-/// in), the crop rect itself, and the keep rects (flat x,y,w,h CSS px) to
-/// mask the bitmap to.
+/// in), the crop rect itself, and the keep rects (flat
+/// x,y,w,h,radius,corners CSS px — corners is a bitset of the element's
+/// own, unclipped rounded corners) to mask the bitmap to.
 struct SnapshotMeta {
     id: u32,
     alloc: (i32, i32),
@@ -975,13 +976,14 @@ struct SnapshotMeta {
 /// The crop handed from the GTK main thread to the store worker: the raw
 /// PREMULTIPLIED ARGB32 pixels (plus stride) of a crop-sized owned surface,
 /// the target engine id, the engine sequence number allocated at snapshot
-/// time, and the keep rects (BITMAP px) to mask to.
+/// time, and the keep rects (BITMAP px, with scaled radius + corner flags)
+/// to mask to.
 struct PageCrop {
     raw: Vec<u8>,
     stride: usize,
     w: u32,
     h: u32,
-    keep: Vec<(usize, usize, usize, usize)>,
+    keep: Vec<super::KeepPx>,
     id: u32,
     seq: u64,
 }
@@ -1066,9 +1068,11 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
     drop(owned);
     // Map the keep rects (CSS px) into bitmap px (relative to the crop
     // origin, clamped into the bitmap) — anything outside every keep gets
-    // masked transparent by the worker.
+    // masked transparent by the worker. Radius scales with the device
+    // factor and is capped at half the clamped extent; corners is the
+    // element's own-corner bitset, passed through verbatim.
     let keep_px = keep
-        .as_chunks::<4>()
+        .as_chunks::<6>()
         .0
         .iter()
         .filter_map(|r| {
@@ -1083,7 +1087,17 @@ fn finish_page_snapshot(res: Result<cairo::Surface, glib::Error>, meta: Snapshot
             if kw == 0 || kh == 0 {
                 None
             } else {
-                Some((kx, ky, kw, kh))
+                let kr = clamp(f64::from(r[4].max(0)) * scale_x, cw.max(ch))
+                    .min(kw / 2)
+                    .min(kh / 2);
+                Some(super::KeepPx {
+                    x: kx,
+                    y: ky,
+                    w: kw,
+                    h: kh,
+                    r: kr,
+                    corners: r[5].clamp(0, 15) as u8,
+                })
             }
         })
         .collect::<Vec<_>>();

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { keepRect, osdFractions, overlayKey, rectsOverlap } from './page-overlay'
 
 const box = (l: number, t: number, w: number, h: number) => ({
@@ -29,15 +29,47 @@ describe('rectsOverlap', () => {
 })
 
 describe('keepRect', () => {
+  // keepRect reads the element's own rect (getBoundingClientRect) plus its
+  // computed border radius; happy-dom's getComputedStyle does not resolve
+  // border-radius at all, so it is stubbed per element via a WeakMap.
+  const radii = new WeakMap<HTMLElement, string>()
+  beforeAll(() => {
+    vi.stubGlobal('getComputedStyle', (node: Element): { borderTopLeftRadius: string } => ({
+      borderTopLeftRadius: node instanceof HTMLElement ? (radii.get(node) ?? '0px') : '0px',
+    }))
+  })
+  afterAll(() => vi.unstubAllGlobals())
+
+  const el = (l: number, t: number, w: number, h: number, radius = '0px'): HTMLElement => {
+    const node = document.createElement('div')
+    node.getBoundingClientRect = () =>
+      ({ left: l, top: t, right: l + w, bottom: t + h, width: w, height: h }) as DOMRect
+    radii.set(node, radius)
+    return node
+  }
+
   it('clamps the element to the surface rect', () => {
-    // Element hanging over the surface's top-left corner.
-    expect(keepRect(box(-10, -10, 50, 50), box(0, 0, 100, 100))).toEqual([0, 0, 40, 40])
-    // Element hanging over the bottom-right corner.
-    expect(keepRect(box(80, 80, 50, 50), box(0, 0, 100, 100))).toEqual([80, 80, 20, 20])
+    // Element hanging over the surface's top-left corner: the keep is the
+    // clamped rect; the only surviving corner flag is the element's own
+    // bottom-right (the one corner the clip did not touch, BR=8).
+    expect(keepRect(el(-10, -10, 50, 50), box(0, 0, 100, 100))).toEqual([0, 0, 40, 40, 0, 8])
+    // Element hanging over the bottom-right corner: only top-left is the
+    // element's own corner (flags TL=1).
+    expect(keepRect(el(80, 80, 50, 50), box(0, 0, 100, 100))).toEqual([80, 80, 20, 20, 0, 1])
   })
 
   it('keeps an inside element as-is, rounded', () => {
-    expect(keepRect(box(10.4, 20.6, 30, 40), box(0, 0, 100, 100))).toEqual([10, 21, 30, 40])
+    expect(keepRect(el(10.4, 20.6, 30, 40), box(0, 0, 100, 100))).toEqual([10, 21, 30, 40, 0, 15])
+  })
+
+  it('reports the border radius and flags only unclipped corners', () => {
+    // Fully inside: all four corners flagged (TL|TR|BL|BR = 15).
+    expect(keepRect(el(10, 20, 30, 40, '6px'), box(0, 0, 100, 100))).toEqual([10, 20, 30, 40, 6, 15])
+    // Flush edges count as unclipped; only the top row was clipped here
+    // → BL|BR = 12.
+    expect(keepRect(el(10, -5, 90, 40, '4px'), box(0, 0, 100, 100))).toEqual([10, 0, 90, 35, 4, 12])
+    // Non-px radii (percentages, compound values) report 0 — square mask.
+    expect(keepRect(el(10, 20, 30, 40, '50%'), box(0, 0, 100, 100))).toEqual([10, 20, 30, 40, 0, 15])
   })
 })
 

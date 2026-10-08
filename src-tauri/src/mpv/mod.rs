@@ -1249,27 +1249,95 @@ fn argb32_crop_to_bgra(
     out
 }
 
+/// One keep rect in BITMAP px, plus the element's uniform corner radius and
+/// a bitset of the rect's corners that are the ELEMENT'S own (unclipped by
+/// the surface) rounded corners — those get carved out of the mask, because
+/// a rounded pill's bounding box shows the opaque page backdrop in its
+/// corner wedges, which over the video composites as small dark corners.
+struct KeepPx {
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    r: usize,
+    corners: u8,
+}
+
 /// Zero every packed premultiplied-BGRA pixel OUTSIDE the union of `keeps`
-/// ((x, y, w, h) bitmap px, clamped). The page snapshot's crop box is the
-/// UNION BBOX of the overlapping elements — regions inside the box but
-/// outside the elements show the page's empty player, which would composite
-/// as an opaque dark border around the UI. ALL FOUR bytes go to zero, not
-/// just alpha: overlay-add blends premultiplied, where a pixel with a=0 but
-/// nonzero color channels ADDS that color to the video (a dark haze box
-/// around the tooltip). Masking keeps only the elements themselves; empty
-/// `keeps` leaves the bitmap untouched.
-fn mask_keep_rects(bgra: &mut [u8], w: usize, h: usize, keeps: &[(usize, usize, usize, usize)]) {
+/// (bitmap px, clamped), carving flagged corners outside their rounding
+/// radius. The page snapshot's crop box is the UNION BBOX of the
+/// overlapping elements — regions inside the box but outside the elements
+/// show the page's empty player, which would composite as an opaque dark
+/// border around the UI. ALL FOUR bytes go to zero, not just alpha:
+/// overlay-add blends premultiplied, where a pixel with a=0 but nonzero
+/// color channels ADDS that color to the video (a dark haze box around the
+/// tooltip). The corner carve exists because the mask is rectangular while
+/// the elements are rounded pills; a corner the surface CLIPPED off is not
+/// the element's own corner and is never carved, and a carved pixel
+/// covered by a DIFFERENT keep survives (sibling strips may overlap).
+/// Empty `keeps` leaves the bitmap untouched.
+fn mask_keep_rects(bgra: &mut [u8], w: usize, h: usize, keeps: &[KeepPx]) {
     if keeps.is_empty() || w == 0 || h == 0 || bgra.len() < w * h * 4 {
         return;
     }
+    let rects: Vec<(usize, usize, usize, usize)> = keeps
+        .iter()
+        .map(|k| {
+            let x1 = k.x.min(w);
+            let y1 = k.y.min(h);
+            let x2 = k.x.saturating_add(k.w).min(w);
+            let y2 = k.y.saturating_add(k.h).min(h);
+            (x1, y1, x2, y2)
+        })
+        .collect();
     let mut mask = vec![0u8; w * h];
-    for &(kx, ky, kw, kh) in keeps {
-        let x1 = kx.min(w);
-        let y1 = ky.min(h);
-        let x2 = kx.saturating_add(kw).min(w);
-        let y2 = ky.saturating_add(kh).min(h);
+    for &(x1, y1, x2, y2) in &rects {
         for row in mask.chunks_exact_mut(w).skip(y1).take(y2 - y1) {
             row[x1..x2].fill(1);
+        }
+    }
+    // Corner carve: pixel centers inside an r×r corner box but outside the
+    // corner circle go, unless a different keep covers them.
+    let inside_other = |px: usize, py: usize, skip: usize| -> bool {
+        rects
+            .iter()
+            .enumerate()
+            .any(|(i, &(x1, y1, x2, y2))| i != skip && px >= x1 && px < x2 && py >= y1 && py < y2)
+    };
+    for (i, k) in keeps.iter().enumerate() {
+        let (x1, y1, x2, y2) = rects[i];
+        // The radius cannot eat more than half the (possibly clamped) rect.
+        let r = k.r.min((x2 - x1) / 2).min((y2 - y1) / 2);
+        if r == 0 {
+            continue;
+        }
+        let rf = r as f64;
+        let corners = [
+            ((k.corners & 1) != 0, x1 + r, y1 + r, x1, y1),
+            ((k.corners & 2) != 0, x2 - r, y1 + r, x2 - r, y1),
+            ((k.corners & 4) != 0, x1 + r, y2 - r, x1, y2 - r),
+            ((k.corners & 8) != 0, x2 - r, y2 - r, x2 - r, y2 - r),
+        ];
+        for &(on, cx, cy, bx, by) in &corners {
+            if !on {
+                continue;
+            }
+            for py in by..by + r {
+                for px in bx..bx + r {
+                    if px >= w || py >= h {
+                        continue;
+                    }
+                    let idx = py * w + px;
+                    if mask[idx] == 0 || inside_other(px, py, i) {
+                        continue;
+                    }
+                    let dx = px as f64 + 0.5 - cx as f64;
+                    let dy = py as f64 + 0.5 - cy as f64;
+                    if dx * dx + dy * dy > rf * rf {
+                        mask[idx] = 0;
+                    }
+                }
+            }
         }
     }
     for (px, keep) in bgra.as_chunks_mut::<4>().0.iter_mut().zip(mask) {
@@ -1750,7 +1818,11 @@ pub async fn mpv_script_msg(id: Option<u32>, args: Vec<String>) -> Result<(), St
 /// pixels outside every keep rect get alpha 0, so the union crop of e.g.
 /// the notification menu + a tooltip poking past its edge doesn't carry
 /// the empty player's opaque background as dark padding around the
-/// elements. Empty/absent = keep everything.
+/// elements. Each keep is flat `x, y, w, h, radius, corners`: the corner
+/// radius and a bitset (1=TL 2=TR 4=BL 8=BR) of the element's own
+/// (unclipped) rounded corners, carved out of the mask so a rounded
+/// pill's bounding-box wedges can't composite as dark corners over the
+/// video. Empty/absent = keep everything.
 ///
 /// Returns Ok(false) when the request was COALESCED (per-engine window,
 /// see linux::PAGE_SNAPSHOT_LAST): the frontend retries after the window
@@ -1775,8 +1847,8 @@ pub fn mpv_page_snapshot(
         return Err("snapshot rect must be non-negative with w/h >= 1".to_string());
     }
     if let Some(flat) = &keep {
-        if flat.len() % 4 != 0 {
-            return Err("keep must be flat x,y,w,h rects".to_string());
+        if flat.len() % 6 != 0 {
+            return Err("keep must be flat x,y,w,h,radius,corners rects".to_string());
         }
     }
     linux::page_snapshot(&app, engine_id(id)?, x, y, w, h, keep.unwrap_or_default())
@@ -2027,6 +2099,17 @@ mod tests {
         assert!(resample_bgra(&src, 2, 1, 0, 1).is_empty());
     }
 
+    fn keep(x: usize, y: usize, w: usize, h: usize, r: usize, corners: u8) -> KeepPx {
+        KeepPx {
+            x,
+            y,
+            w,
+            h,
+            r,
+            corners,
+        }
+    }
+
     #[test]
     fn keep_rect_masking_zeroes_outside_pixels_whole() {
         // 3x2 bitmap, all opaque; keep the left column and the bottom-right
@@ -2034,7 +2117,12 @@ mod tests {
         // just alpha: overlay-add blends premultiplied, and a=0 pixels with
         // leftover color channels add that color to the video.
         let mut bgra = vec![0xEEu8; 3 * 2 * 4];
-        mask_keep_rects(&mut bgra, 3, 2, &[(0, 0, 1, 2), (2, 1, 1, 1)]);
+        mask_keep_rects(
+            &mut bgra,
+            3,
+            2,
+            &[keep(0, 0, 1, 2, 0, 0), keep(2, 1, 1, 1, 0, 0)],
+        );
         let px = |i: usize| &bgra[i * 4..i * 4 + 4];
         assert_eq!(px(0), &[0xEE; 4]); // (0,0) kept
         assert_eq!(px(1), &[0, 0, 0, 0]); // (1,0) outside
@@ -2046,8 +2134,50 @@ mod tests {
         let mut untouched = vec![0xEEu8; 4];
         mask_keep_rects(&mut untouched, 1, 1, &[]);
         assert_eq!(untouched, vec![0xEE; 4]);
-        mask_keep_rects(&mut untouched, 1, 1, &[(9, 9, 5, 5)]);
+        mask_keep_rects(&mut untouched, 1, 1, &[keep(9, 9, 5, 5, 0, 0)]);
         assert_eq!(untouched, vec![0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn keep_rect_masking_carves_flagged_rounded_corners() {
+        // 7x7 keep, r=3, ONLY the top-left corner flagged: pixel centers
+        // outside the corner circle (center (3,3), radius 3) get carved,
+        // the other three corners stay square.
+        let mut bgra = vec![0xEEu8; 7 * 7 * 4];
+        mask_keep_rects(&mut bgra, 7, 7, &[keep(0, 0, 7, 7, 3, 1)]);
+        let kept = |x: usize, y: usize| bgra[(y * 7 + x) * 4..(y * 7 + x) * 4 + 4] == [0xEE; 4];
+        assert!(!kept(0, 0)); // dx=dy=-2.5 → 12.5 > 9
+        assert!(kept(1, 0)); // 8.5 ≤ 9 — inside the circle
+        assert!(kept(0, 1));
+        assert!(kept(1, 1));
+        assert!(kept(0, 2)); // 6.5 ≤ 9
+        assert!(kept(2, 0));
+        assert!(kept(6, 0)); // TR not flagged — square
+        assert!(kept(0, 6)); // BL not flagged
+        assert!(kept(6, 6)); // BR not flagged
+        assert!(kept(3, 3)); // deep inside
+
+        // Radius caps at half the clamped extent: r=3 on a 3x2 keep acts as
+        // r=1, whose only corner pixel center (0.5,0.5) sits inside the
+        // circle — nothing is carved.
+        let mut capped = vec![0xEEu8; 3 * 2 * 4];
+        mask_keep_rects(&mut capped, 3, 2, &[keep(0, 0, 3, 2, 3, 15)]);
+        assert!(capped.iter().all(|&b| b == 0xEE));
+
+        // A carved corner covered by a DIFFERENT keep survives (sibling
+        // strips may overlap): B's 2x2 rect covers A's top-left notch.
+        let mut overlap = vec![0xEEu8; 7 * 7 * 4];
+        mask_keep_rects(
+            &mut overlap,
+            7,
+            7,
+            &[keep(0, 0, 7, 7, 3, 1), keep(0, 0, 2, 2, 0, 0)],
+        );
+        let still_kept =
+            |x: usize, y: usize| overlap[(y * 7 + x) * 4..(y * 7 + x) * 4 + 4] == [0xEE; 4];
+        for &(x, y) in &[(0, 0), (1, 0), (0, 1), (1, 1)] {
+            assert!(still_kept(x, y), "sibling-covered pixel ({x},{y}) carved");
+        }
     }
 
     #[test]
