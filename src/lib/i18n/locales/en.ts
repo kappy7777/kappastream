@@ -311,6 +311,8 @@ export const en = {
   settings_exportAriaMany: 'Export {n} favorites to a JSON file',
   settings_importFailedLarge: 'Import failed: file too large (> 2 MB)',
   settings_importFailed: 'Import failed: {msg}',
+  settings_exportFailed: 'Export failed: {msg}',
+  settings_exportOk: 'Exported to {path}',
   settings_importFailedJson: 'Import failed: not a valid favorites JSON',
   settings_importNothing: 'Import: nothing to add',
   settings_importSummary: 'Import: {summary}',

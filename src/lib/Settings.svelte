@@ -350,10 +350,26 @@
     const stamp = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
     const filename = 'twitch-favorites-' + stamp + '.json'
     try {
-      await invoke('save_favorites_export', { content: json, suggestedFilename: filename })
+      const savedTo = await invoke<string | null>('save_favorites_export', {
+        content: json,
+        suggestedFilename: filename,
+      })
+      // null = the user canceled the native save dialog; that is not a failure.
+      if (savedTo) setFavStatus(t('settings_exportOk', { path: savedTo }), false)
     } catch (err) {
       if (import.meta.env.DEV) console.error('favorites export failed', err)
+      setFavStatus(t('settings_exportFailed', { msg: err instanceof Error ? err.message : String(err) }), true)
     }
+  }
+
+  /** Export/import outcome line under the backup buttons (auto-clears). */
+  function setFavStatus(msg: string, error: boolean): void {
+    importStatus = msg
+    importError = error
+    if (importStatusTimer) clearTimeout(importStatusTimer)
+    importStatusTimer = setTimeout(() => {
+      importStatus = ''
+    }, 6000)
   }
 
   function triggerImport(): void {

@@ -290,6 +290,8 @@ export const pt: Record<TKey, string> = {
   settings_exportAriaMany: 'Exportar {n} favoritos para um ficheiro JSON',
   settings_importFailedLarge: 'Importação falhada: ficheiro demasiado grande (> 2 MB)',
   settings_importFailed: 'Importação falhada: {msg}',
+  settings_exportFailed: 'Falha ao exportar: {msg}',
+  settings_exportOk: 'Exportado para {path}',
   settings_importFailedJson: 'Importação falhada: JSON de favoritos inválido',
   settings_importNothing: 'Importar: nada a adicionar',
   settings_importSummary: 'Importar: {summary}',

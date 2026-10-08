@@ -292,6 +292,8 @@ export const fr: Record<TKey, string> = {
   settings_exportAriaMany: 'Exporter {n} favoris vers un fichier JSON',
   settings_importFailedLarge: 'Import échoué : fichier trop volumineux (> 2 Mo)',
   settings_importFailed: 'Import échoué : {msg}',
+  settings_exportFailed: 'Échec de l’export : {msg}',
+  settings_exportOk: 'Exporté vers {path}',
   settings_importFailedJson: 'Import échoué : JSON de favoris invalide',
   settings_importNothing: 'Import : rien à ajouter',
   settings_importSummary: 'Import : {summary}',
