@@ -32,6 +32,9 @@ install_files() {
 		"$PREFIX/share/applications/kappastream.desktop"
 	install -Dm644 "$HERE/dev.kappy.kappastream.metainfo.xml" \
 		"$PREFIX/share/metainfo/dev.kappy.kappastream.metainfo.xml"
+	# License (GPLv3) — same /usr/share/licenses location the AUR packages use.
+	install -Dm644 "$HERE/LICENSE" \
+		"$PREFIX/share/licenses/kappastream/LICENSE"
 	# hicolor icon theme (sizes mirror the AUR/Debian/Fedora layout).
 	install -Dm644 "$HERE/32x32.png"      "$PREFIX/share/icons/hicolor/32x32/apps/kappastream.png"
 	install -Dm644 "$HERE/64x64.png"      "$PREFIX/share/icons/hicolor/64x64/apps/kappastream.png"
@@ -49,7 +52,8 @@ uninstall_files() {
 	rm -f "$PREFIX/bin/kappastream" \
 		"$LIBDIR/kappastream" \
 		"$PREFIX/share/applications/kappastream.desktop" \
-		"$PREFIX/share/metainfo/dev.kappy.kappastream.metainfo.xml"
+		"$PREFIX/share/metainfo/dev.kappy.kappastream.metainfo.xml" \
+		"$PREFIX/share/licenses/kappastream/LICENSE"
 	# POSIX for-loop: this script runs under /bin/sh (dash on Debian/Ubuntu),
 	# which does not brace-expand, so a {32x32,...} glob would try to remove a
 	# literally-named file and leave every icon behind.
