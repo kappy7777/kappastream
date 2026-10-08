@@ -5,7 +5,7 @@ project, so this is short.
 
 ## Bug reports
 
-Open an [issue](./issues) and include:
+Open an [issue](../../issues) and include:
 
 - your distro and compositor (X11 or Wayland, and which — Hyprland, KDE, GNOME, …)
 - the app version (see the About modal, or the release page)
@@ -20,28 +20,36 @@ PRs are welcome for bug fixes and features that fit the project's scope (a
 no-account, no-tracking native Twitch viewer). Before opening one:
 
 1. **Run the verification gates.** The full gate set (CI enforces all of
-   these) is:
+   these, in this order) is:
 
    ```bash
+   npm audit                           # JS supply-chain scan over package-lock.json
+   sh scripts/check-versions.sh        # version-drift guard (see Releasing)
    npm run check                       # svelte-check (src/**) + tsc (vite.config.ts)
    npm run lint                        # ESLint (flat config), .ts + .svelte
+   npm run format:check                # Prettier (fix with `npm run format`)
    npm test                            # Vitest (src/**/*.test.ts)
-   sh scripts/check-versions.sh        # version-drift guard (see Releasing)
-   cargo fmt --all -- --check          # run inside src-tauri/
+   npm run build                       # must precede every cargo command below
+   cargo fmt --all -- --check          # cargo commands run inside src-tauri/
    cargo clippy --all-targets -- -D warnings
+   cargo clippy --no-default-features --features "mpv-embed,tauri/custom-protocol" \
+       --all-targets -- -D warnings    # the AUR build state (updater off, engine on)
    cargo test
+   cargo audit                         # RustSec scan (ignores in src-tauri/.cargo/audit.toml)
    ```
 
-   No Prettier — don't add one without asking first.
+   `npm run build` before the cargo gates is not optional: the Rust build
+   embeds `dist/` via `tauri::generate_context!` and panics if it's
+   missing. Formatting is owned by Prettier — don't hand-argue style in
+   reviews, and don't add other tooling without asking first.
 
-   CI additionally runs `cargo clippy --all-targets -- -D warnings` and
-   `cargo test`, so `npm run build` must succeed (the Rust build embeds
-   `dist/` and will panic if it's missing).
-
-2. **Keep the no-auth posture.** Don't add Twitch login, OAuth, a
-   `client_id`, or calls to the Helix/Kraken APIs. The whole point is that
-   the app is anonymous read-only and holds no Twitch credentials. If your
-   change seems to need auth, open an issue to discuss it first.
+2. **Keep the no-auth posture.** Don't add Twitch login, OAuth, calls to
+   the Helix/Kraken APIs, or a registered app `client_id`. The anonymous
+   GQL transport (`gql_fetch` in `src-tauri/src/gql.rs`) already pins
+   Twitch's public web Client-ID in the native binary — keep it that
+   way. The whole point is that the app is anonymous read-only and holds
+   no Twitch credentials. If your change seems to need auth, open an
+   issue to discuss it first.
 
 3. **Build from source** to confirm it compiles end-to-end — see the
    [README](./README.md#build-from-source). Linux builds additionally need
@@ -70,31 +78,38 @@ is triggered by pushing a `v*` tag.
 
 Checklist for cutting a release:
 
-1. Bump the version in **all three** authoritative sources in lockstep —
-   `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock`
-   (`tauri.conf.json` has no `version` key; it falls back to `Cargo.toml`).
-   Regenerate the lock by running `cargo check` inside `src-tauri/`.
+1. Bump the version in **all four** version-carrying files in lockstep —
+   `package.json`, `package-lock.json` (the two root `version` fields;
+   sync them with `npm install --package-lock-only`), `src-tauri/Cargo.toml`,
+   and `src-tauri/Cargo.lock` (`tauri.conf.json` has no `version` key; it
+   falls back to `Cargo.toml`). Regenerate `Cargo.lock` by running
+   `cargo check` inside `src-tauri/`.
 2. Add a `## [<version>]` entry to `CHANGELOG.md` and update the
    `[Unreleased]` / `[<version>]` compare links at the bottom.
-3. Add a `<release version="<version>" date="<YYYY-MM-DD>">` entry to
+3. Add the version's entry to `src/lib/release-notes.ts` (the what's-new
+   highlights; sections mirror the CHANGELOG's Added/Changed/Fixed) and
+   fill `.github/update-notes.md` with the update-banner note (plain
+   text, one line — the file is empty between releases, and its content
+   at the tagged commit ships in the release's `latest.json`). Clear it
+   back to empty once the release has published.
+4. Add a `<release version="<version>" date="<YYYY-MM-DD>">` entry to
    `packaging/shared/dev.kappy.kappastream.metainfo.xml` at the top of the
    `<releases>` block (newest first), with a `<url>` pointing at the GitHub
    release. The date must match the CHANGELOG heading.
-4. Run the version-drift guard to confirm nothing has drifted:
+5. Run the version-drift guard to confirm nothing has drifted:
    ```bash
    sh scripts/check-versions.sh
    ```
-5. Run the full local gate set (`npm run check`, `npm run lint`, `npm test`, `cargo fmt
-   --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo
-   test`). CI runs these too, but catch failures before tagging.
-6. Commit on `main` (e.g. `Release v<version>`), then tag and push the tag:
+6. Run the full local gate set from **Pull requests** above. CI runs
+   these too, but catch failures before tagging.
+7. Commit on `main` (e.g. `Release v<version>`), then tag and push the tag:
    ```bash
    git tag v<version>
    git push origin v<version>
    ```
    Pushing the tag runs `release.yml`, which builds and publishes the bundles +
    `SHA256SUMS` (the release stays **draft** until the checksums land).
-7. After the release publishes, update the AUR packages (see
+8. After the release publishes, update the AUR packages (see
    `packaging/aur/README.md`): refresh `-git`'s `pkgver` and `-bin`'s tarball
    sha256 (taken from the release's `SHA256SUMS`) + `pkgver`.
 
