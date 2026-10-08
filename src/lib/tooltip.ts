@@ -34,7 +34,7 @@ export const tooltip: Action<HTMLElement, string | TooltipOptions | undefined> =
     if (!text) return
     const show = () => {
       const rect = node.getBoundingClientRect()
-      showTooltip(text, rect)
+      showTooltip(text, rect, node)
     }
     if (delay > 0) {
       timer = setTimeout(show, delay)
@@ -53,6 +53,12 @@ export const tooltip: Action<HTMLElement, string | TooltipOptions | undefined> =
       clearTimer()
       node.removeEventListener('mouseenter', onEnter)
       node.removeEventListener('mouseleave', onLeave)
+      // A node unmounted while hovered (a button that hides its own
+      // container, a chat row rolling off) never receives mouseleave —
+      // there is no element left to deliver it — so without this the
+      // tooltip would stay on screen until another host is hovered.
+      // The host argument keeps this scoped to the node's OWN tooltip.
+      hideTooltip(node)
     },
   }
 }
