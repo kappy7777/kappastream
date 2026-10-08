@@ -61,8 +61,14 @@
       errorMessage = ''
       return
     }
-    // Opening a query flips to loading immediately so the panel appears.
+    // Opening a query flips to loading immediately so the panel appears. The
+    // previous query's rows are dropped too: they are no longer rendered, and
+    // keeping them let ArrowDown + Enter act on a HIDDEN stale row while the
+    // new query was still in flight (Enter then joins a channel the user can
+    // no longer see). With the rows gone, keys fall back to the fast path on
+    // the typed text until real results arrive.
     phase = 'loading'
+    results = []
     activeIndex = -1
     errorMessage = ''
     const query = q
