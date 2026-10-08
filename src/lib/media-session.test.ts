@@ -8,7 +8,8 @@ import { bindMediaSessionPlayPause, setMediaSessionTitle } from './media-session
  * semantics: each action toggles only when it would change the state, a
  * rejected action name is skipped without losing the other, unbind removes
  * what was bound, and everything degrades to a no-op without mediaSession
- * or MediaMetadata.
+ * or MediaMetadata. (Native-engine media keys are served by the Rust-side
+ * MPRIS service, not this module.)
  */
 
 type Handler = (details: MediaSessionActionDetails) => void
@@ -84,7 +85,7 @@ describe('bindMediaSessionPlayPause', () => {
   it('unbind removes the handlers', () => {
     const ctx = stubMediaSession()
     expect(ctx.bound()).toEqual([])
-    const unbind = bindMediaSessionPlayPause(() => null)
+    const unbind = bindMediaSessionPlayPause(() => ({ playing: () => true, toggle: () => {} }))
     expect(ctx.bound().sort()).toEqual(['pause', 'play'])
     unbind()
     expect(ctx.bound()).toEqual([])

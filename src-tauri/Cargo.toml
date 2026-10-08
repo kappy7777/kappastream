@@ -57,6 +57,7 @@ mpv-embed = [
   "dep:webkit2gtk",
   "dep:libc",
   "dep:cairo",
+  "dep:zbus",
 ]
 
 [build-dependencies]
@@ -127,3 +128,9 @@ libc = { version = "0.2", optional = true }
 # `cairo::…`; version matches what gtk already resolves to so the trees
 # unify.
 cairo = { version = "0.18", package = "cairo-rs", optional = true }
+# mpv-embed only: the MPRIS D-Bus service that puts the native engine on the
+# desktop's media controls (hardware media keys — the webview's own MPRIS
+# bridge only registers real, audio-producing media elements). Version and
+# the tokio feature unify with the zbus the notification plugin already
+# resolves, so this adds no new dependency tree.
+zbus = { version = "5", features = ["tokio"], optional = true }

@@ -1,12 +1,18 @@
-// Media Session routing for OS-level media controls: keyboard media keys,
-// GNOME's media widget, Windows' SMTC. Without action handlers the engine
-// delivers a hardware pause as a plain `pause` event on the active
-// <video> — indistinguishable from a webkit2gtk underrun stall, so live
-// stall recovery force-resumes it ~1s later (shouldRecoverStallAfterPause
-// in playback.ts). Registering handlers takes the default behavior over:
-// the surface pauses through its own userPaused discipline (the same path
-// its play/pause button uses), which stall recovery correctly leaves
-// alone.
+// Media Session routing for OS-level media controls on the WEBVIEW's own
+// playback: keyboard media keys, GNOME's media widget, Windows' SMTC.
+// Without action handlers the engine delivers a hardware pause as a plain
+// `pause` event on the active <video> — indistinguishable from a
+// webkit2gtk underrun stall, so live stall recovery force-resumes it ~1s
+// later (shouldRecoverStallAfterPause in playback.ts). Registering
+// handlers takes the default behavior over: the surface pauses through
+// its own userPaused discipline (the same path its play/pause button
+// uses), which stall recovery correctly leaves alone.
+//
+// This covers the hls engine (a real media element drives the session).
+// The NATIVE engine cannot work this way — WebKitGTK's MPRIS bridge only
+// registers real, audio-producing media elements, and a stand-in element
+// (muted or not) never registers — so native media keys are served by the
+// Rust-side MPRIS D-Bus service instead (src-tauri/src/mpv/mpris.rs).
 //
 // Feature-detected per action: engines without Media Session, or that
 // reject an action name, keep the previous behavior and bind nothing.
@@ -23,14 +29,14 @@ export interface MediaSessionControls {
 
 /**
  * Route the pause/play media actions into the surface `getControls`
- * returns. The returned function unbinds (a no-op when nothing bound).
+ * returns. Each action only toggles when it would actually change the
+ * state — a 'pause' key press while paused must never resume. The
+ * returned function unbinds (a no-op when nothing bound).
  */
 export function bindMediaSessionPlayPause(getControls: () => MediaSessionControls | null): () => void {
   const ms = typeof navigator === 'undefined' ? undefined : navigator.mediaSession
   if (!ms) return () => {}
   const bound: MediaSessionAction[] = []
-  // Each action only toggles when it would actually change the state — a
-  // 'pause' key press while paused must never resume.
   const intents: Array<{ action: MediaSessionAction; when: (playing: boolean) => boolean }> = [
     { action: 'pause', when: (playing) => playing },
     { action: 'play', when: (playing) => !playing },

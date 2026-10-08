@@ -377,6 +377,7 @@
         hwdec: settings.mpvHwdec,
         volume: isAuthority ? settings.volume : tile.volume,
         muted: !tileAudible(isAuthority, tile.manualUnmute, settings.muted),
+        title: tile.channel,
       })
       if (res.ok) {
         nativeActive = true
@@ -866,9 +867,19 @@
     const el = videoEl
     if (!el) return
     if (nativeActive && mpvBackend) {
-      onTileHandles(tile.id, { video: null, backend: mpvBackend, controls: { togglePlay, isPaused } })
+      onTileHandles(tile.id, {
+        video: null,
+        backend: mpvBackend,
+        engineId: mpvId,
+        controls: { togglePlay, isPaused },
+      })
     } else {
-      onTileHandles(tile.id, { video: el, backend: null, controls: { togglePlay, isPaused } })
+      onTileHandles(tile.id, {
+        video: el,
+        backend: null,
+        engineId: null,
+        controls: { togglePlay, isPaused },
+      })
     }
   })
 

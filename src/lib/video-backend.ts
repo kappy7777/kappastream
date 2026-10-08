@@ -93,6 +93,10 @@ export interface TileShortcutHandles {
   video: HTMLVideoElement | null
   backend: VideoBackend | null
   controls: { togglePlay: () => void; isPaused: () => boolean }
+  /** The tile's native engine id — how App names the audio-authority
+   *  engine to the Rust MPRIS service. null while the tile plays hls
+   *  (no native engine to name). */
+  engineId: number | null
 }
 
 /**
@@ -252,6 +256,11 @@ export interface MpvLoadOptions {
    */
   volume?: number
   muted?: boolean
+  /**
+   * Media title for the desktop's media widgets (MPRIS xesam:title) — the
+   * channel / VOD / clip name of whatever is being loaded.
+   */
+  title?: string
 }
 
 /**
@@ -460,6 +469,7 @@ export class MpvBackend implements VideoBackend {
         hwdec: opts.hwdec,
         volume: opts.volume ?? this.vol,
         muted: opts.muted ?? this.mut,
+        title: opts.title ?? null,
       })
       this.lastError = null
       return { ok: true }

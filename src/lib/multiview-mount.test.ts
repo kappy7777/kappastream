@@ -93,6 +93,7 @@ function mountView(mpvAvailable: boolean): void {
       onAuthorityVideo: () => {},
       onAuthorityBackend: () => {},
       onAuthorityControls: () => {},
+      onAuthorityEngine: () => {},
       mpvAvailable,
     },
   })

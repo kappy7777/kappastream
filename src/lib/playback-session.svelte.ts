@@ -163,6 +163,8 @@ export interface AttachMpvOptions {
    */
   volume?: number
   muted?: boolean
+  /** Media title for the desktop's media widgets (MPRIS xesam:title). */
+  title?: string
 }
 
 export class PlaybackSession {
@@ -342,6 +344,7 @@ export class PlaybackSession {
       startAt: opts.startAt,
       volume: opts.volume,
       muted: opts.muted,
+      title: opts.title,
     })
     if (this.disposed) return { ok: false, error: 'session disposed' }
     this.mpvBackend = result.ok ? backend : null

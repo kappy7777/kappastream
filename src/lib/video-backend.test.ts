@@ -304,7 +304,12 @@ describe('MpvBackend', () => {
     const b = new MpvBackend()
     b.setVolume(0.7)
     b.setMuted(true)
-    const r = await b.load('https://cdn.example/x.m3u8', { kind: 'vod', hwdec: 'auto-safe', startAt: 91.4 })
+    const r = await b.load('https://cdn.example/x.m3u8', {
+      kind: 'vod',
+      hwdec: 'auto-safe',
+      startAt: 91.4,
+      title: 'somechannel',
+    })
     expect(r).toEqual({ ok: true })
     expect(invokeMock).toHaveBeenCalledWith('mpv_load', {
       id: 0,
@@ -314,6 +319,7 @@ describe('MpvBackend', () => {
       hwdec: 'auto-safe',
       volume: 0.7,
       muted: true,
+      title: 'somechannel',
     })
     await b.dispose()
   })

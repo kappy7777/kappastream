@@ -89,6 +89,8 @@ use tauri::{AppHandle, Emitter, Manager};
 mod linux;
 #[cfg(target_os = "linux")]
 use linux as platform;
+#[cfg(target_os = "linux")]
+mod mpris;
 
 /// The UA mpv presents when fetching the resolved media URLs: THE SAME
 /// shared browser const the GQL proxy sends (gql::USER_AGENT) — an alias,
@@ -371,6 +373,7 @@ fn ensure_engine(app: &AppHandle, id: u32) -> Result<(), String> {
     match build_engine(app, id) {
         Ok(engine) => {
             lock_or_recover(engines()).insert(id, engine);
+            mpris::ensure_started();
             Ok(())
         }
         Err(err) => {
@@ -904,6 +907,7 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                     let err = Some(format!("{e}"));
                     if last_state.as_ref().map(|(s, _)| *s) != Some("error") {
                         last_state = Some(("error", err.clone()));
+                        mpris::note_state(id, &Some(("error", err.clone())));
                         emit_state(id, &app, Some(("error", err)));
                     }
                 }
@@ -912,6 +916,7 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
             if state_dirty {
                 state_dirty = false;
                 let state = compute_state(mpv);
+                mpris::note_state(id, &state);
                 // Idle = no file: the engine is no longer an active surface
                 // (a broadcast re-show must not un-hide a stopped engine),
                 // and the cached OSD size is stale — clear it so pointer
@@ -1579,6 +1584,8 @@ pub async fn mpv_available(app: AppHandle) -> AvailabilityPayload {
 /// load (the engine may have been created by a bare availability probe
 /// before the frontend ever set them), and `pause` is cleared at load so a
 /// core paused for a previous item cannot start the new one frozen.
+/// `title` (channel / VOD / clip name) is recorded for the MPRIS metadata —
+/// what desktop media widgets display.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // the load's full parameter set, mirroring mpv's own loadfile+options
 pub async fn mpv_load(
@@ -1590,6 +1597,7 @@ pub async fn mpv_load(
     hwdec: String,
     volume: f64,
     muted: bool,
+    title: Option<String>,
 ) -> Result<(), String> {
     if !matches!(kind.as_str(), "live" | "vod" | "clip") {
         return Err(format!("unknown media kind: {kind}"));
@@ -1609,6 +1617,7 @@ pub async fn mpv_load(
     // also work. The bootstrap may block on the GTK main thread (widget
     // tree + render context), hence spawn_blocking.
     let id = engine_id(id)?;
+    mpris::set_title(id, title);
     let app2 = app.clone();
     tauri::async_runtime::spawn_blocking(move || ensure_engine(&app2, id))
         .await
@@ -1683,6 +1692,7 @@ pub async fn mpv_stop(id: Option<u32>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn mpv_set_paused(id: Option<u32>, paused: bool) -> Result<(), String> {
+    mpris::note_touched(engine_id(id)?);
     with_core(engine_id(id)?, move |mpv| {
         mpv.set_property("pause", paused)
             .map_err(|err| format!("set pause: {err}"))
@@ -1693,6 +1703,7 @@ pub async fn mpv_set_paused(id: Option<u32>, paused: bool) -> Result<(), String>
 /// Absolute seek in seconds.
 #[tauri::command]
 pub async fn mpv_seek(id: Option<u32>, seconds: f64) -> Result<(), String> {
+    mpris::note_touched(engine_id(id)?);
     let target = format!("{:.3}", seconds.max(0.0));
     with_core(engine_id(id)?, move |mpv| {
         mpv.command("seek", &[target.as_str(), "absolute"])
@@ -1704,6 +1715,7 @@ pub async fn mpv_seek(id: Option<u32>, seconds: f64) -> Result<(), String> {
 /// Volume 0..1 (mpv's property is 0..100).
 #[tauri::command]
 pub async fn mpv_set_volume(id: Option<u32>, volume: f64) -> Result<(), String> {
+    mpris::note_touched(engine_id(id)?);
     let v = volume.clamp(0.0, 1.0) * 100.0;
     with_core(engine_id(id)?, move |mpv| {
         mpv.set_property("volume", v)
@@ -1714,11 +1726,22 @@ pub async fn mpv_set_volume(id: Option<u32>, volume: f64) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn mpv_set_muted(id: Option<u32>, muted: bool) -> Result<(), String> {
+    mpris::note_touched(engine_id(id)?);
     with_core(engine_id(id)?, move |mpv| {
         mpv.set_property("mute", muted)
             .map_err(|err| format!("set mute: {err}"))
     })
     .await
+}
+
+/// Name the engine desktop media controls act on: the frontend mirrors the
+/// audio-authority pointer here so MPRIS follows the same target as the
+/// keyboard shortcuts (0 — the single-view player — is the default).
+/// Nothing but a store: works before the MPRIS service ever started, and
+/// the service reads the value lazily.
+#[tauri::command]
+pub fn mpris_set_authority(id: Option<u32>) {
+    mpris::set_authority(engine_id(id).unwrap_or(0));
 }
 
 /// Position the surface (logical px, window-relative, zoom-adjusted by the
@@ -1772,6 +1795,11 @@ fn resolve_osd_dims(cached: (i64, i64), live: Result<(i64, i64), String>) -> Opt
 #[tauri::command]
 pub async fn mpv_pointer(id: Option<u32>, x: f64, y: f64, kind: String) -> Result<(), String> {
     let id = engine_id(id)?;
+    // Clicks mark the engine desktop media controls will act on (moves
+    // would let hovering steal the target — see mpris.rs).
+    if kind == "click" {
+        mpris::note_touched(id);
+    }
     let engine = engine_handle(id)?;
     // The cached osd-width/height (observed by the event thread) replaces
     // the two get_property calls this used to make per event. A cache of 0
@@ -1875,6 +1903,7 @@ pub async fn mpv_script_msg(id: Option<u32>, args: Vec<String>) -> Result<(), St
     if args.is_empty() {
         return Err("empty script message".to_string());
     }
+    mpris::note_touched(engine_id(id)?);
     with_core(engine_id(id)?, move |mpv| {
         let mut argv: Vec<&str> = vec![KS_OSC_CLIENT];
         argv.extend(args.iter().map(String::as_str));

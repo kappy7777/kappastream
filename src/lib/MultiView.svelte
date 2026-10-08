@@ -64,11 +64,21 @@
      *  the media keys route through the tile's own session so its
      *  stall-recovery respects the pause. */
     onAuthorityControls: (h: { togglePlay: () => void; isPaused: () => boolean } | null) => void
+    /** The authority tile's native ENGINE id — App names it to the Rust
+     *  MPRIS service so desktop media keys act on the audio authority. */
+    onAuthorityEngine: (id: number | null) => void
     /** invoke('mpv_available') result from App (feature build + surface). */
     mpvAvailable: boolean
   }
-  const { isWindows, chatSize, onAuthorityVideo, onAuthorityBackend, onAuthorityControls, mpvAvailable }: Props =
-    $props()
+  const {
+    isWindows,
+    chatSize,
+    onAuthorityVideo,
+    onAuthorityBackend,
+    onAuthorityControls,
+    onAuthorityEngine,
+    mpvAvailable,
+  }: Props = $props()
 
   // Per-tile shortcut handles (registered by Tile via onTileHandles): every
   // tile reports its OWN <video>/native-backend/togglePlay keyed by its id,
@@ -89,6 +99,7 @@
     onAuthorityVideo(handles?.video ?? null)
     onAuthorityBackend(handles?.backend ?? null)
     onAuthorityControls(handles?.controls ?? null)
+    onAuthorityEngine(handles?.engineId ?? null)
   })
 
   // Per-tile chat sessions. A SvelteMap so `.get()` reads genuinely track

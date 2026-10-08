@@ -376,6 +376,9 @@
   // element from App's session looked like a stall and auto-resumed ~1 s
   // later, so Space/K never stuck on hls tiles.
   let authorityTileControls = $state<{ togglePlay: () => void; isPaused: () => boolean } | null>(null)
+  // The authority tile's native ENGINE id (null while it plays hls) — only
+  // consumed by the MPRIS authority effect below.
+  let authorityTileEngine = $state<number | null>(null)
   let tooltipEl: HTMLElement | undefined = $state()
   let tooltipPos = $state({ left: 0, top: 0 })
   let probeEl: HTMLElement | undefined = $state()
@@ -545,6 +548,16 @@
   $effect(() => {
     const authority = multiView ? tileStore.authority : null
     setMediaSessionTitle(channelJoined ?? authority?.channel ?? null)
+  })
+
+  // Native-engine media keys are served by the Rust MPRIS service, and it
+  // acts on the AUDIO-AUTHORITY engine — the same target as the keyboard
+  // shortcuts (0 = the single-view player; multi-view off resets to it).
+  // Reject-safe: the command only exists in Linux builds with the engine.
+  $effect(() => {
+    if (!isTauri()) return
+    const id = multiView ? (authorityTileEngine ?? 0) : 0
+    void invoke('mpris_set_authority', { id }).catch(() => {})
   })
 
   function toggleVideoMute(): void {
@@ -1907,6 +1920,7 @@
         url,
         kind: 'live',
         hwdec: settings.mpvHwdec,
+        title: channel,
       })
       if (token !== loadToken) {
         // The load lost the race while the engine was taking our loadfile.
@@ -2290,6 +2304,7 @@
     authorityTileVideo = null
     authorityTileBackend = null
     authorityTileControls = null
+    authorityTileEngine = null
     if (ch) selectChannel(ch)
   }
 
@@ -2444,6 +2459,7 @@
         kind: 'vod',
         hwdec: settings.mpvHwdec,
         startAt: resume > 0.5 ? resume : undefined,
+        title: playback.kind === 'vod' ? playback.title : undefined,
       })
       if (token !== loadToken) {
         // Same ownership rule as attachStream's native branch: stop only
@@ -2596,6 +2612,7 @@
         url: raw.url,
         kind: 'clip',
         hwdec: settings.mpvHwdec,
+        title: playback.kind === 'clip' ? playback.title : undefined,
       })
       if (token !== loadToken) {
         // Same ownership rule as attachStream's native branch.
@@ -3427,6 +3444,9 @@
         }}
         onAuthorityControls={(h) => {
           authorityTileControls = h
+        }}
+        onAuthorityEngine={(id) => {
+          authorityTileEngine = id
         }}
       />
     {:else}
