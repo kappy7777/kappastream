@@ -995,7 +995,13 @@
     if (pipDroveIt || pipOpen || multiView) return
     if (playback.kind === 'vod') {
       const pos = lastVideoPosition
-      if (pos > 1) vodCtl.save(playback.id, true)
+      if (pos > 1) {
+        // vodPositions directly, NOT vodCtl.save: the selection already
+        // flipped, so the derived backend resolves to the INERT <video>
+        // (native mode never played through it) and a save through it would
+        // read position 0.
+        vodPositions.save(playback.id, pos, Number.isFinite(lastVideoDuration) ? lastVideoDuration : 0)
+      }
       teardownPlayer()
       void loadVod(playback.id, quality, pos > 1 ? Math.floor(pos) : undefined)
     } else if (playback.kind === 'clip' && lastPlayedClip && lastPlayedClip.slug === playback.slug) {
@@ -2034,10 +2040,15 @@
   async function changeQuality(newQuality: string): Promise<void> {
     if (newQuality === quality) return
     quality = newQuality
-    // VOD: re-resolve at the new quality (not persisted as a channel pref).
+    // VOD: re-resolve at the new quality (not persisted as a channel pref),
+    // continuing at the watched position — capture it BEFORE the teardown
+    // resets the element, and hand it over as a quiet internal-reload start
+    // (no "Resumed from" bar: the user never left).
     if (playback.kind === 'vod') {
+      const backend = videoBackend
+      const pos = backend && Number.isFinite(backend.currentTime) ? backend.currentTime : lastVideoPosition
       teardownPlayer()
-      await loadVod(playback.id, newQuality)
+      await loadVod(playback.id, newQuality, pos > 1 ? Math.floor(pos) : undefined)
       return
     }
     // Clip quality is fixed (best available from videoQualities).
@@ -2061,9 +2072,9 @@
       showNotifToast(t('toast_invalidChannel'))
       return
     }
-    // Any (re)connect returns to live mode — clears a prior VOD/clip playback.
-    playback = { kind: 'live' }
-    vodCtl.clearExtras()
+    // Any (re)connect returns to live mode — clears a prior VOD/clip playback
+    // (disconnect() owns that reset so the position lands while the backend
+    // still reports it).
     disconnect()
 
     // Record the join and start the video HERE, not on the chat socket: an
@@ -2087,6 +2098,20 @@
     loadToken++
     chatSession?.dispose()
     chatSession = null // deriveds (status/emoteStatus/roomState/…) fall back to idle
+    // Leaving through this path (channel switch, entering multi-view,
+    // close-to-tray, app teardown) must not strand VOD MODE: the player
+    // subtree keys off playback.kind and would keep the "Past broadcast"
+    // badge, a Resume button with nothing to replay (channelJoined is cleared
+    // below), and VOD keybindings on a live-less player. Force the position
+    // checkpoint BEFORE the teardown — after it the element reports 0 — then
+    // return to live. (The sleep-timer's disconnectStream-only stop is the
+    // deliberate exception: VOD mode survives so Resume can replay it.)
+    if (playback.kind !== 'live') {
+      vodCtl.save(currentVodId(), true)
+      vodCtl.clearExtras()
+      vodCtl.dismissResumeBar()
+      playback = { kind: 'live' }
+    }
     disconnectStream()
     mainStoppedForPip = false
     channelJoined = null
@@ -2368,7 +2393,9 @@
       if (attach.ok) {
         playerStatus = 'playing'
         nativeVideoActive = true
-        if (resume >= 30) vodCtl.showResumeBar(videoId, resume)
+        // An explicit startAt marks an internal reload (quality change,
+        // engine flip): continue there WITHOUT the "Resumed from" bar.
+        if (resume >= 30 && startAt === undefined) vodCtl.showResumeBar(videoId, resume)
         // Prime PiP with this VOD (resume position included) unless an OPEN
         // PiP already owns the main player — pushing then would restart the
         // floating window (which is holding live) at the VOD while main
@@ -2408,7 +2435,14 @@
           startAt: pipStart > 0.5 ? pipStart : undefined,
         })
       }
-      vodCtl.restore(videoId)
+      if (startAt !== undefined && startAt > 0.5) {
+        // Internal reload (quality change / engine flip): land at the carried
+        // position, quietly — the saved-checkpoint "Resumed from" bar is for
+        // the user coming BACK to a VOD, not for staying in it.
+        vodCtl.restore(videoId, { startAt, quiet: true })
+      } else {
+        vodCtl.restore(videoId)
+      }
       return true
     }
     playerStatus = 'error'
@@ -2561,7 +2595,11 @@
     loadToken++
     const ch = channelJoined
     vodChat.stop()
+    // Same leave-the-VOD discipline as disconnect(): flush the checkpoint
+    // while the backend still reports the position.
+    vodCtl.save(currentVodId(), true)
     vodCtl.clearExtras()
+    vodCtl.dismissResumeBar()
     playback = { kind: 'live' }
     if (ch) selectChannel(ch)
   }

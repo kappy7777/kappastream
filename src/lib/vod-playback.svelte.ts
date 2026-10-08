@@ -129,15 +129,27 @@ export class VodPlaybackController {
    * playlists list every segment, so seekable usually covers the full duration
    * right after manifest parse; a short progress-listener poll is the safety
    * net for the rare case it does not.
+   *
+   * `opts.startAt` overrides the saved checkpoint with the position the
+   * caller captured before an INTERNAL reload (a quality change, an engine
+   * flip) — the user never left the VOD, so `opts.quiet` suppresses the
+   * "Resumed from" bar in that case.
    */
-  restore(videoId: string): void {
+  restore(videoId: string, opts?: { startAt?: number; quiet?: boolean }): void {
     // Any new restore invalidates the previous wait, whatever its state —
     // the paths below return early when there is nothing to resume, and a
     // listener left over from an earlier VOD would seek THIS element to the
     // OLD VOD's captured position.
     this.dropPendingRestore()
+    const explicit = opts?.startAt
     const saved = vodPositions.get(videoId)
-    if (!saved || saved.position < 30) return
+    if (explicit === undefined) {
+      if (!saved || saved.position < 30) return
+    } else if (explicit < 1) {
+      return
+    }
+    const position = explicit ?? saved!.position
+    const quiet = opts?.quiet === true
     const backend = this.opts.getBackend()
     if (!backend) return
     // The seekable-range wait is an HLS/<video> mechanism: hls.js needs a
@@ -150,16 +162,16 @@ export class VodPlaybackController {
     const attempt = (): boolean => {
       const seekable = el.seekable
       if (seekable.length === 0) return false
-      if (saved.position > seekable.end(seekable.length - 1)) return false
+      if (position > seekable.end(seekable.length - 1)) return false
       try {
-        el.currentTime = saved.position
+        el.currentTime = position
       } catch {
         /* ignore */
       }
       return true
     }
     if (attempt()) {
-      this.showResumeBar(videoId, saved.position)
+      if (!quiet) this.showResumeBar(videoId, position)
       return
     }
     const teardown = (): void => {
@@ -169,7 +181,7 @@ export class VodPlaybackController {
     const onProgress = (): void => {
       if (attempt()) {
         teardown()
-        this.showResumeBar(videoId, saved.position)
+        if (!quiet) this.showResumeBar(videoId, position)
       } else if (++tries > 200) {
         teardown()
       }
