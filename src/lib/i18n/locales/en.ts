@@ -97,6 +97,7 @@ export const en = {
 
   // ---- App.svelte: toasts --------------------------------------------------
   toast_sleepStopped: 'Sleep timer: playback stopped',
+  toast_sleepNothingPlaying: 'Sleep timer: nothing is playing',
   toast_launchingMpv: 'Launching in mpv…',
   toast_mpvFailed: 'Could not launch mpv',
   toast_mpvEngineFailed: 'Native engine failed ({error}) — using the web player',

@@ -85,6 +85,7 @@ export const de: Record<TKey, string> = {
   sidebar_liveViewers: 'Live · {n} Zuschauer',
 
   toast_sleepStopped: 'Sleep-Timer: Wiedergabe gestoppt',
+  toast_sleepNothingPlaying: 'Sleep-Timer: Es wird nichts abgespielt',
   toast_launchingMpv: 'Starte in mpv…',
   toast_mpvFailed: 'mpv konnte nicht gestartet werden',
   toast_mpvEngineFailed: 'Natives Modul fehlgeschlagen ({error}) — Web-Player wird verwendet',

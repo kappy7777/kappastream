@@ -84,6 +84,7 @@ export const es: Record<TKey, string> = {
   sidebar_liveViewers: 'En directo · {n} espectadores',
 
   toast_sleepStopped: 'Temporizador: reproducción detenida',
+  toast_sleepNothingPlaying: 'Temporizador: no hay nada en reproducción',
   toast_launchingMpv: 'Abriendo en mpv…',
   toast_mpvFailed: 'No se pudo abrir mpv',
   toast_mpvEngineFailed: 'El motor nativo falló ({error}); se usa el reproductor web',

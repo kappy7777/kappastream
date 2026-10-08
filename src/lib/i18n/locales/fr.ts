@@ -84,6 +84,7 @@ export const fr: Record<TKey, string> = {
   sidebar_liveViewers: 'En direct · {n} spectateurs',
 
   toast_sleepStopped: 'Minuteur : lecture arrêtée',
+  toast_sleepNothingPlaying: 'Minuteur : rien en cours de lecture',
   toast_launchingMpv: 'Ouverture dans mpv…',
   toast_mpvFailed: 'Impossible d’ouvrir mpv',
   toast_mpvEngineFailed: 'Échec du moteur natif ({error}) — retour au lecteur web',

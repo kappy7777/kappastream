@@ -47,7 +47,7 @@
   import { PlaybackSession, resolveLiveStream } from './playback-session.svelte'
   import { GQL_REFRESH_INTERVAL_MS } from './gql'
   import { fetchLiveStatus } from './favorites.svelte'
-  import { MpvBackend, type MpvActionEvent, type VideoBackend } from './video-backend'
+  import { MpvBackend, type MpvActionEvent, type TileShortcutHandles } from './video-backend'
   import {
     tileStore,
     tileAudible,
@@ -71,17 +71,14 @@
     isDragging: boolean
     /** True while another tile is being dragged over this one (drop highlight). */
     isDropTarget: boolean
-    onAuthorityVideo: (el: HTMLVideoElement | null) => void
-    /** The authority tile's playback BACKEND (native engine tiles): App's
-     *  keyboard shortcuts target it instead of the inert <video> element. */
-    onAuthorityBackend: (b: VideoBackend | null) => void
-    /** The authority tile's play/pause HANDLE (Tile.togglePlay, which flags
-     *  the TILE session's userPaused so its own stall-recovery watcher
-     *  respects the pause). App's keyboard shortcut routes through this —
-     *  pausing the element from App's session armed the tile's stall
-     *  recovery, which auto-resumed at the live edge ~1 s later. Null when
-     *  this tile is not the authority. */
-    onAuthorityControls: (h: { togglePlay: () => void } | null) => void
+    /** Reports THIS tile's shortcut handles (its <video>, or its native
+     *  backend while the native engine plays it, plus its togglePlay) to
+     *  MultiView whenever they change; null on teardown. MultiView keys the
+     *  reports by tile id and forwards the AUDIO-AUTHORITY tile's set to
+     *  App — reporting per tile (rather than every tile writing three
+     *  shared slots) is what keeps a non-authority tile's effect from
+     *  wiping the authority's handles. */
+    onTileHandles: (tileId: string, handles: TileShortcutHandles | null) => void
     /** Reports this tile's native-video-area element (the rect the mpv
      *  surface must cover + the box MultiView's overlay manager checks
      *  page UI against). Null on unmount. */
@@ -111,9 +108,7 @@
     isWindows,
     isDragging,
     isDropTarget,
-    onAuthorityVideo,
-    onAuthorityBackend,
-    onAuthorityControls,
+    onTileHandles,
     onNativeArea,
     onTileActivate,
     onTileDragStart,
@@ -665,6 +660,15 @@
     if (!stage) return
     const id = mpvId
     let lastClickAt = 0
+    // True while a pointer press that STARTED on this tile's stage is held.
+    // Held-move clicks are synthesized only for such presses: a splitter or
+    // drag-handle press crossing the tile still fires pointermove here (its
+    // events are un-captured page events landing on whatever is under the
+    // pointer), and every forwarded click hit-tests the OSC — which
+    // activates the button under it even from its hidden state. Without the
+    // gate, resizing the grid could close a tile, pause it or set its
+    // volume.
+    let pressActive = false
     // Fractions within the tile, computed in the event and coalesced to at
     // most one 'move' per animation frame (each forward is an IPC hop that
     // becomes an mpv input command; pointermove can outpace the display
@@ -699,10 +703,11 @@
         pendingMove = loc
         if (!moveRaf) moveRaf = requestAnimationFrame(flushMove)
       }
-      if (e.buttons === 1) click(e)
+      if (e.buttons === 1 && pressActive) click(e)
     }
     const onDown = (e: PointerEvent): void => {
       if (e.button !== 0) return
+      pressActive = true
       // Pointer capture keeps held-drag streams flowing even when the
       // pointer leaves the tile mid-drag.
       try {
@@ -711,6 +716,11 @@
         /* stage gone mid-gesture */
       }
       click(e)
+    }
+    // Capture retargets the release to the stage, so this clears even when
+    // the pointer left the tile mid-press.
+    const onUp = (): void => {
+      pressActive = false
     }
     const onWheelNative = (e: WheelEvent): void => {
       // mpv owns the wheel in native mode (OSC volume steps) — the page's
@@ -731,12 +741,16 @@
     }
     stage.addEventListener('pointermove', onMove, { passive: true })
     stage.addEventListener('pointerdown', onDown)
+    stage.addEventListener('pointerup', onUp)
+    stage.addEventListener('pointercancel', onUp)
     stage.addEventListener('click', onClick)
     stage.addEventListener('wheel', onWheelNative, { passive: false })
     return () => {
       if (moveRaf) cancelAnimationFrame(moveRaf)
       stage.removeEventListener('pointermove', onMove)
       stage.removeEventListener('pointerdown', onDown)
+      stage.removeEventListener('pointerup', onUp)
+      stage.removeEventListener('pointercancel', onUp)
       stage.removeEventListener('click', onClick)
       stage.removeEventListener('wheel', onWheelNative)
     }
@@ -780,25 +794,21 @@
     return () => el.removeEventListener('wheel', onWheel)
   })
 
-  // Report the authority tile's shortcut TARGET to App (keyboard shortcuts
-  // follow the AUDIO AUTHORITY, not the active chat tab): the backend while
-  // the native engine plays this tile (the <video> is inert then), else the
-  // element — plus the play/pause HANDLE in both cases, so the keyboard
-  // shortcut routes through the TILE's session (its userPaused flag is what
-  // the tile's own stall-recovery watcher respects).
+  // Report THIS tile's shortcut handles (its <video>, or its native backend
+  // while the native engine plays it, plus its togglePlay — the TILE
+  // session's userPaused flag is what the tile's own stall-recovery watcher
+  // respects). MultiView keys the reports by tile id and forwards the AUDIO
+  // AUTHORITY tile's set to App; authority selection lives there so a
+  // sibling's report can never blank the authority's handles (the shared
+  // three-slot wiring did — K/space/F/arrows went dead the moment a second
+  // tile opened).
   $effect(() => {
-    if (isAuthority && nativeActive && mpvBackend) {
-      onAuthorityVideo(null)
-      onAuthorityBackend(mpvBackend)
-      onAuthorityControls({ togglePlay })
-    } else if (isAuthority && videoEl) {
-      onAuthorityVideo(videoEl)
-      onAuthorityBackend(null)
-      onAuthorityControls({ togglePlay })
+    const el = videoEl
+    if (!el) return
+    if (nativeActive && mpvBackend) {
+      onTileHandles(tile.id, { video: null, backend: mpvBackend, controls: { togglePlay } })
     } else {
-      onAuthorityVideo(null)
-      onAuthorityBackend(null)
-      onAuthorityControls(null)
+      onTileHandles(tile.id, { video: el, backend: null, controls: { togglePlay } })
     }
   })
 
@@ -850,9 +860,7 @@
     mpvBackend = null
     if (b) void b.dispose() // unsubscribes + mpv_stop (hides the surface)
     if (pollTimer) clearInterval(pollTimer)
-    onAuthorityVideo(null)
-    onAuthorityBackend(null)
-    onAuthorityControls(null)
+    onTileHandles(tile.id, null)
     onNativeArea(tile.id, null)
   })
 
@@ -873,6 +881,16 @@
     }, 400)
     return () => clearInterval(id)
   })
+
+  // The HTML overlay controls (bar, label, drag handle) render for hls
+  // tiles AND for native tiles whose surface is NOT up — the initial load
+  // before the first native attach, an offline/error resolve, a mid-playback
+  // engine error or stream end, or an mpv_load fallback to hls.js. While the
+  // native surface is actually showing, the mpv OSC owns the tile and the
+  // HTML overlay stays away; gating on mpvEnabled alone left every one of
+  // those states with NO controls at all (uncloseable, unmutable, no quality
+  // menu — the OSC's surface was already hidden).
+  const htmlControls = $derived(controlsShown && !(mpvEnabled && nativeActive))
 
   const showOverlay = $derived(tile.status === 'loading' || tile.status === 'offline' || tile.status === 'error')
 </script>
@@ -922,7 +940,7 @@
          player or its controls. Keyboard users get the ◀/▶ reorder buttons below.
          Auto-hides with the rest of the tile overlay (controlsShown); native
          tiles use the mpv OSC instead of the HTML overlay UI. -->
-    {#if controlsShown && !mpvEnabled}
+    {#if htmlControls}
       <button
         type="button"
         class="mv-drag-handle"
@@ -940,7 +958,7 @@
       </button>
     {/if}
 
-    {#if controlsShown && !mpvEnabled}
+    {#if htmlControls}
       <div class="mv-tile-channel" class:mv-tile-channel--dim={!isAuthority}>{tile.channel}</div>
     {/if}
 
@@ -957,10 +975,11 @@
     {/if}
   </div>
 
-  {#if controlsShown && !mpvEnabled}
-    <!-- The auto-hiding gradient bar OVER the video — hls.js tiles only.
-         Native tiles use the mpv OSC (in-video, mpv-rendered; see the
-         OSC feeding/effects above). -->
+  {#if htmlControls}
+    <!-- The auto-hiding gradient bar OVER the video — hls.js tiles, plus
+         native tiles whose surface is down (see htmlControls). A playing
+         native tile uses the mpv OSC instead (in-video, mpv-rendered; see
+         the OSC feeding/effects above). -->
     <div class="mv-tile-controls">
       <button type="button" class="mv-ctrl" onclick={togglePlay} aria-label={t('pc_play')} use:tooltip={t('pc_play')}>
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"

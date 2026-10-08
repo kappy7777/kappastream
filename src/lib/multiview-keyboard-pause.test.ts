@@ -54,7 +54,13 @@ vi.mock('@tauri-apps/api/core', () => ({
         if (body.includes('users(logins:')) {
           return JSON.stringify({
             data: {
-              users: [{ id: '111', login: 'chan5', profileImageURL: 'a', followers: { totalCount: 1 }, stream: null }],
+              users: ['chan1', 'chan2', 'chan3', 'chan4'].map((login, i) => ({
+                id: String(100 + i),
+                login,
+                profileImageURL: 'a',
+                followers: { totalCount: 1 },
+                stream: null,
+              })),
             },
           })
         }
@@ -136,13 +142,18 @@ HTMLMediaElement.prototype.load = function (): void {}
 
 // Seeded BEFORE the App import: the first-launch store classifies at module
 // construction, and a first-install welcome overlay would suppress player
-// shortcuts entirely.
+// shortcuts entirely. Four favorites — the keyboard-target test needs a grid
+// that grows past one tile.
 localStorage.setItem('app-last-seen-version-v1', '99.0.0')
-localStorage.setItem('twitch-favorites-v1', JSON.stringify([{ name: 'chan5', addedAt: 1, order: 1 }]))
+localStorage.setItem(
+  'twitch-favorites-v1',
+  JSON.stringify(['chan1', 'chan2', 'chan3', 'chan4'].map((name, i) => ({ name, addedAt: i + 1, order: i + 1 }))),
+)
 
 const App = (await import('../App.svelte')).default
 const { tileStore } = await import('./tile-store.svelte')
 const { settings } = await import('./settings.svelte.ts')
+const { sleepTimer } = await import('./sleep-timer.svelte')
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -159,6 +170,7 @@ afterEach(() => {
   view = null
   tileStore.exitAll()
   settings.setMpvEngine(false)
+  sleepTimer.cancel()
   localStorage.clear()
   hlsMock.instances.length = 0
 })
@@ -197,5 +209,147 @@ describe('multi-view keyboard pause sticks', () => {
     await sleep(1400)
     expect(video!.paused).toBe(true)
     expect(playCalls.get(video!)).toBe(before)
+  }, 20000)
+})
+
+// Pins the authority-handle registry in MultiView: every Tile used to write
+// App's three shared shortcut slots, and each non-authority tile's report
+// nulled them — so K/space/F/arrows went dead the moment a SECOND tile
+// opened and only came back when authority landed on the LAST tile in grid
+// order. Tiles now report per tile id and MultiView forwards the authority's
+// set, so the shortcut must work at every grid size.
+describe('multi-view keyboard target survives sibling tiles', () => {
+  function fireManifestParsed(): void {
+    for (const inst of hlsMock.instances) {
+      for (const call of inst.on.mock.calls) {
+        if (call[0] === 'hlsManifestParsed') (call[1] as (e: unknown, d: unknown) => void)(undefined, {})
+      }
+    }
+  }
+
+  it('K pauses the authority tile with 1, 2 and 4 tiles open', async () => {
+    const target = document.createElement('div')
+    document.body.appendChild(target)
+    view = mount(App, { target })
+    await sleep(150)
+
+    q('button[aria-label="Multi-stream view"]').click()
+    await sleep(80)
+    // Re-query every iteration: the favorites poll re-renders the sidebar,
+    // and a click on a stale detached node never reaches Svelte's delegated
+    // handler.
+    const favs = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.fav')]
+    expect(favs().length).toBe(4)
+
+    let favIndex = 0
+    for (const count of [1, 2, 4]) {
+      // Open favorites one by one until the grid holds `count` tiles.
+      while (document.querySelectorAll('[data-tile-id]').length < count && favIndex < 4) {
+        favs()[favIndex++]?.click()
+        await sleep(300)
+      }
+      fireManifestParsed()
+      await sleep(150)
+      expect(document.querySelectorAll('[data-tile-id]').length).toBe(count)
+
+      // The newly opened tile is the authority; its video must be playing.
+      const video = document.querySelector<HTMLVideoElement>('.mv-tile--authority video')
+      expect(video).toBeTruthy()
+      expect(video!.paused).toBe(false)
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }))
+      await sleep(50)
+      expect(video!.paused).toBe(true)
+
+      // Resume so the next iteration starts from a playing grid.
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }))
+      await sleep(50)
+      expect(video!.paused).toBe(false)
+    }
+  }, 30000)
+})
+
+// Search-box Enter funnels through App.openChannel, which now normalizes and
+// validates in BOTH views: the multi-view branch used to skip connect()'s
+// validation and open raw typed text (empty, `#Chan2 `, `a,b`) as a tile.
+describe('multi-view search Enter validates the channel name', () => {
+  function typeAndEnter(text: string): void {
+    const input = q('.channel-input') as HTMLInputElement
+    input.value = text
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  }
+
+  it('normalizes a typed name into a tile and refuses invalid input with a toast', async () => {
+    const target = document.createElement('div')
+    document.body.appendChild(target)
+    view = mount(App, { target })
+    await sleep(150)
+
+    q('button[aria-label="Multi-stream view"]').click()
+    await sleep(80)
+
+    typeAndEnter(' #Chan2 ')
+    await sleep(300)
+    let tiles = [...document.querySelectorAll('[data-tile-id]')]
+    expect(tiles.map((el) => el.getAttribute('aria-label'))).toEqual(['chan2'])
+
+    // Invalid text never becomes a tile; the shared invalid-name toast shows.
+    typeAndEnter('chan3,chan4')
+    await sleep(120)
+    tiles = [...document.querySelectorAll('[data-tile-id]')]
+    expect(tiles.length).toBe(1)
+    expect(document.querySelector('.notif-toast')?.textContent).toBeTruthy()
+
+    // Whitespace-only Enter is a plain no-op.
+    typeAndEnter('   ')
+    await sleep(120)
+    expect(document.querySelectorAll('[data-tile-id]').length).toBe(1)
+  }, 20000)
+})
+
+// Pins the sleep-timer arming paths: the cancel-on-idle $effect used to read
+// the timer's own `armed` state through cancel(), so ARMING re-ran the
+// effect, saw 'idle' and cancelled the fresh timer — the sleep timer could
+// never be armed in multi-view (the single player is idle there by design),
+// and arming single-view-idle failed just as silently. Arming is now
+// refused with a toast when nothing plays (single view) and stays armed in
+// multi-view.
+describe('sleep timer arming', () => {
+  async function openSleepPresets(): Promise<HTMLButtonElement> {
+    q('button[aria-label="Settings"]').click()
+    await sleep(60)
+    // Playback is the 4th nav section (general, appearance, chat, playback).
+    const nav = [...document.querySelectorAll<HTMLButtonElement>('.settings-nav-item')]
+    nav[3]!.click()
+    await sleep(60)
+    const preset = [...document.querySelectorAll<HTMLButtonElement>('.seg .seg-btn')].find(
+      (b) => b.textContent === '15m',
+    )
+    if (!preset) throw new Error('sleep preset button not found')
+    return preset
+  }
+
+  it('refuses to arm with nothing playing (toast) and stays armed in multi-view', async () => {
+    const target = document.createElement('div')
+    document.body.appendChild(target)
+    view = mount(App, { target })
+    await sleep(150)
+
+    // Single view, nothing playing: refused, with the why toast.
+    ;(await openSleepPresets()).click()
+    await sleep(100)
+    expect(sleepTimer.armed).toBe(false)
+    expect(document.querySelector('.notif-toast')?.textContent).toBeTruthy()
+
+    // Multi-view: arming targets the tile grid and must stick.
+    q('.settings-close').click()
+    await sleep(50)
+    q('button[aria-label="Multi-stream view"]').click()
+    await sleep(80)
+    ;(await openSleepPresets()).click()
+    await sleep(150)
+    expect(sleepTimer.armed).toBe(true)
+    sleepTimer.cancel()
   }, 20000)
 })

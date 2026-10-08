@@ -153,13 +153,15 @@
     }
   }
 
-  // Fast path: connect directly to whatever is typed. Hands the raw text to
-  // App.connect (via onselect → selectChannel), which normalizes, validates,
-  // and shows the invalid-name toast — identical to the pre-search behavior.
+  // Fast path: connect directly to whatever is typed. Only whitespace is
+  // handled here (an empty Enter is a no-op, not an error); the trimmed text
+  // goes to onselect → App.openChannel, which normalizes and validates it for
+  // BOTH views and shows the invalid-name toast — multi-view used to bypass
+  // that validation and open the raw text as a tile.
   function submitDirect(): void {
-    const name = value
+    const name = value.trim()
     reset()
-    onselect(name)
+    if (name) onselect(name)
   }
 
   function choose(r: SearchChannelResult): void {

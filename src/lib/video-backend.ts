@@ -81,6 +81,21 @@ export interface VideoBackend {
 }
 
 /**
+ * One multi-view tile's keyboard-shortcut handles: the target App's media
+ * shortcuts drive while that tile is the audio authority. `video` is null
+ * while the native engine plays the tile (the backend is the target then);
+ * `controls` routes play/pause through the tile's OWN playback session so
+ * its stall-recovery respects the pause. Tiles report their own set (keyed
+ * by tile id) and MultiView forwards the authority tile's — a tile never
+ * clears a sibling's report.
+ */
+export interface TileShortcutHandles {
+  video: HTMLVideoElement | null
+  backend: VideoBackend | null
+  controls: { togglePlay: () => void }
+}
+
+/**
  * The no-behaviour-change backend: pure delegation to the existing
  * <video> element. Events are the element's own DOM events (the names in
  * VideoBackendEvent are all standard MediaElement events), so `on` is

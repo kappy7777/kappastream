@@ -48,7 +48,7 @@
   import { formatCompact } from './format'
   import { tooltip } from './tooltip.ts'
   import { t } from './i18n/index.svelte'
-  import type { VideoBackend } from './video-backend'
+  import type { TileShortcutHandles, VideoBackend } from './video-backend'
 
   interface Props {
     isWindows: boolean
@@ -66,13 +66,40 @@
   const { isWindows, chatSize, onAuthorityVideo, onAuthorityBackend, onAuthorityControls, mpvAvailable }: Props =
     $props()
 
+  // Per-tile shortcut handles (registered by Tile via onTileHandles): every
+  // tile reports its OWN <video>/native-backend/togglePlay keyed by its id,
+  // and the effect below forwards the AUDIO-AUTHORITY tile's set into App's
+  // three shortcut slots. Keying per tile is the point: the previous wiring
+  // handed every tile the same three setters, and each non-authority tile's
+  // report wrote null into them — opening a second tile wiped the
+  // authority's handles, and K/space/F/arrows did nothing until authority
+  // happened to land on the last tile in grid order.
+  const tileHandles = new SvelteMap<string, TileShortcutHandles>()
+  function onTileHandles(tileId: string, handles: TileShortcutHandles | null): void {
+    if (handles) tileHandles.set(tileId, handles)
+    else tileHandles.delete(tileId)
+  }
+  $effect(() => {
+    const authority = tileStore.authority
+    const handles = authority ? (tileHandles.get(authority.id) ?? null) : null
+    onAuthorityVideo(handles?.video ?? null)
+    onAuthorityBackend(handles?.backend ?? null)
+    onAuthorityControls(handles?.controls ?? null)
+  })
+
   // Per-tile chat sessions. A SvelteMap so `.get()` reads genuinely track
   // (a plain $state(new Map()) does not react to .set()/.delete() — pinned
   // by map-reactivity.test.ts).
   const sessions = new SvelteMap<string, ChatSession>()
 
-  // Reconcile sessions to the current tiles: create on add, dispose on remove,
-  // restart on channel replace (same tile id, different channel).
+  // Chat-only merge members' sessions + avatars (see the merged-chats
+  // section below for the member model). Declared HERE — above the tile
+  // reconcile — because that reconcile ADOPTS a member's session when a
+  // tile takes over its channel, and an init-time effect run would hit the
+  // temporal dead zone of a later `const`.
+  const extraSessions = new SvelteMap<string, ChatSession>()
+  const extraAvatars = new SvelteMap<string, string>()
+
   // Reconcile sessions to the current tiles: create on add, dispose on remove,
   // restart on channel replace (same tile id, different channel).
   //
@@ -82,13 +109,17 @@
   // session for the just-added tile and renders "No streams open" until the user
   // manually switches chat tabs. $effect.pre runs before the update phase, so
   // the session is in the Map by the time `sessions.get(activeChatId)` is read.
-  // All sessions reads stay under untrack: the map is now mutation-reactive,
-  // and a tracked read of state the effect then writes is the classic
-  // read-write-same-state effect loop (same rationale as the mpvIds pool
-  // effect below).
+  // The CHANNELS are read tracked (outside untrack) on purpose: a full grid
+  // replaces a tile by rewriting its channel IN PLACE (same id — see
+  // addOrReplace), so ids alone never re-run this effect and the replaced
+  // tile kept the OLD channel's session, socket and pinned message under
+  // the new channel's tab name. All sessions reads stay under untrack: the
+  // map is mutation-reactive, and a tracked read of state the effect then
+  // writes is the classic read-write-same-state effect loop (same rationale
+  // as the mpvIds pool effect below).
   $effect.pre(() => {
-    const tiles = tileStore.tiles
-    const ids = new Set(tiles.map((tile) => tile.id))
+    const wanted = tileStore.tiles.map((tile) => [tile.id, tile.channel] as const)
+    const ids = new Set(wanted.map(([id]) => id))
     untrack(() => {
       for (const [id, s] of sessions) {
         if (!ids.has(id)) {
@@ -96,18 +127,24 @@
           sessions.delete(id)
         }
       }
-      for (const tile of tiles) {
-        const existing = sessions.get(tile.id)
-        if (!existing) {
-          const s = new ChatSession(tile.channel)
-          sessions.set(tile.id, s)
-          s.start()
-        } else if (existing.channel !== tile.channel) {
-          existing.dispose()
-          const s = new ChatSession(tile.channel)
-          sessions.set(tile.id, s)
-          s.start()
+      for (const [id, channel] of wanted) {
+        const existing = sessions.get(id)
+        if (existing && existing.channel === channel) continue
+        if (existing) existing.dispose()
+        // A chat-only merge member's headless session may already hold this
+        // channel's history — adopt it (still connected) instead of dropping
+        // it for a fresh reconnect; the member migrates from `chat:<channel>`
+        // to this tile's id one flush later.
+        const extra = extraSessions.get(channel)
+        if (extra) {
+          extraSessions.delete(channel)
+          extraAvatars.delete(channel)
+          sessions.set(id, extra)
+          continue
         }
+        const s = new ChatSession(channel)
+        sessions.set(id, s)
+        s.start()
       }
     })
   })
@@ -299,10 +336,8 @@
 
   // Chat-only members: channels merged WITHOUT a tile. Each gets a headless
   // IRC session (ChatSession is player-free — socket + emote/badge fetches
-  // only) and a fire-and-forget avatar. SvelteMaps for the same reactivity
-  // reason as `sessions` above. Keyed by channel.
-  const extraSessions = new SvelteMap<string, ChatSession>()
-  const extraAvatars = new SvelteMap<string, string>()
+  // only) and a fire-and-forget avatar. The session/avatar maps live above
+  // the tile reconcile (which adopts from them); keyed by channel.
 
   // The chat-only twin of the tile-session reconcile: a member's session is
   // created the moment it joins the group (a pending one-member group
@@ -465,9 +500,13 @@
   // The scroll-following message list itself (loop, sticky-bottom discipline,
   // errored-art tracking, jump pill) is the SHARED ChatPane component — the
   // same renderer the single-stream chat uses. The pane resets its follow
-  // state when this key changes: a chat-tab switch or a merged-view toggle
-  // both swap the whole rendered buffer.
-  const chatResetKey = $derived(`${activeChatId ?? 'none'}:${mergedView ? 'merged' : 'single'}`)
+  // state when this key changes: a chat-tab switch, a merged-view toggle, or
+  // a full-grid REPLACE (same tile id, new channel — the channel rides the
+  // key so the new buffer starts with fresh follow state instead of the old
+  // channel's).
+  const chatResetKey = $derived(
+    `${activeChatId ?? 'none'}:${activeSession?.channel ?? ''}:${mergedView ? 'merged' : 'single'}`,
+  )
 
   // The pane's follow state drives the sessions' trim hold: the sessions whose
   // chat the pane DISPLAYS (the merged group while merged, else the active
@@ -643,6 +682,16 @@
     e.preventDefault()
     e.stopPropagation()
     splitDrag = { axis }
+    // Capture the pointer for the whole gesture so the drag owns every
+    // pointer event until release. Without it the moves keep landing on
+    // whatever sits under the pointer — over a native tile that fed the OSC
+    // a synthetic click per move, so resizing the grid could press the
+    // tiles' in-video buttons.
+    try {
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    } catch {
+      /* splitter gone mid-gesture */
+    }
     document.addEventListener('pointermove', onSplitMove)
     document.addEventListener('pointerup', endSplitDrag)
     document.addEventListener('pointercancel', endSplitDrag)
@@ -716,9 +765,7 @@
             isDragging={draggingId === tile.id}
             isDropTarget={dropTargetId === tile.id}
             {isWindows}
-            {onAuthorityVideo}
-            {onAuthorityBackend}
-            {onAuthorityControls}
+            {onTileHandles}
             {onNativeArea}
             onTileActivate={activateTile}
             onTileDragStart={startDrag}

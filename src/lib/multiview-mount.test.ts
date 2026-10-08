@@ -25,10 +25,12 @@ vi.mock('@tauri-apps/api/event', () => ({
 }))
 vi.mock('./chat-session.svelte', () => {
   // Chat is not under test here — a no-op session keeps the mount cheap and
-  // offline (no sockets, no emote fetches). Constructed channels are recorded
-  // so the merge test can assert a headless session spawns for a chat-only
-  // member (a channel with no tile).
+  // offline (no sockets, no emote fetches). Constructed + disposed channels
+  // are recorded so the merge test can assert a headless session spawns for
+  // a chat-only member (a channel with no tile) and the full-grid-replace
+  // test can assert the session swap.
   const constructed: string[] = []
+  const disposed: string[] = []
   class ChatSession {
     channel: string
     messages: unknown[] = []
@@ -43,9 +45,11 @@ vi.mock('./chat-session.svelte', () => {
     }
     start(): void {}
     setHoldTrim(_hold: boolean): void {}
-    dispose(): void {}
+    dispose(): void {
+      disposed.push(this.channel)
+    }
   }
-  return { ChatSession, __constructed: constructed }
+  return { ChatSession, __constructed: constructed, __disposed: disposed }
 })
 
 if (!('ResizeObserver' in globalThis)) {
@@ -57,9 +61,12 @@ if (!('ResizeObserver' in globalThis)) {
 }
 
 const MultiView = (await import('./MultiView.svelte')).default
-// The mocked ChatSession's constructed-channel log (extra export the mock
-// factory adds; the real module has none).
-const chatMock = (await import('./chat-session.svelte')) as unknown as { __constructed: string[] }
+// The mocked ChatSession's constructed/disposed-channel logs (extra exports
+// the mock factory adds; the real module has none).
+const chatMock = (await import('./chat-session.svelte')) as unknown as {
+  __constructed: string[]
+  __disposed: string[]
+}
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 let view: ReturnType<typeof mount> | null = null
@@ -68,6 +75,11 @@ afterEach(() => {
   view = null
   tileStore.exitAll()
   settings.setMpvEngine(false)
+  chatMock.__constructed.length = 0
+  chatMock.__disposed.length = 0
+  // A test may override the invoke mock (e.g. failing mpv_load); restore the
+  // factory's permissive default so later tests start clean.
+  vi.mocked(invoke).mockImplementation(async () => ({ ok: true, url: 'https://example.invalid/x.m3u8' }))
 })
 
 function mountView(mpvAvailable: boolean): void {
@@ -182,5 +194,106 @@ describe('MultiView mount (effect-loop regression)', () => {
     expect(names).toContain('chan9')
     const tab = document.querySelector<HTMLButtonElement>('.mv-chat-tab')!
     expect(tab.getAttribute('title')).toBe('chan1, chan9')
+  })
+
+  // A full grid replaces a tile by rewriting its channel IN PLACE (same tile
+  // id — see addOrReplace). The session reconcile used to read tile.channel
+  // under untrack, so the replace never re-ran it: the tab named after the
+  // NEW channel kept the OLD channel's chat (socket, pins, modes) until an
+  // unrelated tile change. The channels are tracked reads now, so the
+  // replace must connect a session for the new channel and dispose the old
+  // one's.
+  it('full-grid replace swaps the chat session for the new channel', async () => {
+    settings.setMpvEngine(false)
+    mountView(false)
+    await sleep(60)
+    for (const c of ['chan1', 'chan2', 'chan3', 'chan4']) tileStore.addOrReplace(c, 'best', 1)
+    await sleep(200)
+    expect(chatMock.__constructed).toEqual(['chan1', 'chan2', 'chan3', 'chan4'])
+    expect(chatMock.__disposed).toEqual([])
+
+    // The 5th open rewrites the AUTHORITY tile (chan4 after four adds).
+    tileStore.addOrReplace('chan5', 'best', 1)
+    await sleep(120)
+    expect(chatMock.__constructed).toEqual(['chan1', 'chan2', 'chan3', 'chan4', 'chan5'])
+    expect(chatMock.__disposed).toEqual(['chan4'])
+    expect(tileStore.count).toBe(4)
+  })
+
+  // A native tile whose surface is NOT up — an mpv_load that fails and falls
+  // back to hls.js, an offline/error resolve, a mid-stream engine error —
+  // has no mpv OSC to fall back on. Gating the HTML bar on mpvEnabled alone
+  // left those tiles with NO controls (uncloseable, unmutable); it must be
+  // gated on the surface actually showing instead.
+  it('mpv mode: a tile without a live native surface keeps the HTML controls', async () => {
+    settings.setMpvEngine(true)
+    mountView(true)
+    await sleep(60)
+    // Tile 1: the native load fails → the tile falls back to the page
+    // player path and the HTML bar must render. (A failed mpv_load is a
+    // REJECTED invoke — a resolved one is always a success.)
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === 'mpv_load') throw new Error('engine unavailable')
+      return { ok: true, url: 'https://example.invalid/x.m3u8' }
+    })
+    tileStore.addOrReplace('chan1', 'best', 1)
+    await sleep(250)
+    const tiles = () => [...document.querySelectorAll('[data-tile-id]')]
+    expect(tiles().length).toBe(1)
+    expect(tiles()[0]!.querySelector('.mv-tile-controls')).toBeTruthy()
+    expect(tiles()[0]!.querySelector('.mv-close')).toBeTruthy()
+
+    // Tile 2: the engine loads fine → the surface is up, the mpv OSC owns
+    // the tile, and the HTML bar stays out of the way.
+    vi.mocked(invoke).mockImplementation(async () => ({ ok: true, url: 'https://example.invalid/x.m3u8' }))
+    tileStore.addOrReplace('chan2', 'best', 1)
+    await sleep(250)
+    expect(tiles().length).toBe(2)
+    expect(tiles()[1]!.querySelector('.mv-tile-controls')).toBeNull()
+    // The fallback tile keeps its bar.
+    expect(tiles()[0]!.querySelector('.mv-tile-controls')).toBeTruthy()
+  })
+
+  // Held-move clicks feed the OSC's drag synthesis — but ONLY while a press
+  // that started on the tile is held. A splitter or drag-handle press
+  // crossing a native tile used to forward a click per move, and the OSC
+  // activates the button under any forwarded click (even from its hidden
+  // state), so resizing the grid could close or pause a tile.
+  it('mpv mode: held moves without an on-tile press forward no OSC clicks', async () => {
+    settings.setMpvEngine(true)
+    mountView(true)
+    await sleep(60)
+    tileStore.addOrReplace('chan1', 'best', 1)
+    await sleep(250)
+    const stage = document.querySelector<HTMLElement>('.mv-video-area')
+    expect(stage).toBeTruthy()
+    // happy-dom lays out nothing — stub a real rect so the forwarder's
+    // fraction math runs.
+    stage!.getBoundingClientRect = () =>
+      ({ x: 0, y: 0, left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300 }) as DOMRect
+    const PE: new (type: string, init?: MouseEventInit) => PointerEvent = ((
+      globalThis as { PointerEvent?: typeof MouseEvent }
+    ).PointerEvent ?? MouseEvent) as new (type: string, init?: MouseEventInit) => PointerEvent
+    const clicks = (): number =>
+      vi
+        .mocked(invoke)
+        .mock.calls.filter((c) => c[0] === 'mpv_pointer' && (c[1] as { kind?: string } | undefined)?.kind === 'click')
+        .length
+    const move = (x: number, y: number): void => {
+      stage!.dispatchEvent(new PE('pointermove', { buttons: 1, clientX: x, clientY: y }))
+    }
+
+    // A splitter-style drag: button held, but the press started elsewhere.
+    move(390, 290)
+    await sleep(80)
+    expect(clicks()).toBe(0)
+
+    // A press on the tile itself forwards its down click and held moves.
+    stage!.dispatchEvent(new PE('pointerdown', { button: 0, buttons: 1, clientX: 200, clientY: 150 }))
+    await sleep(80)
+    expect(clicks()).toBe(1)
+    move(210, 150)
+    await sleep(80)
+    expect(clicks()).toBe(2)
   })
 })

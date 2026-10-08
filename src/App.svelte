@@ -695,24 +695,41 @@
   // playback kind), so a later channel change / VOD switch cancels it (see
   // the $effect below). The generation is deliberately NOT part of the key:
   // a quality switch, low-latency toggle or variant fallback reloads the
-  // same stream and must not cancel an armed timer.
+  // same stream and must not cancel an armed timer. Multi-view arms against
+  // the tile grid (the single player sits idle there — see the effect below)
+  // — outside multi-view there must be something to stop, so arming with
+  // nothing playing is refused with a toast instead of silently counting
+  // down to a no-op.
   function armSleep(minutes: number): void {
+    if (!multiView && (playerStatus === 'idle' || playerStatus === 'offline' || playerStatus === 'error')) {
+      showNotifToast(t('toast_sleepNothingPlaying'))
+      return
+    }
     sleepTimer.arm({ channel: channelJoined, playbackKind: playback.kind }, minutes)
   }
 
   // A stale armed timer must never fire against a different stream than the one
   // it was set for: cancel when the channel or playback kind changes, or when
   // the player stops / the stream ends (idle / offline / error). Transient
-  // resolving/loading states within the SAME stream do not cancel.
+  // resolving/loading states within the SAME stream do not cancel. Multi-view
+  // skips the idle cancel entirely: the single player is ALWAYS idle while
+  // the tile grid owns playback, and the timer's whole multi-view job is to
+  // stop those tiles. The timer calls run under untrack because cancel() /
+  // cancelIfStale() read the `armed` $state — tracked, ARMING itself re-ran
+  // this effect, which saw 'idle' and cancelled the timer the moment it was
+  // set (the sleep timer could never be armed in multi-view at all).
   $effect(() => {
     void channelJoined
     void playback.kind
     void playerStatus
-    if (playerStatus === 'idle' || playerStatus === 'offline' || playerStatus === 'error') {
-      sleepTimer.cancel()
-    } else {
-      sleepTimer.cancelIfStale(channelJoined, playback.kind)
+    void multiView
+    if (!multiView && (playerStatus === 'idle' || playerStatus === 'offline' || playerStatus === 'error')) {
+      untrack(() => sleepTimer.cancel())
+      return
     }
+    const channel = channelJoined
+    const kind = playback.kind
+    untrack(() => sleepTimer.cancelIfStale(channel, kind))
   })
 
   // VOD resume: force-flush the current position when the user LEAVES a VOD
@@ -2000,15 +2017,22 @@
 
   // ---- Multi-stream split view -------------------------------------------
   // The SINGLE channel-open entry point every call site funnels through
-  // (sidebar / search / browse). With multi-view OFF it is exactly the existing
-  // single-stream path (byte-identical baseline). With multi-view ON it adds a
-  // tile (next empty slot, else replaces the focused tile) via the TileStore.
+  // (sidebar / search / browse). The name is normalized + validated HERE, once,
+  // so both views get the same rule: search-box text like `#chan`, ` chan `
+  // or `a,b` used to skip connect()'s validation in the multi-view branch and
+  // become a broken tile (failed resolve, a ChatSession joining the raw text).
+  // With multi-view OFF it is exactly the existing single-stream path.
   function openChannel(name: string): void {
-    if (multiView) {
-      tileStore.addOrReplace(name, 'best', settings.volume)
+    const channel = normalizeChannelName(name)
+    if (!isValidChannelName(channel)) {
+      showNotifToast(t('toast_invalidChannel'))
       return
     }
-    selectChannel(name)
+    if (multiView) {
+      tileStore.addOrReplace(channel, 'best', settings.volume)
+      return
+    }
+    selectChannel(channel)
   }
 
   // Connect from Browse — opens via the shared router, then closes the overlay.
