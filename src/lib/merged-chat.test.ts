@@ -118,9 +118,11 @@ describe('reconcileMergedIds — keep the group valid as tiles change', () => {
     expect(reconcileMergedIds(['t1', 't2', 't3'], tiles(['t1', 'chan1'], ['t3', 'chan3']))).toEqual(['t1', 't3'])
   })
 
-  it('collapses to empty when fewer than two members survive', () => {
+  it('collapses to empty when fewer than two members survive a LOSS', () => {
     expect(reconcileMergedIds(['t1', 't2'], tiles(['t2', 'chan2']))).toEqual([])
     expect(reconcileMergedIds(['t1', 't2'], [])).toEqual([])
+    // A doubled channel deduping down to one membership is a loss too.
+    expect(reconcileMergedIds(['chat:chan2', 't2'], tiles(['t2', 'chan2']))).toEqual([])
   })
 
   it('a chat-only member whose channel gets a tile MIGRATES to that tile id', () => {
@@ -130,9 +132,26 @@ describe('reconcileMergedIds — keep the group valid as tiles change', () => {
     expect(reconcileMergedIds(['t1', 'chat:chan2'], tiles(['t1', 'chan1'], ['t2', 'chan2']))).toEqual(['t1', 't2'])
   })
 
+  it('a PENDING one-member selection migrates instead of being dropped', () => {
+    // The first tick of a group is a pending selection the user made; its
+    // channel getting a tile must CARRY the selection over to that tile
+    // (the group stays "formed by adding", not a removal leftover).
+    expect(reconcileMergedIds(['chat:chan1'], tiles(['t1', 'chan1']))).toEqual(['t1'])
+  })
+
   it('chat-only members with no matching tile survive reconcile (no tile to die with)', () => {
     const group = ['chat:chan1', 'chat:chan2']
     expect(reconcileMergedIds(group, tiles(['t9', 'chan9']))).toBe(group)
+  })
+
+  it('an EMPTY grid drops chat-only members too (wholesale teardown)', () => {
+    // exitAll paths (sleep timer, hide-to-tray) keep multi-view mounted
+    // with no tiles: the headless IRC sessions must not outlive the grid
+    // they were merged alongside — there is no picker left to remove them
+    // with (the merge button needs a tile).
+    expect(reconcileMergedIds(['chat:chan1', 'chat:chan2'], [])).toEqual([])
+    const empty: string[] = []
+    expect(reconcileMergedIds(empty, [])).toBe(empty)
   })
 
   it('migration is a CHANGE even with no drops (fresh array, not the same reference)', () => {

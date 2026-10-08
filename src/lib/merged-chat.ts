@@ -128,19 +128,29 @@ export function toggleMergedId(current: string[], id: string, cap = MAX_MERGED_S
  * whose channel LATER got a tile of its own MIGRATES to that tile's id —
  * the group keeps its size, the tile's checkbox shows checked, and the
  * chat-only session is released instead of doubling the channel's messages
- * through two connections. Other chat-only members are kept (they have no
- * tile to die with). A group smaller than two collapses to empty. Returns
- * the SAME array reference when nothing changed so callers (an $effect) can
+ * through two connections. Migration is lossless, so a PENDING one-member
+ * selection (`[chat:chan]` whose channel just got a tile) migrates to
+ * `[tileId]` and stays a pending selection; only a group that LOST a
+ * membership (a tile died, or a doubled channel deduped down) collapses
+ * below two to empty — a leftover of removals is not a selection. With NO
+ * tiles at all the whole group goes: multi-view torn down wholesale (sleep
+ * timer, hide-to-tray) must not leave headless IRC sockets alive with no
+ * grid to manage them from (the merge picker needs a tile). Returns the
+ * SAME array reference when nothing changed so callers (an $effect) can
  * skip a redundant state write.
  */
 export function reconcileMergedIds(
   current: string[],
   liveTiles: ReadonlyArray<{ id: string; channel: string }>,
 ): string[] {
+  if (liveTiles.length === 0) {
+    return current.length === 0 ? current : []
+  }
   const tileByChannel = new Map(liveTiles.map((tile) => [tile.channel, tile.id]))
   const liveIds = new Set(liveTiles.map((tile) => tile.id))
   const kept: string[] = []
   let changed = false
+  let lost = false
   const seen = new Set<string>()
   for (const id of current) {
     let mapped = id
@@ -152,6 +162,7 @@ export function reconcileMergedIds(
     }
     if (mapped === '') {
       changed = true
+      lost = true
       continue
     }
     if (mapped !== id) changed = true
@@ -159,13 +170,14 @@ export function reconcileMergedIds(
       // The channel was a member twice (chat-only, then its tile got checked
       // before the migration ran) — one membership survives.
       changed = true
+      lost = true
       continue
     }
     seen.add(mapped)
     kept.push(mapped)
   }
   if (!changed) return current
-  return kept.length >= 2 ? kept : []
+  return kept.length >= 2 || !lost ? kept : []
 }
 
 export type ExtraChatAddReason = 'invalid' | 'tile-open' | 'already-merged' | 'full'

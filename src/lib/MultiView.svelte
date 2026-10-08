@@ -358,6 +358,12 @@
       }
       for (const channel of wanted) {
         if (extraSessions.has(channel)) continue
+        // A channel that just got a tile is mid-migration to that tile's
+        // id (the mergedIds reconcile lands one flush later): the tile's
+        // reconcile ADOPTED the member's session, and creating a fresh one
+        // here would open a second IRC connection to the channel for
+        // exactly that gap.
+        if (tileStore.tiles.some((tile) => tile.channel === channel)) continue
         const s = new ChatSession(channel)
         extraSessions.set(channel, s)
         s.start()

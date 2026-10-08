@@ -297,3 +297,71 @@ describe('MultiView mount (effect-loop regression)', () => {
     expect(clicks()).toBe(2)
   })
 })
+
+// Chat-only merge members must not outlive the grid: the exitAll paths
+// (sleep timer, hide-to-tray) keep multi-view mounted with an EMPTY grid,
+// where the merge picker no longer renders (it needs a tile) — headless
+// IRC sockets would camp there with no way to see or remove them.
+it('exitAll disposes chat-only members and drops the merged tab', async () => {
+  settings.setMpvEngine(false)
+  mountView(false)
+  await sleep(60)
+  tileStore.addOrReplace('chan1', 'best', 1)
+  tileStore.addOrReplace('chan2', 'best', 1)
+  await sleep(200)
+
+  // Form a group of one tile + two chat-only members via the picker.
+  document.querySelector<HTMLButtonElement>('.mv-merge-btn')!.click()
+  await sleep(30)
+  const panel = document.querySelector<HTMLElement>('.mv-merge-panel')!
+  panel.querySelector<HTMLButtonElement>('.mv-merge-row')!.click() // chan1
+  await sleep(30)
+  for (const name of ['chan9', 'chan10']) {
+    const input = panel.querySelector<HTMLInputElement>('.mv-merge-add-input')!
+    input.value = name
+    input.dispatchEvent(new Event('input'))
+    panel.querySelector<HTMLFormElement>('.mv-merge-add')!.dispatchEvent(new Event('submit', { bubbles: true }))
+    await sleep(60)
+  }
+  expect(chatMock.__constructed).toEqual(expect.arrayContaining(['chan9', 'chan10']))
+  expect(chatMock.__disposed).toEqual([])
+
+  // Wholesale teardown (what the sleep timer / hide-to-tray paths run).
+  tileStore.exitAll()
+  await sleep(120)
+  expect(chatMock.__disposed).toEqual(expect.arrayContaining(['chan1', 'chan2', 'chan9', 'chan10']))
+  // The merged tab (and every tile tab) is gone over the empty grid.
+  expect(document.querySelector('.mv-chat-tab')).toBeNull()
+})
+
+// Opening a chat-only member's channel as a tile ADOPTS its headless
+// session (scrollback + connection survive the migration to the tile id);
+// the one-flush gap before mergedIds migrates must not spawn a SECOND
+// connection to the channel.
+it('opening a chat-only member as a tile adopts its session without reconnecting', async () => {
+  settings.setMpvEngine(false)
+  mountView(false)
+  await sleep(60)
+  tileStore.addOrReplace('chan1', 'best', 1)
+  tileStore.addOrReplace('chan2', 'best', 1)
+  await sleep(200)
+
+  document.querySelector<HTMLButtonElement>('.mv-merge-btn')!.click()
+  await sleep(30)
+  const panel = document.querySelector<HTMLElement>('.mv-merge-panel')!
+  panel.querySelector<HTMLButtonElement>('.mv-merge-row')!.click() // chan1 (pending)
+  await sleep(30)
+  const input = panel.querySelector<HTMLInputElement>('.mv-merge-add-input')!
+  input.value = 'chan9'
+  input.dispatchEvent(new Event('input'))
+  panel.querySelector<HTMLFormElement>('.mv-merge-add')!.dispatchEvent(new Event('submit', { bubbles: true }))
+  await sleep(80)
+  expect(chatMock.__constructed.filter((c) => c === 'chan9')).toEqual(['chan9'])
+
+  // Open chan9 as a tile: its session moves to the tile, no reconnect.
+  tileStore.addOrReplace('chan9', 'best', 1)
+  await sleep(150)
+  expect(chatMock.__constructed.filter((c) => c === 'chan9')).toEqual(['chan9'])
+  expect(chatMock.__disposed).toEqual([])
+  expect(tileStore.count).toBe(3)
+})
