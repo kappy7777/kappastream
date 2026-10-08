@@ -2,10 +2,14 @@
 //
 // 1. Manual sort (switched LIVE, no remount): pressing a row and moving it
 //    past the threshold floats a full clone of the row, tracks the hovered
-//    sibling via geometry (the drop indicator), and releasing reorders.
-//    This replaces HTML5 drag-and-drop, whose dragover events the webview
-//    stopped delivering to the rows once they changed at runtime — the
-//    drag picked up but no drop was accepted anywhere until a restart.
+//    sibling via geometry, and draws the drop line on the edge matching the
+//    pointer's half of the row (top half → above, bottom half → below);
+//    releasing inserts at exactly that edge. This replaces HTML5
+//    drag-and-drop, whose dragover events the webview stopped delivering to
+//    the rows once they changed at runtime, leaving the drag undroppable
+//    until a restart. It also pins the line-vs-drop agreement: dropping on
+//    the next row's TOP half must be a no-op (the line sits where the row
+//    already is), never a silent swap.
 // 2. Auto sort: presses stay plain clicks — no drag starts, so no drop
 //    line can promise a reorder that Auto sort would silently swallow
 //    (it ignores the manual order entirely).
@@ -130,12 +134,29 @@ describe('sidebar pointer drag-to-reorder', () => {
     expect(ghost!.style.transform).toBe('translate(0px, 21px)')
     expect(ghost!.style.width).toBe('110px')
 
-    // Hovering chan2's band shows the drop indicator there.
+    // Hovering chan2's band in its TOP half (62 < 63, the row's middle)
+    // shows the line ABOVE the row — which is chan1's own slot, so the
+    // drop must not move anything.
     await tick()
     expect(rows()[1].classList.contains('fav--drag-over')).toBe(true)
+    expect(rows()[1].classList.contains('fav--drag-over-below')).toBe(false)
+
+    pointer('pointerup', rows()[0], 100, 62)
+    await tick()
+    expect(storedOrder()).toEqual(['chan1', 'chan2'])
+    expect(rows()[0].dataset.favName).toBe('chan1')
+    expect(document.querySelector('[data-drag-ghost]')).toBeNull()
+
+    // Drag again, this time into chan2's BOTTOM half: the line moves below
+    // the row and the release lands chan1 after it.
+    pointer('pointerdown', rows()[0], 100, 20)
+    pointer('pointermove', rows()[0], 100, 70)
+    await tick()
+    expect(rows()[1].classList.contains('fav--drag-over-below')).toBe(true)
+    expect(rows()[1].classList.contains('fav--drag-over')).toBe(false)
 
     // Release: the reorder lands without a restart.
-    pointer('pointerup', rows()[0], 100, 62)
+    pointer('pointerup', rows()[0], 100, 70)
     await tick()
     expect(storedOrder()).toEqual(['chan2', 'chan1'])
     expect(rows()[0].dataset.favName).toBe('chan2')

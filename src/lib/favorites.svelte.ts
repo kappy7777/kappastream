@@ -384,13 +384,20 @@ export class FavoritesStore {
     return true
   }
 
-  reorder(fromName: string, toName: string): void {
+  // `after` selects which edge of the target row the drop line was drawn on;
+  // the insertion must honor it or the drop lands one row away from what the
+  // user saw. Removing the source first shifts the target up by one slot only
+  // when the drag moved DOWN the list, hence the from-dependent index math
+  // (always inserting at `to` put a downward drop below the line, so dropping
+  // on the very next row silently swapped the two).
+  reorder(fromName: string, toName: string, after = false): void {
     const from = this.entries.findIndex((e) => e.name === fromName)
     const to = this.entries.findIndex((e) => e.name === toName)
     if (from === -1 || to === -1 || from === to) return
     const next = [...this.entries]
     const [moved] = next.splice(from, 1)
-    next.splice(to, 0, moved)
+    const insertAt = after ? (to > from ? to : to + 1) : to > from ? to - 1 : to
+    next.splice(insertAt, 0, moved)
     next.forEach((e, i) => {
       e.order = i + 1
     })

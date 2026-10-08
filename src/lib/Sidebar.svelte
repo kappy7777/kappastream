@@ -28,6 +28,10 @@
   let hoveredName: string | null = $state(null)
   let draggingName: string | null = $state(null)
   let dragOverName: string | null = $state(null)
+  // Which edge of the hovered row the drop line is drawn on (pointer in the
+  // bottom half → below). reorder() inserts at exactly that edge, so the drop
+  // can never land somewhere the line didn't show.
+  let dragOverBelow = $state(false)
   let addMenuOpen = $state(false)
   let addInput = $state('')
   let addError = $state('')
@@ -190,11 +194,12 @@
     if (!c || e.pointerId !== c.pointerId) return
     const wasDragging = draggingName !== null
     const target = dragOverName
+    const below = dragOverBelow
     endRowDrag()
     dragCandidate = null
     if (wasDragging) {
       suppressRowClick = true
-      if (target && target !== c.name) store.reorder(c.name, target)
+      if (target && target !== c.name) store.reorder(c.name, target, below)
     }
   }
 
@@ -259,18 +264,24 @@
       }px)`
     }
     let hit: string | null = null
+    let below = false
     for (const r of dragRects) {
       if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
-        if (r.name !== draggingName) hit = r.name
+        if (r.name !== draggingName) {
+          hit = r.name
+          below = e.clientY > (r.top + r.bottom) / 2
+        }
         break
       }
     }
     dragOverName = hit
+    dragOverBelow = hit !== null && below
   }
 
   function endRowDrag(): void {
     draggingName = null
     dragOverName = null
+    dragOverBelow = false
     dragRects = []
     dragGhostEl?.remove()
     dragGhostEl = null
@@ -380,7 +391,8 @@
           class:fav--offline={isOff}
           class:fav--error={isErr}
           class:fav--dragging={draggingName === fav.name}
-          class:fav--drag-over={dragOverName === fav.name}
+          class:fav--drag-over={dragOverName === fav.name && !dragOverBelow}
+          class:fav--drag-over-below={dragOverName === fav.name && dragOverBelow}
           data-fav-name={fav.name}
           onpointerdown={(e) => onRowPointerDown(e, fav.name)}
           onpointermove={onRowPointerMove}
@@ -1086,6 +1098,11 @@
   .fav--drag-over {
     border-top: 2px solid var(--accent);
     padding-top: calc(6px - 2px);
+  }
+
+  .fav--drag-over-below {
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: calc(6px - 2px);
   }
 
   .sidebar-list::-webkit-scrollbar {
