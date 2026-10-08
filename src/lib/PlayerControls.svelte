@@ -105,6 +105,14 @@
   let lastActivityAt = $state(Date.now())
   let controlsShown = $state(true)
   const IDLE_HIDE_MS = 4_000
+  // The <video> listeners cannot see the pointer once it is over the bar or
+  // the menu backdrop (both sit above the element and swallow the moves), so
+  // the idle hide must be suspended while the user is engaged with the
+  // controls themselves: hovering/scrubbing them, an open menu, or keyboard
+  // focus inside (arrow keys on the scrubber or volume with the pointer at
+  // rest).
+  let pointerInControls = $state(false)
+  let focusInControls = $state(false)
 
   function bumpActivity(): void {
     lastActivityAt = Date.now()
@@ -247,8 +255,17 @@
   })
 
   $effect(() => {
-    if (!visible) return
+    if (!visible) {
+      // The {#if} that renders .controls unmounts under an engaged pointer
+      // or focus without firing pointerleave/focusout — drop the flags (and
+      // any open menu) or the idle hide stays blocked after the remount.
+      menuOpen = false
+      pointerInControls = false
+      focusInControls = false
+      return
+    }
     const id = setInterval(() => {
+      if (menuOpen || pointerInControls || focusInControls) return
       if (Date.now() - lastActivityAt >= IDLE_HIDE_MS) controlsShown = false
     }, 500)
     return () => clearInterval(id)
@@ -416,7 +433,25 @@
 {/if}
 
 {#if effectiveVisible}
-  <div class="controls" role="presentation" onkeydown={onControlsKey} style="--ctrl-scale: {ctrlScale.toFixed(3)}">
+  <!-- pointermove/pointerdown/focusin here keep the idle timer fed while the
+       bar (or its full-screen menu backdrop — a child of this element, whose
+       events bubble through these same handlers) has the pointer: the
+       <video>'s own listeners never fire for those moves. -->
+  <div
+    class="controls"
+    role="presentation"
+    onkeydown={onControlsKey}
+    onpointerenter={() => (pointerInControls = true)}
+    onpointerleave={() => (pointerInControls = false)}
+    onpointermove={bumpActivity}
+    onpointerdown={bumpActivity}
+    onfocusin={() => {
+      focusInControls = true
+      bumpActivity()
+    }}
+    onfocusout={() => (focusInControls = false)}
+    style="--ctrl-scale: {ctrlScale.toFixed(3)}"
+  >
     {#if menuOpen}
       <button type="button" class="menu-backdrop" aria-label={t('pc_closeMenu')} onclick={closeMenu}></button>
     {/if}
