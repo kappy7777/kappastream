@@ -299,6 +299,7 @@ export const en = {
   settings_favSortMode: 'Favorite sort mode',
   settings_sortAuto: 'Auto (live first, by viewers)',
   settings_sortManual: 'Manual (live first, by drag order)',
+  settings_sortAutoHint: 'Switch to Manual sort to reorder favorites by dragging.',
   settings_favBackup: 'Favorites backup',
   settings_backupGroup: 'Favorites import and export',
   settings_importAria: 'Import favorites from a JSON file',

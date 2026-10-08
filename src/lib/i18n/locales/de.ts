@@ -281,6 +281,7 @@ export const de: Record<TKey, string> = {
   settings_favSortMode: 'Favoriten-Sortierungsmodus',
   settings_sortAuto: 'Auto (Live zuerst, nach Zuschauern)',
   settings_sortManual: 'Manuell (Live zuerst, nach Reihenfolge)',
+  settings_sortAutoHint: 'Wechsle zur manuellen Sortierung, um Favoriten durch Ziehen anzuordnen.',
   settings_favBackup: 'Favoriten-Backup',
   settings_backupGroup: 'Favoriten importieren und exportieren',
   settings_importAria: 'Favoriten aus einer JSON-Datei importieren',

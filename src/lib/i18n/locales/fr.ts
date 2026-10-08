@@ -280,6 +280,7 @@ export const fr: Record<TKey, string> = {
   settings_favSortMode: 'Mode de tri des favoris',
   settings_sortAuto: 'Auto (direct d’abord, par spectateurs)',
   settings_sortManual: 'Manuel (direct d’abord, par ordre de glissement)',
+  settings_sortAutoHint: 'Passez au tri manuel pour réordonner les favoris par glissement.',
   settings_favBackup: 'Sauvegarde des favoris',
   settings_backupGroup: 'Importer et exporter les favoris',
   settings_importAria: 'Importer les favoris depuis un fichier JSON',

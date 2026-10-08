@@ -1007,6 +1007,9 @@
                 onclick={() => settings.setSortMode('manual')}>{t('settings_sortManual')}</button
               >
             </div>
+            {#if settings.sortMode === 'auto'}
+              <p class="sort-hint">{t('settings_sortAutoHint')}</p>
+            {/if}
             <div class="subgroup-label">{t('settings_favBackup')}</div>
             <div class="seg" role="group" aria-label={t('settings_backupGroup')}>
               <button type="button" class="seg-btn" onclick={triggerImport} aria-label={t('settings_importAria')}>
@@ -1624,6 +1627,12 @@
   }
 
   .sleep-help {
+    margin: 2px 0 0;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .sort-hint {
     margin: 2px 0 0;
     font-size: 11px;
     color: var(--text-dim);

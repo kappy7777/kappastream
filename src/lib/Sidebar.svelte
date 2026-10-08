@@ -9,6 +9,7 @@
     type FavoriteStatus,
     type LiveStatus,
   } from './favorites.svelte'
+  import { settings } from './settings.svelte.ts'
   import { tooltip } from './tooltip.ts'
   import { t } from './i18n/index.svelte'
   import { formatCompact, timeAgo } from './format'
@@ -262,6 +263,9 @@
         {@const collab = collabBadge(fav.status)}
         {@const isOff = fav.status.state === 'offline'}
         {@const isErr = fav.status.state === 'error'}
+        <!-- Rows are only draggable in Manual sort: Auto ignores the manual
+             order (it sorts live-first by viewership), so a drop there would
+             silently rewrite an order the list never shows. -->
         <button
           type="button"
           class="fav"
@@ -270,7 +274,7 @@
           class:fav--error={isErr}
           class:fav--dragging={draggingName === fav.name}
           class:fav--drag-over={dragOverName === fav.name}
-          draggable="true"
+          draggable={settings.sortMode === 'manual'}
           ondragstart={(e) => onDragStart(e, fav.name)}
           ondragover={(e) => onDragOver(e, fav.name)}
           ondragleave={(e) => onDragLeave(e, fav.name)}
