@@ -171,26 +171,32 @@ fn non_empty(opt: &Option<String>) -> Option<&str> {
 enum Session {
     Wayland,
     X11,
-    /// A session type we explicitly do not target (e.g. `XDG_SESSION_TYPE=tty`).
+    /// No graphical session at all: a non-display session type (e.g. `tty`)
+    /// with no display socket to fall back on.
     Other,
     /// No usable session signal at all.
     Unknown,
 }
 
-/// Classify the session. `XDG_SESSION_TYPE` is the primary signal; when it is
-/// absent or empty we fall back to `WAYLAND_DISPLAY` (Wayland) then `DISPLAY`
-/// (X11). A Wayland session is never classified as X11 merely because `DISPLAY`
-/// is also present (XWayland sets it).
+/// Classify the session. `XDG_SESSION_TYPE` is the primary signal, but only
+/// its two DISPLAY values are trusted: a compositor started from a TTY
+/// (sway, river, dwl) exports `XDG_SESSION_TYPE=tty` into everything it
+/// spawns, so a non-display value must not veto the live socket signals.
+/// Any other or absent value falls back to `WAYLAND_DISPLAY` (Wayland) then
+/// `DISPLAY` (X11); a non-display value with no socket at all is a genuinely
+/// headless session. A Wayland session is never classified as X11 merely
+/// because `DISPLAY` is also present (XWayland sets it).
 fn classify_session(inputs: &CompatInputs) -> Session {
     match non_empty(&inputs.xdg_session_type) {
         Some("wayland") => Session::Wayland,
         Some("x11") => Session::X11,
-        Some(_) => Session::Other,
-        None => {
+        _ => {
             if non_empty(&inputs.wayland_display).is_some() {
                 Session::Wayland
             } else if non_empty(&inputs.display).is_some() {
                 Session::X11
+            } else if non_empty(&inputs.xdg_session_type).is_some() {
+                Session::Other
             } else {
                 Session::Unknown
             }
@@ -897,7 +903,8 @@ mod tests {
         );
     }
 
-    // tty session type ⇒ Other, no workaround even with NVIDIA.
+    // tty session type with no display socket ⇒ Other, no workaround even
+    // with NVIDIA.
     #[test]
     fn tty_session_is_other_and_untargeted() {
         assert_eq!(
@@ -907,6 +914,62 @@ mod tests {
         assert_eq!(
             select_actions(&compat(Some("tty"), None, None, None, None, true)),
             actions_none()
+        );
+    }
+
+    // A compositor started from a TTY keeps XDG_SESSION_TYPE=tty in the
+    // environment it spawns — the socket signals must win over the stale
+    // session type, or the AppImage stays on XWayland and NVIDIA misses the
+    // explicit-sync workaround.
+    #[test]
+    fn tty_session_type_with_wayland_socket_is_wayland() {
+        assert_eq!(
+            classify_session(&compat(
+                Some("tty"),
+                Some("wayland-1"),
+                None,
+                None,
+                None,
+                false
+            )),
+            Session::Wayland
+        );
+        assert_eq!(
+            select_actions(&compat(
+                Some("tty"),
+                Some("wayland-1"),
+                None,
+                None,
+                None,
+                true
+            )),
+            actions_wayland_only()
+        );
+        assert_eq!(
+            select_actions(&compat_appimage(
+                Some("tty"),
+                Some("wayland-1"),
+                None,
+                None,
+                None,
+                true,
+                None
+            )),
+            actions_wayland_appimage()
+        );
+    }
+
+    // Symmetric X case: startx keeps the tty session type while DISPLAY is
+    // live — the X11 NVIDIA workaround applies.
+    #[test]
+    fn tty_session_type_with_display_socket_is_x11() {
+        assert_eq!(
+            classify_session(&compat(Some("tty"), None, Some(":0"), None, None, false)),
+            Session::X11
+        );
+        assert_eq!(
+            select_actions(&compat(Some("tty"), None, Some(":0"), None, None, true)),
+            actions_x11_only()
         );
     }
 
