@@ -349,6 +349,7 @@ export const es: Record<TKey, string> = {
 
   update_downloading: 'Descargando v{version}…',
   update_installing: 'Instalando v{version}…',
+  update_restartNeeded: 'v{version} está instalado; reinicia kappastream para terminar',
   update_failed: 'La actualización a v{version} falló',
   update_dismiss: 'Ocultar aviso de actualización',
   update_available: 'kappastream v{version} está disponible',

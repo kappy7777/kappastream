@@ -374,6 +374,7 @@ export const en = {
   // ---- UpdateBanner.svelte -------------------------------------------------
   update_downloading: 'Downloading v{version}…',
   update_installing: 'Installing v{version}…',
+  update_restartNeeded: 'v{version} is installed; restart kappastream to finish',
   update_failed: 'Update to v{version} failed',
   update_dismiss: 'Dismiss update notice',
   update_available: 'kappastream v{version} is available',

@@ -94,6 +94,19 @@
             / {fmtBytes(updateStore.contentLength)}{/if}
         </span>
       </div>
+    {:else if updateStore.status === 'restart'}
+      <div class="update-banner__main">
+        <span class="update-banner__icon" aria-hidden="true">✓</span>
+        <span class="update-banner__text">
+          {t('update_restartNeeded', { version: updateStore.version ?? '' })}
+        </span>
+        <button
+          type="button"
+          class="update-banner__btn update-banner__btn--ghost"
+          onclick={() => updateStore.dismiss()}
+          aria-label={t('update_dismiss')}>×</button
+        >
+      </div>
     {:else if updateStore.status === 'error'}
       <div class="update-banner__main">
         <span class="update-banner__icon update-banner__icon--error" aria-hidden="true">!</span>

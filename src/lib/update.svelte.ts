@@ -22,6 +22,7 @@ export type UpdateStatus =
   | 'available' // an update is waiting for an explicit click
   | 'downloading'
   | 'installing'
+  | 'restart' // installed, but the automatic relaunch failed — manual restart needed
   | 'error' // download/install/verify failed (only after a user click)
 
 interface UpdateState {
@@ -55,6 +56,7 @@ class UpdateStore {
       (this.status === 'available' ||
         this.status === 'downloading' ||
         this.status === 'installing' ||
+        this.status === 'restart' ||
         this.status === 'error')
     )
   }
@@ -124,12 +126,15 @@ class UpdateStore {
       })
       // On Windows the NSIS installer exits the app during install, so this
       // line is reached only on Linux (AppImage/.deb/.rpm). Relaunch there;
-      // if it fails, leave the app running so the user can restart manually.
+      // if it fails the update IS installed but the old process is still
+      // running — switch to the restart state so the banner says so instead
+      // of spinning on "Installing" for the rest of the session.
       this.status = 'installing'
       try {
         await relaunch()
       } catch (err) {
         console.warn('[update] relaunch failed (manual restart needed):', err)
+        this.status = 'restart'
       }
     } catch (err) {
       console.error('[update] download/install failed:', err)

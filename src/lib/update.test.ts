@@ -22,6 +22,8 @@ const updater = vi.hoisted(() => ({
   checkImpl: async (): Promise<unknown> => null,
   checkCalls: 0,
   relaunchCalls: 0,
+  // Swapped per test; rejects to simulate a failed relaunch.
+  relaunchImpl: (): Promise<void> => Promise.resolve(),
   tauriEnabled: true,
 }))
 
@@ -35,7 +37,7 @@ vi.mock('@tauri-apps/plugin-updater', () => ({
 vi.mock('@tauri-apps/plugin-process', () => ({
   relaunch: (): Promise<void> => {
     updater.relaunchCalls++
-    return Promise.resolve()
+    return updater.relaunchImpl()
   },
 }))
 vi.mock('@tauri-apps/api/core', () => ({
@@ -80,6 +82,7 @@ beforeEach(async () => {
   localStorage.clear()
   updater.checkCalls = 0
   updater.relaunchCalls = 0
+  updater.relaunchImpl = () => Promise.resolve()
   updater.tauriEnabled = true
   updater.checkImpl = async () => null
   // The store logs failures to the console by design; keep test output clean.
@@ -187,8 +190,8 @@ describe('getters', () => {
     expect(store.visible).toBe(false) // dismissed pins it off
   })
 
-  it('visible stays true through the busy statuses and the error status', async () => {
-    for (const status of ['downloading', 'installing', 'error'] as const) {
+  it('visible stays true through the busy statuses, the restart status, and the error status', async () => {
+    for (const status of ['downloading', 'installing', 'restart', 'error'] as const) {
       store.status = status
       expect(store.visible, status).toBe(true)
     }
@@ -202,6 +205,8 @@ describe('getters', () => {
     expect(store.busy).toBe(true)
     store.status = 'installing'
     expect(store.busy).toBe(true)
+    store.status = 'restart'
+    expect(store.busy).toBe(false) // dismissable: the install is done
     store.status = 'error'
     expect(store.busy).toBe(false)
   })
@@ -291,6 +296,20 @@ describe('apply() — the explicit-click path', () => {
     expect(store.visible).toBe(true)
     finish()
     await applying
+  })
+
+  it('a failed relaunch after a successful install lands in restart (dismissable, not busy)', async () => {
+    // The Linux path: downloadAndInstall resolved, so the update IS on disk,
+    // but the automatic relaunch threw — the user must restart manually.
+    updater.relaunchImpl = () => Promise.reject(new Error('spawn failed'))
+    await makeAvailable(async () => {})
+    await store.apply()
+    expect(store.status).toBe('restart')
+    expect(store.visible).toBe(true)
+    expect(store.busy).toBe(false)
+    store.dismiss()
+    expect(store.dismissed).toBe(true)
+    expect(store.visible).toBe(false)
   })
 
   it('a failed download sets status error and populates errorMsg (UI allowed: user clicked)', async () => {
