@@ -635,6 +635,45 @@ describe('stale-response guard', () => {
   })
 })
 
+describe('reorder splices in the order manual sort shows', () => {
+  it('a drag after importing into a never-hand-sorted list moves what the drop line pointed at', () => {
+    // Existing entries were never hand-sorted: their order values are
+    // add-time epochs.
+    localStorage.setItem(
+      'twitch-favorites-v1',
+      JSON.stringify([
+        { name: 'old1', addedAt: 1000, order: 1000 },
+        { name: 'old2', addedAt: 1001, order: 1001 },
+      ]),
+    )
+    const store = new F.FavoritesStore()
+    // A hand-sorted export carries small sequential orders; merging them
+    // leaves the stored array order and the (order, name) display order
+    // disagreeing — manual sort shows [imp1, imp2, old1, old2].
+    store.importJson(
+      JSON.stringify({
+        version: 1,
+        favorites: [
+          { name: 'imp1', addedAt: 2000, order: 1 },
+          { name: 'imp2', addedAt: 2001, order: 2 },
+        ],
+      }),
+    )
+    // Drag imp1 below imp2 (the drop the sidebar's row geometry reports).
+    // Splicing by raw array positions would have reordered the array as
+    // [old1, old2, imp2, imp1] instead.
+    store.reorder('imp1', 'imp2', true)
+    expect(store.snapshot().map((s) => s.name)).toEqual(['imp2', 'imp1', 'old1', 'old2'])
+    // The renumber persists the shown order, so the next drag starts from it.
+    const stored = JSON.parse(localStorage.getItem('twitch-favorites-v1') ?? '[]') as {
+      name: string
+      order: number
+    }[]
+    expect(stored.map((e) => e.name)).toEqual(['imp2', 'imp1', 'old1', 'old2'])
+    expect(stored.map((e) => e.order)).toEqual([1, 2, 3, 4])
+  })
+})
+
 describe('collabBadge (LiveStatus → badge data)', () => {
   it('returns null unless live and in a session', async () => {
     const { collabBadge } = await import('./favorites.svelte')

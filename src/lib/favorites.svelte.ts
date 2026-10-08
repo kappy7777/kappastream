@@ -391,10 +391,17 @@ export class FavoritesStore {
   // (always inserting at `to` put a downward drop below the line, so dropping
   // on the very next row silently swapped the two).
   reorder(fromName: string, toName: string, after = false): void {
-    const from = this.entries.findIndex((e) => e.name === fromName)
-    const to = this.entries.findIndex((e) => e.name === toName)
+    // Splice in the order the list actually shows (manual sort displays by
+    // (order, name)). The stored array can disagree with it after an import
+    // merges differently-scaled order values — a hand-sorted 1..N export
+    // into a list ordered by add-time epochs — and raw array positions would
+    // then move items by an order the sidebar never displays while the
+    // renumber below scrambles the list. Normalizing here also heals an
+    // already-scrambled stored array on the next drag.
+    const next = [...this.entries].sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name))
+    const from = next.findIndex((e) => e.name === fromName)
+    const to = next.findIndex((e) => e.name === toName)
     if (from === -1 || to === -1 || from === to) return
-    const next = [...this.entries]
     const [moved] = next.splice(from, 1)
     const insertAt = after ? (to > from ? to : to + 1) : to > from ? to - 1 : to
     next.splice(insertAt, 0, moved)
