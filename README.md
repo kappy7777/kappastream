@@ -257,7 +257,7 @@ A successful result confirms that the downloaded file matches the checksum publi
 #### Linux
 
 - The [Tauri 2 Linux prerequisites](https://v2.tauri.app/start/prerequisites/)
-- WebKitGTK 4.1, GTK 3, Soup 3, librsvg, and Ayatana AppIndicator development packages
+- WebKitGTK 4.1, GTK 3, Soup 3, librsvg, Ayatana AppIndicator, and libmpv development packages (the embedded mpv playback engine is a default Cargo feature on Linux)
 
 On Debian or Ubuntu, the build dependencies used by CI are:
 
@@ -269,6 +269,7 @@ sudo apt install \
   librsvg2-dev \
   libgtk-3-dev \
   libayatana-appindicator3-dev \
+  libmpv-dev \
   patchelf
 ```
 
@@ -277,6 +278,17 @@ sudo apt install \
 - Windows 10 or 11
 - [Microsoft Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
 - [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)
+
+`tauri.windows.conf.json` maps the gitignored `streamlink-bundle/` directory into
+the installer as a build resource, so tauri-build fails on a fresh clone without
+it. CI stages the real streamlink portable tree there for releases; for a local
+build a placeholder is enough (the app still finds a `streamlink` on PATH at
+runtime when the bundle is absent):
+
+```bash
+mkdir -p streamlink-bundle
+echo placeholder > streamlink-bundle/README-placeholder
+```
 
 #### macOS
 
@@ -292,13 +304,25 @@ cd kappastream
 npm ci
 npm run check
 npm run build
-npm run tauri -- build --bundles appimage   # Linux (use --bundles nsis on Windows, --bundles app,dmg on macOS)
+npm run tauri -- build --bundles appimage --no-sign   # Linux (use --bundles nsis on Windows, --bundles app,dmg on macOS)
 ```
+
+`--no-sign` skips signing the in-app updater artifacts. The repo commits an
+updater public key (`bundle.createUpdaterArtifacts` + `plugins.updater.pubkey`
+in `src-tauri/tauri.conf.json`), so without the flag, and without
+`TAURI_SIGNING_PRIVATE_KEY` set, the bundler writes every artifact and then
+exits with "A public key has been found, but no private key". Release builds
+sign with the CI-held key.
 
 The bundles are written to:
 
 ```text
-src-tauri/target/release/bundle/<appimage|nsis>/
+src-tauri/target/release/bundle/appimage/   # Linux AppImage (--bundles appimage)
+src-tauri/target/release/bundle/deb/        # Linux .deb (--bundles deb)
+src-tauri/target/release/bundle/rpm/        # Linux .rpm (--bundles rpm)
+src-tauri/target/release/bundle/nsis/       # Windows installer (--bundles nsis)
+src-tauri/target/release/bundle/macos/      # macOS .app (--bundles app)
+src-tauri/target/release/bundle/dmg/        # macOS disk image (--bundles dmg)
 ```
 
 The first Rust build can take considerably longer than subsequent builds.
