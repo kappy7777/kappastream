@@ -38,14 +38,29 @@ const FETCH_TIMEOUT_MS = 8_000
  */
 type ProviderResult = Promise<Emote[] | null>
 
-async function fetchWithTimeout(url: string, signal?: AbortSignal): Promise<Response> {
+/** Non-2xx response — callers map 404 to a definitive empty list. */
+class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`)
+  }
+}
+
+/**
+ * fetch + JSON body parse under ONE timeout/abort umbrella: the timer and
+ * the caller's abort stay armed until the BODY is parsed, not just until
+ * the headers arrive. Clearing them at header time let a provider that
+ * stalled mid-body hang the whole emote load on an unbounded json() read.
+ */
+async function fetchJsonWithTimeout<T>(url: string, signal?: AbortSignal): Promise<T> {
   const controller = new AbortController()
   const abort = () => controller.abort()
   if (signal?.aborted) abort()
   else signal?.addEventListener('abort', abort, { once: true })
   const timer = setTimeout(abort, FETCH_TIMEOUT_MS)
   try {
-    return await fetch(url, { signal: controller.signal })
+    const res = await fetch(url, { signal: controller.signal })
+    if (!res.ok) throw new HttpError(res.status)
+    return (await res.json()) as T
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener('abort', abort)
@@ -131,9 +146,10 @@ function uniquePush(list: Emote[], emote: Emote | null) {
 
 async function fetch7TVChannel(twitchUserId: string, signal?: AbortSignal): ProviderResult {
   try {
-    const res = await fetchWithTimeout(`https://7tv.io/v3/users/twitch/${twitchUserId}`, signal)
-    if (!res.ok) return res.status === 404 ? [] : null
-    const data = (await res.json()) as SevenTvUserResponse
+    const data = await fetchJsonWithTimeout<SevenTvUserResponse>(
+      `https://7tv.io/v3/users/twitch/${twitchUserId}`,
+      signal,
+    )
     const out: Emote[] = []
 
     if (data.emote_set?.emotes) {
@@ -149,20 +165,20 @@ async function fetch7TVChannel(twitchUserId: string, signal?: AbortSignal): Prov
     }
 
     return out
-  } catch {
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 404) return []
     return null
   }
 }
 
 async function fetch7TVGlobal(signal?: AbortSignal): ProviderResult {
   try {
-    const res = await fetchWithTimeout('https://7tv.io/v3/emote-sets/global', signal)
-    if (!res.ok) return res.status === 404 ? [] : null
-    const data = (await res.json()) as SevenTvSet
+    const data = await fetchJsonWithTimeout<SevenTvSet>('https://7tv.io/v3/emote-sets/global', signal)
     const out: Emote[] = []
     for (const e of data.emotes ?? []) uniquePush(out, sevenTvEmote(e))
     return out
-  } catch {
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 404) return []
     return null
   }
 }
@@ -182,30 +198,31 @@ function bttvEmote(e: BttvEmote): Emote {
 
 async function fetchBTTVChannel(twitchUserId: string, signal?: AbortSignal): ProviderResult {
   try {
-    const res = await fetchWithTimeout(`https://api.betterttv.net/3/cached/users/twitch/${twitchUserId}`, signal)
-    if (!res.ok) return res.status === 404 ? [] : null
-    const data = (await res.json()) as BttvUser
+    const data = await fetchJsonWithTimeout<BttvUser>(
+      `https://api.betterttv.net/3/cached/users/twitch/${twitchUserId}`,
+      signal,
+    )
     const out: Emote[] = []
     for (const e of data.channelEmotes ?? []) uniquePush(out, bttvEmote(e))
     for (const e of data.sharedEmotes ?? []) uniquePush(out, bttvEmote(e))
     return out
-  } catch {
-    // A thrown fetch (network error, timeout, bad JSON) is transient, not
+  } catch (err) {
+    // A failed request (network error, timeout, bad JSON) is transient, not
     // "no emotes": returning [] here used to cache the channel as emoteless
     // for the whole process AND mask the all-providers-down outage.
+    if (err instanceof HttpError && err.status === 404) return []
     return null
   }
 }
 
 async function fetchBTTVGlobal(signal?: AbortSignal): ProviderResult {
   try {
-    const res = await fetchWithTimeout('https://api.betterttv.net/3/cached/emotes/global', signal)
-    if (!res.ok) return res.status === 404 ? [] : null
-    const data = (await res.json()) as BttvEmote[]
+    const data = await fetchJsonWithTimeout<BttvEmote[]>('https://api.betterttv.net/3/cached/emotes/global', signal)
     const out: Emote[] = []
     for (const e of data) uniquePush(out, bttvEmote(e))
     return out
-  } catch {
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 404) return []
     return null
   }
 }
@@ -228,25 +245,22 @@ function ffzEmote(e: FfzEmote): Emote {
 
 async function fetchFFZChannel(twitchUserId: string, signal?: AbortSignal): ProviderResult {
   try {
-    const res = await fetchWithTimeout(`https://api.frankerfacez.com/v1/user/id/${twitchUserId}`, signal)
-    if (!res.ok) return res.status === 404 ? [] : null
-    const data = (await res.json()) as FfzUser
+    const data = await fetchJsonWithTimeout<FfzUser>(`https://api.frankerfacez.com/v1/user/id/${twitchUserId}`, signal)
     const out: Emote[] = []
     for (const set of Object.values(data.sets ?? {})) {
       for (const e of set.emoticons ?? []) uniquePush(out, ffzEmote(e))
     }
     return out
-  } catch {
-    // Same contract as BTTV above: transient failure, never a cached [].
+  } catch (err) {
+    // Same contract as BTTV above: 404 is definitive, the rest transient.
+    if (err instanceof HttpError && err.status === 404) return []
     return null
   }
 }
 
 async function fetchFFZGlobal(signal?: AbortSignal): ProviderResult {
   try {
-    const res = await fetchWithTimeout('https://api.frankerfacez.com/v1/set/global', signal)
-    if (!res.ok) return res.status === 404 ? [] : null
-    const data = (await res.json()) as FfzGlobal
+    const data = await fetchJsonWithTimeout<FfzGlobal>('https://api.frankerfacez.com/v1/set/global', signal)
     // Only the sets listed in `default_sets` are the global ones — `sets` may
     // also contain other (e.g. featured) collections, so iterate by id rather
     // than flattening every key.
@@ -256,7 +270,8 @@ async function fetchFFZGlobal(signal?: AbortSignal): ProviderResult {
       for (const e of set?.emoticons ?? []) uniquePush(out, ffzEmote(e))
     }
     return out
-  } catch {
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 404) return []
     return null
   }
 }

@@ -306,6 +306,36 @@ describe('transient provider failures are not cached', () => {
     expect(second.allFailed).toBe(true)
     expect(providerCalls).toBe(6) // 3 providers x 2 loads — nothing cached
   })
+
+  it('a provider that stalls after headers does not hang the emote load', async () => {
+    vi.useFakeTimers()
+    try {
+      tauriInvoke.handler = async (cmd: string) => {
+        if (cmd === 'gql_fetch') {
+          return JSON.stringify({ data: { users: [{ id: '12345', login: 'chan5' }] } })
+        }
+        throw new Error('unexpected invoke: ' + cmd)
+      }
+      fetchImpl = async (_url, opts) => ({
+        ok: true,
+        // Headers arrive; the body never does. The request's own signal is
+        // the only thing that can end this read — the timeout must still be
+        // armed when the parse starts (it used to be cleared the moment the
+        // headers resolved, leaving json() unbounded).
+        json: () =>
+          new Promise((_resolve, reject) => {
+            opts?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+          }),
+      })
+      const pending = E.loadChannelEmotes('chan5')
+      await vi.advanceTimersByTimeAsync(9_000) // past the 8 s fetch timeout
+      const res = await pending
+      expect(res.emotes).toEqual([])
+      expect(res.allFailed).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('ChatSession emoteStatus', () => {
