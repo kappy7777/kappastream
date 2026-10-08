@@ -185,6 +185,8 @@ export const de: Record<TKey, string> = {
   chat_r9k: 'R9K',
   chat_waitingMessages: 'Warten auf Nachrichten…',
   chat_joinToSee: 'Verbinde dich mit einem Kanal, um den Chat zu sehen',
+  chat_connecting: 'Verbinde mit dem Chat…',
+  chat_disconnected: 'Chat-Verbindung verloren — es wird erneut versucht…',
   chat_backToBottom: 'Nach unten scrollen',
   chat_loadingEmotes: 'Emotes werden geladen…',
   chat_emotesFailed: 'Drittanbieter-Emotes konnten nicht geladen werden. Twitch-eigene Emotes funktionieren weiterhin.',

@@ -184,6 +184,8 @@ export const fr: Record<TKey, string> = {
   chat_r9k: 'R9K',
   chat_waitingMessages: 'En attente de messages…',
   chat_joinToSee: 'Connectez-vous à une chaîne pour voir le chat',
+  chat_connecting: 'Connexion au chat…',
+  chat_disconnected: 'Connexion au chat perdue — nouvelle tentative…',
   chat_backToBottom: 'Aller en bas',
   chat_loadingEmotes: 'Chargement des emotes…',
   chat_emotesFailed: 'Échec du chargement des emotes tiers. Les emotes natifs de Twitch fonctionnent toujours.',

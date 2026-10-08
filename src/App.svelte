@@ -1670,7 +1670,11 @@
           : t('vod_chatLoading')
       : status === 'connected'
         ? t('chat_waitingMessages')
-        : t('chat_joinToSee'),
+        : status === 'connecting'
+          ? t('chat_connecting')
+          : status === 'disconnected'
+            ? t('chat_disconnected')
+            : t('chat_joinToSee'),
   )
   const chatResetKey = $derived(status === 'idle' ? 'idle' : `live:${chatJoinSerial}:${chatSession?.channel ?? ''}`)
 

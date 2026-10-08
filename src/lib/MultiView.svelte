@@ -594,7 +594,11 @@
       : activeSession
         ? activeSession.status === 'connected'
           ? t('chat_waitingMessages')
-          : t('chat_joinToSee')
+          : activeSession.status === 'connecting'
+            ? t('chat_connecting')
+            : activeSession.status === 'disconnected'
+              ? t('chat_disconnected')
+              : t('chat_joinToSee')
         : t('mv_noTiles'),
   )
 

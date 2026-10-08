@@ -79,9 +79,23 @@ const MAX_BUFFER = 500
 // MAX_BUFFER once the pane follows the bottom again.
 const MAX_BUFFER_HELD = 2000
 const IRC_URL = 'wss://irc-ws.chat.twitch.tv:443'
-const MAX_RECONNECT_ATTEMPTS = 10
+// Reconnect backoff: 1 s doubling to a 30 s cap — and retries FOREVER. Chat
+// is core, so an outage longer than the backoff keeps retrying at the cap
+// (the window 'online' event below short-circuits it the moment the network
+// returns) instead of giving up after a fixed budget and leaving the pane
+// frozen until the channel is re-clicked.
 const RECONNECT_BASE_MS = 1_000
 const RECONNECT_MAX_MS = 30_000
+// Past this many attempts (~3 minutes of failures) the status flips from
+// 'connecting' to 'disconnected' so the UI can say the connection is LOST —
+// while the retries themselves continue exactly as before.
+const RECONNECT_DISCONNECTED_ATTEMPTS = 10
+// Twitch PINGs the client roughly every 5 minutes. A socket that delivered
+// no line for 6 minutes while nominally connected died without a close
+// frame (system suspend, NAT drop) — force it closed and reconnect, or the
+// pane shows a live-looking chat that is frozen forever.
+const IRC_SILENCE_MS = 6 * 60_000
+const WATCHDOG_TICK_MS = 30_000
 
 function randomUsername(): string {
   return (
@@ -108,6 +122,9 @@ export class ChatSession {
   private reconnectAttempts = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private emoteAbort: AbortController | null = null
+  private lastLineAt = 0
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null
+  private onlineListener: (() => void) | null = null
   // Third-party emote map for the renderer. Public + $state so the pinned-
   // message banner — which renders through renderMessage at render time —
   // re-resolves when the channel's emotes land (message parts are baked on
@@ -143,6 +160,16 @@ export class ChatSession {
     void this.loadEmotes(gen, this.emoteAbort.signal)
     void this.loadBadges(gen)
     this.openSocket(gen)
+    // Reconnect at once when the network comes back (the backoff may be
+    // sitting at its 30 s cap) and keep an eye on a silently-dead socket.
+    // Registered once for the session's lifetime; removed in dispose().
+    if (!this.onlineListener) {
+      this.onlineListener = () => this.reconnectNow()
+      window.addEventListener('online', this.onlineListener)
+    }
+    if (this.watchdogTimer == null) {
+      this.watchdogTimer = setInterval(() => this.checkSilence(), WATCHDOG_TICK_MS)
+    }
   }
 
   /**
@@ -180,19 +207,51 @@ export class ChatSession {
     this.generation++ // invalidate any in-flight callback
     this.emoteAbort?.abort()
     this.emoteAbort = null
+    if (this.onlineListener) {
+      window.removeEventListener('online', this.onlineListener)
+      this.onlineListener = null
+    }
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer)
+      this.watchdogTimer = null
+    }
     this.closeSocket()
+  }
+
+  /** Reconnect immediately (network came back mid-backoff). */
+  private reconnectNow(): void {
+    if (this.disposed || this.socket || this.status === 'idle') return
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.reconnectAttempts = 0
+    this.status = 'connecting'
+    this.openSocket(this.generation)
+  }
+
+  /** Close a socket that went silent without a close frame. */
+  private checkSilence(): void {
+    if (this.status !== 'connected' || !this.socket) return
+    if (Date.now() - this.lastLineAt < IRC_SILENCE_MS) return
+    const ws = this.socket
+    try {
+      ws.close()
+    } catch {
+      this.socket = null
+      this.scheduleReconnect(this.generation)
+    }
   }
 
   private scheduleReconnect(gen: number): void {
     if (gen !== this.generation || this.disposed) return
     if (this.reconnectTimer) return
-    if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      this.status = 'disconnected'
-      return
-    }
     const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** this.reconnectAttempts)
     this.reconnectAttempts++
-    this.status = 'connecting'
+    // 'connecting' while the outage still looks like a blip; once it has
+    // dragged past RECONNECT_DISCONNECTED_ATTEMPTS the status says LOST —
+    // the retries continue at the 30 s cap either way.
+    this.status = this.reconnectAttempts >= RECONNECT_DISCONNECTED_ATTEMPTS ? 'disconnected' : 'connecting'
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       if (gen !== this.generation || this.disposed) return
@@ -225,10 +284,12 @@ export class ChatSession {
       ws.send('NICK ' + nick)
       ws.send('JOIN #' + this.channel)
       this.reconnectAttempts = 0
+      this.lastLineAt = Date.now()
       this.status = 'connected'
     }
     ws.onmessage = (ev) => {
       if (gen === this.generation && this.socket === ws && !this.disposed) {
+        this.lastLineAt = Date.now()
         this.handleRaw(ev.data as string, ws)
       }
     }

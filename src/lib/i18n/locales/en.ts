@@ -202,6 +202,8 @@ export const en = {
   chat_r9k: 'R9K',
   chat_waitingMessages: 'Waiting for messages…',
   chat_joinToSee: 'Join a channel to see chat',
+  chat_connecting: 'Connecting to chat…',
+  chat_disconnected: 'Chat connection lost — retrying…',
   chat_backToBottom: 'Back to bottom',
   chat_loadingEmotes: 'Loading emotes…',
   chat_emotesFailed: 'Failed to load third-party emotes. Twitch native emotes still work.',
