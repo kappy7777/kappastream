@@ -621,12 +621,29 @@ pub async fn vod_qualities(video_id: String) -> Result<Vec<String>, String> {
 /// The one URL validator every streamlink-output consumer uses —
 /// resolve_stream, resolve_vod, resolve_clip, validate_media_url (the
 /// mpv_load trust boundary) and the ksvod proxy's reconstructed targets:
-/// https, no userinfo, the default port, an allowlisted host, and a single
-/// line of input. Returns the parsed `Url` so callers use its serialized
+/// https, no userinfo, the default port, an allowlisted host, a single
+/// line of input, and no raw byte the WHATWG parser would rewrite before
+/// validating. Returns the parsed `Url` so callers use its serialized
 /// form (`as_str`) rather than any raw string they were handed — the proxy
 /// in particular must never fetch a hand-assembled target.
 pub(crate) fn parse_media_url(raw: &str, host_ok: fn(&str) -> bool) -> Option<url::Url> {
     if raw.lines().count() != 1 {
+        return None;
+    }
+    // The WHATWG parser silently rewrites some raw bytes ('\'
+    // becomes '/', tabs and newlines are deleted, leading/trailing
+    // spaces and controls are trimmed) while consumers downstream of
+    // this validator read the bytes verbatim: FFmpeg's av_url_split
+    // inside mpv parses `https://host\@evil:8443/x` as userinfo and
+    // connects to `evil`, though the parser validated the host as
+    // `host`. Raw backslashes, ASCII controls, and spaces are rejected
+    // outright so the returned serialization means the same thing to
+    // every parser that consumes it.
+    if raw
+        .as_bytes()
+        .iter()
+        .any(|&b| b == b'\\' || b == b' ' || b.is_ascii_control())
+    {
         return None;
     }
     let parsed = url::Url::parse(raw).ok()?;
@@ -698,27 +715,32 @@ pub(crate) fn is_allowed_live_host(host: &str) -> bool {
 /// resolves inside `is_allowed_live_host`; VOD playlists AND clip MP4s
 /// inside `is_allowed_vod_host` (streamlink signs both onto CloudFront).
 /// Debug builds may name the offending host; release builds get a stable
-/// generic message (include_detail()).
+/// generic message (include_detail()). Returns the parsed URL so mpv_load
+/// hands mpv the parser's own serialization, never the raw string it was
+/// given — FFmpeg does not read URLs the way the WHATWG parser validated
+/// them, so only the normalized form keeps both parsers on the same host.
 #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
-pub(crate) fn validate_media_url(url: &str, kind: &str) -> Result<(), String> {
+pub(crate) fn validate_media_url(url: &str, kind: &str) -> Result<url::Url, String> {
     let host_ok: fn(&str) -> bool = match kind {
         "live" => is_allowed_live_host,
         "vod" | "clip" => is_allowed_vod_host,
         other => return Err(format!("unknown media kind: {other}")),
     };
-    if parse_media_url(url, host_ok).is_some() {
-        return Ok(());
-    }
-    if include_detail() {
-        let host = url::Url::parse(url)
-            .ok()
-            .and_then(|parsed| parsed.host_str().map(str::to_string))
-            .unwrap_or_else(|| "<unparseable>".to_string());
-        Err(format!(
-            "rejected media url for kind '{kind}' (host '{host}')"
-        ))
-    } else {
-        Err("invalid media url".to_string())
+    match parse_media_url(url, host_ok) {
+        Some(parsed) => Ok(parsed),
+        None => {
+            if include_detail() {
+                let host = url::Url::parse(url)
+                    .ok()
+                    .and_then(|parsed| parsed.host_str().map(str::to_string))
+                    .unwrap_or_else(|| "<unparseable>".to_string());
+                Err(format!(
+                    "rejected media url for kind '{kind}' (host '{host}')"
+                ))
+            } else {
+                Err("invalid media url".to_string())
+            }
+        }
     }
 }
 
@@ -1321,6 +1343,51 @@ mod tests {
     }
 
     #[test]
+    fn parse_media_url_rejects_bytes_the_url_parser_would_rewrite() {
+        // The url crate reads '\' as a path separator, so bare Url::parse
+        // accepts this string with host usher.ttvnw.net — but FFmpeg's
+        // av_url_split reads the same bytes as userinfo and connects to
+        // 127.0.0.1:8443. That disagreement is why the raw bytes are
+        // rejected outright instead of laundered through the parser.
+        let smuggled = "https://usher.ttvnw.net\\@127.0.0.1:8443/x.m3u8";
+        assert_eq!(
+            url::Url::parse(smuggled)
+                .expect("url crate accepts the smuggled string")
+                .host_str(),
+            Some("usher.ttvnw.net")
+        );
+        assert_eq!(parse_media_url(smuggled, is_allowed_live_host), None);
+        // Tabs are deleted and edge spaces/controls trimmed by the
+        // parser before the host is ever checked — a validator must not
+        // pass any of them through for someone else to re-read.
+        assert_eq!(
+            parse_media_url("https://usher.ttvnw.net/a\tb.m3u8", is_allowed_live_host),
+            None
+        );
+        assert_eq!(
+            parse_media_url(
+                " https://usher.ttvnw.net/api/channel/hls/x.m3u8",
+                is_allowed_live_host
+            ),
+            None
+        );
+        assert_eq!(
+            parse_media_url(
+                "https://usher.ttvnw.net/api/channel/hls/x.m3u8 ",
+                is_allowed_live_host
+            ),
+            None
+        );
+        assert_eq!(
+            parse_media_url(
+                "https://usher.ttvnw.net/api/channel/hls/x.m3u8\u{7f}",
+                is_allowed_live_host
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn sub_only_detection() {
         assert!(looks_sub_only("error: This content is subscribers-only"));
         assert!(looks_sub_only("HTTP 403 Forbidden"));
@@ -1444,5 +1511,25 @@ mod tests {
             "clip"
         )
         .is_ok());
+    }
+
+    #[test]
+    #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
+    fn validate_media_url_hands_back_the_parser_serialization() {
+        // mpv_load passes this serialization to loadfile — the round trip
+        // must be exact for real resolved URLs.
+        let parsed = validate_media_url(
+            "https://usher.ttvnw.net/api/channel/hls/somechannel.m3u8?sig=abc&token=def",
+            "live",
+        )
+        .expect("a real resolved live URL validates");
+        assert_eq!(
+            parsed.as_str(),
+            "https://usher.ttvnw.net/api/channel/hls/somechannel.m3u8?sig=abc&token=def"
+        );
+        // The backslash smuggle never gets far enough to serialize.
+        assert!(
+            validate_media_url("https://usher.ttvnw.net\\@127.0.0.1:8443/x.m3u8", "live").is_err()
+        );
     }
 }

@@ -1514,8 +1514,12 @@ pub async fn mpv_load(
     // The webview is the caller — a TRUST BOUNDARY. mpv opens file://,
     // edl://, memory://, lavf://, smb:// and local playlists if handed
     // them, so nothing reaches loadfile without passing the same https +
-    // host-family predicate the resolvers apply to streamlink's output.
-    crate::resolve::validate_media_url(&url, &kind)?;
+    // host-family predicate the resolvers apply to streamlink's output —
+    // and what reaches it is the validator's own serialization, never
+    // the raw input: FFmpeg does not read URLs the way the WHATWG parser
+    // validated them, so only the normalized form keeps both parsers on
+    // the same host.
+    let media_url = crate::resolve::validate_media_url(&url, &kind)?;
     // The engine (and the surface) must be up; a lazy first call is fine —
     // the frontend probes mpv_available at startup, which normally already
     // built engine 0, but a first-ever load (or a tile's first stream) must
@@ -1553,7 +1557,7 @@ pub async fn mpv_load(
         };
         mpv.set_property("start", start_prop)
             .map_err(|err| format!("set start: {err}"))?;
-        mpv.command("loadfile", &[url.as_str(), "replace"])
+        mpv.command("loadfile", &[media_url.as_str(), "replace"])
             .map_err(|err| format!("loadfile: {err}"))?;
         // NOTE: the surface is NOT revealed here — the event thread shows it
         // on the first PlaybackRestart (first frame presented), so the page's
