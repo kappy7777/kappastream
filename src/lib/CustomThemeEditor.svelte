@@ -369,8 +369,28 @@
     onclose()
   }
 
-  function remove(): void {
+  /**
+   * Deleting is permanent and one undo away from the Cancel button, so it
+   * takes a second click: the first arms the button (relabelled, styled as
+   * destructive) and disarms itself again after a few idle seconds.
+   */
+  let deleteArmed = $state(false)
+  let deleteArmTimer: ReturnType<typeof setTimeout> | null = null
+
+  function requestDelete(): void {
     if (isNew) return
+    if (!deleteArmed) {
+      deleteArmed = true
+      if (deleteArmTimer) clearTimeout(deleteArmTimer)
+      deleteArmTimer = setTimeout(() => {
+        deleteArmed = false
+      }, 4000)
+      return
+    }
+    if (deleteArmTimer) {
+      clearTimeout(deleteArmTimer)
+      deleteArmTimer = null
+    }
     deleteCustomTheme(editing.id)
     if (settings.theme === editing.id) settings.setTheme('amethyst')
     onclose()
@@ -425,6 +445,7 @@
   })
 
   onDestroy(() => {
+    if (deleteArmTimer) clearTimeout(deleteArmTimer)
     // Safety net: never leave a preview applied after teardown.
     settings.reapplyTheme()
   })
@@ -680,7 +701,9 @@
       <span class="ct-spacer"></span>
       {#if !isNew}
         <button type="button" class="ct-btn" onclick={exportTheme}>{t('settings_ctExport')}</button>
-        <button type="button" class="ct-btn ct-btn--danger" onclick={remove}>{t('settings_ctDelete')}</button>
+        <button type="button" class="ct-btn ct-btn--danger" class:ct-btn--armed={deleteArmed} onclick={requestDelete}
+          >{deleteArmed ? t('settings_ctDeleteConfirm') : t('settings_ctDelete')}</button
+        >
       {/if}
       <button type="button" class="ct-btn" onclick={close}>{t('cancel')}</button>
       <button type="button" class="ct-btn ct-btn--primary" onclick={save} disabled={!canSave}
@@ -1108,5 +1131,15 @@
   .ct-btn--danger:hover:not(:disabled) {
     color: var(--live);
     border-color: var(--live);
+  }
+
+  /* Armed state: the button has been clicked once and the next click
+     deletes — fill it with the destructive colour so the stakes read at a
+     glance. */
+  .ct-btn--armed,
+  .ct-btn--armed:hover:not(:disabled) {
+    background: var(--live);
+    border-color: var(--live);
+    color: var(--on-live);
   }
 </style>

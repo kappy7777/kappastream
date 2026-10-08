@@ -429,6 +429,7 @@ export const pt: Record<TKey, string> = {
   settings_ctEmpty: 'Duplique um tema integrado e ajuste as cores.',
   settings_ctEdit: 'Editar',
   settings_ctDelete: 'Excluir',
+  settings_ctDeleteConfirm: 'Excluir mesmo?',
   settings_ctExport: 'Exportar',
   settings_ctDuplicateFrom: 'Duplicar de',
   settings_ctName: 'Nome',

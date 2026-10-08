@@ -431,6 +431,7 @@ export const fr: Record<TKey, string> = {
   settings_ctEmpty: 'Dupliquez un thème intégré puis ajustez les couleurs.',
   settings_ctEdit: 'Modifier',
   settings_ctDelete: 'Supprimer',
+  settings_ctDeleteConfirm: 'Vraiment supprimer ?',
   settings_ctExport: 'Exporter',
   settings_ctDuplicateFrom: 'Dupliquer depuis',
   settings_ctName: 'Nom',

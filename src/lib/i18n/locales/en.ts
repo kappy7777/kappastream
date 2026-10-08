@@ -458,6 +458,7 @@ export const en = {
   settings_ctEmpty: 'Duplicate a built-in theme, then adjust the colours.',
   settings_ctEdit: 'Edit',
   settings_ctDelete: 'Delete',
+  settings_ctDeleteConfirm: 'Really delete?',
   settings_ctExport: 'Export',
   settings_ctDuplicateFrom: 'Duplicate from',
   settings_ctName: 'Name',
