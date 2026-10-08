@@ -9,9 +9,18 @@
 
   const count = $derived(notifications.unreadCount)
 
+  // Which entries were unread when the panel opened. Opening marks everything
+  // read (badge + aria count reset at once), but the accent stripe still marks
+  // those entries so the user can see what was new; entries arriving while the
+  // panel is open stripe via their own read flag.
+  let unreadAtOpen: string[] = $state.raw([])
+
   function toggle(): void {
     open = !open
-    if (open) notifications.markAllRead()
+    if (open) {
+      unreadAtOpen = notifications.items.filter((i) => !i.read).map((i) => i.id)
+      notifications.markAllRead()
+    }
   }
 
   function clearAll(): void {
@@ -96,7 +105,11 @@
       {:else}
         <div class="notif-list">
           {#each notifications.items as item (item.id)}
-            <div class="notif-item" class:notif-item--live={item.kind === 'live'} data-read={item.read}>
+            <div
+              class="notif-item"
+              class:notif-item--live={item.kind === 'live'}
+              data-unread={!item.read || unreadAtOpen.includes(item.id)}
+            >
               <span class="notif-icon" class:notif-icon--live={item.kind === 'live'} aria-hidden="true"
                 >{iconFor(item.kind)}</span
               >
@@ -300,7 +313,7 @@
     background: transparent;
   }
 
-  .notif-item[data-read='false']::before {
+  .notif-item[data-unread='true']::before {
     background: var(--accent);
   }
 
