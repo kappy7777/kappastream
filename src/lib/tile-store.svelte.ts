@@ -50,8 +50,12 @@
 //    live→offline transition (setLiveStatus with state 'offline' for a tile that
 //    was previously live). A transient transport/hls error is reported via
 //    setStatus('error', …) and does NOT close the tile — the Tile component
-//    shows an error overlay and retries, matching the single-stream path which
-//    only surfaces 'offline' from an authoritative resolve result.
+//    shows an error overlay and retries on the bounded nextTileRetryDelayMs
+//    backoff (plus the overlay's manual Retry button), matching the
+//    single-stream path which only surfaces 'offline' from an authoritative
+//    resolve result. A tile opened on an OFFLINE channel stays (showing the
+//    offline overlay) until the status poll sees the channel live again —
+//    the Tile component reloads it then.
 //  - Closing the last remaining tile exits multi-view (onShouldExit fires).
 
 import type { LiveStatus } from './favorites.svelte'
@@ -69,9 +73,27 @@ export type TilePlaybackStatus = 'loading' | 'playing' | 'offline' | 'error'
  */
 export const TILE_IDLE_HIDE_MS = 3_500
 
-/** The idle-hide tick's predicate: true when the controls should hide. */
+/**
+ * The idle-hide tick's predicate: true when the controls should hide.
+ */
 export function tileControlsIdle(now: number, lastActivity: number): boolean {
   return now - lastActivity >= TILE_IDLE_HIDE_MS
+}
+
+/**
+ * Backoff for a tile's automatic error retry: a failed load (transient
+ * resolve/network error) is retried after TILE_RETRY_BASE_MS doubling per
+ * consecutive failure, capped at TILE_RETRY_MAX_MS. The backoff is bounded,
+ * the retry COUNT is not — a tile that keeps failing keeps trying at the
+ * cap (roughly one resolve per 30 s), so a transient outage never leaves a
+ * dead tile in the grid; the count resets on the first success, a
+ * channel/quality change, or the overlay's manual Retry button.
+ */
+export const TILE_RETRY_BASE_MS = 2_000
+export const TILE_RETRY_MAX_MS = 30_000
+
+export function nextTileRetryDelayMs(attempt: number): number {
+  return Math.min(TILE_RETRY_BASE_MS * 2 ** attempt, TILE_RETRY_MAX_MS)
 }
 
 /**

@@ -734,3 +734,16 @@ describe('tileControlsIdle — the controls auto-hide predicate (3.5 s)', () => 
     expect(S.tileControlsIdle(bumped, bumped)).toBe(false)
   })
 })
+
+// ---- error-retry backoff (the automatic retry behind the error overlay) ----
+describe('nextTileRetryDelayMs — bounded doubling backoff', () => {
+  it('doubles from the base and caps at the max', () => {
+    expect(S.nextTileRetryDelayMs(0)).toBe(S.TILE_RETRY_BASE_MS)
+    expect(S.nextTileRetryDelayMs(1)).toBe(S.TILE_RETRY_BASE_MS * 2)
+    expect(S.nextTileRetryDelayMs(2)).toBe(S.TILE_RETRY_BASE_MS * 4)
+    expect(S.nextTileRetryDelayMs(3)).toBe(S.TILE_RETRY_BASE_MS * 8)
+    // 2s · 2^4 = 32 s would exceed the 30 s cap.
+    expect(S.nextTileRetryDelayMs(4)).toBe(S.TILE_RETRY_MAX_MS)
+    expect(S.nextTileRetryDelayMs(50)).toBe(S.TILE_RETRY_MAX_MS)
+  })
+})

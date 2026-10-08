@@ -401,3 +401,29 @@ it('merge picker: a nonexistent channel is dropped with the not-found error', as
   expect(names).not.toContain('nosuch')
   expect(document.querySelector('.mv-merge-error')?.textContent).toBe('Channel not found')
 })
+
+// A failed tile shows the error overlay with a working Retry button (the
+// automatic backoff exists too, but its first fire is 2 s out — the button
+// is the immediate escape hatch).
+it('an error tile offers a Retry button that re-resolves', async () => {
+  settings.setMpvEngine(false)
+  mountView(false)
+  await sleep(60)
+  vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    if (cmd === 'resolve_stream') return { ok: false, error: 'nope' }
+    return { ok: true, url: 'https://example.invalid/x.m3u8' }
+  })
+  const resolves = (): number => vi.mocked(invoke).mock.calls.filter((c) => c[0] === 'resolve_stream').length
+
+  tileStore.addOrReplace('chan1', 'best', 1)
+  await sleep(200)
+  const tile = document.querySelector('[data-tile-id]')!
+  expect(tile.querySelector('.mv-tile-overlay')).toBeTruthy()
+  const btn = tile.querySelector<HTMLButtonElement>('.mv-overlay-retry')
+  expect(btn).toBeTruthy()
+  expect(resolves()).toBe(1)
+
+  btn!.click()
+  await sleep(150)
+  expect(resolves()).toBe(2)
+})

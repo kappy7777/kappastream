@@ -4,11 +4,14 @@
   // play), a local generation guard for stale-request discipline, live stall
   // recovery, and an authoritative offline-vs-transient split:
   //   - genuine offline (resolve returns offline, or a live→offline status
-  //     poll) → the tile is CLOSED by the store (offline-close).
+  //     poll) → the tile is CLOSED by the store (offline-close). A tile
+  //     opened while the channel was offline stays, showing the offline
+  //     overlay, and reloads when the status poll sees the channel live.
   //   - transient (resolve network error / hls fatal networkish error / manifest
-  //     timeout) → status 'error' overlay + an automatic retry, the tile is NOT
-  //     closed (mirrors the single-stream path, which only surfaces 'offline'
-  //     from an authoritative resolve result).
+  //     timeout) → status 'error' overlay + an automatic bounded-backoff retry
+  //     (plus the overlay's Retry button), the tile is NOT closed (mirrors the
+  //     single-stream path, which only surfaces 'offline' from an authoritative
+  //     resolve result).
   //
   // The engine is hls.js OR the embedded native mpv engine (mpvEnabled):
   // both render the SAME overlay layout (video area inset-0, auto-hiding
@@ -37,7 +40,7 @@
   // channel change, tile close, and component teardown ( onDestroy). The video
   // element is paused + has its src cleared so no segment fetches outlive it.
 
-  import { onDestroy } from 'svelte'
+  import { onDestroy, untrack } from 'svelte'
   import Hls from 'hls.js'
   import { invoke } from '@tauri-apps/api/core'
   import { listen } from '@tauri-apps/api/event'
@@ -52,6 +55,7 @@
     tileStore,
     tileAudible,
     tileControlsIdle,
+    nextTileRetryDelayMs,
     planTileMuteToggle,
     planTileVolumeInput,
     applyTileAudio,
@@ -172,7 +176,7 @@
       b.on('error', () => {
         playback.teardown(videoEl)
         nativeActive = false
-        tileStore.setStatus(tile.id, 'error', b.lastError ?? 'native engine error')
+        failTile(b.lastError ?? 'native engine error')
       }),
       b.on('ended', () => {
         // A live stream that ends went offline; the status poll closes the
@@ -388,7 +392,7 @@
         // 404ing ended playlist from a real network fault — the status
         // poll's offline-close removes the tile when the channel actually
         // went offline, so an honest error overlay is the safe default.
-        onFatalAfterStart: (error) => tileStore.setStatus(tile.id, 'error', error),
+        onFatalAfterStart: (error) => failTile(error),
       })
     }
     if (el.canPlayType('application/vnd.apple.mpegurl')) {
@@ -399,6 +403,40 @@
       })
     }
     return { ok: false, error: 'HLS playback is not supported' }
+  }
+
+  // ---- error retry (bounded backoff) --------------------------------------
+  // A transient failure leaves the tile alive with an error overlay; the
+  // automatic retry doubles its delay per consecutive failure (capped by
+  // nextTileRetryDelayMs) so a longer outage never strands a dead tile in
+  // the grid while a short one costs only a few early attempts. The attempt
+  // count resets on success, on a channel/quality/engine change, and on the
+  // overlay's manual Retry button (which retries immediately).
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+  let retryAttempt = 0
+
+  function clearRetry(): void {
+    if (retryTimer) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
+  }
+
+  function failTile(error: string): void {
+    tileStore.setStatus(tile.id, 'error', error)
+    clearRetry()
+    const delay = nextTileRetryDelayMs(retryAttempt)
+    retryAttempt++
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      void load(tile.quality)
+    }, delay)
+  }
+
+  function retryNow(): void {
+    clearRetry()
+    retryAttempt = 0
+    void load(tile.quality)
   }
 
   async function load(q: string): Promise<void> {
@@ -418,12 +456,16 @@
         await load('best')
         return
       }
-      tileStore.setStatus(tile.id, 'error', resolved.error ?? 'failed to resolve stream')
+      failTile(resolved.error ?? 'failed to resolve stream')
       return
     }
     const res = await attach(tile.channel, q, resolved.url, gen)
     if (!isCurrent(gen, q)) return
-    if (!res.ok) tileStore.setStatus(tile.id, 'error', res.error)
+    if (!res.ok) {
+      failTile(res.error)
+      return
+    }
+    retryAttempt = 0
   }
 
   function changeQuality(q: string): void {
@@ -547,6 +589,8 @@
     prevLowLatency = ll
     prevMpvEnabled = mpv
     if (!changed) return // idempotent guard — never reload on an unchanged re-run
+    clearRetry()
+    retryAttempt = 0
     playback.teardown(el)
     nativeActive = false
     if (channelChanged && !firstRun) tileStore.setStatus(tile.id, 'loading')
@@ -854,7 +898,23 @@
     }
   })
 
+  // A tile sitting on the offline overlay reloads when the poll sees the
+  // channel live again — a tile opened on an offline channel, or a stream
+  // end the poll hasn't flipped to offline yet (that later flip costs one
+  // extra resolve at most, and the real offline-close removes the tile).
+  // The reload's own status → 'loading' write un-arms this effect.
+  $effect(() => {
+    if (tile.status !== 'offline') return
+    if (tile.liveStatus.state !== 'live') return
+    untrack(() => {
+      clearRetry()
+      retryAttempt = 0
+      void load(tile.quality)
+    })
+  })
+
   onDestroy(() => {
+    clearRetry()
     playback.dispose(videoEl)
     const b = mpvBackend
     mpvBackend = null
@@ -968,8 +1028,10 @@
           <div class="mv-spinner" aria-hidden="true"></div>
         {:else if tile.status === 'offline'}
           <span class="mv-overlay-title">{t('player_offline')}</span>
+          <button type="button" class="mv-overlay-retry" onclick={retryNow}>{t('retry')}</button>
         {:else if tile.status === 'error'}
           <span class="mv-overlay-title">{t('player_streamError')}</span>
+          <button type="button" class="mv-overlay-retry" onclick={retryNow}>{t('retry')}</button>
         {/if}
       </div>
     {/if}
@@ -1238,6 +1300,26 @@
     font-weight: 600;
     text-align: center;
     padding: 0 10px;
+  }
+  /* The overlay itself is pointer-events: none (it must never eat tile
+     clicks); the Retry button re-enables pointer events for itself only. */
+  .mv-overlay-retry {
+    pointer-events: auto;
+    padding: 4px 16px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-panel);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .mv-overlay-retry:hover {
+    background: var(--bg-hover);
+  }
+  .mv-overlay-retry:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
   .mv-spinner {
     width: 26px;
