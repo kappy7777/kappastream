@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { clampRectToMonitor, readSavedPipRect, writeSavedPipRect } from './pip-rect'
+import { clampRectToMonitor, readSavedPipRect, rectCentreOnAnyMonitor, writeSavedPipRect } from './pip-rect'
 
 /*
  * Unit tests for src/lib/pip-rect.ts — the restore-time clamp that heals
@@ -93,5 +93,37 @@ describe('clampRectToMonitor', () => {
       width: 1280,
       height: 720,
     })
+  })
+})
+
+describe('rectCentreOnAnyMonitor', () => {
+  // Physical monitor rects, the same units the saved rect carries.
+  const PRIMARY = { x: 0, y: 0, width: 2560, height: 1440 }
+  const SECOND = { x: 2560, y: 0, width: 1920, height: 1080 }
+
+  it('keeps a rect whose centre lands on the primary monitor', () => {
+    expect(rectCentreOnAnyMonitor({ x: 40, y: 50, width: 480, height: 270 }, [PRIMARY])).toBe(true)
+  })
+
+  it('keeps a rect whose centre lands on ANOTHER connected monitor', () => {
+    // Saved at x=3000 on a two-monitor desk; the primary ends at 2560.
+    expect(rectCentreOnAnyMonitor({ x: 3000, y: 100, width: 480, height: 270 }, [PRIMARY, SECOND])).toBe(true)
+  })
+
+  it('drops a rect saved on a since-unplugged monitor', () => {
+    // Centre x = 5000+240 = 5240: past the primary, past the second.
+    expect(rectCentreOnAnyMonitor({ x: 5000, y: 200, width: 480, height: 270 }, [PRIMARY])).toBe(false)
+    expect(rectCentreOnAnyMonitor({ x: 5000, y: 200, width: 480, height: 270 }, [PRIMARY, SECOND])).toBe(false)
+  })
+
+  it('counts a centre exactly on a monitor edge as on-screen', () => {
+    // Centre (2560, 720): the right edge of the primary AND the left edge
+    // of the second — either way it is reachable, so it stays.
+    expect(rectCentreOnAnyMonitor({ x: 2320, y: 585, width: 480, height: 270 }, [PRIMARY])).toBe(true)
+    expect(rectCentreOnAnyMonitor({ x: 2320, y: 585, width: 480, height: 270 }, [SECOND])).toBe(true)
+  })
+
+  it('no monitors answering means no position to keep', () => {
+    expect(rectCentreOnAnyMonitor({ x: 100, y: 100, width: 480, height: 270 }, [])).toBe(false)
   })
 })

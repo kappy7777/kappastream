@@ -47,6 +47,28 @@ export function writeSavedPipRect(storageKey: string, rect: PipRectShape): void 
   }
 }
 
+/** A monitor's rect in the same RAW PHYSICAL pixels the saved rect carries
+ *  (Tauri's Monitor.position/size are physical). */
+export interface MonitorRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * Whether the CENTRE of a saved rect lands on any connected monitor. The
+ * PiP window is undecorated and skips the taskbar, so a rect saved on a
+ * since-unplugged monitor would otherwise reopen with no visible chrome to
+ * drag it back by — the caller drops the position and centres instead.
+ * Edge-inclusive: a centre exactly on a monitor edge still counts.
+ */
+export function rectCentreOnAnyMonitor(rect: PipRectShape, monitors: readonly MonitorRect[]): boolean {
+  const cx = rect.x + rect.width / 2
+  const cy = rect.y + rect.height / 2
+  return monitors.some((m) => cx >= m.x && cx <= m.x + m.width && cy >= m.y && cy <= m.y + m.height)
+}
+
 /**
  * Clamp a restore rect to a fraction of the monitor's size, in the SAME
  * units both are carried in — RAW PHYSICAL pixels (the stored rect relays

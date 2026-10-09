@@ -728,10 +728,10 @@
     // resize events and setSize(PhysicalSize) speak the same physical units
     // (the snap has always relied on that), so the stored raw event values
     // are re-applied verbatim — no scale-factor or monitor queries in THIS
-    // window, which on some compositors lie or fail outright (KDE at 200%
-    // reports scaleFactor 1; currentMonitor rejects). The MAIN window's
-    // controller clamps the stored rect against its own working monitor
-    // query at open, before this window is even created.
+    // window, which mixed-DPI setups can misreport (KDE at 200% reporting
+    // scaleFactor 1). The MAIN window's controller clamps the stored rect
+    // and validates its position against its own monitor queries at open,
+    // before this window is even created.
     {
       const savedRect = readSavedPipRect(STORAGE_KEYS.pipWindowRect)
       if (savedRect) {

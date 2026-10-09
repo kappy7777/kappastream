@@ -26,6 +26,11 @@ const tauri = vi.hoisted(() => ({
   windowsDestroyed: 0,
   lastWindowOpts: null as Record<string, unknown> | null,
   monitor: null as { width: number; height: number; scaleFactor: number } | null,
+  // Additional physical monitor rects for availableMonitors(); the current
+  // monitor is always part of the list when it answers.
+  extraMonitors: [] as { x: number; y: number; width: number; height: number }[],
+  // When true, availableMonitors() rejects (the position check is skipped).
+  monitorsFail: false,
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -42,6 +47,25 @@ vi.mock('@tauri-apps/api/window', () => ({
             scaleFactor: tauri.monitor.scaleFactor,
           },
     ),
+  availableMonitors: () =>
+    tauri.monitorsFail
+      ? Promise.reject(new Error('mock: monitors unavailable'))
+      : Promise.resolve([
+          ...(tauri.monitor
+            ? [
+                {
+                  size: { width: tauri.monitor.width, height: tauri.monitor.height },
+                  position: { x: 0, y: 0 },
+                  scaleFactor: tauri.monitor.scaleFactor,
+                },
+              ]
+            : []),
+          ...tauri.extraMonitors.map((m) => ({
+            size: { width: m.width, height: m.height },
+            position: { x: m.x, y: m.y },
+            scaleFactor: 1,
+          })),
+        ]),
 }))
 vi.mock('@tauri-apps/api/event', () => ({
   emit: (event: string, payload?: unknown) => {
@@ -119,6 +143,8 @@ beforeEach(async () => {
   tauri.windowsDestroyed = 0
   tauri.lastWindowOpts = null
   tauri.monitor = { width: 2560, height: 1440, scaleFactor: 1 }
+  tauri.extraMonitors = []
+  tauri.monitorsFail = false
   P = await import('./pip-controller.svelte')
   await flush()
 })
@@ -517,6 +543,52 @@ describe('pip-controller: saved-rect restore clamping', () => {
       width: 2400,
       height: 1350,
     })
+  })
+})
+
+describe('pip-controller: saved-position on-screen validation', () => {
+  // A rect saved on a monitor that is no longer connected must not reopen
+  // there: the PiP is undecorated + skip-taskbar, so there is no chrome to
+  // drag it back by. The centre check runs against the PHYSICAL monitor
+  // rects; a query that fails keeps the position (yesterday's behaviour).
+
+  function saveRect(x: number, y: number, width: number, height: number): void {
+    localStorage.setItem(STORAGE_KEYS.pipWindowRect, JSON.stringify({ x, y, width, height }))
+  }
+
+  async function openOpts(): Promise<Record<string, unknown>> {
+    P.pipController.setStream({ url: 'https://x/1.m3u8', channel: 'chan1', quality: 'best' })
+    await P.pipController.toggle()
+    expect(tauri.lastWindowOpts).toBeTruthy()
+    return tauri.lastWindowOpts!
+  }
+
+  it('opens centred when the saved centre is off every monitor', async () => {
+    saveRect(5000, 200, 480, 270) // centre x 5240: past the 2560-wide primary
+    const opts = await openOpts()
+    expect(opts.width).toBe(480)
+    expect(opts.height).toBe(270)
+    expect(opts.x).toBeUndefined()
+    expect(opts.y).toBeUndefined()
+    expect(opts.center).toBe(true)
+  })
+
+  it('keeps the saved position when the centre is on another monitor', async () => {
+    tauri.extraMonitors = [{ x: 2560, y: 0, width: 1920, height: 1080 }]
+    saveRect(3000, 100, 480, 270) // centre (3240, 235): on the second monitor
+    const opts = await openOpts()
+    expect(opts.x).toBe(3000)
+    expect(opts.y).toBe(100)
+    expect(opts.center).toBeUndefined()
+  })
+
+  it('a failed monitors query keeps the position unvalidated', async () => {
+    tauri.monitorsFail = true
+    saveRect(5000, 200, 480, 270)
+    const opts = await openOpts()
+    expect(opts.x).toBe(5000)
+    expect(opts.y).toBe(200)
+    expect(opts.center).toBeUndefined()
   })
 })
 

@@ -1,10 +1,10 @@
 import { emit, listen } from '@tauri-apps/api/event'
 import { isTauri } from '@tauri-apps/api/core'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
-import { currentMonitor } from '@tauri-apps/api/window'
+import { availableMonitors, currentMonitor } from '@tauri-apps/api/window'
 import { settings } from './settings.svelte.ts'
 import { STORAGE_KEYS } from './storage-keys'
-import { clampRectToMonitor, readSavedPipRect, writeSavedPipRect } from './pip-rect'
+import { clampRectToMonitor, readSavedPipRect, rectCentreOnAnyMonitor, writeSavedPipRect } from './pip-rect'
 
 // Picture-in-Picture for this app is implemented as a SECOND, borderless,
 // always-on-top Tauri window (the native HTML5 `requestPictureInPicture` API
@@ -227,17 +227,31 @@ class PipController {
 
     const url = window.location.href.split('#')[0] + '#pip'
     // The stored rect is in RAW PHYSICAL pixels (the floating window relays
-    // resize-event values verbatim — see PipWindow). Clamp it HERE, in the
-    // main window, whose monitor query is the trustworthy one (in the PiP
-    // window currentMonitor() fails on some compositors, e.g. KDE Wayland),
-    // and write the clamped value back so the floating window's own restore
+    // resize-event values verbatim — see PipWindow). Clamp and position it
+    // HERE, in the main window: it is already mapped and its monitor queries
+    // are the ones to trust, while the floating window does not exist yet.
+    // The clamped value is written back so the floating window's own restore
     // reads a healed rect. The constructor takes LOGICAL pixels, so the
     // clamped physical size is divided by the monitor's scale factor — the
     // constructor size is only a pre-map starting point; the floating window
     // re-asserts the stored physical size after mapping.
+    //
+    // The saved POSITION is only kept when the rect's centre still lands on
+    // a connected monitor (physical rects): the PiP is undecorated and
+    // skips the taskbar, so a rect saved on a since-unplugged monitor would
+    // reopen off-screen with no visible chrome to drag it back by — those
+    // opens drop x/y and centre instead. A failed monitors query keeps the
+    // position, exactly as before the check existed.
     const saved = readSavedPipRect(STORAGE_KEYS.pipWindowRect)
     let ctorSize: { width: number; height: number; x: number; y: number } | null = null
+    let positionOnScreen = true
     if (saved) {
+      let monitors: Awaited<ReturnType<typeof availableMonitors>> | null = null
+      try {
+        monitors = await availableMonitors()
+      } catch {
+        /* ignore — position stays unvalidated this once */
+      }
       try {
         const mon = await currentMonitor()
         if (mon) {
@@ -248,6 +262,17 @@ class PipController {
             height: Math.max(1, Math.round(clamped.height / sf)),
             x: Math.round(clamped.x / sf),
             y: Math.round(clamped.y / sf),
+          }
+          if (monitors !== null) {
+            positionOnScreen = rectCentreOnAnyMonitor(
+              clamped,
+              monitors.map((m) => ({
+                x: m.position.x,
+                y: m.position.y,
+                width: m.size.width,
+                height: m.size.height,
+              })),
+            )
           }
           writeSavedPipRect(STORAGE_KEYS.pipWindowRect, clamped)
         }
@@ -268,7 +293,7 @@ class PipController {
       alwaysOnTop: true,
       skipTaskbar: true,
       shadow: true,
-      ...(ctorSize ? { x: ctorSize.x, y: ctorSize.y } : {}),
+      ...(ctorSize ? (positionOnScreen ? { x: ctorSize.x, y: ctorSize.y } : { center: true }) : {}),
     })
     void wv.once('tauri://error', () => {
       void this.onPipClosed()
