@@ -126,6 +126,12 @@ jobs:
   build-native-packages:
     name: build native (deb/rpm/aur) · debian-12 container
     needs: [check, verify-dispatch-tag]
+    # A SKIPPED needs-job is not a success: verify-dispatch-tag skips on tag
+    # pushes (it only gates manual dispatches), and the default success()
+    # condition would skip every build with it. !failure() runs when the
+    # needs jobs succeeded OR were skipped; a real verify failure still
+    # blocks (failure()), as does a cancelled run.
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     # Debian 12 (bookworm), not ubuntu-22.04: the embedded-libmpv engine
     # links the BUILD HOST's libmpv, and the deb/rpm `depends` declare
@@ -278,6 +284,8 @@ jobs:
   build-appimage:
     name: build AppImage · ubuntu-24.04
     needs: [check, verify-dispatch-tag]
+    # Skipped needs-jobs must not skip the build (see build-native-packages).
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -532,6 +540,8 @@ jobs:
   build-windows:
     name: build windows (nsis) · windows-latest
     needs: [check, verify-dispatch-tag]
+    # Skipped needs-jobs must not skip the build (see build-native-packages).
+    if: ${{ !failure() && !cancelled() }}
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -707,6 +717,8 @@ jobs:
   build-macos:
     name: build macos (app/dmg) · macos-latest · arm64
     needs: [check, verify-dispatch-tag]
+    # Skipped needs-jobs must not skip the build (see build-native-packages).
+    if: ${{ !failure() && !cancelled() }}
     runs-on: macos-latest
     steps:
       - name: Checkout
