@@ -25,8 +25,10 @@
 //! fetch lands, not at load time — and is downloaded to the app cache so
 //! the URI is a local file (GNOME Shell ignores remote art URLs).
 //!
-//! Everything is best-effort: no session bus (or a D-Bus failure) just
-//! logs and retries at the next engine creation.
+//! Everything is best-effort: no session bus (or the bus going away
+//! mid-run) just logs — the supervisor below restarts the service on a
+//! capped backoff, and per-tick D-Bus failures are retried on the next
+//! tick without killing the loop.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -41,6 +43,10 @@ use super::{lock_or_recover, mpv_set_paused, mpv_stop, DerivedState};
 const MPRIS_NAME: &str = "org.mpris.MediaPlayer2.kappastream";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const TRACK_ID: &str = "/org/mpris/mediaplayer/kappastream/track";
+
+/// Restart cadence for the supervised service loop (see ensure_started).
+const MPRIS_RETRY_BASE: Duration = Duration::from_secs(2);
+const MPRIS_RETRY_MAX: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Status {
@@ -427,19 +433,90 @@ fn metadata_map(id: Option<u32>) -> HashMap<String, OwnedValue> {
     map
 }
 
-/// Start the service once per process (retried at the next engine creation
-/// if the session bus is unavailable now).
+/// Start the service once per process. The spawned task SUPERVISES the
+/// service loop: a connection-level failure (no session bus now, or the
+/// bus going away) is retried on a capped backoff rather than left for the
+/// next engine creation — engines are never removed from the registry, so
+/// nothing else would restart the service and media keys would stay dead
+/// until the app restarts.
 pub(super) fn ensure_started() {
     static STARTED: AtomicBool = AtomicBool::new(false);
     if STARTED.swap(true, Ordering::Relaxed) {
         return;
     }
     tauri::async_runtime::spawn(async {
-        if let Err(err) = run().await {
-            eprintln!("[mpv] mpris service unavailable: {err}");
-            STARTED.store(false, Ordering::Relaxed);
+        let mut backoff = MPRIS_RETRY_BASE;
+        loop {
+            match run().await {
+                // Unreachable today: the service loop below never exits on
+                // its own — keep the arm so a future early-return can't turn
+                // the supervisor into a busy loop.
+                Ok(()) => break,
+                Err(err) => {
+                    eprintln!("[mpv] mpris service unavailable, retrying in {backoff:?}: {err}");
+                    tokio::time::sleep(backoff).await;
+                    backoff = next_retry_backoff(backoff);
+                }
+            }
         }
     });
+}
+
+/// Backoff between service restarts: 2 s doubling, capped at 60 s.
+fn next_retry_backoff(prev: Duration) -> Duration {
+    match prev.checked_mul(2) {
+        Some(doubled) if doubled <= MPRIS_RETRY_MAX => doubled,
+        _ => MPRIS_RETRY_MAX,
+    }
+}
+
+/// Logs a per-tick failure at most once per distinct message. A bus that
+/// stays broken must not turn the 500 ms tick into a log firehose, but a
+/// genuinely new failure still gets its line. Bounded so a pathological
+/// alternation of errors cannot grow it forever.
+#[derive(Default)]
+struct TickFailures {
+    logged: Vec<String>,
+}
+
+impl TickFailures {
+    fn note(&mut self, what: &str, err: impl std::fmt::Display) {
+        if self.logged.len() >= 8 {
+            return;
+        }
+        let msg = format!("[mpv] mpris {what} failed, retrying next tick: {err}");
+        if self.logged.iter().any(|m| m == &msg) {
+            return;
+        }
+        self.logged.push(msg.clone());
+        eprintln!("{msg}");
+    }
+}
+
+async fn emit_status_signal(conn: &zbus::connection::Connection) -> zbus::Result<()> {
+    let iface = conn
+        .object_server()
+        .interface::<_, Player>(MPRIS_PATH)
+        .await?;
+    iface
+        .get_mut()
+        .await
+        .playback_status_changed(iface.signal_emitter())
+        .await?;
+    Ok(())
+}
+
+async fn emit_metadata_signal(conn: &zbus::connection::Connection) -> zbus::Result<()> {
+    let iface = conn
+        .object_server()
+        .interface::<_, Player>(MPRIS_PATH)
+        .await?;
+    iface
+        .get_mut()
+        .await
+        .metadata_changed(iface.signal_emitter())
+        .await?;
+    Ok(())
 }
 
 async fn run() -> zbus::Result<()> {
@@ -451,48 +528,53 @@ async fn run() -> zbus::Result<()> {
     let mut owned = false;
     let mut announced: Option<Status> = None;
     let mut announced_meta: Option<(u32, Option<String>, Option<String>)> = None;
+    let mut failures = TickFailures::default();
     loop {
         tokio::time::sleep(Duration::from_millis(500)).await;
         let snap = snapshot();
         let want_owned = snap.is_some();
         if want_owned != owned {
-            if want_owned {
-                conn.request_name(MPRIS_NAME).await?;
+            // Only a connection-level error escapes this loop (the `?`s
+            // above); a failed name request/release is retried on the next
+            // tick with `owned` left untouched, so the state machine never
+            // records an ownership it does not have.
+            let attempted = if want_owned {
+                conn.request_name(MPRIS_NAME).await
             } else {
-                conn.release_name(MPRIS_NAME).await?;
+                conn.release_name(MPRIS_NAME).await.map(|_| ())
+            };
+            match attempted {
+                Ok(_) => {
+                    owned = want_owned;
+                    announced = None;
+                    announced_meta = None;
+                }
+                Err(err) => failures.note(
+                    if want_owned {
+                        "name request"
+                    } else {
+                        "name release"
+                    },
+                    err,
+                ),
             }
-            owned = want_owned;
-            announced = None;
-            announced_meta = None;
         }
         let status = snap.map(|(_, status)| status);
         if owned && status != announced {
-            let iface = conn
-                .object_server()
-                .interface::<_, Player>(MPRIS_PATH)
-                .await?;
-            iface
-                .get_mut()
-                .await
-                .playback_status_changed(iface.signal_emitter())
-                .await?;
-            announced = status;
+            match emit_status_signal(&conn).await {
+                Ok(()) => announced = status,
+                Err(err) => failures.note("playback-status signal", err),
+            }
         }
         // The controlling engine, its title, or its art changed (authority
         // moved, a load replaced the media, or the art download landed):
         // re-announce so widgets re-render.
         let meta = snap.map(|(id, _)| (id, title_of(id), art_of(id)));
         if owned && meta != announced_meta {
-            let iface = conn
-                .object_server()
-                .interface::<_, Player>(MPRIS_PATH)
-                .await?;
-            iface
-                .get_mut()
-                .await
-                .metadata_changed(iface.signal_emitter())
-                .await?;
-            announced_meta = meta;
+            match emit_metadata_signal(&conn).await {
+                Ok(()) => announced_meta = meta,
+                Err(err) => failures.note("metadata signal", err),
+            }
         }
     }
 }
@@ -601,5 +683,46 @@ mod tests {
         assert!(parse_art_url("https://example.invalid/x.png").is_none());
         assert!(parse_art_url("http://static-cdn.jtvnw.net/x.png").is_none());
         assert!(parse_art_url("https://static-cdn.jtvnw.net:8443/x.png").is_none());
+    }
+
+    #[test]
+    fn retry_backoff_doubles_from_2s_to_the_60s_cap() {
+        assert_eq!(
+            next_retry_backoff(Duration::from_secs(2)),
+            Duration::from_secs(4)
+        );
+        assert_eq!(
+            next_retry_backoff(Duration::from_secs(4)),
+            Duration::from_secs(8)
+        );
+        assert_eq!(
+            next_retry_backoff(Duration::from_secs(16)),
+            Duration::from_secs(32)
+        );
+        // 32 s doubles past the cap — the cap wins, and holds.
+        assert_eq!(
+            next_retry_backoff(Duration::from_secs(32)),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            next_retry_backoff(Duration::from_secs(60)),
+            Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn per_tick_failure_logging_is_deduplicated_by_message() {
+        let mut failures = TickFailures::default();
+        failures.note("name request", "no bus");
+        failures.note("name request", "no bus");
+        failures.note("name request", "no bus");
+        assert_eq!(failures.logged.len(), 1);
+        failures.note("name release", "name not owned");
+        assert_eq!(failures.logged.len(), 2);
+        // The log stays bounded no matter how distinct the errors are.
+        for i in 0..20 {
+            failures.note("metadata signal", format!("err {i}"));
+        }
+        assert_eq!(failures.logged.len(), 8);
     }
 }
