@@ -64,16 +64,30 @@ export function bindMediaSessionPlayPause(getControls: () => MediaSessionControl
 }
 
 /**
- * Give desktop media controls a title to show (without one, some engines
- * never surface controls or route media keys at all). null clears it.
- * Best-effort: does nothing where MediaMetadata is unavailable.
+ * Give desktop media controls what they display: a title (without one,
+ * some engines never surface controls or route media keys at all) and,
+ * when known, cover art (the channel avatar). A null title with no
+ * artwork clears the metadata. Best-effort: does nothing where
+ * MediaMetadata is unavailable.
  */
-export function setMediaSessionTitle(title: string | null): void {
+export function setMediaSessionMetadata(title: string | null, artworkUrl?: string | null): void {
   const ms = typeof navigator === 'undefined' ? undefined : navigator.mediaSession
   if (!ms) return
   try {
-    ms.metadata = title === null ? null : new MediaMetadata({ title })
+    if (title === null && !artworkUrl) {
+      ms.metadata = null
+      return
+    }
+    const artwork = artworkUrl ? [{ src: artworkUrl, sizes: '70x70', type: imageTypeOf(artworkUrl) }] : []
+    ms.metadata = new MediaMetadata({ title: title ?? '', artwork })
   } catch {
     /* ignore */
   }
+}
+
+/** Twitch avatars are png; stay honest about the odd webp/jpeg. */
+function imageTypeOf(url: string): string {
+  if (url.endsWith('.png')) return 'image/png'
+  if (url.endsWith('.webp')) return 'image/webp'
+  return 'image/jpeg'
 }

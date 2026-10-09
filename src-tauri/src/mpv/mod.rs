@@ -1744,6 +1744,20 @@ pub fn mpris_set_authority(id: Option<u32>) {
     mpris::set_authority(engine_id(id).unwrap_or(0));
 }
 
+/// Cover art for an engine's desktop media-widget entry (MPRIS
+/// mpris:artUrl): the frontend sends the channel's avatar URL (null
+/// clears). The service downloads it into the app cache and serves a
+/// file:// URI — GNOME Shell only renders local art. Best-effort: a
+/// failed download leaves widgets on the app icon.
+#[tauri::command]
+pub fn mpris_set_art(
+    app: tauri::AppHandle,
+    id: Option<u32>,
+    url: Option<String>,
+) -> Result<(), String> {
+    mpris::note_art(&app, engine_id(id)?, url)
+}
+
 /// Position the surface (logical px, window-relative, zoom-adjusted by the
 /// frontend). Cheap: the surface marshals to the UI thread itself, so this
 /// never blocks the caller. GTK-ONLY (no libmpv): stays a sync command —

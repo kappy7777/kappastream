@@ -181,6 +181,8 @@ pub fn run() {
             #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpris_set_authority,
             #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
+            mpv::mpris_set_art,
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_set_rect,
             #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_pointer,

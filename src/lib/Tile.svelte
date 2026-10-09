@@ -925,6 +925,18 @@
     }
   })
 
+  // Cover art for this tile's native engine (desktop media widgets show it
+  // for the audio authority's stream; the MPRIS service downloads + caches
+  // the avatar itself and dedupes unchanged URLs, so re-sending on every
+  // status refresh is free). Reject-safe: the command only exists in Linux
+  // builds with the engine.
+  $effect(() => {
+    if (!mpvEnabled) return
+    const s = tile.liveStatus
+    const url = s.state === 'live' || s.state === 'offline' ? s.avatarUrl || null : null
+    void invoke('mpris_set_art', { id: mpvId, url }).catch(() => {})
+  })
+
   // A tile sitting on the offline overlay reloads when the poll sees the
   // channel live again — a tile opened on an offline channel, or a stream
   // end the poll hasn't flipped to offline yet (that later flip costs one

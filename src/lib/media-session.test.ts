@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { bindMediaSessionPlayPause, setMediaSessionTitle } from './media-session'
+import { bindMediaSessionPlayPause, setMediaSessionMetadata } from './media-session'
 
 /*
  * The Media Session helpers against a stubbed navigator.mediaSession. The
@@ -107,24 +107,58 @@ describe('bindMediaSessionPlayPause', () => {
   })
 })
 
-describe('setMediaSessionTitle', () => {
-  it('writes MediaMetadata with the title, and null clears it', () => {
+describe('setMediaSessionMetadata', () => {
+  interface MetadataStub {
+    title: string
+    artwork?: Array<{ src: string; sizes: string; type: string }>
+  }
+  function stubMetadata() {
     class MediaMetadataStub {
       title: string
-      constructor(init: { title: string }) {
+      artwork?: Array<{ src: string; sizes: string; type: string }>
+      constructor(init: { title: string; artwork?: Array<{ src: string; sizes: string; type: string }> }) {
         this.title = init.title
+        this.artwork = init.artwork
       }
     }
     vi.stubGlobal('MediaMetadata', MediaMetadataStub)
+    return MediaMetadataStub
+  }
+
+  it('writes MediaMetadata with the title, and null clears it', () => {
+    const Stub = stubMetadata()
     const ms = navigator.mediaSession as { metadata: unknown }
-    setMediaSessionTitle('chan1')
-    expect(ms.metadata).toBeInstanceOf(MediaMetadataStub)
-    expect((ms.metadata as MediaMetadataStub).title).toBe('chan1')
-    setMediaSessionTitle(null)
+    setMediaSessionMetadata('chan1')
+    expect(ms.metadata).toBeInstanceOf(Stub)
+    expect((ms.metadata as MetadataStub).title).toBe('chan1')
+    setMediaSessionMetadata(null)
     expect(ms.metadata).toBeNull()
   })
 
+  it('carries the artwork with an honest mime type when given', () => {
+    stubMetadata()
+    const ms = navigator.mediaSession as { metadata: unknown }
+    setMediaSessionMetadata('chan1', 'https://static-cdn.jtvnw.net/jtv_user_pictures/x-profile_image-70x70.png')
+    expect((ms.metadata as MetadataStub).artwork).toEqual([
+      {
+        src: 'https://static-cdn.jtvnw.net/jtv_user_pictures/x-profile_image-70x70.png',
+        sizes: '70x70',
+        type: 'image/png',
+      },
+    ])
+    setMediaSessionMetadata('chan1', 'https://static-cdn.jtvnw.net/other.jpg')
+    expect((ms.metadata as MetadataStub).artwork?.[0]?.type).toBe('image/jpeg')
+  })
+
+  it('artwork without a title keeps a metadata object (empty title), not null', () => {
+    stubMetadata()
+    const ms = navigator.mediaSession as { metadata: unknown }
+    setMediaSessionMetadata(null, 'https://static-cdn.jtvnw.net/x.png')
+    expect((ms.metadata as MetadataStub).title).toBe('')
+    expect((ms.metadata as MetadataStub).artwork).toHaveLength(1)
+  })
+
   it('does nothing (and does not throw) without MediaMetadata', () => {
-    expect(() => setMediaSessionTitle('chan1')).not.toThrow()
+    expect(() => setMediaSessionMetadata('chan1')).not.toThrow()
   })
 })

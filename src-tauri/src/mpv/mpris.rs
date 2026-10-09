@@ -20,7 +20,10 @@
 //! that saw a click, an OSD interaction, or a volume/mute/seek write
 //! stands in. What the desktop widgets DISPLAY (xesam:title) rides along
 //! with every load: mpv_load records the channel / VOD / clip title for
-//! the engine it loads.
+//! the engine it loads. Cover art (mpris:artUrl) arrives separately via
+//! mpris_set_art — the avatar URL is only known once the GQL status
+//! fetch lands, not at load time — and is downloaded to the app cache so
+//! the URI is a local file (GNOME Shell ignores remote art URLs).
 //!
 //! Everything is best-effort: no session bus (or a D-Bus failure) just
 //! logs and retries at the next engine creation.
@@ -54,6 +57,20 @@ fn statuses() -> &'static Mutex<HashMap<u32, Status>> {
 /// sends with every load) — what desktop widgets display.
 fn titles() -> &'static Mutex<HashMap<u32, String>> {
     static MAP: OnceLock<Mutex<HashMap<u32, String>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Cover art per engine: the avatar URL the frontend wants plus the
+/// cached local file URI once the download lands. Best-effort — a failed
+/// download just leaves widgets on the app icon.
+#[derive(Default)]
+struct Art {
+    wanted: String,
+    local: Option<String>,
+}
+
+fn arts() -> &'static Mutex<HashMap<u32, Art>> {
+    static MAP: OnceLock<Mutex<HashMap<u32, Art>>> = OnceLock::new();
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -116,6 +133,108 @@ pub(super) fn set_authority(id: u32) {
 
 fn title_of(id: u32) -> Option<String> {
     lock_or_recover(titles()).get(&id).cloned()
+}
+
+fn art_of(id: u32) -> Option<String> {
+    lock_or_recover(arts())
+        .get(&id)
+        .and_then(|a| a.local.clone())
+}
+
+/// Avatars come from exactly one host (Twitch's static CDN) — anything
+/// else the webview hands us is not fetched.
+fn is_avatar_host(host: &str) -> bool {
+    host == "static-cdn.jtvnw.net"
+}
+
+fn parse_art_url(raw: &str) -> Option<url::Url> {
+    crate::resolve::parse_media_url(raw, is_avatar_host)
+}
+
+/// Record + fetch cover art for `id` (None clears). An unchanged wanted
+/// URL with a local file already present is a no-op, so the frontend can
+/// re-send on every status refresh for free.
+pub(super) fn note_art(app: &tauri::AppHandle, id: u32, url: Option<String>) -> Result<(), String> {
+    let Some(url) = url else {
+        lock_or_recover(arts()).remove(&id);
+        return Ok(());
+    };
+    let parsed = parse_art_url(&url).ok_or_else(|| format!("refusing art url: {url}"))?;
+    {
+        let mut map = lock_or_recover(arts());
+        let entry = map.entry(id).or_default();
+        if entry.wanted == parsed.as_str() && entry.local.is_some() {
+            return Ok(());
+        }
+        entry.wanted = parsed.as_str().to_string();
+        entry.local = None;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(err) = fetch_art(&app, id, &parsed).await {
+            eprintln!("[mpv] mpris art: {err}");
+        }
+    });
+    Ok(())
+}
+
+/// Defensive ceiling on what we write into the cache (avatars are a few
+/// KB; anything past this is not an avatar).
+const MAX_ART_BYTES: usize = 2 * 1024 * 1024;
+
+fn http() -> &'static reqwest::Client {
+    // Same browser-shaped UA posture as the GQL transport; avatars are a
+    // public CDN asset, so no app-identifying string either.
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(crate::gql::USER_AGENT)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+async fn fetch_art(app: &tauri::AppHandle, id: u32, url: &url::Url) -> Result<(), String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("cache dir: {e}"))?
+        .join("mpris");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cache dir: {e}"))?;
+    let resp = http()
+        .get(url.as_str())
+        .send()
+        .await
+        .map_err(|e| format!("fetch: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("fetch: status {}", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| format!("fetch: {e}"))?;
+    if bytes.len() > MAX_ART_BYTES {
+        return Err(format!("fetch: {} bytes exceeds the cap", bytes.len()));
+    }
+    // One stable name per engine: each load overwrites the previous
+    // channel's avatar, so the cache never grows past five files.
+    let ext = match url.path().rsplit('.').next() {
+        Some("png") => "png",
+        Some("webp") => "webp",
+        _ => "jpg",
+    };
+    let file = dir.join(format!("engine-{id}.{ext}"));
+    std::fs::write(&file, &bytes).map_err(|e| format!("write: {e}"))?;
+    let uri =
+        url::Url::from_file_path(&file).map_err(|_| "art path is not a file URL".to_string())?;
+    // A newer note_art may have replaced the wanted URL while this fetch
+    // was in flight; the stale download is dropped, not published.
+    let mut map = lock_or_recover(arts());
+    if let Some(entry) = map.get_mut(&id) {
+        if entry.wanted == url.as_str() {
+            entry.local = Some(uri.to_string());
+        }
+    }
+    Ok(())
 }
 
 fn snapshot() -> Option<(u32, Status)> {
@@ -274,12 +393,13 @@ impl Player {
 }
 
 /// The `a{sv}` the desktop widgets read: a track id plus, when the
-/// frontend sent one, the channel / VOD / clip title (`xesam:title` is
+/// frontend sent them, the channel / VOD / clip title (`xesam:title` is
 /// what GNOME's and KDE's media widgets display — the same string the
-/// hls engine's MediaMetadata would carry).
+/// hls engine's MediaMetadata would carry) and the cached avatar file
+/// (`mpris:artUrl` — GNOME Shell only renders local files).
 fn metadata_map(id: Option<u32>) -> HashMap<String, OwnedValue> {
     let id = id.unwrap_or(0);
-    let mut map = HashMap::with_capacity(2);
+    let mut map = HashMap::with_capacity(3);
     let track = Value::ObjectPath(
         ObjectPath::try_from(format!("{TRACK_ID}/{id}"))
             .expect("an engine id keeps the track path valid"),
@@ -292,6 +412,14 @@ fn metadata_map(id: Option<u32>) -> HashMap<String, OwnedValue> {
         map.insert(
             "xesam:title".to_string(),
             Value::from(title)
+                .try_to_owned()
+                .expect("string value converts to owned"),
+        );
+    }
+    if let Some(art) = art_of(id) {
+        map.insert(
+            "mpris:artUrl".to_string(),
+            Value::from(art)
                 .try_to_owned()
                 .expect("string value converts to owned"),
         );
@@ -322,7 +450,7 @@ async fn run() -> zbus::Result<()> {
         .await?;
     let mut owned = false;
     let mut announced: Option<Status> = None;
-    let mut announced_meta: Option<(u32, Option<String>)> = None;
+    let mut announced_meta: Option<(u32, Option<String>, Option<String>)> = None;
     loop {
         tokio::time::sleep(Duration::from_millis(500)).await;
         let snap = snapshot();
@@ -350,9 +478,10 @@ async fn run() -> zbus::Result<()> {
                 .await?;
             announced = status;
         }
-        // The controlling engine or its title changed (authority moved, or
-        // a load replaced the media): re-announce so widgets re-render.
-        let meta = snap.map(|(id, _)| (id, title_of(id)));
+        // The controlling engine, its title, or its art changed (authority
+        // moved, a load replaced the media, or the art download landed):
+        // re-announce so widgets re-render.
+        let meta = snap.map(|(id, _)| (id, title_of(id), art_of(id)));
         if owned && meta != announced_meta {
             let iface = conn
                 .object_server()
@@ -378,9 +507,11 @@ mod tests {
     fn cleanup(ids: &[u32]) {
         let mut statuses = lock_or_recover(statuses());
         let mut titles = lock_or_recover(titles());
+        let mut arts = lock_or_recover(arts());
         for id in ids {
             statuses.remove(id);
             titles.remove(id);
+            arts.remove(id);
         }
     }
 
@@ -433,5 +564,42 @@ mod tests {
         lock_or_recover(statuses()).remove(&43);
         assert_eq!(snapshot(), Some((42, Status::Playing)));
         cleanup(&[42, 43]);
+    }
+
+    #[test]
+    fn metadata_carries_art_only_once_the_download_landed() {
+        cleanup(&[44]);
+        // Wanted but not yet downloaded: no mpris:artUrl (widgets stay on
+        // the app icon rather than a dead URL).
+        lock_or_recover(arts()).insert(
+            44,
+            Art {
+                wanted: "https://static-cdn.jtvnw.net/x.png".to_string(),
+                local: None,
+            },
+        );
+        assert!(!metadata_map(Some(44)).contains_key("mpris:artUrl"));
+        lock_or_recover(arts()).insert(
+            44,
+            Art {
+                wanted: "https://static-cdn.jtvnw.net/x.png".to_string(),
+                local: Some("file:///cache/mpris/engine-44.png".to_string()),
+            },
+        );
+        let with = metadata_map(Some(44));
+        assert_eq!(
+            str_of(&with, "mpris:artUrl").as_deref(),
+            Some("file:///cache/mpris/engine-44.png")
+        );
+        cleanup(&[44]);
+    }
+
+    #[test]
+    fn art_urls_are_the_avatar_cdn_over_https_only() {
+        assert!(parse_art_url("https://static-cdn.jtvnw.net/jtv_user_pictures/x.png").is_some());
+        // Not the avatar host, not https, or smuggling a port — refused.
+        assert!(parse_art_url("https://example.invalid/x.png").is_none());
+        assert!(parse_art_url("http://static-cdn.jtvnw.net/x.png").is_none());
+        assert!(parse_art_url("https://static-cdn.jtvnw.net:8443/x.png").is_none());
     }
 }

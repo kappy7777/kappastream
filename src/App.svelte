@@ -59,7 +59,7 @@
   import { notifications } from './lib/notifications.svelte.ts'
   import { tooltipState } from './lib/tooltip.svelte.ts'
   import { tileStore } from './lib/tile-store.svelte.ts'
-  import { bindMediaSessionPlayPause, setMediaSessionTitle } from './lib/media-session'
+  import { bindMediaSessionPlayPause, setMediaSessionMetadata } from './lib/media-session'
   import MultiView from './lib/MultiView.svelte'
   import PinnedMessage from './lib/PinnedMessage.svelte'
   import { pinnedChat } from './lib/pinned-chat.svelte'
@@ -291,6 +291,13 @@
   let availableQualities = $state<string[] | null>(null)
   let qualitiesProbedFor = ''
   let activeStatus: LiveStatus = $state({ state: 'unknown' })
+
+  /** The channel's avatar once a status fetch has landed (desktop media
+   *  controls show it as cover art; null = unknown, keep the app icon). */
+  function avatarOf(s: LiveStatus | null): string | null {
+    if (!s || (s.state !== 'live' && s.state !== 'offline')) return null
+    return s.avatarUrl || null
+  }
 
   // VOD / clip playback mode. 'live' is the default (coupled chat + live
   // stream). 'vod' / 'clip' swap the player source to a past broadcast (HLS via
@@ -544,10 +551,15 @@
     }),
   )
 
-  // Desktop media controls show the stream they would act on.
+  // Desktop media controls show the stream they would act on: title plus
+  // cover art (the channel avatar). This feeds the WEBVIEW's own media
+  // session (the hls engine's bridge); native playback gets its art
+  // through the MPRIS cache below.
   $effect(() => {
     const authority = multiView ? tileStore.authority : null
-    setMediaSessionTitle(channelJoined ?? authority?.channel ?? null)
+    const title = channelJoined ?? authority?.channel ?? null
+    const live = multiView ? (authority?.liveStatus ?? null) : activeStatus
+    setMediaSessionMetadata(title, avatarOf(live))
   })
 
   // Native-engine media keys are served by the Rust MPRIS service, and it
@@ -558,6 +570,15 @@
     if (!isTauri()) return
     const id = multiView ? (authorityTileEngine ?? 0) : 0
     void invoke('mpris_set_authority', { id }).catch(() => {})
+  })
+
+  // Cover art for the SINGLE-PLAYER native engine (engine 0): the MPRIS
+  // service downloads the avatar to the app cache and reports it as
+  // mpris:artUrl. Reject-safe, and inert in multi-view (engine 0 is idle
+  // there — the per-tile art feed lives in Tile.svelte).
+  $effect(() => {
+    if (!isTauri() || multiView) return
+    void invoke('mpris_set_art', { id: 0, url: avatarOf(activeStatus) }).catch(() => {})
   })
 
   function toggleVideoMute(): void {
