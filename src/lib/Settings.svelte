@@ -8,7 +8,6 @@
     UI_SCALE_PRESETS,
     UI_SCALE_MIN,
     UI_SCALE_MAX,
-    UI_SCALE_DEFAULT,
     MAX_MUTED_USERS,
     type MpvHwdec,
     type ThemeId,
@@ -211,7 +210,7 @@
 
   function scaleIndexOf(v: number): number {
     const i = UI_SCALE_PRESETS.findIndex((p) => Math.abs(p - v) < 0.001)
-    return i === -1 ? UI_SCALE_PRESETS.indexOf(UI_SCALE_DEFAULT) : i
+    return i === -1 ? UI_SCALE_PRESETS.indexOf(settings.uiScaleDefault) : i
   }
   const scaleIndex = $derived(scaleIndexOf(settings.uiScale))
   // What the line renders: the stop under a live drag, else the setting.
@@ -692,8 +691,8 @@
                 type="button"
                 class="scale-reset"
                 onclick={resetUiScale}
-                disabled={settings.uiScale === UI_SCALE_DEFAULT}
-                >{t('settings_resetTo', { n: UI_SCALE_DEFAULT })}</button
+                disabled={settings.uiScale === settings.uiScaleDefault}
+                >{t('settings_resetTo', { n: settings.uiScaleDefault })}</button
               >
               <span class="scale-foot-label">{t('settings_uiScaleMax', { n: UI_SCALE_MAX })}</span>
             </div>

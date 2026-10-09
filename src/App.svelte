@@ -107,6 +107,9 @@
     void invoke<string>('target_os')
       .then((os) => {
         isWindows = os === 'windows'
+        // The platform also picks the out-of-the-box UI scale (Windows
+        // starts at 1×, everywhere else at 1.25×).
+        settings.notePlatformOs(os)
       })
       .catch((e) => {
         console.error('[platform] target_os failed; assuming non-Windows (live playback may regress on Windows)', e)

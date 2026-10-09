@@ -116,10 +116,17 @@ export function isMpvHwdec(v: string | null): v is MpvHwdec {
 export const UI_SCALE_MIN = 0.5
 export const UI_SCALE_MAX = 4
 export const UI_SCALE_STEP = 0.05
-// The out-of-the-box scale: 1× reads small both on laptop-density panels
-// and on large displays. Only the ABSENT-key fallback — an explicitly
-// saved scale is never overridden.
+// The out-of-the-box scale. On WebKitGTK (Linux) and WKWebView (macOS),
+// 1× reads small both on laptop-density panels and on large displays, so
+// they start at 1.25×; WebView2 (Windows) already renders 1× at the size
+// the design was drawn for, where 1.25× oversizes the UI. Both are
+// ABSENT-key fallbacks only — an explicitly saved scale is never
+// overridden. The platform split resolves asynchronously (the store is
+// constructed long before the `target_os` round-trip can answer), so the
+// store boots on UI_SCALE_DEFAULT and notePlatformOs() moves Windows to
+// its own value — see there.
 export const UI_SCALE_DEFAULT = 1.25
+export const UI_SCALE_DEFAULT_WINDOWS = 1
 export const UI_SCALE_PRESETS: ReadonlyArray<number> = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4] as const
 
 function safeRead(key: StorageKeyArg): string | null {
@@ -345,6 +352,15 @@ class SettingsStore {
   private lastNonZeroVolume: number = 0.5
   sortMode: SortMode = $state(readSortMode())
   uiScale: number = $state(readUiScale())
+  /**
+   * The out-of-the-box scale for the RUNNING platform — what the Settings
+   * reset button and resetUiScale() target. Starts at the cross-platform
+   * default because the store is constructed at module load, before the
+   * authoritative `target_os` round-trip resolves; notePlatformOs() moves
+   * it to the platform value once known. Reactive so the Settings UI
+   * follows it live.
+   */
+  uiScaleDefault: number = $state(UI_SCALE_DEFAULT)
   lowLatency: boolean = $state(readLowLatency())
   mpvEngine: boolean = $state(readMpvEngine())
   mpvHwdec: MpvHwdec = $state(readMpvHwdec())
@@ -654,8 +670,26 @@ class SettingsStore {
     this.applyUiScale(clamped)
   }
 
+  /**
+   * Record the authoritative platform (the Rust `target_os` string, fed by
+   * App.svelte once its round-trip resolves). Windows is the one platform
+   * whose out-of-the-box UI scale differs (1× — see
+   * UI_SCALE_DEFAULT_WINDOWS): users with NO saved scale adopt it here, and
+   * the adoption is PERSISTED so every later launch constructs the store at
+   * 1× synchronously. Without that write, each Windows launch would paint
+   * its first frame at the cross-platform 1.25× (the constructor applies
+   * the zoom long before this call can) and visibly snap. A saved scale —
+   * deliberate or a prior adoption — is never overridden.
+   */
+  notePlatformOs(os: string): void {
+    this.uiScaleDefault = os === 'windows' ? UI_SCALE_DEFAULT_WINDOWS : UI_SCALE_DEFAULT
+    if (os === 'windows' && safeRead(STORAGE_KEYS.uiScale) === null) {
+      this.setUiScale(this.uiScaleDefault)
+    }
+  }
+
   resetUiScale(): void {
-    this.setUiScale(UI_SCALE_DEFAULT)
+    this.setUiScale(this.uiScaleDefault)
   }
 
   toggleTheaterMode(): void {
