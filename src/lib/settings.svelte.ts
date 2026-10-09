@@ -116,7 +116,10 @@ export function isMpvHwdec(v: string | null): v is MpvHwdec {
 export const UI_SCALE_MIN = 0.5
 export const UI_SCALE_MAX = 4
 export const UI_SCALE_STEP = 0.05
-export const UI_SCALE_DEFAULT = 1
+// The out-of-the-box scale: 1× reads small both on laptop-density panels
+// and on large displays. Only the ABSENT-key fallback — an explicitly
+// saved scale is never overridden.
+export const UI_SCALE_DEFAULT = 1.25
 export const UI_SCALE_PRESETS: ReadonlyArray<number> = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4] as const
 
 function safeRead(key: StorageKeyArg): string | null {

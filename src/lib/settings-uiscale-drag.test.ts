@@ -32,7 +32,7 @@ const Settings = (await import('./Settings.svelte')).default
 const { settings, UI_SCALE_DEFAULT } = await import('./settings.svelte.ts')
 
 // Presets [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4]: index 4 = 1.5× (the
-// default 1× sits at index 2, one stop left of it), index 8 = 4×.
+// default 1.25× sits at index 3, one stop left of it), index 8 = 4×.
 const IDX_150 = 4
 const IDX_MAX = 8
 
