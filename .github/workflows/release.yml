@@ -475,7 +475,7 @@ jobs:
           for f in "$cache"/*; do
             [ -e "$f" ] || continue
             case "$(basename "$f")" in
-              AppRun-x86_64|linuxdeploy-x86_64.AppImage|linuxdeploy-plugin-gtk.sh|linuxdeploy-plugin-gstreamer.sh|linuxdeploy-plugin-appimage.AppImage|runtime-x86_64) ;;
+              AppRun-x86_64|linuxdeploy-07333c6-x86_64.AppImage|linuxdeploy-plugin-gtk.sh|linuxdeploy-plugin-gstreamer.sh|linuxdeploy-plugin-appimage.AppImage|runtime-x86_64) ;;
               *)
                 echo "ERROR: unexpected file in the tauri tool cache: $f" >&2
                 echo "       a tauri-cli bump may have added a tool — pin it in the pre-seed step" >&2
