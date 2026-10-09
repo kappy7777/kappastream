@@ -83,6 +83,15 @@ To build the latest development version from source instead:
 yay -S kappastream-git
 ```
 
+`kappastream-git` builds whatever is on `main` at build time. AUR helpers only rebuild it when new commits land if devel mode is on. With yay:
+
+```bash
+yay -Y --gendb          # once, after installing
+yay -Y --devel --save   # from now on, yay -Syu rebuilds when main moves
+```
+
+Every rebuild compiles the whole app from source. If you only want updates, use `kappastream-bin`.
+
 Other AUR helpers can be used in place of `yay`.
 
 ### 📦 AppImage
