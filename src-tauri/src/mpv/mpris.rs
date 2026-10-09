@@ -31,6 +31,7 @@
 //! tick without killing the loop.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -66,13 +67,16 @@ fn titles() -> &'static Mutex<HashMap<u32, String>> {
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Cover art per engine: the avatar URL the frontend wants plus the
-/// cached local file URI once the download lands. Best-effort — a failed
-/// download just leaves widgets on the app icon.
+/// Cover art per engine: the avatar URL the frontend wants, the cached
+/// local file URI once the download lands, and the file that engine last
+/// published (kept across `wanted` changes so the next publish can remove
+/// it). Best-effort — a failed download just leaves widgets on the app
+/// icon.
 #[derive(Default)]
 struct Art {
     wanted: String,
     local: Option<String>,
+    published: Option<PathBuf>,
 }
 
 fn arts() -> &'static Mutex<HashMap<u32, Art>> {
@@ -159,10 +163,17 @@ fn parse_art_url(raw: &str) -> Option<url::Url> {
 
 /// Record + fetch cover art for `id` (None clears). An unchanged wanted
 /// URL with a local file already present is a no-op, so the frontend can
-/// re-send on every status refresh for free.
+/// re-send on every status refresh for free. Clearing also removes the
+/// engine's published cache file — the per-URL file names must not
+/// accumulate across clear/set cycles.
 pub(super) fn note_art(app: &tauri::AppHandle, id: u32, url: Option<String>) -> Result<(), String> {
     let Some(url) = url else {
-        lock_or_recover(arts()).remove(&id);
+        let published = lock_or_recover(arts())
+            .remove(&id)
+            .and_then(|a| a.published);
+        if let Some(path) = published {
+            let _ = std::fs::remove_file(path);
+        }
         return Ok(());
     };
     let parsed = parse_art_url(&url).ok_or_else(|| format!("refusing art url: {url}"))?;
@@ -201,6 +212,45 @@ fn http() -> &'static reqwest::Client {
     })
 }
 
+/// 64-bit FNV-1a of the URL — enough spread to key cache file names per
+/// avatar URL without pulling in a hash dependency.
+fn url_hash(url: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in url.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// Cache file name for an engine's avatar download: keyed by the avatar
+/// URL, because desktop widgets cache art by URI — reusing one name per
+/// engine republished the SAME file:// URI with new bytes and kept showing
+/// the previous channel's avatar. Distinct URLs name distinct files, so
+/// the publish swap (which removes the superseded file) is what a widget
+/// sees.
+fn art_file_name(id: u32, url: &str, ext: &str) -> String {
+    format!("engine-{id}-{:016x}.{ext}", url_hash(url))
+}
+
+/// The file a publish must remove: the previously published one, unless it
+/// is the same path (a duplicate fetch for the same URL rewrites it).
+fn superseded_art_to_delete(previous: Option<&Path>, new: &Path) -> Option<PathBuf> {
+    previous
+        .filter(|prev| prev != &new)
+        .map(|prev| prev.to_path_buf())
+}
+
+/// The file a stale fetch must remove: its own write — unless that path is
+/// the engine's currently published file, which no fetch may delete.
+fn stale_art_to_delete(written: &Path, published: Option<&Path>) -> Option<PathBuf> {
+    if published == Some(written) {
+        None
+    } else {
+        Some(written.to_path_buf())
+    }
+}
+
 async fn fetch_art(app: &tauri::AppHandle, id: u32, url: &url::Url) -> Result<(), String> {
     use tauri::Manager;
     let dir = app
@@ -221,24 +271,41 @@ async fn fetch_art(app: &tauri::AppHandle, id: u32, url: &url::Url) -> Result<()
     if bytes.len() > MAX_ART_BYTES {
         return Err(format!("fetch: {} bytes exceeds the cap", bytes.len()));
     }
-    // One stable name per engine: each load overwrites the previous
-    // channel's avatar, so the cache never grows past five files.
     let ext = match url.path().rsplit('.').next() {
         Some("png") => "png",
         Some("webp") => "webp",
         _ => "jpg",
     };
-    let file = dir.join(format!("engine-{id}.{ext}"));
+    let file = dir.join(art_file_name(id, url.as_str(), ext));
     std::fs::write(&file, &bytes).map_err(|e| format!("write: {e}"))?;
     let uri =
         url::Url::from_file_path(&file).map_err(|_| "art path is not a file URL".to_string())?;
-    // A newer note_art may have replaced the wanted URL while this fetch
-    // was in flight; the stale download is dropped, not published.
-    let mut map = lock_or_recover(arts());
-    if let Some(entry) = map.get_mut(&id) {
-        if entry.wanted == url.as_str() {
-            entry.local = Some(uri.to_string());
+    // Publish or clean up under the arts lock so concurrent fetches for one
+    // engine can never remove the file that is currently published: a
+    // still-wanted fetch swaps `published` before its cleanup runs, and a
+    // stale fetch only ever deletes its own write. Either way the engine
+    // keeps at most one published file plus the new one in flight — the
+    // cache stays bounded across unlimited channel switches.
+    let cleanup: Option<PathBuf>;
+    {
+        let mut map = lock_or_recover(arts());
+        match map.get_mut(&id) {
+            Some(entry) if entry.wanted == url.as_str() => {
+                cleanup = superseded_art_to_delete(entry.published.as_deref(), &file);
+                entry.local = Some(uri.to_string());
+                entry.published = Some(file);
+            }
+            // A newer note_art replaced the wanted URL while this fetch was
+            // in flight: the stale download is dropped, not published.
+            Some(entry) => {
+                cleanup = stale_art_to_delete(&file, entry.published.as_deref());
+            }
+            // The entry was cleared outright mid-flight.
+            None => cleanup = Some(file),
         }
+    }
+    if let Some(path) = cleanup {
+        let _ = std::fs::remove_file(path);
     }
     Ok(())
 }
@@ -658,6 +725,7 @@ mod tests {
             Art {
                 wanted: "https://static-cdn.jtvnw.net/x.png".to_string(),
                 local: None,
+                published: None,
             },
         );
         assert!(!metadata_map(Some(44)).contains_key("mpris:artUrl"));
@@ -665,13 +733,14 @@ mod tests {
             44,
             Art {
                 wanted: "https://static-cdn.jtvnw.net/x.png".to_string(),
-                local: Some("file:///cache/mpris/engine-44.png".to_string()),
+                local: Some("file:///cache/mpris/engine-44-00000000000000ab.png".to_string()),
+                published: None,
             },
         );
         let with = metadata_map(Some(44));
         assert_eq!(
             str_of(&with, "mpris:artUrl").as_deref(),
-            Some("file:///cache/mpris/engine-44.png")
+            Some("file:///cache/mpris/engine-44-00000000000000ab.png")
         );
         cleanup(&[44]);
     }
@@ -724,5 +793,57 @@ mod tests {
             failures.note("metadata signal", format!("err {i}"));
         }
         assert_eq!(failures.logged.len(), 8);
+    }
+
+    #[test]
+    fn art_file_names_carry_the_engine_and_a_per_url_hash() {
+        let a = art_file_name(7, "https://static-cdn.jtvnw.net/a.png", "png");
+        let b = art_file_name(7, "https://static-cdn.jtvnw.net/b.png", "png");
+        // Different avatar URLs must name different files — that is the
+        // whole point of the hash (widgets cache art by URI).
+        assert_ne!(a, b);
+        assert!(a.starts_with("engine-7-"), "name: {a}");
+        let stem = a.strip_suffix(".png").expect("keeps the extension");
+        let hash = stem.rsplit('-').next().expect("hash after the engine id");
+        assert_eq!(hash.len(), 16);
+        assert!(
+            hash.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+            "hash: {hash}"
+        );
+        // Stable for the same URL, distinct per engine.
+        assert_eq!(
+            a,
+            art_file_name(7, "https://static-cdn.jtvnw.net/a.png", "png")
+        );
+        assert_ne!(
+            a,
+            art_file_name(8, "https://static-cdn.jtvnw.net/a.png", "png")
+        );
+    }
+
+    #[test]
+    fn publishing_deletes_only_a_superseded_file() {
+        let new = PathBuf::from("/cache/mpris/engine-1-000000000000000a.png");
+        let old = PathBuf::from("/cache/mpris/engine-1-000000000000000b.png");
+        assert_eq!(superseded_art_to_delete(Some(&old), &new), Some(old));
+        assert_eq!(superseded_art_to_delete(None, &new), None);
+        // A duplicate fetch for the same URL names the same file: removing
+        // it would delete what the first fetch just published.
+        assert_eq!(superseded_art_to_delete(Some(&new), &new), None);
+    }
+
+    #[test]
+    fn a_stale_fetch_cleans_up_unless_it_rewrote_the_published_file() {
+        let written = PathBuf::from("/cache/mpris/engine-1-000000000000000a.png");
+        let published = PathBuf::from("/cache/mpris/engine-1-000000000000000b.png");
+        assert_eq!(
+            stale_art_to_delete(&written, Some(&published)),
+            Some(written.clone())
+        );
+        assert_eq!(stale_art_to_delete(&written, None), Some(written.clone()));
+        // The stale URL is still the published one (a newer fetch for it is
+        // in flight): never delete the published file.
+        assert_eq!(stale_art_to_delete(&written, Some(&written)), None);
     }
 }
