@@ -79,6 +79,21 @@
   </content_rating>
 
   <releases>
+    <release version="1.0.7" date="2026-10-09">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.7</url>
+      <description>
+        <p>The UI now starts at 1.25× scale — the 1× default read small on
+        laptop-density and large displays alike, and an explicitly chosen
+        scale is kept. UI scale no longer overflows the window on WebKitGTK
+        2.54 and newer: the zoom compensation is measured at runtime per
+        engine, so the layout fits exactly on every platform.</p>
+        <p>Media keys survive a D-Bus hiccup and desktop controls show the
+        current channel's avatar; the PiP window opens where it should (its
+        monitor queries finally permitted, and positions saved on unplugged
+        monitors reopen centered); and chat recovers within seconds after
+        suspend/resume through a socket liveness probe.</p>
+      </description>
+    </release>
     <release version="1.0.6" date="2026-10-09">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.6</url>
       <description>

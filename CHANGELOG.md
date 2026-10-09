@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-10-09
+
+### Changed
+
+- **The UI now starts at 1.25× scale.** The 1× default read small both on
+  laptop-density panels and on large displays. Only the out-of-the-box
+  value changes — an explicitly chosen scale is kept.
+
+### Fixed
+
+- **UI scale no longer overflows the window on WebKitGTK 2.54 and newer.**
+  Whether zooming the document rescales viewport-unit sizes is a
+  per-engine property, and WebKit flipped it for every port in 2.54 — so
+  Linux builds on newer WebKitGTK stacks grew the same overflow macOS has
+  always had: an empty band above the video and chat running past the
+  bottom. The compensation is now decided by a runtime measurement instead
+  of a platform guess, so it engages exactly where the engine needs it and
+  nowhere else. The welcome, about, shortcuts and theme-editor dialogs were
+  also re-taught the divide-only-the-viewport-term rule — on affected
+  engines they had shrunk to design size instead of the scaled size.
+
+- **Media keys survive a D-Bus hiccup.** A single failed operation inside
+  the MPRIS service loop used to end the service for the rest of the
+  session — engines are never rebuilt, so the desktop controls stayed dead
+  until an app restart. The service is now supervised: it comes back on a
+  capped backoff, and failures inside the loop retry quietly on the next
+  tick.
+
+- **Desktop media controls show the current channel's avatar.** Cover art
+  was downloaded to one file per player, so switching channels republished
+  the same file:// URI with new bytes, and widgets that cache art by URL
+  kept showing the old avatar. Each avatar now gets its own cache file
+  named after its URL, the superseded file is removed on publish, and the
+  cache stays bounded.
+
+- **The PiP window opens where it should.** The monitor queries the
+  restore path depends on were never granted in the capability set, so the
+  1.0.6 size-healing never actually ran — and a position saved on a
+  monitor that is no longer connected reopened the undecorated,
+  taskbar-less window off-screen, with nothing to drag it back by. The
+  queries are granted now, and a saved position is kept only when it still
+  lands on a connected monitor; otherwise the window opens centered
+  (Wayland ignores saved positions anyway).
+
+- **Chat recovers within seconds after suspend/resume.** A socket that
+  died silently across a suspend kept the reconnect logic believing it was
+  still connected, so only a six-minute silence watchdog brought chat
+  back. The connection now has to answer a liveness ping within ten
+  seconds — on the network's return, and on the watchdog's first quiet
+  minute — or it is replaced immediately.
+
 ## [1.0.6] - 2026-10-09
 
 ### Added
@@ -1099,7 +1150,8 @@ marks the milestone; it is not a breaking change.
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.0.6...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.0.7...HEAD
+[1.0.7]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.7
 [1.0.6]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.6
 [1.0.5]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.5
 [1.0.4]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.4

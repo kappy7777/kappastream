@@ -41,6 +41,18 @@ export interface VersionNotes {
 }
 
 export const RELEASE_NOTES: Record<string, VersionNotes> = {
+  '1.0.7': {
+    changed: [
+      '🔍 The UI now starts at 1.25× — the old 1× default read small on laptop and big screens alike. An explicitly chosen scale is kept.',
+    ],
+    fixed: [
+      '📏 UI scale no longer overflows the window on WebKitGTK 2.54+: no band above the video, no chat past the bottom — the zoom compensation is measured at runtime now, so every engine gets exactly what it needs.',
+      '⏯️ Media keys survive a D-Bus hiccup: the desktop-controls service restarts itself on a capped backoff instead of staying dead until an app restart.',
+      "👤 Desktop media controls show the current channel's avatar — each avatar gets its own cache file instead of one stale file:// URI.",
+      '🪞 The PiP window opens where it should: its monitor queries are finally permitted (the 1.0.6 size-healing never ran), and a position saved on an unplugged monitor reopens centered instead of off-screen.',
+      '💬 Chat recovers within seconds after suspend/resume — a connection that cannot answer a liveness ping gets replaced instead of freezing until a six-minute watchdog fires.',
+    ],
+  },
   '1.0.6': {
     added: [
       "🪞 The PiP window grows a scrubber for VODs and clips — chapters, muted segments, storyboard previews — plus the player's quality menu and a two-way position handoff.",
