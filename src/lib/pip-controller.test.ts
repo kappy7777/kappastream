@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { STORAGE_KEYS } from './storage-keys'
 
 /*
  * Unit tests for src/lib/pip-controller.svelte.ts.
@@ -23,10 +24,24 @@ const tauri = vi.hoisted(() => ({
   tauriEnabled: true,
   windowsCreated: 0,
   windowsDestroyed: 0,
+  lastWindowOpts: null as Record<string, unknown> | null,
+  monitor: null as { width: number; height: number; scaleFactor: number } | null,
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => tauri.tauriEnabled,
+}))
+vi.mock('@tauri-apps/api/window', () => ({
+  currentMonitor: () =>
+    Promise.resolve(
+      tauri.monitor === null
+        ? null
+        : {
+            size: { width: tauri.monitor.width, height: tauri.monitor.height },
+            position: { x: 0, y: 0 },
+            scaleFactor: tauri.monitor.scaleFactor,
+          },
+    ),
 }))
 vi.mock('@tauri-apps/api/event', () => ({
   emit: (event: string, payload?: unknown) => {
@@ -54,8 +69,9 @@ vi.mock('@tauri-apps/api/webviewWindow', () => {
       tauri.windowsDestroyed++
       return Promise.resolve()
     }
-    constructor(_label: string, _opts: unknown) {
+    constructor(_label: string, opts: unknown) {
       tauri.windowsCreated++
+      tauri.lastWindowOpts = opts as Record<string, unknown>
       created.push(this)
     }
     static getByLabel(label: string): Promise<unknown> {
@@ -73,6 +89,8 @@ const EV_STREAM = 'ks://pip-stream'
 const EV_READY = 'ks://pip-ready'
 const EV_CLOSED = 'ks://pip-closed'
 const EV_DO_CLOSE = 'ks://pip-do-close'
+const EV_QUALITIES = 'ks://pip-qualities'
+const EV_QUALITY_REQ = 'ks://pip-quality'
 
 /** Let the constructor's void-listen() chain register its handlers. */
 async function flush(): Promise<void> {
@@ -99,6 +117,8 @@ beforeEach(async () => {
   tauri.tauriEnabled = true
   tauri.windowsCreated = 0
   tauri.windowsDestroyed = 0
+  tauri.lastWindowOpts = null
+  tauri.monitor = { width: 2560, height: 1440, scaleFactor: 1 }
   P = await import('./pip-controller.svelte')
   await flush()
 })
@@ -353,6 +373,42 @@ describe('pip-controller: VOD resume handoff', () => {
   })
 })
 
+describe('pip-controller: quality menu plumbing', () => {
+  it('pushQualityMenu caches for the init handshake and emits nothing while closed', () => {
+    // The probe is async and often answers after the window opens, so the
+    // menu must be refreshable post-handshake — but a closed pip gets no
+    // dead events; the cache is what the NEXT sendInit serves.
+    P.pipController.pushQualityMenu(['best', '720p60', '480p'], '720p60')
+    expect(payloadsOf(EV_QUALITIES)).toEqual([])
+    P.pipController.setStream({ url: 'https://x/1.m3u8', channel: 'chan1', quality: '720p60' })
+    deliver(EV_READY)
+    const p = payloadsOf(EV_INIT)[0] as Record<string, unknown>
+    expect(p.qualities).toEqual(['best', '720p60', '480p'])
+    expect(p.quality).toBe('720p60')
+  })
+
+  it('pushQualityMenu emits a live refresh to an OPEN pip', async () => {
+    P.pipController.setStream({ url: 'https://x/1.m3u8', channel: 'chan1', quality: 'best' })
+    await P.pipController.toggle()
+    P.pipController.pushQualityMenu(['best', '160p'], 'best')
+    expect(payloadsOf(EV_QUALITIES)).toEqual([{ quality: 'best', qualities: ['best', '160p'] }])
+  })
+
+  it('ks://pip-quality forwards to onQualityRequest; junk payloads are dropped', () => {
+    const seen: Array<[string, number | undefined]> = []
+    P.pipController.onQualityRequest = (q, position) => seen.push([q, position])
+    deliver(EV_QUALITY_REQ, { quality: '480p', position: 123 })
+    deliver(EV_QUALITY_REQ, { quality: '720p' })
+    deliver(EV_QUALITY_REQ, { quality: 42 })
+    deliver(EV_QUALITY_REQ, {})
+    deliver(EV_QUALITY_REQ, undefined)
+    expect(seen).toEqual([
+      ['480p', 123],
+      ['720p', undefined],
+    ])
+  })
+})
+
 describe('pip-controller: hung-window close fallback', () => {
   it('destroys the orphan window when ks://pip-closed never arrives', async () => {
     P.pipController.setStream({ url: 'https://x/1.m3u8', channel: 'chan1', quality: 'best' })
@@ -376,5 +432,123 @@ describe('pip-controller: hung-window close fallback', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('pip-controller: saved-rect restore clamping', () => {
+  // The floating window saves its rect in RAW PHYSICAL pixels (resize-event
+  // values relayed verbatim), but rects written before that model can carry
+  // grown sizes — the restore must clamp against the current monitor (also
+  // physical) so they heal on the first open instead of coming back nearly
+  // fullscreen. The WebviewWindow constructor takes LOGICAL pixels, so the
+  // clamped physical rect is converted for it.
+  function saveRect(x: number, y: number, width: number, height: number): void {
+    localStorage.setItem(STORAGE_KEYS.pipWindowRect, JSON.stringify({ x, y, width, height }))
+  }
+
+  async function openOpts(): Promise<Record<string, unknown>> {
+    P.pipController.setStream({ url: 'https://x/1.m3u8', channel: 'chan1', quality: 'best' })
+    await P.pipController.toggle()
+    expect(tauri.lastWindowOpts).toBeTruthy()
+    return tauri.lastWindowOpts!
+  }
+
+  it('opens at the default 320×180 with no saved rect', async () => {
+    const opts = await openOpts()
+    expect(opts.width).toBe(320)
+    expect(opts.height).toBe(180)
+    expect(opts.x).toBeUndefined()
+    expect(opts.y).toBeUndefined()
+  })
+
+  it('converts an in-range saved PHYSICAL rect to logical constructor options', async () => {
+    // The stored rect is physical; the WebviewWindow constructor takes
+    // logical. On this sf=1 mock the values pass through unchanged.
+    saveRect(40, 50, 480, 270)
+    const opts = await openOpts()
+    expect(opts.width).toBe(480)
+    expect(opts.height).toBe(270)
+    expect(opts.x).toBe(40)
+    expect(opts.y).toBe(50)
+    // In-range rects are written back unchanged.
+    expect(localStorage.getItem(STORAGE_KEYS.pipWindowRect)).toContain('"width":480')
+  })
+
+  it('clamps a grown rect to 60% of the monitor (physical) and heals the store', async () => {
+    saveRect(3, 4, 2400, 1350)
+    const opts = await openOpts()
+    // 2560×1440 monitor → physical caps 1536×864.
+    expect(opts.width).toBe(1536)
+    expect(opts.height).toBe(864)
+    expect(opts.x).toBe(3)
+    expect(opts.y).toBe(4)
+    // The clamped value is written back so the floating window's own
+    // physical restore reads a healed rect.
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.pipWindowRect)!)).toMatchObject({
+      width: 1536,
+      height: 864,
+    })
+  })
+
+  it('clamps in PHYSICAL units on a scaled monitor and converts for the constructor', async () => {
+    // 3840×2160 physical at 2.0: the stored rect and the cap are physical
+    // (0.6×3840 = 2304×1296); the constructor gets LOGICAL (÷2 → 1152×648).
+    tauri.monitor = { width: 3840, height: 2160, scaleFactor: 2 }
+    saveRect(0, 0, 3600, 2025)
+    const opts = await openOpts()
+    expect(opts.width).toBe(1152)
+    expect(opts.height).toBe(648)
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.pipWindowRect)!)).toMatchObject({
+      width: 2304,
+      height: 1296,
+    })
+  })
+
+  it('falls back to the default constructor size when no monitor answers', async () => {
+    // The floating window restores the stored physical size itself after
+    // mapping, so without a monitor answer the constructor just opens small.
+    tauri.monitor = null
+    saveRect(3, 4, 2400, 1350)
+    const opts = await openOpts()
+    expect(opts.width).toBe(320)
+    expect(opts.height).toBe(180)
+    // The store is left untouched — no clamp, no write-back.
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.pipWindowRect)!)).toMatchObject({
+      width: 2400,
+      height: 1350,
+    })
+  })
+})
+
+describe('pip-controller: vodId passthrough for the PiP scrub-bar extras', () => {
+  it('setStream forwards vodId on ks://pip-stream; absent stays absent', async () => {
+    P.pipController.setStream({ url: 'https://x/1.m3u8', channel: 'chan1', quality: 'best' })
+    await P.pipController.toggle()
+    P.pipController.setStream({
+      url: 'https://x/v.m3u8',
+      channel: 'chan1',
+      quality: 'best',
+      isLive: false,
+      vodId: '987654321',
+    })
+    P.pipController.setStream({ url: 'https://x/v2.m3u8', channel: 'chan1', quality: 'best', isLive: false })
+    expect(payloadsOf(EV_STREAM)).toEqual([
+      { url: 'https://x/v.m3u8', mediaKind: 'hls', isLive: false, lowLatency: false, vodId: '987654321' },
+      { url: 'https://x/v2.m3u8', mediaKind: 'hls', isLive: false, lowLatency: false },
+    ])
+  })
+
+  it('sendInit serves the stored vodId alongside startAt', () => {
+    P.pipController.setStream({
+      url: 'https://x/v.m3u8',
+      channel: 'chan1',
+      quality: 'best',
+      startAt: 42,
+      vodId: '123',
+    })
+    deliver(EV_READY)
+    const p = payloadsOf(EV_INIT)[0] as Record<string, unknown>
+    expect(p.startAt).toBe(42)
+    expect(p.vodId).toBe('123')
   })
 })

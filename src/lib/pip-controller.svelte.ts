@@ -1,8 +1,10 @@
 import { emit, listen } from '@tauri-apps/api/event'
 import { isTauri } from '@tauri-apps/api/core'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
+import { currentMonitor } from '@tauri-apps/api/window'
 import { settings } from './settings.svelte.ts'
 import { STORAGE_KEYS } from './storage-keys'
+import { clampRectToMonitor, readSavedPipRect, writeSavedPipRect } from './pip-rect'
 
 // Picture-in-Picture for this app is implemented as a SECOND, borderless,
 // always-on-top Tauri window (the native HTML5 `requestPictureInPicture` API
@@ -11,12 +13,14 @@ import { STORAGE_KEYS } from './storage-keys'
 // while open and the main video is force-muted (without persisting that mute).
 //
 // Everything is coordinated over Tauri global events:
-//   main -> pip   ks://pip-init       { url, channel, quality, volume, muted, mediaKind?, isLive?, lowLatency?, startAt? }
+//   main -> pip   ks://pip-init       { url, channel, quality, volume, muted, mediaKind?, isLive?, lowLatency?, startAt?, qualities? }
 //   main -> pip   ks://pip-stream     { url, mediaKind?, isLive?, lowLatency?, startAt? }    (channel/quality change)
+//   main -> pip   ks://pip-qualities  { quality, qualities }   (menu refresh: probe answered / selection changed)
 //   main -> pip   ks://pip-do-close                        (main requests close)
 //   pip  -> main  ks://pip-ready                           (pip listening, wants init)
 //   pip  -> main  ks://pip-volume     { volume, muted }    (pip is audio authority)
-//   pip  -> main  ks://pip-closed     { rect?, position?, duration?, isLive? }  (pip window closed)
+//   pip  -> main  ks://pip-quality     { quality, position? }  (pip wants a quality switch)
+//   pip  -> main  ks://pip-closed     { position?, duration?, isLive? }  (pip window closed)
 //
 // `isLive` (absent = false) gates the PiP stall recovery: a live edge snap
 // must never force-seek a paused VOD (its seekable end is the END of the
@@ -24,6 +28,12 @@ import { STORAGE_KEYS } from './storage-keys'
 // setStream call site. `startAt` / the closed position report are the VOD
 // resume handoff: PiP continues where the main player was, and the main
 // player resumes where PiP left off.
+//
+// The PiP window persists its own rect: PipWindow writes the shared
+// localStorage key (same origin) on every settled resize/move while the
+// window is alive. Nothing saves the rect at close time — a close-time
+// query of a tearing-down window is exactly the kind of thing that fails
+// silently and leaves a stale size saved forever.
 
 const PIP_LABEL = 'pip'
 
@@ -33,13 +43,8 @@ const EV_STREAM = 'ks://pip-stream'
 const EV_VOLUME = 'ks://pip-volume'
 const EV_CLOSED = 'ks://pip-closed'
 const EV_DO_CLOSE = 'ks://pip-do-close'
-
-interface PipRect {
-  x: number
-  y: number
-  width: number
-  height: number
-}
+const EV_QUALITIES = 'ks://pip-qualities'
+const EV_QUALITY_REQ = 'ks://pip-quality'
 
 interface StreamInfo {
   url: string
@@ -56,36 +61,13 @@ interface StreamInfo {
    *  Absent = false (VODs and clips are never low-latency). */
   lowLatency?: boolean
   /** VOD position (seconds) the floating window should start at — the resume
-   *  half of the PiP position handoff. Absent or <= 0.5 = play from the
-   *  start; live streams never carry one. */
+   * half of the PiP position handoff. Absent or <= 0.5 = play from the
+   * start; live streams never carry one. */
   startAt?: number
-}
-
-function readRect(): PipRect | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.pipWindowRect)
-    if (!raw) return null
-    const v = JSON.parse(raw) as Partial<PipRect>
-    if (
-      typeof v.x !== 'number' ||
-      typeof v.y !== 'number' ||
-      typeof v.width !== 'number' ||
-      typeof v.height !== 'number'
-    )
-      return null
-    if (v.width < 160 || v.height < 90) return null
-    return { x: v.x, y: v.y, width: v.width, height: v.height }
-  } catch {
-    return null
-  }
-}
-
-function writeRect(rect: PipRect): void {
-  try {
-    localStorage.setItem(STORAGE_KEYS.pipWindowRect, JSON.stringify(rect))
-  } catch {
-    /* ignore */
-  }
+  /** The VOD's numeric id — lets the floating window fetch its own scrub-bar
+   * extras (chapters, muted segments, storyboard previews). Live streams and
+   * clips never carry one. */
+  vodId?: string
 }
 
 /** The startAt payload field only when it carries a real position — payloads
@@ -116,12 +98,26 @@ class PipController {
    * consumes it when restoring the stopped main player.
    */
   closedMedia: { position: number; duration: number } | null = null
+  /**
+   * The floating window's quality-menu request (ks://pip-quality). App wires
+   * this: only the main window knows the platform proxy routing, the
+   * per-channel quality preference, and the unavailable→best fallback
+   * ladder, so the floating window asks instead of resolving itself.
+   * `position` is the floating window's VOD playhead (absent for live) so
+   * the re-resolved stream continues where it is.
+   */
+  onQualityRequest: ((quality: string, position: number | undefined) => void) | null = null
 
   private videoEl: HTMLVideoElement | null = null
   private currentStream: StreamInfo | null = null
+  /** The last quality menu App pushed (the probed variant list + the current
+   *  selection). Cached so the init handshake can serve it without a fresh
+   *  push — the probe is async and often answers AFTER the window opens. */
+  private qualityMenu: { qualities: string[]; quality: string } | null = null
   private savedMainMuted = false
   private unlistenReady: (() => void) | null = null
   private unlistenVolume: (() => void) | null = null
+  private unlistenQualityReq: (() => void) | null = null
   private unlistenClosed: (() => void) | null = null
   private closeFallbackTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -140,8 +136,15 @@ class PipController {
     }).then((u) => {
       this.unlistenVolume = u
     })
-    void listen<{ rect?: PipRect; position?: number; duration?: number; isLive?: boolean }>(EV_CLOSED, (e) => {
-      if (e.payload?.rect) writeRect(e.payload.rect)
+    void listen<{ quality?: unknown; position?: unknown }>(EV_QUALITY_REQ, (e) => {
+      const p = e.payload
+      if (!p || typeof p.quality !== 'string' || !p.quality) return
+      const pos = typeof p.position === 'number' && Number.isFinite(p.position) ? p.position : undefined
+      this.onQualityRequest?.(p.quality, pos)
+    }).then((u) => {
+      this.unlistenQualityReq = u
+    })
+    void listen<{ position?: number; duration?: number; isLive?: boolean }>(EV_CLOSED, (e) => {
       const p = e.payload
       this.closedMedia =
         p && typeof p.position === 'number' && Number.isFinite(p.position) && p.isLive !== true
@@ -161,6 +164,19 @@ class PipController {
     this.videoEl = el ?? null
   }
 
+  /** Cache + push the quality menu to the floating window (App feeds this
+   *  from the same probed variant list its own gear menu uses — the floating
+   *  window has NO probe of its own, so a second streamlink spawn per open
+   *  is avoided). The push is also the late-probe refresh: the list starts
+   *  as the full vocabulary and sharpens when the probe answers, sometimes
+   *  after the window opened. Cached so the NEXT sendInit serves the
+   *  current menu without a fresh push. */
+  pushQualityMenu(qualities: readonly string[], quality: string): void {
+    this.qualityMenu = { qualities: [...qualities], quality }
+    if (!this.isOpen || !isTauri()) return
+    void emit(EV_QUALITIES, this.qualityMenu)
+  }
+
   /** Called after a stream successfully attaches (and on quality change). */
   setStream(info: StreamInfo): void {
     this.currentStream = info
@@ -172,6 +188,7 @@ class PipController {
       isLive: info.isLive === true,
       lowLatency: info.lowLatency === true,
       ...startAtProp(info),
+      ...(info.vodId ? { vodId: info.vodId } : {}),
     })
   }
 
@@ -209,12 +226,41 @@ class PipController {
     if (this.videoEl) this.videoEl.muted = true
 
     const url = window.location.href.split('#')[0] + '#pip'
-    const saved = readRect()
+    // The stored rect is in RAW PHYSICAL pixels (the floating window relays
+    // resize-event values verbatim — see PipWindow). Clamp it HERE, in the
+    // main window, whose monitor query is the trustworthy one (in the PiP
+    // window currentMonitor() fails on some compositors, e.g. KDE Wayland),
+    // and write the clamped value back so the floating window's own restore
+    // reads a healed rect. The constructor takes LOGICAL pixels, so the
+    // clamped physical size is divided by the monitor's scale factor — the
+    // constructor size is only a pre-map starting point; the floating window
+    // re-asserts the stored physical size after mapping.
+    const saved = readSavedPipRect(STORAGE_KEYS.pipWindowRect)
+    let ctorSize: { width: number; height: number; x: number; y: number } | null = null
+    if (saved) {
+      try {
+        const mon = await currentMonitor()
+        if (mon) {
+          const clamped = clampRectToMonitor(saved, mon.size.width, mon.size.height)
+          const sf = mon.scaleFactor > 0 ? mon.scaleFactor : 1
+          ctorSize = {
+            width: Math.max(1, Math.round(clamped.width / sf)),
+            height: Math.max(1, Math.round(clamped.height / sf)),
+            x: Math.round(clamped.x / sf),
+            y: Math.round(clamped.y / sf),
+          }
+          writeSavedPipRect(STORAGE_KEYS.pipWindowRect, clamped)
+        }
+      } catch {
+        /* ignore — no monitor answer; the floating window restores the
+           stored physical size itself, unclamped this once */
+      }
+    }
     const wv = new WebviewWindow(PIP_LABEL, {
       url,
       title: 'kappastream — PiP',
-      width: saved?.width ?? 320,
-      height: saved?.height ?? 180,
+      width: ctorSize?.width ?? 320,
+      height: ctorSize?.height ?? 180,
       minWidth: 200,
       minHeight: 113,
       resizable: true,
@@ -222,7 +268,7 @@ class PipController {
       alwaysOnTop: true,
       skipTaskbar: true,
       shadow: true,
-      ...(saved ? { x: saved.x, y: saved.y } : {}),
+      ...(ctorSize ? { x: ctorSize.x, y: ctorSize.y } : {}),
     })
     void wv.once('tauri://error', () => {
       void this.onPipClosed()
@@ -243,6 +289,10 @@ class PipController {
       isLive: this.currentStream.isLive === true,
       lowLatency: this.currentStream.lowLatency === true,
       ...startAtProp(this.currentStream),
+      ...(this.currentStream.vodId ? { vodId: this.currentStream.vodId } : {}),
+      // The cached quality menu (pushed by App's probe feed) — the floating
+      // window's menu seed; late probe answers refresh it via ks://pip-qualities.
+      ...(this.qualityMenu ? { qualities: this.qualityMenu.qualities } : {}),
       volume: settings.volume,
       // The floating window CONTINUES the main player's audio state — it
       // does not reset it. Starting from the persisted mute (not a hardcoded
@@ -254,8 +304,8 @@ class PipController {
 
   private async close(): Promise<void> {
     if (!isTauri()) return
-    // Ask the PiP window to close itself. It emits ks://pip-closed (with its
-    // last rect) on its way out, which drives onPipClosed().
+    // Ask the PiP window to close itself. It emits ks://pip-closed on its way
+    // out, which drives onPipClosed().
     void emit(EV_DO_CLOSE)
     // Safety net: if the PiP window is unresponsive and never reports closed,
     // destroy it outright and restore main audio. Without the destroy a hung

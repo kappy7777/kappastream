@@ -736,6 +736,15 @@
     pipController.setVideoElement(videoEl)
   })
 
+  // The floating window's quality menu asks THIS window to switch (see
+  // switchPipQuality below) — a static callback, wired once.
+  onMount(() => {
+    pipController.onQualityRequest = (q, position) => void switchPipQuality(q, position)
+    return () => {
+      pipController.onQualityRequest = null
+    }
+  })
+
   // PiP runs in a SEPARATE Tauri webview with its own <video>/hls.js, so taking
   // over the stream does not require the main player to keep fetching segments.
   // When PiP opens we disconnect the main player (freeing its network/CPU); when
@@ -1538,6 +1547,17 @@
     ])
   })
 
+  // The same quality-menu feed for the floating PiP window (the hls
+  // vocabulary — PiP never runs the native engine, so audio_only stays in,
+  // unlike the OSD feed above). Clips push an EMPTY list: like the OSD gear,
+  // the floating window's quality button hides when there is nothing to
+  // choose. The push doubles as the late-probe refresh (availableQualities
+  // starts null → full vocabulary, and sharpens when the probe answers).
+  $effect(() => {
+    const list = playback.kind === 'clip' ? [] : effectiveQualities(availableQualities)
+    pipController.pushQualityMenu(list, quality)
+  })
+
   // VOD scrubber extras on the OSD: chapter marks + muted segments (pure
   // data), and the storyboard geometry for the hover preview. vodCtl clears
   // all three for live/clip playback, which sends the empty variants.
@@ -2136,6 +2156,89 @@
     await loadStream(channelJoined, quality)
   }
 
+  // Quality switching for the floating PiP window (ks://pip-quality). The
+  // re-resolve happens HERE, never in the floating window: only this side
+  // knows the platform proxy routing, the per-channel quality preference,
+  // and the unavailable→best fallback ladder. The result goes back as a
+  // normal ks://pip-stream reload; the main player is NOT touched (it is
+  // stopped while PiP owns the stream) — but main's `quality` selection
+  // updates anyway, so the resume-on-close and the live per-channel
+  // preference follow the floating window's choice.
+  async function switchPipQuality(q: string, position?: number): Promise<void> {
+    if (!pipController.isOpen || q === quality) return
+    // Clip quality is fixed (best available from videoQualities) — the
+    // floating menu is never offered there; a stray request is a no-op too.
+    if (playback.kind === 'clip') return
+    quality = q
+    if (playback.kind === 'vod') {
+      await resolveVodForPip(playback.id, q, position)
+      return
+    }
+    const channel = channelJoined
+    if (!channel) return
+    settings.setQualityFor(channel, q)
+    await resolveLiveForPip(channel, q)
+  }
+
+  async function resolveLiveForPip(channel: string, q: string): Promise<void> {
+    if (!channel) return
+    const resolved = await resolveLiveStream(channel, q, settings.lowLatency)
+    // Closed (or re-opened against another stream) while resolving — a late
+    // setStream must not land on whatever the controller holds now.
+    if (!pipController.isOpen) return
+    if (!resolved.ok) {
+      // Same one-shot fallback as loadStream: an unavailable rung switches
+      // back to best (the probe list proved stale — re-probe), any other
+      // failure leaves the floating window on its current stream.
+      if (resolved.unavailable && q !== 'best') {
+        quality = 'best'
+        toast(t('toast_qualityFallback', { q, source: t('pc_sourceQuality') }))
+        void refreshAvailableQualities(channel)
+        await resolveLiveForPip(channel, 'best')
+      }
+      return
+    }
+    // Mirror loadStream's PiP routing: through the ksvod proxy on Windows so
+    // the floating WebView2 can fetch the manifest.
+    pipController.setStream({
+      url: isWindows ? toKsvodProxyUrl(resolved.url, isWindows) : resolved.url,
+      channel,
+      quality: q,
+      isLive: true,
+      lowLatency: settings.lowLatency,
+    })
+  }
+
+  async function resolveVodForPip(videoId: string, q: string, position?: number): Promise<void> {
+    type ResolveRaw = { ok?: boolean; url?: string | null; unavailable?: boolean }
+    let raw: ResolveRaw
+    try {
+      raw = (await invoke('resolve_vod', { videoId, quality: q })) as ResolveRaw
+    } catch {
+      return // the floating window keeps its current stream
+    }
+    // Superseded (another VOD/clip/live opened, or PiP closed) mid-resolve.
+    if (!pipController.isOpen || playback.kind !== 'vod' || playback.id !== videoId) return
+    if (!raw.ok || !raw.url) {
+      // Same one-shot fallback as loadVod, carrying the position so the
+      // retry still continues where the floating window is.
+      if (raw.unavailable && q !== 'best') {
+        quality = 'best'
+        toast(t('toast_qualityFallback', { q, source: t('pc_sourceQuality') }))
+        await resolveVodForPip(videoId, 'best', position)
+      }
+      return
+    }
+    pipController.setStream({
+      url: toKsvodProxyUrl(raw.url, isWindows),
+      channel: channelJoined ?? '',
+      quality: q,
+      isLive: false,
+      startAt: position && position > 0.5 ? position : undefined,
+      vodId: videoId,
+    })
+  }
+
   // ---- Chat connection (single ChatSession; the socket + reconnect +
   //      dispatch discipline lives in chat-session.svelte.ts, shared with
   //      multi-view) ----
@@ -2484,6 +2587,7 @@
             quality: q,
             isLive: false,
             startAt: resume,
+            vodId: videoId,
           })
         return true
       }
@@ -2510,6 +2614,7 @@
           quality: q,
           isLive: false,
           startAt: pipStart > 0.5 ? pipStart : undefined,
+          vodId: videoId,
         })
       }
       if (startAt !== undefined && startAt > 0.5) {
