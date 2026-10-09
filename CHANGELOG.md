@@ -7,6 +7,200 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-10-09
+
+### Added
+
+- **A scrub bar, a quality menu, and a two-way position handoff in the PiP
+  window.** VODs and clips in the floating window get a miniature of the
+  main player's scrubber — chapter ticks, muted-segment stripes, buffered
+  extent, storyboard hover previews with chapter labels — seekable by
+  click, arrow keys, and Home/End; live streams show no bar, matching the
+  main player. A gear next to the close button opens the quality menu,
+  listing the variants the channel or VOD actually offers, just like the
+  in-player gear: picking a rung re-resolves through the main window
+  (proxy routing, per-channel preference, and the unavailable→best
+  fallback included) and a VOD continues at the floating window's
+  position; clips show no menu, their quality is fixed. The handoff is
+  two-way now — the floating window continues a VOD at the watched
+  position, and on close the main player resumes from where it left off,
+  chat replay aligned — and the window inherits the low-latency setting
+  and continues the persisted mute.
+
+- **Desktop media controls for the native engine — with cover art.** The
+  mpv engine now owns a real MPRIS D-Bus service, so Linux desktop shells
+  and media keys control it directly, and both engines show the channel
+  avatar as cover art (the Windows and macOS bridges included). Media-key
+  and desktop-control pauses also stick on live streams now — stall
+  recovery no longer force-resumes them a second later.
+
+- **Every keyboard shortcut in Settings.** The Keyboard shortcuts section
+  lists the same rows the ? overlay shows, from one shared source.
+
+- **Chat-only channels in a merged chat.** The multi-view merge picker
+  accepts a bare channel name and joins its chat headlessly — no tile
+  needed — interleaving it with the merged view (up to six sources). A
+  chat-only channel that later gets a tile migrates to it instead of
+  holding a second connection, and a typo'd name is rejected with a
+  "channel not found" line in the picker.
+
+- **Notes in the update banner.** A release can now carry a short
+  plain-text note shown right in the update banner.
+
+### Changed
+
+- **The player no longer depends on chat.** Joining a channel starts the
+  stream immediately — an unreachable IRC endpoint no longer leaves an
+  empty player — and a chat reconnect drop never unmounts the video.
+
+- **Chat reconnects forever.** The IRC client retries with backoff capped
+  at 30 s instead of giving up after about three minutes, reconnects at
+  once when the network returns, watchdogs a silently dead socket, and
+  past a few minutes of failures the status says "connection lost —
+  retrying".
+
+- **Multi-view tiles recover on their own.** A failed tile retries on a
+  doubling backoff (a Retry button forces an immediate attempt), and a
+  tile opened on an offline channel reloads when the channel goes live
+  again.
+
+- **Deleting a custom theme takes a second click.** The first click arms
+  the delete button — filled with the destructive colour, clearing itself
+  after a few idle seconds — instead of destroying the theme outright.
+
+- **A proper desktop-entry category, AppStream metainfo so software
+  catalogs list the app, and the GPL license text with every artifact.**
+
+### Fixed
+
+- **The PiP window reopens at the size you left it.** A unit mismatch in
+  the save/restore path grew the window on every open/close cycle on
+  scaled displays (KDE at 200% doubled it each time); the rect is now
+  relayed in raw physical pixels on every settled resize and move, and a
+  grown stored rect heals to 60% of the monitor at open. A hung floating
+  window is destroyed by the close fallback instead of floating
+  unreachable forever.
+
+- **VOD quality menus list what the VOD offers.** The menus no longer show
+  the full generic vocabulary — a rung the VOD never transcoded was a
+  guaranteed failure — on either engine, and an unoffered pick falls back
+  to Source once instead of erroring. The native OSD gains the quality
+  gear during VODs and hides its live-only handoff button during VODs and
+  clips.
+
+- **VOD mode survives leaving, switching, and racing loads.** Leaving a
+  VOD (multi-view, close-to-tray, a channel switch) returns the app to
+  live cleanly with the checkpoint saved; a quality change or engine flip
+  continues at the watched position without the "Resumed from" bar; and a
+  stale resolve that lost the race to a newer load can no longer play
+  over it.
+
+- **Dead streams say so.** A fatal hls error after playback started (a
+  playlist that 404s once the broadcast ends, a network drop, exhausted
+  retries) no longer leaves a black player claiming "playing" — the live
+  player re-resolves, tiles surface an error, PiP shows its error state —
+  and slow proxied segments no longer exhaust the retry budget on laggy
+  links.
+
+- **VOD chat replay behaves.** A VOD without comments (or seeked past
+  them) shows "No chat messages" instead of Loading forever, seeks resync
+  chat at the real playhead instead of the pre-seek one, and a scrub no
+  longer fetches every page twice.
+
+- **Reading chat history stays put.** Incoming messages no longer slide
+  the text up while you're scrolled back (the buffer holds a 2000-entry
+  ceiling until you return to the bottom), busy merged chat no longer
+  cancels your wheel scrolls, quiet chats stay on the bottom line, and
+  the unseen-message pill keeps counting past the 500-entry cap. A direct
+  channel switch resets the follow state, mention highlights work with
+  punctuation before the @, malformed clip links are rejected safely,
+  and a link no browser can open says so instead of failing silently.
+
+- **Emotes survive provider hiccups — and render right.** A transient
+  7TV/BTTV/FFZ failure is no longer cached as "no emotes" for the rest of
+  the session (and global sets are fetched once per process), Twitch
+  emote positions after emoji no longer slice mid-glyph, third-party
+  codes match case-sensitively (EZ is not ez), and an emote shadowed by a
+  same-name Twitch emote renders once, not stacked.
+
+- **Readable colours on every theme.** Chatters without a picked colour
+  get a deterministic one from Twitch's own palette, every username is
+  contrast-adjusted to WCAG AA against the theme's panels, and accent/
+  live fills get readable ink across all built-in themes. The
+  custom-theme editor also keeps its slider positions (dragging L to 0
+  and back no longer eats hue and saturation), exports the draft under
+  the draft's name, and re-saving the active theme live-updates the
+  native OSD and chat colours.
+
+- **Favorites keep working when the sidebar is hidden.** Launching in the
+  hidden-sidebar mode no longer disables go-live notifications and status
+  polling, the heart and bell react to sidebar edits and imports, adding
+  several favorites in a row no longer stalls the batch poll, and a
+  failed status fetch keeps the last known state — the status bar never
+  blanks and tiles keep their live marker. The status bar also stays
+  fresh for non-favorite channels, survives a favorite flip, and the
+  uptime line ticks every second instead of freezing between polls.
+
+- **Favorites drag-to-reorder, rebuilt.** The HTML5 drag stopped working
+  once rows changed at runtime (no drop indicator, no accepted drop until
+  restart); the drag is pointer-driven now, drops land exactly where the
+  drop line points (a row's bottom half means "after"), reordering
+  follows the displayed order, and dragging is offered in Manual sort
+  only. The UI-scale slider likewise applies its drag once, on release,
+  instead of ping-ponging between stops.
+
+- **Keyboard and controls act on the right thing.** The control bar and
+  an open quality menu no longer vanish mid-use; the keyboard pause
+  routes through the tile's own session (stall recovery used to
+  force-resume it on hls tiles); arrows on the VOD scrubber no longer
+  double-seek; M/T/F/Space no longer fire behind the Settings modal; ?
+  toggles the shortcuts help from Settings and from behind the help
+  itself; the low-latency toggle only reloads live playback; the
+  unavailable→best fallback no longer overwrites the saved quality
+  preference; the sleep timer survives a quality switch; and unmuting at
+  volume 0 restores the last audible volume.
+
+- **A responsive mpv engine.** The UI thread no longer blocks on every
+  rendered frame (which throttled the whole interface to video fps),
+  engine commands run off the GTK main thread and overlays issue without
+  lock contention, the engine only boots when it's actually enabled, and
+  renders without a fold skip the offscreen copy entirely. Correctness:
+  no frozen first frame when the previous item was paused, the on-screen
+  bar's pointer wakes again after an idle reload at an unchanged size, a
+  seek while paused updates the position immediately, and custom themes
+  reach the OSD in the right colours.
+
+- **Clean overlays and a harder engine.** Page-UI snapshots composited
+  over the native video render correctly now — premultiplied alpha
+  (tooltips were darkened and barely readable), rounded corners instead
+  of black wedges, opaque strip styling over native tiles — and the
+  engine is harder to misuse: media URLs reach mpv as the validator's own
+  parsed serialization (a backslash-laced URL can no longer redirect the
+  connection), OSD script messages are addressed to their client instead
+  of broadcast, and overlay allocations are bounded against crafted
+  geometry.
+
+- **Better desktop citizenship.** The AppImage forwards proxy variables
+  and XDG dirs plus BROWSER to spawned children (browsers open again on
+  Flatpak-desktop systems like Bazzite and Silverblue); Wayland detection
+  trusts live display sockets, so TTY-launched compositors (sway, river)
+  get the native Wayland path with the NVIDIA workaround; the tray's
+  dlopen'd appindicator dependency is declared in the hand-written
+  packages; and the uninstaller actually removes every icon size.
+
+- **Update troubles speak plainly.** The updater's real failure strings
+  are classified (offline, a download that died mid-body, a package
+  install failure, a dismissed password prompt), a successful install
+  whose relaunch throws says "restart to finish" instead of spinning
+  forever, and the what's-new log leads with the running version even
+  when it has no curated notes. Modal dialogs trap and restore focus,
+  the search dropdown drops stale rows and cancels its pending query on
+  Escape, notification dismiss buttons appear on keyboard focus and the
+  promised unread stripe shows, tooltips refresh when their label changes
+  and clear when their host unmounts, the chat resizer hides in stacked
+  layout, and the translated catalogues fix drifted wording and a
+  $-pattern bug in placeholder substitution.
+
 ## [1.0.5] - 2026-09-23
 
 ### Linux .deb / .rpm users: update manually this once
@@ -905,7 +1099,11 @@ marks the milestone; it is not a breaking change.
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.6
+[1.0.5]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.5
+[1.0.4]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.4
+[1.0.3]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.3
 [1.0.2]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.2
 [1.0.1]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.1
 [1.0.0]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.0

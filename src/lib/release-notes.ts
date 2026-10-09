@@ -41,6 +41,39 @@ export interface VersionNotes {
 }
 
 export const RELEASE_NOTES: Record<string, VersionNotes> = {
+  '1.0.6': {
+    added: [
+      "🪞 The PiP window grows a scrubber for VODs and clips — chapters, muted segments, storyboard previews — plus the player's quality menu and a two-way position handoff.",
+      '🎛️ Real desktop media controls for the mpv engine (MPRIS), cover art on both engines, and media-key pauses that stick on live streams.',
+      "⌨️ Every keyboard shortcut listed in Settings, straight from the ? overlay's list.",
+      '💬 Chat-only channels join a merged chat from the picker — no tile needed.',
+      '📝 Releases can carry a short note shown in the update banner.',
+    ],
+    changed: [
+      '🔌 The player no longer waits on chat: streams start even when IRC is unreachable, and reconnect drops never unmount the video.',
+      '🔁 Chat reconnects forever (30 s backoff cap), wakes the moment the network returns, and says "connection lost — retrying" when it\'s struggling.',
+      '🔄 Multi-view tiles retry on their own after failures and reload when an offline channel goes live.',
+      '🗑️ Deleting a custom theme takes a second click.',
+      '📄 Release bundles ship a proper desktop category, AppStream metainfo, and the GPL license text.',
+    ],
+    fixed: [
+      '🪟 The PiP window reopens at the size you left it — no more growing every open — and a hung floating window gets destroyed.',
+      '📼 VOD quality menus list the rungs the VOD actually offers, on both engines, and the OSD gear works during VODs.',
+      '🧭 VOD mode survives leaving, quality switches, engine flips, and loads that race.',
+      '💀 Dead streams say so: fatal mid-playback errors surface instead of a black "playing" player, and slow links no longer kill proxied segments.',
+      '🗨️ VOD chat replay shows "No chat messages" when there are none, and resyncs seeks at the real playhead.',
+      '📜 Reading chat history stays put: no sliding text, no cancelled scrolls, correct pill counts, working mentions.',
+      '😀 Emotes survive provider hiccups and render right after emoji, case-sensitively, without stacking.',
+      '🎨 Readable colours on every theme — usernames and accent fills — and a theme editor that keeps slider positions and exports the draft.',
+      '⭐ Favorites keep working with the sidebar hidden; a failed poll keeps the last known status, and the uptime line ticks.',
+      '🖱️ Favorites drag-to-reorder rebuilt on pointer events — drops land where the line points; the UI-scale drag commits on release.',
+      '🎹 Shortcuts hit the right target: the bar stays up while in use, tile pauses stick, no double-seeks, nothing fires behind Settings.',
+      '⚡ A responsive mpv engine: the UI no longer throttles to video fps, it boots only when enabled, plus first-frame, pointer and OSD colour fixes.',
+      '🖼️ Clean overlays over the native video (premultiplied alpha, rounded corners) and a harder engine (parsed URLs, addressed messages, bounded overlays).',
+      '🐧 Better desktop citizenship: AppImage env forwarding, TTY-compositor Wayland detection, the tray dependency, full icon uninstall.',
+      '🩹 Update failures speak plainly, dialogs trap focus, and a batch of search/tooltip/notification/translation fixes lands.',
+    ],
+  },
   '1.0.5': {
     added: [
       '🎞️ Experimental native video engine (mpv), Linux only — opt-in under Settings → Player. Video plays through embedded mpv, with its own on-screen bar (avatar and hover thumbnails included), in single view and multi-view alike.',
