@@ -810,8 +810,15 @@ jobs:
     needs: [check, build-native-packages, build-appimage, build-windows, build-macos]
     # Publish on a real tag push, or an explicit manual opt-in. A manual
     # dispatch without `publish` builds everything and keeps the workflow
-    # artifacts without creating any release.
-    if: ${{ github.event_name == 'push' || inputs.publish == true }}
+    # artifacts without creating a release.
+    #
+    # The !cancelled()/!failure() armor is required, not decoration: with
+    # verify-dispatch-tag skipped on tag pushes, the default success()
+    # gate skipped this job even though every listed need succeeded (the
+    # skip seeps through the needs graph), so a healthy pipeline ended
+    # green with nothing published. The armor runs this job when the
+    # needs jobs succeeded or were skipped; a failed need still blocks.
+    if: ${{ !cancelled() && !failure() && (github.event_name == 'push' || inputs.publish == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
