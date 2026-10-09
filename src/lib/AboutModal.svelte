@@ -46,8 +46,8 @@
     left: 50%;
     transform: translate(-50%, -50%);
     z-index: 1001;
-    width: calc(min(480px, calc(100vw - 32px)) / var(--ui-zoom, 1));
-    max-height: calc((100vh - 64px) / var(--ui-zoom, 1));
+    width: min(480px, calc(100vw / var(--ui-zoom, 1) - 32px));
+    max-height: calc(100vh / var(--ui-zoom, 1) - 64px);
     overflow: auto;
     background: var(--bg-panel);
     border: 1px solid var(--border);

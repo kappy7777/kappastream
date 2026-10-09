@@ -14,7 +14,7 @@
   import ShortcutsHelp from './lib/ShortcutsHelp.svelte'
   import { singleChatEntries } from './lib/merged-chat'
   import { osdHexColor } from './lib/custom-themes.svelte'
-  import { UI_ZOOM_VAR, zoomDivisor } from './lib/ui-zoom'
+  import { UI_ZOOM_VAR, shouldCompensateViewportUnits, zoomDivisor } from './lib/ui-zoom'
   import Sidebar from './lib/Sidebar.svelte'
   import PlayerControls from './lib/PlayerControls.svelte'
   import Settings from './lib/Settings.svelte'
@@ -101,34 +101,43 @@
   // mount; every use site (attachStream, PiP, the proxy prefix in
   // toKsvodProxyUrl) is user-triggered and runs after that resolves.
   let isWindows = $state(false)
-  // isMacOS gates ONLY the viewport-unit zoom compensation below (the macOS
-  // WKWebView scaling bug). It is not used to gate anything else. isWindows
-  // remains gated to live-playback routing / the ksvod proxy prefix only.
-  let isMacOS = $state(false)
 
   onMount(() => {
     if (!isTauri()) return
     void invoke<string>('target_os')
       .then((os) => {
         isWindows = os === 'windows'
-        isMacOS = os === 'macos'
       })
       .catch((e) => {
         console.error('[platform] target_os failed; assuming non-Windows (live playback may regress on Windows)', e)
       })
   })
 
-  // macOS-only viewport-unit zoom compensation. WKWebView scales the
-  // documentElement.zoom subtree's paint WITHOUT rescaling vh/vw/dvh, so a
-  // `height: 100dvh` element renders at `zoom ×` the real window height and
-  // overflows. The CSS divides viewport-unit sizes by `var(--ui-zoom, 1)`; we
-  // write that variable ONLY on macOS, so Linux/Windows (which rescale viewport
-  // units natively) keep the `1` fallback and render identically to before.
-  // Reacts to both the platform signal and the live UI-scale value.
+  // Viewport-unit zoom compensation, decided per ENGINE at runtime. Whether
+  // documentElement.style.zoom rescales viewport units differs by engine and
+  // by version (see lib/ui-zoom.ts): WKWebView never rescales them, WebKitGTK
+  // stops rescaling them from 2.54 on, WebView2 still does — and a wrong
+  // platform guess either overflows the viewport or shrinks the UI to
+  // 1/zoom × the window. So instead of branching on the platform we measure:
+  // .vh-probe is a 100vh-tall fixed element, .vh-ref anchors to both viewport
+  // edges; their height ratio is `zoom` exactly when the engine does NOT
+  // rescale viewport units, ~1 when it does. The CSS divides viewport-unit
+  // sizes by `var(--ui-zoom, 1)`; this effect writes the zoom divisor there
+  // when the measurement says compensate, an explicit 1 otherwise (the same
+  // value the `1` fallback already gives an unset variable). Reacts to the
+  // live UI-scale value — settings applies the zoom synchronously before
+  // effects re-run, so the probes measure the new zoom, not the old one.
+  let vhProbeEl: HTMLElement | undefined = $state()
+  let vhRefEl: HTMLElement | undefined = $state()
+
   $effect(() => {
-    if (!isMacOS) return
-    const divisor = zoomDivisor(settings.uiScale)
-    document.documentElement.style.setProperty(UI_ZOOM_VAR, String(divisor))
+    void settings.uiScale
+    if (!vhProbeEl || !vhRefEl) return
+    const scale = settings.uiScale
+    const ratio = vhProbeEl.getBoundingClientRect().height / vhRefEl.getBoundingClientRect().height
+    const compensate = shouldCompensateViewportUnits(ratio, scale)
+    document.documentElement.style.setProperty(UI_ZOOM_VAR, compensate ? String(zoomDivisor(scale)) : '1')
+    console.info(`[ui-zoom] vh ratio ${ratio.toFixed(3)} at scale ${scale}: compensate=${compensate}`)
   })
 
   // Sleep timer expiry = STOP playback completely (not just pause): tear down
@@ -395,10 +404,11 @@
   // of assuming a formula we measure it with a hidden probe (see .zoom-probe
   // below). All tooltip math runs in VISUAL space (target/tip rects are
   // visual) and only divides by k at the very end to produce the CSS left/top
-  // to set. (WKWebView has a SECOND, separate zoom divergence: it does not
-  // rescale viewport units with documentElement zoom, which the --ui-zoom
-  // compensation below + the calc(... / var(--ui-zoom, 1)) sizing in the
-  // stylesheets address. The two divergences are independent.)
+  // to set. (Some engines have a SECOND, separate zoom divergence: they do
+  // not rescale viewport units with documentElement zoom — WKWebView always,
+  // WebKitGTK from 2.54 on — which the --ui-zoom compensation below + the
+  // calc(... / var(--ui-zoom, 1)) sizing in the stylesheets address. The two
+  // divergences are independent.)
   let zoomK = $state(1)
 
   $effect(() => {
@@ -3997,6 +4007,11 @@
 
   <!-- Hidden probe used to measure the zoom factor (see zoomK). Never visible. -->
   <div class="zoom-probe" bind:this={probeEl} aria-hidden="true"></div>
+  <!-- Hidden probes that decide the viewport-unit zoom compensation (see the
+       ui-zoom effect): 100vh vs a both-edges-anchored reference, measured
+       under the live zoom. Never visible. -->
+  <div class="vh-probe" bind:this={vhProbeEl} aria-hidden="true"></div>
+  <div class="vh-ref" bind:this={vhRefEl} aria-hidden="true"></div>
 
   {#if aboutOpen}
     <AboutModal onclose={closeAbout} />
@@ -4076,12 +4091,12 @@
     display: flex;
     flex-direction: column;
     width: 100%;
-    /* On macOS (WKWebView) documentElement.zoom scales this subtree's paint
-       without rescaling viewport units, so a bare 100dvh renders at
-       `zoom ×` the window height and overflows (band above the video, chat
-       past the bottom). Dividing by --ui-zoom cancels the zoom there;
-       --ui-zoom is written ONLY on macOS, so the `1` fallback makes this
-       identical to 100dvh on Linux/Windows. See App.svelte isMacOS effect. */
+    /* Engines that do not rescale viewport units with documentElement zoom
+       (WKWebView always; WebKitGTK from 2.54 on) render a bare 100dvh at
+       `zoom ×` the window height and overflow (band above the video, chat
+       past the bottom). Dividing by --ui-zoom cancels the zoom there; the
+       variable carries the measured zoom divisor exactly on those engines
+       and 1 everywhere else (see the ui-zoom effect + lib/ui-zoom.ts). */
     height: calc(100vh / var(--ui-zoom, 1));
     height: calc(100dvh / var(--ui-zoom, 1));
     background: var(--bg-app);
@@ -4966,6 +4981,29 @@
     height: 0;
     pointer-events: none;
     visibility: hidden;
+  }
+
+  /* Hidden probes for the viewport-unit compensation decision (see the
+     ui-zoom effect): .vh-probe is sized by 100vh while .vh-ref anchors to
+     both viewport edges, so on an engine that does not rescale viewport
+     units with documentElement zoom the probe's height measures `zoom ×`
+     the ref's. Never painted. */
+  .vh-probe,
+  .vh-ref {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .vh-probe {
+    height: 100vh;
+  }
+
+  .vh-ref {
+    bottom: 0;
   }
 
   .player-placeholder {

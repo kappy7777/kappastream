@@ -724,7 +724,7 @@
   .ct-panel {
     display: flex;
     flex-direction: column;
-    width: min(560px, calc(100vw - 24px));
+    width: min(560px, calc(100vw / var(--ui-zoom, 1) - 24px));
     max-height: calc(88vh / var(--ui-zoom, 1));
     background: var(--bg-panel);
     border: 1px solid var(--border);
