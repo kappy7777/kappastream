@@ -4,7 +4,8 @@
 // status distinguishes "connecting" from "lost — retrying" so the pane can
 // say which, the window 'online' event short-circuits the backoff, and a
 // connected socket that went silent without a close frame (system suspend,
-// NAT drop) is forced closed and reconnected.
+// NAT drop) is probed for liveness and reconnected as soon as the probe
+// deadline — not the old 6-minute watchdog — says it is dead.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 vi.mock('./emotes', async (importOriginal) => {
@@ -32,13 +33,16 @@ class FakeWebSocket {
   onmessage: ((ev: { data: string }) => void) | null = null
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
+  sent: string[] = []
   constructor() {
     FakeWebSocket.instances.push(this)
   }
-  send(): void {}
+  send(data: string): void {
+    this.sent.push(data)
+  }
   close(): void {
     // The real transport fires onclose from close() even on a dead peer;
-    // the silence watchdog depends on exactly that.
+    // the hard-deadline watchdog path depends on exactly that.
     this.onclose?.()
   }
 }
@@ -104,22 +108,70 @@ describe('ChatSession reconnect', () => {
     s.dispose()
   })
 
-  it('closes and reconnects a socket that went silent mid-connection', async () => {
+  it('probes and reconnects a socket that went silent mid-connection', async () => {
     const s = new ChatSession('chan1')
     s.start()
     const open = lastWs()
     open.onopen?.()
     expect(s.status).toBe('connected')
 
-    // No line for 6+ minutes (the server PINGs ~every 5 min): the watchdog
-    // tick after the threshold closes the dead socket; onclose drives the
-    // usual reconnect path.
-    await vi.advanceTimersByTimeAsync(6 * 60_000 + 31_000)
+    // No line for 60 s (the server PINGs ~every 5 min, so a healthy socket
+    // never gets this quiet): the next watchdog tick sends the liveness
+    // PING, and a socket that draws no line within the 10 s window is
+    // detached and reconnected immediately — no waiting for the 6-minute
+    // hard deadline (or an onclose that never comes).
+    await vi.advanceTimersByTimeAsync(61_000)
+    expect(open.sent).toContain('PING :tmi.twitch.tv')
+    expect(FakeWebSocket.instances.length).toBe(1) // the probe is patient
+
+    await vi.advanceTimersByTimeAsync(10_001)
     expect(s.status).toBe('connecting')
     expect(FakeWebSocket.instances.length).toBe(2)
+    expect(open.onclose).toBeNull() // detached, not closed-and-waited
 
-    await vi.advanceTimersByTimeAsync(1_001) // the 1 s first backoff
     lastWs().onopen?.()
+    expect(s.status).toBe('connected')
+    s.dispose()
+  })
+
+  it('online with a silently-dead connected socket reconnects within the probe window', async () => {
+    const s = new ChatSession('chan1')
+    s.start()
+    const open = lastWs()
+    open.onopen?.()
+    expect(s.status).toBe('connected')
+
+    // Suspend/resume killed the socket without a close frame; the network
+    // coming back fires 'online'. reconnectNow must not trust the still-set
+    // socket: it probes, and reconnects when no line lands.
+    window.dispatchEvent(new Event('online'))
+    expect(open.sent).toContain('PING :tmi.twitch.tv')
+    await vi.advanceTimersByTimeAsync(9_999)
+    expect(FakeWebSocket.instances.length).toBe(1) // inside the window
+    await vi.advanceTimersByTimeAsync(2)
+    expect(FakeWebSocket.instances.length).toBe(2)
+    expect(s.status).toBe('connecting')
+
+    lastWs().onopen?.()
+    expect(s.status).toBe('connected')
+    s.dispose()
+  })
+
+  it('a healthy socket answering the probe PONG stays connected', async () => {
+    const s = new ChatSession('chan1')
+    s.start()
+    const open = lastWs()
+    open.onopen?.()
+    expect(s.status).toBe('connected')
+
+    window.dispatchEvent(new Event('online'))
+    expect(open.sent).toContain('PING :tmi.twitch.tv')
+    open.onmessage?.({ data: ':tmi.twitch.tv PONG tmi.twitch.tv :tmi.twitch.tv' })
+
+    // The PONG disarmed the probe: no reconnect, and the watchdog's later
+    // ticks see fresh silence (the PONG counts as a line).
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(FakeWebSocket.instances.length).toBe(1)
     expect(s.status).toBe('connected')
     s.dispose()
   })

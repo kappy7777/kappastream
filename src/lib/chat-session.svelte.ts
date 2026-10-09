@@ -92,10 +92,15 @@ const RECONNECT_MAX_MS = 30_000
 // 'connecting' to 'disconnected' so the UI can say the connection is LOST —
 // while the retries themselves continue exactly as before.
 const RECONNECT_DISCONNECTED_ATTEMPTS = 10
-// Twitch PINGs the client roughly every 5 minutes. A socket that delivered
-// no line for 6 minutes while nominally connected died without a close
-// frame (system suspend, NAT drop) — force it closed and reconnect, or the
-// pane shows a live-looking chat that is frozen forever.
+// Twitch PINGs the client roughly every 5 minutes. A socket that goes quiet
+// may simply have died without a close frame (system suspend, NAT drop):
+// past ~60 s of silence a liveness probe PINGs the server, and a socket
+// that cannot draw one line within the probe window is detached and
+// reconnected at once. The 6-minute silence deadline below remains as the
+// last-resort backstop — without the probe, a silently-dead socket left the
+// pane showing a live-looking chat that was frozen forever.
+const PROBE_SILENCE_MS = 60_000
+const PROBE_TIMEOUT_MS = 10_000
 const IRC_SILENCE_MS = 6 * 60_000
 const WATCHDOG_TICK_MS = 30_000
 
@@ -123,6 +128,7 @@ export class ChatSession {
   private generation = 0
   private reconnectAttempts = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private probeTimer: ReturnType<typeof setTimeout> | null = null
   private emoteAbort: AbortController | null = null
   private lastLineAt = 0
   private watchdogTimer: ReturnType<typeof setInterval> | null = null
@@ -184,6 +190,7 @@ export class ChatSession {
    */
   closeSocket(): void {
     this.reconnectAttempts = 0
+    this.clearProbe()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -220,9 +227,17 @@ export class ChatSession {
     this.closeSocket()
   }
 
-  /** Reconnect immediately (network came back mid-backoff). */
+  /** Reconnect immediately (network came back mid-backoff). A socket that
+   *  is still set is kept only if it proves it is alive — suspend/resume
+   *  can kill a socket without a close frame, and without the probe this
+   *  early return made the 'online' event a no-op until the watchdog's
+   *  6-minute deadline. */
   private reconnectNow(): void {
-    if (this.disposed || this.socket || this.status === 'idle') return
+    if (this.disposed || this.status === 'idle') return
+    if (this.socket) {
+      if (this.status === 'connected') this.startProbe()
+      return
+    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -232,17 +247,70 @@ export class ChatSession {
     this.openSocket(this.generation)
   }
 
-  /** Close a socket that went silent without a close frame. */
+  /** Ask a connected socket to prove it is alive: PING the server and
+   *  expect any line (the PONG counts) within the probe window. One probe
+   *  in flight at a time; everything is generation- and socket-guarded and
+   *  cleaned up in dispose() via closeSocket(). */
+  private startProbe(): void {
+    if (this.disposed || this.probeTimer || !this.socket) return
+    const ws = this.socket
+    const gen = this.generation
+    try {
+      ws.send('PING :tmi.twitch.tv')
+    } catch {
+      this.detachAndReconnect(ws)
+      return
+    }
+    this.probeTimer = setTimeout(() => {
+      this.probeTimer = null
+      if (this.disposed || gen !== this.generation || this.socket !== ws) return
+      this.detachAndReconnect(ws)
+    }, PROBE_TIMEOUT_MS)
+  }
+
+  private clearProbe(): void {
+    if (this.probeTimer) {
+      clearTimeout(this.probeTimer)
+      this.probeTimer = null
+    }
+  }
+
+  /** Null a socket that died without a close frame and reconnect at once.
+   *  close() is deliberately not called — on a dead peer it can sit
+   *  unanswered, and the reconnect must not wait for an onclose that never
+   *  comes. Nulling the handlers first means the dead socket cannot drive
+   *  anything on its way out. */
+  private detachAndReconnect(ws: WebSocket): void {
+    if (this.socket === ws) this.socket = null
+    ws.onopen = null
+    ws.onmessage = null
+    ws.onerror = null
+    ws.onclose = null
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.reconnectAttempts = 0
+    this.status = 'connecting'
+    this.openSocket(this.generation)
+  }
+
+  /** Probe — and past the hard deadline, close — a socket that went silent
+   *  without a close frame. */
   private checkSilence(): void {
     if (this.status !== 'connected' || !this.socket) return
-    if (Date.now() - this.lastLineAt < IRC_SILENCE_MS) return
-    const ws = this.socket
-    try {
-      ws.close()
-    } catch {
-      this.socket = null
-      this.scheduleReconnect(this.generation)
+    const silentFor = Date.now() - this.lastLineAt
+    if (silentFor >= IRC_SILENCE_MS) {
+      const ws = this.socket
+      try {
+        ws.close()
+      } catch {
+        this.socket = null
+        this.scheduleReconnect(this.generation)
+      }
+      return
     }
+    if (silentFor >= PROBE_SILENCE_MS) this.startProbe()
   }
 
   private scheduleReconnect(gen: number): void {
@@ -263,6 +331,7 @@ export class ChatSession {
 
   private openSocket(gen: number): void {
     if (gen !== this.generation || this.disposed) return
+    this.clearProbe() // a probe armed on the socket being replaced is moot
     let ws: WebSocket
     try {
       ws = new WebSocket(IRC_URL)
@@ -292,6 +361,7 @@ export class ChatSession {
     ws.onmessage = (ev) => {
       if (gen === this.generation && this.socket === ws && !this.disposed) {
         this.lastLineAt = Date.now()
+        this.clearProbe() // any line — the PONG included — proves liveness
         this.handleRaw(ev.data as string, ws)
       }
     }
@@ -350,6 +420,11 @@ export class ChatSession {
         }
         continue
       }
+      // The reply to our liveness probe (`:tmi.twitch.tv PONG …`): a no-op
+      // line — onmessage already refreshed the silence clocks and disarmed
+      // the probe; there is nothing to store. The optional-prefix match
+      // cannot hit a PRIVMSG body: those lines arrive tags-first.
+      if (/^(:\S+ )?PONG\b/.test(line)) continue
       const ev: IrcEvent | null = parseIrcEvent(line)
       if (!ev) continue
       if (ev.channel !== this.channel) continue
