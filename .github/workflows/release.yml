@@ -362,18 +362,21 @@ jobs:
       # tamper with the AppImage the workflow then signs and ships.
       #
       # tauri-bundler's prepare_tools (crates/tauri-bundler/src/bundle/
-      # linux/appimage/linuxdeploy.rs, v2.9.4 as pulled in by
-      # @tauri-apps/cli 2.11.4) downloads a tool ONLY if it is missing from
-      # ${XDG_CACHE_HOME:-$HOME/.cache}/tauri/, under exactly the file
+      # linux/appimage/linuxdeploy.rs — v2.9.4 as pulled in by
+      # @tauri-apps/cli 2.11.4; re-checked at the 2.12.0 bump, which moved
+      # linuxdeploy to the immutable tag `linuxdeploy-07333c6` and renamed
+      # its cache file accordingly) downloads a tool ONLY if it is missing
+      # from ${XDG_CACHE_HOME:-$HOME/.cache}/tauri/, under exactly the file
       # names seeded below — so a seeded + hash-checked file is never
       # fetched. A @tauri-apps/cli bump means RE-CHECKING prepare_tools: a
       # new tool or a renamed cache file would be downloaded unpinned (the
       # cache check at the end of the Build AppImage step then fails the
       # job on the unexpected file).
       #
-      # Sources, all downloaded and hash-verified on 2026-09-27:
+      # Sources, all downloaded and hash-verified on 2026-09-27 (linuxdeploy
+      # re-pinned 2026-10-09 at the cli 2.12.0 bump):
       #   AppRun-x86_64                tauri-apps/binary-releases, release tag `apprun-old` (mutable tag: the hash is the pin)
-      #   linuxdeploy-x86_64.AppImage  tauri-apps/binary-releases, release tag `linuxdeploy` (mutable tag: the hash is the pin)
+      #   linuxdeploy-07333c6-x86_64.AppImage  tauri-apps/binary-releases, release tag `linuxdeploy-07333c6` (immutable)
       #   linuxdeploy-plugin-gtk.sh    tauri-apps/linuxdeploy-plugin-gtk @ commit b5eb8d05b4c0ed40107fe2158c5d8527f94568ef
       #   linuxdeploy-plugin-gstreamer.sh  tauri-apps/linuxdeploy-plugin-gstreamer @ commit 2a2e67491c32995a3f279ad0ecbe77abd512b42a
       #   linuxdeploy-plugin-appimage.AppImage  linuxdeploy/linuxdeploy-plugin-appimage, dated release tag 1-alpha-20250213-1 (NOT `continuous`)
@@ -389,8 +392,8 @@ jobs:
         env:
           APPRUN_URL: https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64
           APPRUN_SHA256: f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f
-          LINUXDEPLOY_URL: https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage
-          LINUXDEPLOY_SHA256: e762bea85c8eb0d4b3508d46e5c1f037f717d0f9303ae3b4aafc8b04991fa1ef
+          LINUXDEPLOY_URL: https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy-07333c6/linuxdeploy-x86_64.AppImage
+          LINUXDEPLOY_SHA256: 36a2d7e274d12e1050d0e9ecfe11d339ed54720b2bec464c286d53f8b07f5c62
           GTK_HOOK_URL: https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/b5eb8d05b4c0ed40107fe2158c5d8527f94568ef/linuxdeploy-plugin-gtk.sh
           GTK_HOOK_SHA256: cb379f9b0733e9ad9f8bd78f8c2fa038aef2478523bb7d4c8e64ff6a1ea3501a
           GSTREAMER_HOOK_URL: https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gstreamer/2a2e67491c32995a3f279ad0ecbe77abd512b42a/linuxdeploy-plugin-gstreamer.sh
@@ -410,7 +413,7 @@ jobs:
             chmod +x "$cache/$name"
           }
           seed AppRun-x86_64 "$APPRUN_URL" "$APPRUN_SHA256"
-          seed linuxdeploy-x86_64.AppImage "$LINUXDEPLOY_URL" "$LINUXDEPLOY_SHA256"
+          seed linuxdeploy-07333c6-x86_64.AppImage "$LINUXDEPLOY_URL" "$LINUXDEPLOY_SHA256"
           seed linuxdeploy-plugin-gtk.sh "$GTK_HOOK_URL" "$GTK_HOOK_SHA256"
           seed linuxdeploy-plugin-gstreamer.sh "$GSTREAMER_HOOK_URL" "$GSTREAMER_HOOK_SHA256"
           seed linuxdeploy-plugin-appimage.AppImage "$APPIMAGE_PLUGIN_URL" "$APPIMAGE_PLUGIN_SHA256"
