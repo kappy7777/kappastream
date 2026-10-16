@@ -11,6 +11,7 @@
   import ChatPane from './lib/ChatPane.svelte'
   import ChatModesPill from './lib/ChatModesPill.svelte'
   import AboutModal from './lib/AboutModal.svelte'
+  import ChannelInfoModal from './lib/ChannelInfoModal.svelte'
   import ShortcutsHelp from './lib/ShortcutsHelp.svelte'
   import { singleChatEntries } from './lib/merged-chat'
   import { osdHexColor } from './lib/custom-themes.svelte'
@@ -374,6 +375,10 @@
   const compactViewport = $derived(viewportWidth < SIDEBAR_COMPACT_WIDTH)
   const effectiveSidebarMode = $derived(sidebarMode === 'full' && compactViewport ? 'icons' : sidebarMode)
   let aboutOpen = $state(false)
+  // The channel-info (About-style) modal opened from the status-bar Info
+  // button. The modal itself fetches its data on mount, so the only GQL
+  // channel-info request is the one the button press triggers.
+  let channelInfoOpen = $state(false)
   // Whether a Settings-owned overlay (the panel itself or the custom-theme
   // editor) is open — Settings reports it so player shortcuts stay
   // suppressed behind it, like about/browse/help.
@@ -451,6 +456,10 @@
     aboutOpen = true
   }
 
+  function openChannelInfo(): void {
+    channelInfoOpen = true
+  }
+
   // ---- Custom title bar (the main window is decorations:false) ----
   // The top header doubles as the window's title bar: draggable via
   // data-tauri-drag-region, hosts the window controls (minimize/maximize/
@@ -517,6 +526,16 @@
   function closeAbout(): void {
     aboutOpen = false
   }
+  function closeChannelInfo(): void {
+    channelInfoOpen = false
+  }
+
+  // If the joined channel goes away while the info modal is open (stream
+  // error / takeover), reset the flag too — otherwise the next join would
+  // re-open the modal (and fire its fetch) without a button press.
+  $effect(() => {
+    if (!channelJoined) channelInfoOpen = false
+  })
   let shortcutsHelpOpen = $state(false)
 
   // Player keyboard shortcuts (space/k play-pause, m mute, f fullscreen, t
@@ -713,6 +732,7 @@
   function onGlobalKeydown(e: KeyboardEvent): void {
     const action = resolveShortcut(e, {
       aboutOpen,
+      channelInfoOpen,
       browseOpen,
       helpOpen: shortcutsHelpOpen,
       // The welcome/what's-new overlay must suppress player shortcuts and win
@@ -727,6 +747,10 @@
       case 'close-about':
         e.preventDefault()
         closeAbout()
+        return
+      case 'close-channel-info':
+        e.preventDefault()
+        closeChannelInfo()
         return
       case 'close-help':
         e.preventDefault()
@@ -3904,6 +3928,14 @@
                           </svg>
                           <span class="notif-toggle-label">{t('si_videos')}</span>
                         </button>
+                        <button type="button" class="notif-toggle" onclick={openChannelInfo}>
+                          <svg class="notif-toggle-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                            <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5" />
+                            <circle cx="8" cy="4.9" r="0.95" fill="currentColor" />
+                            <rect x="7.1" y="6.9" width="1.8" height="4.4" rx="0.6" fill="currentColor" />
+                          </svg>
+                          <span class="notif-toggle-label">{t('si_info')}</span>
+                        </button>
                       {/if}
                     </div>
                   {/if}
@@ -4018,6 +4050,10 @@
 
   {#if aboutOpen}
     <AboutModal onclose={closeAbout} />
+  {/if}
+
+  {#if channelInfoOpen && channelJoined}
+    <ChannelInfoModal login={channelJoined} onclose={closeChannelInfo} />
   {/if}
 
   {#if shortcutsHelpOpen}

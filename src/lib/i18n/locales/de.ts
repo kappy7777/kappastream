@@ -173,6 +173,17 @@ export const de: Record<TKey, string> = {
   si_notifyOn: 'Benachr. an',
   si_notifyOff: 'Benachr. aus',
   si_videos: 'Videos',
+  si_info: 'Info',
+
+  ci_error: 'Kanalinfo konnte nicht geladen werden.',
+  ci_retry: 'Erneut versuchen',
+  ci_notFound: 'Kanal nicht gefunden.',
+  ci_noBio: 'Keine Beschreibung',
+  ci_created: 'Erstellt',
+  ci_nextStream: 'Nächster Stream',
+  ci_lastLive: 'Zuletzt live',
+  ci_vacation: 'Urlaub bis {date}',
+  ci_cancelled: 'abgesagt',
 
   chat_resizeChat: 'Chat-Größe ändern',
   chat_chatModes: 'Chat-Modi',

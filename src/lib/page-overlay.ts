@@ -7,12 +7,12 @@
 // WebKit's own full-page composite per snapshot dominates and can't be
 // avoided through that API. So overlapping UI is handled in two grades:
 //
-//  - Full-window modals (About/shortcuts, Browse, welcome/what's-new,
-//    Settings, theme editor — the backdrop families): they cover the whole
-//    player anyway, so the surfaces HIDE entirely (mpv_set_surface_visible
-//    broadcasts). The live webview shows through at full frame rate; mpv
-//    keeps playing audio; the video returns when the modal stops
-//    overlapping.
+//  - Full-window modals (About/shortcuts, channel info, Browse,
+//    welcome/what's-new, Settings, theme editor — the backdrop families):
+//    they cover the whole player anyway, so the surfaces HIDE entirely
+//    (mpv_set_surface_visible broadcasts). The live webview shows through
+//    at full frame rate; mpv keeps playing audio; the video returns when
+//    the modal stops overlapping.
 //
 //  - Small STRIPS (update banner, tooltips, toasts, the notification
 //    menu, the search dropdown): must not duck a playing video for a
@@ -73,7 +73,7 @@ export interface OverlaySurface {
 
 /** Full-window modals: hide every surface entirely while one overlaps. */
 export const FULL_OVERLAY_SELECTOR =
-  '.about-modal, .about-backdrop, .browse-modal, .browse-backdrop, .welcome-modal, .welcome-backdrop, .ct-panel, .ct-backdrop, .settings-modal, .settings-backdrop'
+  '.about-modal, .about-backdrop, .ci-modal, .ci-backdrop, .browse-modal, .browse-backdrop, .welcome-modal, .welcome-backdrop, .ct-panel, .ct-backdrop, .settings-modal, .settings-backdrop'
 
 /** Snapshotted strips: small/static/transient UI — a one-shot bitmap with
  *  interaction + drop-retry refreshes, never a duck. */

@@ -22,6 +22,7 @@ function makeKey(key: string, target: HTMLElement | null = null, mods: Partial<K
 
 const ctx = (over: Partial<ShortcutCtx> = {}): ShortcutCtx => ({
   aboutOpen: false,
+  channelInfoOpen: false,
   browseOpen: false,
   helpOpen: false,
   welcomeOpen: false,
@@ -153,10 +154,20 @@ describe("'?' works from behind the help overlay and the Settings modal", () => 
     expect(resolveShortcut(makeKey('?', null, { metaKey: true }), ctx({ settingsOpen: true }))).toBeNull()
   })
 
-  it('? stays suppressed behind the other overlays (about, browse, welcome)', () => {
+  it('? stays suppressed behind the other overlays (about, channel-info, browse, welcome)', () => {
     expect(resolveShortcut(makeKey('?', null), ctx({ aboutOpen: true }))).toBeNull()
+    expect(resolveShortcut(makeKey('?', null), ctx({ channelInfoOpen: true }))).toBeNull()
     expect(resolveShortcut(makeKey('?', null), ctx({ browseOpen: true }))).toBeNull()
     expect(resolveShortcut(makeKey('?', null), ctx({ welcomeOpen: true }))).toBeNull()
+  })
+
+  it('every other shortcut stays suppressed while the channel-info modal is open', () => {
+    for (const key of [' ', 'k', 'm', 'f', 't', 'ArrowLeft', 'ArrowUp']) {
+      expect(
+        resolveShortcut(makeKey(key, null), ctx({ channelInfoOpen: true })),
+        `channel-info open, ${key}`,
+      ).toBeNull()
+    }
   })
 
   it('every other shortcut stays suppressed while help/Settings is open', () => {
@@ -204,6 +215,12 @@ describe('sliders own their arrow keys', () => {
 describe('Escape + modifiers', () => {
   it('Escape closes the about modal when it is open', () => {
     expect(resolveShortcut(makeKey('Escape', null), ctx({ aboutOpen: true }))).toEqual({ type: 'close-about' })
+  })
+
+  it('Escape closes the channel-info modal when it is open', () => {
+    expect(resolveShortcut(makeKey('Escape', null), ctx({ channelInfoOpen: true }))).toEqual({
+      type: 'close-channel-info',
+    })
   })
 
   it('Escape closes the welcome overlay when it is open (highest priority)', () => {

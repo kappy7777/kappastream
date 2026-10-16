@@ -1003,6 +1003,185 @@ export async function fetchClipMedia(slug: string, signal?: AbortSignal): Promis
 
 /*
  * ============================================================================
+ * Channel info — the About-style modal behind the status-bar Info button.
+ *
+ * ONE lightweight single-channel request, fired ONLY when the user presses
+ * that button (never on join, never on a poll — the modal mounts on press and
+ * owns the fetch). Same anonymous transport as everything above. The About
+ * extras ride the same request: user(login:).lastBroadcast and an aliased
+ * channel(name:).schedule.
+ *
+ * Field names verified against the live endpoint: user(login:) exposes
+ * `description`, `createdAt` (account creation), `profileImageURL(width: 300)`,
+ * `followers { totalCount }` and `lastBroadcast { startedAt title game }`
+ * anonymously; channel(name:).schedule exposes `nextSegment { startAt title
+ * isCancelled categories }` and `interruption` (vacation). An offline channel
+ * returns `stream: null`, a nonexistent login returns `user: null`, and a
+ * channel without a schedule returns `schedule: null` (or nextSegment: null).
+ *
+ * Deliberately NOT fetched (probed live, do not re-attempt blindly):
+ *   - channel.socialMedias — the About panel's YouTube/Twitter/donate links.
+ *     IntegrityCheckFailed anonymously via BOTH channel(id:) and
+ *     channel(name:); the field sits behind the integrity token the web
+ *     client earns with a proof-of-work challenge. There is no anonymous
+ *     path to social links.
+ *   - user.videos { totalCount } — intermittently "service error"s for some
+ *     channels, and a field-level error puts `errors` in the envelope, which
+ *     gqlRequest treats as a whole-request transport failure.
+ *   - total channel views — User has no views field at all (`viewCount` does
+ *     not exist on the type).
+ * ============================================================================
+ */
+
+/** The channel's upcoming-schedule slice (null = no schedule set). */
+export interface ChannelSchedule {
+  /** The next uncancelled-or-not upcoming segment, when one exists. */
+  nextSegment: {
+    startAt: string
+    title: string
+    category: string
+    isCancelled: boolean
+  } | null
+  /** ISO end of the vacation/pause window ('' when none). */
+  interruptionEndAt: string
+}
+
+export interface ChannelInfo {
+  login: string
+  displayName: string
+  avatarUrl: string
+  /** Channel bio ('' when the channel has none set). */
+  description: string
+  /** Account-created ISO timestamp ('' when unknown). */
+  createdAt: string
+  followers: number | null
+  live: boolean
+  game: string
+  viewersCount: number
+  /** Most recent broadcast start + title + category (null when unknown). */
+  lastBroadcast: { startedAt: string; title: string; game: string } | null
+  schedule: ChannelSchedule | null
+}
+
+interface RawChannelInfoUser {
+  id?: string | null
+  login?: string | null
+  displayName?: string | null
+  description?: string | null
+  createdAt?: string | null
+  profileImageURL?: string | null
+  followers?: { totalCount?: number | null } | null
+  lastBroadcast?: {
+    startedAt?: string | null
+    title?: string | null
+    game?: { name?: string; displayName?: string } | null
+  } | null
+  stream?: {
+    viewersCount?: number | null
+    game?: { name?: string; displayName?: string } | null
+  } | null
+}
+
+/** The schedule object under the aliased `chan: channel(name:)` selection. */
+interface RawSchedule {
+  nextSegment?: {
+    startAt?: string | null
+    title?: string | null
+    isCancelled?: boolean | null
+    categories?: ({ name?: string; displayName?: string } | null)[] | null
+  } | null
+  interruption?: { endAt?: string | null } | null
+}
+
+const CHANNEL_INFO_QUERY = `
+  query($login: String!) {
+    user(login: $login) {
+      id
+      login
+      displayName
+      description
+      createdAt
+      profileImageURL(width: 300)
+      followers { totalCount }
+      lastBroadcast {
+        startedAt
+        title
+        game { name displayName }
+      }
+      stream {
+        viewersCount
+        game { name displayName }
+      }
+    }
+    chan: channel(name: $login) {
+      schedule {
+        nextSegment {
+          startAt
+          title
+          isCancelled
+          categories { name displayName }
+        }
+        interruption { endAt }
+      }
+    }
+  }
+`
+
+/**
+ * Fetch one channel's About-style info (avatar, bio, followers, account
+ * creation date, current live state, last broadcast, next scheduled stream)
+ * in a single request. Returns null for a nonexistent login; throws on
+ * transport failure (the caller shows an error state with a retry).
+ */
+export async function fetchChannelInfo(login: string, signal?: AbortSignal): Promise<ChannelInfo | null> {
+  const data = await gqlRequest<{ user?: RawChannelInfoUser | null; chan?: { schedule?: RawSchedule | null } | null }>(
+    CHANNEL_INFO_QUERY,
+    { login },
+    signal,
+  )
+  const user = data?.user ?? null
+  if (!user || !user.login) return null
+  const stream = user.stream ?? null
+  const rawSchedule = data?.chan?.schedule ?? null
+  const next = rawSchedule?.nextSegment ?? null
+  const firstCat = next?.categories?.find((c) => c && (c.displayName || c.name))
+  const last = user.lastBroadcast ?? null
+  return {
+    login: user.login,
+    displayName: user.displayName ?? user.login,
+    avatarUrl: user.profileImageURL ?? '',
+    description: user.description ?? '',
+    createdAt: user.createdAt ?? '',
+    followers:
+      typeof user.followers?.totalCount === 'number' && Number.isFinite(user.followers.totalCount)
+        ? user.followers.totalCount
+        : null,
+    live: !!stream,
+    game: stream?.game?.displayName ?? stream?.game?.name ?? '',
+    viewersCount: typeof stream?.viewersCount === 'number' ? stream.viewersCount : 0,
+    lastBroadcast:
+      last && typeof last.startedAt === 'string' && last.startedAt
+        ? { startedAt: last.startedAt, title: last.title ?? '', game: last.game?.displayName ?? last.game?.name ?? '' }
+        : null,
+    schedule: rawSchedule
+      ? {
+          nextSegment:
+            next && typeof next.startAt === 'string' && next.startAt
+              ? {
+                  startAt: next.startAt,
+                  title: next.title ?? '',
+                  category: firstCat?.displayName ?? firstCat?.name ?? '',
+                  isCancelled: !!next.isCancelled,
+                }
+              : null,
+          interruptionEndAt: rawSchedule.interruption?.endAt ?? '',
+        }
+      : null,
+  }
+}
+
+/*
+ * ============================================================================
  * VOD chat replay — past-broadcast comments, synced to the playhead.
  *
  * Same anonymous + GQL-only transport as everything above (same pinned

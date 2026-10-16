@@ -172,6 +172,17 @@ export const fr: Record<TKey, string> = {
   si_notifyOn: 'Notif. activées',
   si_notifyOff: 'Notif. désactivées',
   si_videos: 'Vidéos',
+  si_info: 'Info',
+
+  ci_error: 'Impossible de charger les infos de la chaîne.',
+  ci_retry: 'Réessayer',
+  ci_notFound: 'Chaîne introuvable.',
+  ci_noBio: 'Aucune description',
+  ci_created: 'Créé le',
+  ci_nextStream: 'Prochain stream',
+  ci_lastLive: 'Dernier stream',
+  ci_vacation: 'En vacances jusqu’au {date}',
+  ci_cancelled: 'annulé',
 
   chat_resizeChat: 'Redimensionner le chat',
   chat_chatModes: 'Modes du chat',

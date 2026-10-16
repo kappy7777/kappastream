@@ -189,6 +189,18 @@ export const en = {
   si_notifyOn: 'Notify on',
   si_notifyOff: 'Notify off',
   si_videos: 'Videos',
+  si_info: 'Info',
+
+  // ---- ChannelInfoModal.svelte --------------------------------------------
+  ci_error: 'Could not load channel info.',
+  ci_retry: 'Retry',
+  ci_notFound: 'Channel not found.',
+  ci_noBio: 'No description',
+  ci_created: 'Created',
+  ci_nextStream: 'Next stream',
+  ci_lastLive: 'Last live',
+  ci_vacation: 'On vacation until {date}',
+  ci_cancelled: 'cancelled',
 
   // ---- App.svelte: chat panel ---------------------------------------------
   chat_resizeChat: 'Resize chat',

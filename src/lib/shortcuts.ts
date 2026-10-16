@@ -14,6 +14,7 @@
 
 export type ShortcutAction =
   | { type: 'close-about' }
+  | { type: 'close-channel-info' }
   | { type: 'close-help' }
   | { type: 'close-welcome' }
   | { type: 'play-pause' }
@@ -26,6 +27,8 @@ export type ShortcutAction =
 
 export interface ShortcutCtx {
   aboutOpen: boolean
+  /** The channel-info (About-style) modal is open. */
+  channelInfoOpen: boolean
   browseOpen: boolean
   helpOpen: boolean
   welcomeOpen: boolean
@@ -98,6 +101,7 @@ export function resolveShortcut(e: KeyboardEvent, ctx: ShortcutCtx): ShortcutAct
     if (ctx.welcomeOpen) return { type: 'close-welcome' }
     if (ctx.helpOpen) return { type: 'close-help' }
     if (ctx.aboutOpen) return { type: 'close-about' }
+    if (ctx.channelInfoOpen) return { type: 'close-channel-info' }
     return null
   }
 
@@ -114,11 +118,13 @@ export function resolveShortcut(e: KeyboardEvent, ctx: ShortcutCtx): ShortcutAct
   // The other overlays (about, browse, welcome) still swallow it.
   if (e.key === '?' && (ctx.helpOpen || ctx.settingsOpen)) return { type: 'toggle-help' }
 
-  // No player shortcuts behind an open modal/overlay (about, browse, help,
-  // the first-launch welcome / what's-new overlay, the on-demand changelog —
-  // all fed through welcomeOpen by App.svelte — and the Settings modal /
-  // custom-theme editor).
-  if (ctx.aboutOpen || ctx.browseOpen || ctx.helpOpen || ctx.welcomeOpen || ctx.settingsOpen) return null
+  // No player shortcuts behind an open modal/overlay (about, the channel-info
+  // modal, browse, help, the first-launch welcome / what's-new overlay, the
+  // on-demand changelog — all fed through welcomeOpen by App.svelte — and the
+  // Settings modal / custom-theme editor).
+  if (ctx.aboutOpen || ctx.channelInfoOpen || ctx.browseOpen || ctx.helpOpen || ctx.welcomeOpen || ctx.settingsOpen) {
+    return null
+  }
 
   const key = e.key
 
