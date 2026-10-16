@@ -62,3 +62,4 @@ streamlink-bundle/
 
 # ZCode agent workspace artifacts (session tooling, environment-specific)
 .zcode/
+.zcodeignore
