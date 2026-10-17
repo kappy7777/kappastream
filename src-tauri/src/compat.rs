@@ -70,10 +70,16 @@
 //!
 //! ## AppImage — system `libpipewire` via one-shot re-exec
 //!
-//! The bundled `libmpv.so.2` (a Debian build) declares `libpipewire-0.3.so.0`
-//! as a direct dependency, so linuxdeploy copies the build host's pipewire
-//! client into the AppImage — dropping it would fail the loader on systems
-//! without PipeWire, and bundling it is what keeps the image self-contained.
+//! The bundled `libmpv.so.2` declares `libpipewire-0.3.so.0` as a direct
+//! dependency, so a pipewire client must ship inside the AppImage — dropping
+//! it fails the loader on systems without PipeWire. The pinned linuxdeploy
+//! build has the client on its built-in excludelist, so linuxdeploy does NOT
+//! bundle it on its own anymore: `scripts/stage-appimage-libs.sh` stages the
+//! build host's copy and `bundle.linux.appimage.files` pre-places it in the
+//! AppDir as a regular file named exactly by its SONAME. The SONAME spelling
+//! is load-bearing — the swap below derives the ldconfig lookup name from
+//! the basename the client is mapped under, so a versioned filename would
+//! make the swap silently never fire.
 //! But PipeWire expects the client library and the `spa-0.2` support modules
 //! it loads to match the local server: a client from the build host, running
 //! against the host system's server and modules, periodically stalls the

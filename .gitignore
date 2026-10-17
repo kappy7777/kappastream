@@ -60,6 +60,10 @@ ssh-agent.sock
 # bundle resources via tauri.windows.conf.json)
 streamlink-bundle/
 
+# AppImage bundled-lib staging (scripts/stage-appimage-libs.sh output,
+# shipped via bundle.linux.appimage.files — build-host bytes, never committed)
+src-tauri/appimage-staging/
+
 # ZCode agent workspace artifacts (session tooling, environment-specific)
 .zcode/
 .zcodeignore

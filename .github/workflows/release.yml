@@ -332,6 +332,27 @@ jobs:
             gstreamer1.0-libav \
             libmpv-dev
 
+      # The pipewire client (a hard DT_NEEDED entry of the bundled
+      # libmpv.so.2) cannot come from linuxdeploy: the pinned build has it on
+      # its built-in excludelist (the revision the @tauri-apps/cli 2.12 bump
+      # moved us to added it), so from v1.0.6 to v1.0.7 the AppImage shipped
+      # WITHOUT it and died in the loader on PipeWire-less hosts. Stage the
+      # build host's copy here; tauri.conf.json's `appimage.files` pre-places
+      # it in the AppDir (linuxdeploy leaves pre-placed files alone and still
+      # deploys their dependencies), and the guard step after the build
+      # verifies the result. Fail-closed: if the SONAME does not resolve
+      # through the system libmpv, do not build at all.
+      - name: Stage bundled AppImage libs (pipewire client)
+        run: |
+          set -euo pipefail
+          scripts/stage-appimage-libs.sh | tee staged-libs.txt
+          {
+            echo "## Staged AppImage libraries"
+            echo '```'
+            cat staged-libs.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Cache Cargo (~/.cargo + src-tauri/target)
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -484,6 +505,36 @@ jobs:
             esac
           done
           echo "OK: pinned tools only; no runtime download"
+
+      # WHY THIS GUARD: the AppImage must stay loader-complete on hosts that
+      # lack the client audio libraries the embedded engine links, and nothing
+      # else would notice them going missing — the pinned linuxdeploy
+      # excludelists them, the build stays green, and the failure only shows
+      # as "error while loading shared libraries: …" on user machines (exactly
+      # the v1.0.6/v1.0.7 libpipewire regression). The guard walks the REAL
+      # DT_NEEDED closure of the staged binary, resolved against the AppDir's
+      # own usr/lib, and fails the job unless every unresolved entry is on the
+      # script's explicit host allowlist (the graphics/X11 stack and glibc
+      # group the AppImage deliberately takes from the host). It also checks
+      # each staged library landed as a regular SONAME-named file with the
+      # staged GNU build-id — build-id, not sha256, because linuxdeploy
+      # patches RUNPATH into bundled libs, so the bytes legitimately change.
+      # libpipewire-0.3.so.0 must never be on the host allowlist; the script
+      # itself asserts that so a careless allowlist edit fails the build.
+      - name: Guard AppDir libs (staged libs present, loader closure clean)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="src-tauri/target/release/bundle/appimage"
+          # Same AppDir the glibc step below measures: the bundler leaves it
+          # next to the final AppImage with the identical ELF payload, so the
+          # guard needs no extraction.
+          appdir="$(find "$bundle_dir" -maxdepth 1 -name '*.AppDir' -type d | head -n1)"
+          if [ -z "$appdir" ]; then
+            echo "ERROR: no *.AppDir under $bundle_dir to guard" >&2
+            exit 1
+          fi
+          scripts/check-appimage-libs.sh "$appdir" src-tauri/appimage-staging
 
       # Measure the actual highest GLIBC_* requirement across every ELF file
       # bundled into the AppImage, so the compatibility window is documented
