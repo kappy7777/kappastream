@@ -4350,7 +4350,9 @@
      the pointer handlers ride on. The controls, banners and every overlay
      are the SAME DOM as the hls path — they paint over the hole. The
      page's loading/error overlays render uncovered because the aperture
-     opens only once the first frame presented. */
+     opens only once the first frame presented. In fullscreen the app
+     chrome (title bar, sidebar, chat, status bar) is hidden entirely —
+     see the .app--fullscreen.app--native-video rules below. */
   .app--native-video .video {
     opacity: 0;
   }
@@ -4378,6 +4380,24 @@
   }
   .app--fullscreen .native-backdrop-rect {
     background: #000;
+  }
+
+  /* Native fullscreen: the chrome is hidden, only the player subtree and
+     the backdrop may paint. In hls fullscreen the z-index 9000 player
+     covers the whole app (everything else tops out at 1001); in native
+     mode the player box itself is transparent — the video shows through
+     the aperture hole — and the backdrop sits at the BOTTOM of the paint
+     order, so the opaque title bar, sidebar, chat and status bar would
+     paint straight over the video. visibility (not display) so layout
+     and every getBoundingClientRect measurement (zoom probe, player box,
+     surface rect) stay unchanged; the player subtree stays interactive
+     and the backdrop re-shows the fullscreen #000 cinema bars. */
+  .app--fullscreen.app--native-video {
+    visibility: hidden;
+  }
+  .app--fullscreen.app--native-video .player,
+  .app--fullscreen.app--native-video .native-backdrop {
+    visibility: visible;
   }
 
   /* Status bar: the bottom flex child of .player-stage (NOT of .video-pane),

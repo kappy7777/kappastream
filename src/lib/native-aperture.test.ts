@@ -139,3 +139,23 @@ describe('native canvas transparency (App.svelte source contract)', () => {
     expect(source).toMatch(/classList\.toggle\('ks-native-video', on\)/)
   })
 })
+
+// Native fullscreen: the opaque chrome (title bar, sidebar, chat, status
+// bar) is not covered by the transparent native player the way hls
+// fullscreen covers it at z-index 9000, and the backdrop paints at the
+// BOTTOM of the stack — so the chrome must be hidden, with only the
+// player subtree and the backdrop re-visible. visibility (not display)
+// keeps layout and every getBoundingClientRect measurement identical.
+describe('native fullscreen chrome hiding (App.svelte source contract)', () => {
+  const source = readFileSync(join(process.cwd(), 'src/App.svelte'), 'utf8')
+
+  it('hides the app chrome in native fullscreen', () => {
+    expect(source).toMatch(/\.app--fullscreen\.app--native-video\s*{\s*visibility: hidden;/)
+  })
+
+  it('re-shows only the player subtree and the backdrop', () => {
+    expect(source).toMatch(
+      /\.app--fullscreen\.app--native-video \.player,\s*\.app--fullscreen\.app--native-video \.native-backdrop\s*{\s*visibility: visible;/,
+    )
+  })
+})
