@@ -3769,7 +3769,11 @@
        Wayland it gets no server-side resize edges; these drive tao's
        interactive resize (mirrors PipWindow.svelte, with all 8 directions
        since the main window has no aspect lock). position:fixed + edge
-       anchors are zoom-safe (0 and viewport edges are invariant). -->
+       anchors are zoom-safe (0 and viewport edges are invariant). On Linux
+       these are the ONLY working mouse-resize path once the native engine
+       has booted: the engine's GTK reparent breaks tauri's own
+       undecorated-resize handler for the session (see
+       src-tauri/src/mpv/linux.rs) — never remove them as redundant. -->
   <div class="rz rz-n" aria-hidden="true" onmousedown={() => startWinResize('North')}></div>
   <div class="rz rz-s" aria-hidden="true" onmousedown={() => startWinResize('South')}></div>
   <div class="rz rz-w" aria-hidden="true" onmousedown={() => startWinResize('West')}></div>

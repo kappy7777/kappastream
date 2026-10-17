@@ -1,7 +1,7 @@
 // Linux (GTK3) native video surface for the mpv-embed engine.
 //
-// THE ACTUAL WIDGET TREE (verified against tauri-runtime-wry 2.11.4 + wry
-// 0.55.1 sources, which build the main webview via `build_gtk(vbox)` where
+// THE ACTUAL WIDGET TREE (verified against tauri-runtime-wry 2.12.2 + wry
+// 0.57.0 sources, which build the main webview via `build_gtk(vbox)` where
 // `vbox` is tao's window-default vertical GtkBox):
 //
 //   gtk::ApplicationWindow            (tao)
@@ -48,11 +48,18 @@
 //      window itself an opaque black CSS background so a resize's newly
 //      exposed area can never flash the desktop (belt and suspenders under
 //      the floor).
-// tauri's undecorated-resize handler walks `webview.parent().parent()` and
-// downcasts the grandparent to a gtk::Window — but it does so EXACTLY ONCE,
-// at webview creation time (tauri-runtime-wry attaches the handler while the
-// tree is still webview → vbox → window), so this later reparent cannot
-// affect it; nothing re-resolves the grandparent afterwards.
+// tauri's undecorated-resize handler resolves `webview.parent().parent()`
+// and downcasts the grandparent to a gtk::Window on EVERY pointer event:
+// `resizable_window()` (tauri-runtime-wry's undecorated_resizing.rs) runs
+// inside each motion / button-press / touch handler. Once this bootstrap
+// moves tao's vbox into the GtkOverlay, the webview's grandparent is the
+// overlay — the downcast fails and the handler silently returns Proceed,
+// so tauri's built-in edge resize (and its resize cursors) stop working
+// for the rest of the session. Accepted on purpose: the app's own .rz
+// edge handles (App.svelte → startResizeDragging) are the only working
+// mouse-resize path once the engine has booted. Restoring tauri's handler
+// would mean reparenting the webview widget itself, which leaves its
+// rebuilt surface opaque (step 3 above).
 //
 // WHY BELOW works now (and the old above-page design existed at all): the
 // pre-2026-10 attempts at web-UI-over-video tried DESKTOP-through
@@ -654,9 +661,9 @@ fn init_on_main_thread(
         overlay.add_overlay(&vbox);
 
         // The overlay must become the WINDOW's direct child — not stay
-        // detached. tauri's undecorated-resize handler resolved the
-        // webview's grandparent window ONCE at webview creation (before any
-        // of this), so the re-shape cannot break it.
+        // detached. This re-shape is also what disables tauri's
+        // undecorated-resize handler (see the module header): the app's
+        // .rz page handles take over as the mouse-resize path.
         #[allow(deprecated)]
         window.add(&overlay);
         // The window's own GTK background: opaque black, so a resize's
