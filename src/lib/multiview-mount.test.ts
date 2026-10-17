@@ -10,6 +10,7 @@
 import { describe, it, vi, expect, afterEach } from 'vitest'
 import { mount, unmount } from 'svelte'
 import { tileStore } from './tile-store.svelte'
+import { nextVolume } from './volume'
 import { settings } from './settings.svelte.ts'
 import { invoke } from '@tauri-apps/api/core'
 
@@ -255,33 +256,39 @@ describe('MultiView mount (effect-loop regression)', () => {
   })
 
   // Pointer input over a native tile belongs to the PAGE (the webview is
-  // the topmost window): nothing forwards into mpv's input queue anymore —
-  // the in-engine OSC that consumed forwarded clicks is retired.
-  it('mpv mode: tile pointer interaction forwards nothing to the engine', async () => {
+  // the topmost window): the always-rendered focus surface moves the audio
+  // authority and the tile-level wheel handler drives the audio model —
+  // nothing forwards into mpv's input queue.
+  it('mpv mode: a tile click claims audio authority; a wheel drives the page-side volume', async () => {
     settings.setMpvEngine(true)
     mountView(true)
     await sleep(60)
     tileStore.addOrReplace('chan1', 'best', 1)
+    tileStore.addOrReplace('chan2', 'best', 1)
     await sleep(250)
-    const stage = document.querySelector<HTMLElement>('.mv-video-area')
-    expect(stage).toBeTruthy()
-    // happy-dom lays out nothing — stub a real rect so the geometry math
-    // in any listener would run.
-    stage!.getBoundingClientRect = () =>
-      ({ x: 0, y: 0, left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300 }) as DOMRect
-    const PE: new (type: string, init?: MouseEventInit) => PointerEvent = ((
-      globalThis as { PointerEvent?: typeof MouseEvent }
-    ).PointerEvent ?? MouseEvent) as new (type: string, init?: MouseEventInit) => PointerEvent
-    const forwarded = (): number => vi.mocked(invoke).mock.calls.filter((c) => c[0] === 'mpv_pointer').length
-    const before = forwarded()
+    const roots = () => [...document.querySelectorAll<HTMLElement>('[data-tile-id]')]
+    expect(roots().length).toBe(2)
+    const firstId = tileStore.tiles[0]!.id
+    const secondId = tileStore.tiles[1]!.id
+    // Opening chan2 funnels both pointers to it (new tiles take authority
+    // AND chat).
+    expect(tileStore.authorityId).toBe(secondId)
+    expect(tileStore.chatId).toBe(secondId)
 
-    // A press + held moves on the tile: page-side only.
-    stage!.dispatchEvent(new PE('pointerdown', { button: 0, buttons: 1, clientX: 200, clientY: 150 }))
-    stage!.dispatchEvent(new PE('pointermove', { buttons: 1, clientX: 210, clientY: 150 }))
-    stage!.dispatchEvent(new PE('pointerup', { button: 0, clientX: 210, clientY: 150 }))
-    stage!.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, clientX: 200, clientY: 150 }))
-    await sleep(80)
-    expect(forwarded()).toBe(before)
+    // Clicking chan1's focus surface moves ONLY the audio authority — the
+    // chat pointer deliberately stays on chan2.
+    const surface = roots()[0]!.querySelector<HTMLButtonElement>('.mv-tile-surface')
+    expect(surface).toBeTruthy()
+    surface!.click()
+    expect(tileStore.authorityId).toBe(firstId)
+    expect(tileStore.chatId).toBe(secondId)
+
+    // A wheel-up on the NON-authority tile drives its per-tile volume
+    // through the page handler: one step up from muted plus the explicit
+    // manual unmute.
+    roots()[1]!.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, clientX: 200, clientY: 150 }))
+    expect(tileStore.tiles[1]!.manualUnmute).toBe(true)
+    expect(tileStore.tiles[1]!.volume).toBe(nextVolume(0, 1))
   })
 })
 
