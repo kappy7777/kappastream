@@ -938,6 +938,13 @@
 
       <span class="mv-spacer"></span>
 
+      {#if nativeActive}
+        <!-- Engine marker mirroring the single-view bar's badge: this
+             tile's playback runs on the native engine. Proper noun, not
+             translatable prose. -->
+        <span class="mv-engine-badge" aria-label="mpv">mpv</span>
+      {/if}
+
       <!-- Keyboard-accessible reorder (the drag handle is mouse/pointer only).
            ◀/▶ swap this tile with its neighbour; focus stays on the button. -->
       <button
@@ -1210,6 +1217,32 @@
   }
   .mv-spacer {
     flex: 1 1 auto;
+  }
+  /* The native-engine badge, same marker (and same measured optical
+     centering) as PlayerControls' .engine-badge — see its comment for
+     the asymmetric-padding derivation. The tile bar is a fixed-px
+     scale, so the px terms drop the --ctrl-scale factor. */
+  .mv-engine-badge {
+    flex: 0 0 auto;
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
+    height: 15px;
+    padding: 0 7px;
+    padding-left: calc(7px + 0.133em);
+    padding-bottom: 0.2em;
+    border-radius: 999px;
+    background: var(--bg-hover-faint);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: var(--accent);
+    font-size: 10px;
+    font-weight: 700;
+    font-family: 'Inter', system-ui, monospace;
+    letter-spacing: 0.05em;
+    line-height: 1;
+    pointer-events: none;
+    user-select: none;
   }
   .mv-menu-wrap {
     position: relative;

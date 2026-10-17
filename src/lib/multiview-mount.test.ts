@@ -244,15 +244,20 @@ describe('MultiView mount (effect-loop regression)', () => {
     expect(tiles().length).toBe(1)
     expect(tiles()[0]!.querySelector('.mv-tile-controls')).toBeTruthy()
     expect(tiles()[0]!.querySelector('.mv-close')).toBeTruthy()
+    // The engine badge marks NATIVE playback only — an hls tile (this
+    // fallback one) never wears it.
+    expect(tiles()[0]!.querySelector('.mv-engine-badge')).toBeNull()
 
     // Tile 2: the engine loads fine → the SAME HTML bar renders over the
-    // native surface (there is no engine-side OSC anymore).
+    // native surface (there is no engine-side OSC anymore), and the badge
+    // shows which engine owns the tile.
     vi.mocked(invoke).mockImplementation(async () => ({ ok: true, url: 'https://example.invalid/x.m3u8' }))
     tileStore.addOrReplace('chan2', 'best', 1)
     await sleep(250)
     expect(tiles().length).toBe(2)
     expect(tiles()[1]!.querySelector('.mv-tile-controls')).toBeTruthy()
     expect(tiles()[0]!.querySelector('.mv-tile-controls')).toBeTruthy()
+    expect(tiles()[1]!.querySelector('.mv-engine-badge')?.textContent).toBe('mpv')
   })
 
   // Pointer input over a native tile belongs to the PAGE (the webview is
