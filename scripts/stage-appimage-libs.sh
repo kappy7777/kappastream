@@ -39,6 +39,7 @@ set -euo pipefail
 # scripts/check-appimage-libs.sh in sync.
 sonames=(
   libpipewire-0.3.so.0
+  libjack.so.0
 )
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

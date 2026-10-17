@@ -89,9 +89,10 @@ fi
 
 # ---- 2. the host-provided allowlist ---------------------------------------
 # Libraries the AppImage intentionally resolves from the host at runtime.
-# libjack.so.0 stays listed until it is staged+bundled by the same mechanism
-# as libpipewire (the pinned linuxdeploy excludelists it too); once bundled,
-# it must be REMOVED here so a regression fails this guard.
+# libpipewire-0.3.so.0 and libjack.so.0 are deliberately absent: both are
+# staged+bundled by scripts/stage-appimage-libs.sh (the pinned linuxdeploy
+# excludelists them), and a regression to "take them from the host" must
+# fail this guard, not pass silently.
 host_allowlist="$(cat <<'EOF'
 ld-linux-x86-64.so.2
 libc.so.6
@@ -119,7 +120,6 @@ libfontconfig.so.1
 libfreetype.so.6
 libharfbuzz.so.0
 libfribidi.so.0
-libjack.so.0
 EOF
 )"
 

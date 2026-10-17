@@ -96,6 +96,7 @@
       "appimage": {
         "bundleMediaFramework": true,
         "files": {
+          "/usr/lib/libjack.so.0": "appimage-staging/libjack.so.0",
           "/usr/lib/libpipewire-0.3.so.0": "appimage-staging/libpipewire-0.3.so.0",
           "/usr/share/licenses/kappastream/LICENSE": "../LICENSE"
         }
