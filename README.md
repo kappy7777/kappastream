@@ -49,7 +49,7 @@ Chat is read anonymously through Twitch IRC. Stream playback is resolved locally
 | | |
 |---|---|
 | 📺 **Live playback** | HLS playback with quality selection, fullscreen, theater mode, per-channel quality preferences, an optional low-latency mode, player keyboard shortcuts, and a sleep timer. |
-| 🎞️ **Native video engine** | Experimental, Linux only: play video through an embedded mpv instead of hls.js — opt in under Settings → Playback. Works in the single view and multi-view tiles, with its own on-screen control bar. |
+| 🎞️ **Native video engine** | Experimental, Linux only: play video through an embedded mpv instead of hls.js — opt in under Settings → Playback. Works in the single view and multi-view tiles, with the same HTML controls as hls.js. |
 | 🗂️ **Multi-stream view** | Watch up to four live streams at once in a draggable, resizable tile grid. Each tile has its own chat tab, quality, and volume, and any subset of the chats can be merged into one interleaved stream. |
 | 🎬 **VODs and clips** | Browse a channel's past broadcasts, highlights, recent and popular clips, and play them in the main player — with mpv handoff and Picture-in-Picture support. A Back-to-live control returns to the stream. Past broadcasts resume from where you left off, with a one-click restart, and the scrub bar shows chapters, muted segments, and storyboard seek previews. |
 | 💬 **Anonymous chat** | Read-only Twitch IRC chat with native Twitch emotes, 7TV, BTTV and FFZ emotes, badges, colored usernames, timestamps, mention highlighting, and a client-side mute list. Twitch links in chat are clickable, and clip links play in-app. |

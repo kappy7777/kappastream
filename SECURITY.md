@@ -44,10 +44,11 @@ commands plus one custom URI scheme to its WebView. The complete surface
   host family matching the media kind — live vs VOD/clip), so mpv can
   never be pointed at `file://`, `edl://`, `smb://` or any off-site host
   by the page. Engine ids are bounded to 0..=4 (single view + multi-view
-  tiles); no command can mint extra mpv cores. The engine's OSD script
-  lives in a private per-user runtime dir (0700, files 0600 — never the
-  shared `/tmp`), and OSD bitmaps are passed to mpv by memory, not files.
-  The engine is a Linux-only
+  tiles); no command can mint extra mpv cores. The engine loads no
+  scripts at all (`load-scripts`, `osc`, `ytdl` and
+  `input-default-bindings` are all off, and the builtin console/stats
+  scripts are disabled), so no Lua runs, yt-dlp is never invoked, and
+  no page pixels are handed to mpv. The engine is a Linux-only
   feature by scope decision (2026-09-18): everywhere else the
   `mpv_available` / `mpv_supported` probes resolve false with
   "not supported on this platform" and the remaining `mpv_*` commands
