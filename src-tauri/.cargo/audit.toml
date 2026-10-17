@@ -6,4 +6,14 @@ ignore = [
     # when the transitive graph moves to quick-xml >= 0.41.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # zip extraction advisories (all patched only in zip >= 9, which
+    # tauri-plugin-updater's zip 4 pin cannot reach): the exploitable
+    # surface is extract() on an attacker-controlled archive, but the
+    # updater verifies the minisign signature BEFORE extracting, and the
+    # Linux packages it fetches are .tar.gz anyway — the zip path serves
+    # the Windows ZIP target. Drop all three when the updater crate
+    # moves to zip >= 9.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
 ]
