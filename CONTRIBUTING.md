@@ -111,7 +111,10 @@ Checklist for cutting a release:
    `SHA256SUMS` (the release stays **draft** until the checksums land).
 8. After the release publishes, update the AUR packages (see
    `packaging/aur/README.md`): refresh `-git`'s `pkgver` and `-bin`'s tarball
-   sha256 (taken from the release's `SHA256SUMS`) + `pkgver`.
+   sha256 (taken from the release's `SHA256SUMS`) + `pkgver`, then regenerate
+   each snapshot's `.SRCINFO` from its PKGBUILD (`makepkg --printsrcinfo`) —
+   aurweb's package database reads only the `.SRCINFO`, so a hand-maintained
+   copy that drifts from the PKGBUILD leaves the package page stale.
 
 ## License
 
