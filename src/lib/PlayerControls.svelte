@@ -1061,19 +1061,29 @@
     flex: 1 1 auto;
   }
 
-  /* The native-engine badge: accent-tinted pill matching the LIVE badge's
-     size class — a marker, not a readout. */
+  /* The native-engine badge: an accent-tinted pill echoing the LIVE
+     badge's size class — a marker, not a readout. The inline-flex + fixed
+     height + line-height 1 combo is what actually centers the glyphs: a
+     plain span's line box gives the descender-carrying "mpv" a visible
+     downward bias. The first background is the pre-color-mix fallback (a
+     neutral faint chip); engines with color-mix tint it with the accent,
+     which keeps its own fg/bg contrast in every theme. */
   .engine-badge {
     flex: 0 0 auto;
     align-self: center;
-    padding: calc(1px * var(--ctrl-scale)) calc(5px * var(--ctrl-scale));
-    border: 1px solid var(--accent);
-    border-radius: calc(4px * var(--ctrl-scale));
+    display: inline-flex;
+    align-items: center;
+    height: calc(15px * var(--ctrl-scale));
+    padding: 0 calc(7px * var(--ctrl-scale));
+    border-radius: 999px;
+    background: var(--bg-hover-faint);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
     color: var(--accent);
     font-size: calc(10px * var(--ctrl-scale));
     font-weight: 700;
     font-family: 'Inter', system-ui, monospace;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
+    line-height: 1;
     pointer-events: none;
     user-select: none;
   }
