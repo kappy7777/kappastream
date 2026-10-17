@@ -1061,19 +1061,28 @@
   }
 
   /* The native-engine badge: an accent-tinted pill echoing the LIVE
-     badge's size class — a marker, not a readout. The inline-flex + fixed
-     height + line-height 1 combo is what actually centers the glyphs: a
-     plain span's line box gives the descender-carrying "mpv" a visible
-     downward bias. The first background is the pre-color-mix fallback (a
-     neutral faint chip); engines with color-mix tint it with the accent,
-     which keeps its own fg/bg contrast in every theme. */
+     badge's size class — a marker, not a readout. Flex centering alone
+     leaves "mpv" visibly off-center: the ink is x-height glyphs with one
+     descender (mass sits ~0.1em low in the 1em strut), and the trailing
+     letter-spacing plus the ink-heavy 'm' against the triangular 'v'
+     pull it ~0.07em left. The asymmetric padding biases the centered
+     strut back onto the pill's true center (measured to under 0.1px
+     residual on rendered pixels; both extra terms are em so they track
+     --ctrl-scale). box-sizing matters: border-box keeps the bottom
+     padding inside the fixed height instead of growing the pill. The
+     first background is the pre-color-mix fallback (a neutral faint
+     chip); engines with color-mix tint it with the accent, which keeps
+     its own fg/bg contrast in every theme. */
   .engine-badge {
     flex: 0 0 auto;
     align-self: center;
     display: inline-flex;
     align-items: center;
+    box-sizing: border-box;
     height: calc(15px * var(--ctrl-scale));
     padding: 0 calc(7px * var(--ctrl-scale));
+    padding-left: calc(7px * var(--ctrl-scale) + 0.133em);
+    padding-bottom: 0.2em;
     border-radius: 999px;
     background: var(--bg-hover-faint);
     background: color-mix(in srgb, var(--accent) 15%, transparent);
