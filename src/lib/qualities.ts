@@ -1,9 +1,8 @@
-// Quality menu vocabulary, shared by PlayerControls (the hls.js overlay
-// menu) and App's native-OSD feed (the labels are sent to the mpv OSD
-// script, see src-tauri/src/mpv/ks-osc.lua). The resolution IDs are
-// technical streamlink args and are NOT translated; only the two display
-// words ('Source', 'Audio only') are, resolved reactively via t() so a
-// language switch updates the open menu and the OSD feed live.
+// Quality menu vocabulary, shared by every quality surface (the
+// PlayerControls overlay menu, the tiles, and the PiP feed). The
+// resolution IDs are technical streamlink args and are NOT translated;
+// only the two display words ('Source', 'Audio only') are, resolved
+// reactively via t() so a language switch updates the open menu live.
 
 import { t } from './i18n/index.svelte'
 
@@ -49,11 +48,11 @@ export function effectiveQualities(available: readonly string[] | null | undefin
 }
 
 /** The quality list for the EMBEDDED mpv engine: audio_only is deliberately
- *  absent. mpv plays it, but with no video track there is no OSD canvas
- *  (mpv reports a 0x0 OSD size), so the in-video controller — the only way
- *  to switch quality away — renders nothing and the engine looks dead.
- *  The hls.js path keeps audio_only (its HTML controls are unaffected). A
- *  list that offered ONLY audio_only degrades to Source alone. */
+ *  absent. The native surface has no video track to present in audio-only,
+ *  so switching to it leaves nothing in-frame and nothing to switch back
+ *  from. The hls.js path keeps audio_only (its HTML controls are
+ *  unaffected). A list that offered ONLY audio_only degrades to Source
+ *  alone. */
 export function mpvQualities(available: readonly string[] | null | undefined): string[] {
   return effectiveQualities(available).filter((qid) => qid !== 'audio_only')
 }

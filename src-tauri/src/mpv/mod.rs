@@ -12,7 +12,7 @@
 // 1..=4) under the same hole scheme. The PiP window stays on hls.js (out of
 // scope by design).
 //
-// (History: the ORIGINAL original design drew the video ABOVE the opaque
+// (History: the first design drew the video ABOVE the opaque
 // page with an input-transparent window. The later desktop-through approach
 // — a transparent OS window plus a transparent page — is dead on this stack:
 // WebKitGTK's webview surface never clears between frames, leaving stale
@@ -29,9 +29,11 @@
 //      depends, AppImage bundling via linuxdeploy, AUR `mpv` dep), while a
 //      plain Windows/macOS `cargo build` compiles and links NOTHING mpv
 //      and needs nothing installed. There is no force-enable hatch.
-//   2. Nothing release-affecting: the window/webview stay exactly as
-//      tauri.conf.json builds them (opaque); the Linux surface arranges
-//      the native video surface at runtime.
+//   2. Nothing release-affecting until the engine is actually used: the
+//      first engine's bootstrap is what reparents the window's GTK tree
+//      at runtime, giving the webview its alpha-0 backing layer and the
+//      GTK window its black background; before it runs, the window and
+//      webview are exactly as tauri.conf.json builds them (opaque).
 //   3. `mpv_available()` returns true only when the surface initialized;
 //      builds without the engine register a lib.rs stub that resolves
 //      false with "not supported on this platform" (the frontend also
@@ -914,14 +916,14 @@ pub fn mpris_set_art(
 /// never blocks the caller. GTK-ONLY (no libmpv): stays a sync command —
 /// running on the main thread is correct for it. `fold_top` is the number
 /// of picture rows hidden ABOVE the rect: the page scrolled the fold under
-/// the top bar, and the surface — a native window ABOVE the page, blind to
-/// the page's overflow clip — was sized to the still-visible part. The
-/// engine clips those rows at PRESENTATION time (Linux: mpv renders the
-/// full unfolded picture into a constant-size offscreen and a 1:1 blit
-/// presents only the visible band — see OffscreenTarget in linux.rs), so
-/// the clip always lands on the same frame as the window resize: the same
-/// pixels the webview engine shows under the bar, with no mis-fitted
-/// transitional frame.
+/// the top bar, and the surface — a sibling BELOW the webview, seen through
+/// the aperture hole the page carves — was sized to the still-visible
+/// part. The engine clips those rows at PRESENTATION time (Linux: mpv
+/// renders the full unfolded picture into a constant-size offscreen and a
+/// 1:1 blit presents only the visible band — see OffscreenTarget in
+/// linux.rs), so the clip always lands on the same frame as the window
+/// resize: the same pixels the webview engine shows under the bar, with no
+/// mis-fitted transitional frame.
 #[tauri::command]
 pub fn mpv_set_rect(
     id: Option<u32>,

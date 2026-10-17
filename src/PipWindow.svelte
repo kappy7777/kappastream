@@ -155,7 +155,7 @@
   // list rides ks://pip-init (from the controller's cache) and refreshes via
   // ks://pip-qualities when the main window's variant probe answers late.
   // An EMPTY list (clips — quality is fixed) hides the button entirely,
-  // mirroring how the native OSD gear treats clips. Switching is a REQUEST
+  // mirroring how the main player's gear treats clips. Switching is a REQUEST
   // (ks://pip-quality): the main window owns the re-resolve (platform proxy
   // routing, the unavailable→best fallback ladder, the per-channel quality
   // preference) and the result comes back as a normal ks://pip-stream reload.

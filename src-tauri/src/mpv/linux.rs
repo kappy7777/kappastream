@@ -80,7 +80,7 @@
 // page natively — no input shapes, no pass-through, and the existing HTML
 // click/wheel/dblclick handlers work exactly as on the hls.js path. Page
 // UI (dialogs, dropdowns, tooltips, toasts) renders above the video by
-// DOM order alone; the legacy page-snapshot compositing path is dormant.
+// DOM order alone.
 //
 // mpv renders through the render API into the GLArea's framebuffer on the
 // GLArea's `render` signal: GTK binds the area's own FBO before emitting it,
@@ -315,8 +315,8 @@ pub(super) struct LinuxSurface {
     /// hold the engines lock) and re-read inside the dispatch closures. A
     /// show/hide pair dispatched out of decision order then self-corrects:
     /// the staler closure sees the newer decision's flag and skips, so the
-    /// video can never end up shown over an open modal (or hidden after its
-    /// dismissal) because two dispatches raced.
+    /// surface can never end up contrary to the latest visibility decision
+    /// because two dispatches raced.
     want_visible: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -439,8 +439,8 @@ impl VideoSurface for LinuxSurface {
         let shown = self.shown.clone();
         let _ = self.app.run_on_main_thread(move || {
             // Superseded before this dispatch ran: a later hide decision
-            // flipped the flag — applying this show would put the video
-            // over an open modal.
+            // flipped the flag — applying this stale show would reveal a
+            // surface the latest decision already retired.
             if !want.load(std::sync::atomic::Ordering::Acquire) {
                 return;
             }
@@ -477,8 +477,8 @@ impl VideoSurface for LinuxSurface {
         let shown = self.shown.clone();
         let _ = self.app.run_on_main_thread(move || {
             // Superseded before this dispatch ran: a later show decision
-            // flipped the flag — hiding would leave the video black after
-            // its modal closed.
+            // flipped the flag — hiding would conceal a surface the
+            // latest decision wants shown.
             if want.load(std::sync::atomic::Ordering::Acquire) {
                 return;
             }

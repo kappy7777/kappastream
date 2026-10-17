@@ -768,9 +768,8 @@
     splitDrag = { axis }
     // Capture the pointer for the whole gesture so the drag owns every
     // pointer event until release. Without it the moves keep landing on
-    // whatever sits under the pointer — over a native tile that fed the OSC
-    // a synthetic click per move, so resizing the grid could press the
-    // tiles' in-video buttons.
+    // whatever element sits under the pointer, fighting the tiles' own
+    // handlers mid-gesture.
     try {
       ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     } catch {

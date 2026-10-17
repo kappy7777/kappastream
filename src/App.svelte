@@ -358,9 +358,8 @@
 
   // The quality menu the HTML bar offers. On the native engine the list is
   // the mpv variant (audio_only withheld — the native surface has no video
-  // track to present, so switching to it leaves nothing in-frame; the same
-  // policy the retired OSD gear carried), the hls vocabulary otherwise.
-  // Clips have a fixed quality — no menu.
+  // track to present, so switching to it leaves nothing in-frame), the hls
+  // vocabulary otherwise. Clips have a fixed quality — no menu.
   const menuQualities = $derived(
     playback.kind === 'clip'
       ? undefined
@@ -1190,11 +1189,10 @@
   // whenever the available height binds (short window, chat open): the video
   // letterboxes inside it and the box shows themed bars on the sides. Every
   // consumer that must align to the video PICTURE — the mpv surface rect,
-  // the OSD overlay fractions, the pointer normalization, the control bar
-  // and the in-video banners via the --video-* CSS custom properties — reads
-  // the ONE fitted content rect computed here (lib/video-fit.ts), never its
-  // own fit: two computations with different rounding could desync the OSD
-  // bar from the HTML controls by a pixel.
+  // the control bar and the in-video banners via the --video-* CSS custom
+  // properties — reads the ONE fitted content rect computed here
+  // (lib/video-fit.ts), never its own fit: two computations with different
+  // rounding could desync the controls from the video by a pixel.
   //
   // playerBox is the .player rect in VISUAL px (getBoundingClientRect inside
   // the zoomed subtree — exactly what the .zoom-probe measurement relies
@@ -1279,20 +1277,20 @@
   })
 
   // The fitted content rect in the same visual-px window space as playerBox
-  // — the one rect the native surface, the OSD overlay fractions, and the
-  // pointer normalization must all agree on.
+  // — the one rect the native surface and the aperture hole must both ride.
   const videoContentRect = $derived.by(() => {
     const c = fitContentRect(playerBox.w, playerBox.h, videoAspect)
     return { x: playerBox.x + c.x, y: playerBox.y + c.y, w: c.w, h: c.h }
   })
 
   // The content rect clipped at the scroll viewport's top edge (the top
-  // bar): the native surface window sits ABOVE the page and ignores the
-  // page's overflow clip, so it must pre-clip itself or the video paints
-  // over the bar while the fold is scrolled up. The engine clips the hidden
-  // rows at presentation time (an offscreen render + blit on its side), so
-  // the visible picture fills the clipped surface edge to edge — the same
-  // pixels the hls.js path shows under the bar.
+  // bar): the native surface sits BELOW the page's webview and shows only
+  // through the aperture hole, so it must reproduce the page's own overflow
+  // clip itself — the surface is sized to the still-visible band and the
+  // engine folds the hidden rows away at presentation time (an offscreen
+  // render + blit on its side), so the visible picture fills the clipped
+  // surface edge to edge — the same pixels the hls.js path shows under the
+  // bar.
   const clippedContentRect = $derived.by(() => {
     const r = videoContentRect
     const c = clipRectTop(r.x, r.y, r.w, r.h, stageClipTop)
@@ -1302,8 +1300,7 @@
   // The native surface tracks the CONTENT rect: mpv then fills its surface
   // edge to edge — no mpv-painted black bars — and the page paints the
   // letterbox where the bars used to be (via the aperture backdrop below —
-  // identical pixels to the hls path's side bars). The OSD width IS the
-  // surface width now, so ks-osc's bar spans exactly the video too.
+  // identical pixels to the hls path's side bars).
   $effect(() => {
     if (!nativeVideoActive) return
     const r = clippedContentRect
@@ -1385,10 +1382,11 @@
 
   // The same quality-menu feed for the floating PiP window (the hls
   // vocabulary — PiP never runs the native engine, so audio_only stays in,
-  // unlike the OSD feed above). Clips push an EMPTY list: like the OSD gear,
-  // the floating window's quality button hides when there is nothing to
-  // choose. The push doubles as the late-probe refresh (availableQualities
-  // starts null → full vocabulary, and sharpens when the probe answers).
+  // unlike the native feed above). Clips push an EMPTY list: like the main
+  // player's gear, the floating window's quality button hides when there is
+  // nothing to choose. The push doubles as the late-probe refresh
+  // (availableQualities starts null → full vocabulary, and sharpens when
+  // the probe answers).
   $effect(() => {
     const list = playback.kind === 'clip' ? [] : effectiveQualities(availableQualities)
     pipController.pushQualityMenu(list, quality)
@@ -1640,10 +1638,9 @@
 
   async function handoffToPlayer(): Promise<void> {
     // Live-only by design (both control bars hide the button during
-    // VOD/clip playback; this guard also covers the native OSD's ks-action
-    // relay, which can fire before a ks-mode feed lands): the external mpv
-    // gets the live stream; VODs and clips stay in-app, where the PiP
-    // handoff covers floating-window playback instead.
+    // VOD/clip playback): the external mpv gets the live stream; VODs and
+    // clips stay in-app, where the PiP handoff covers floating-window
+    // playback instead.
     if (playback.kind !== 'live') return
     const channel = channelJoined
     if (!channel) return
@@ -1769,9 +1766,9 @@
   async function startStream(channel: string): Promise<void> {
     const savedQ = settings.getQualityFor(channel)
     quality = savedQ ?? pendingQuality ?? quality
-    // The native engine never offers audio_only (no OSD canvas in audio-only
-    // → no in-video way back); a preference saved while on the hls engine
-    // must not strand an mpv load in it. Storage is left untouched so
+    // The native engine never offers audio_only (its surface has no video
+    // track to present); a preference saved while on the hls engine must
+    // not strand an mpv load in it. Storage is left untouched so
     // switching back to hls restores it.
     if (mpvSelected && quality === 'audio_only') quality = 'best'
     pendingQuality = null

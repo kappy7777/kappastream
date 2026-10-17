@@ -603,9 +603,8 @@
       />
 
       {#if live}
-        <!-- Mirrors the native OSC bar's live badge: a --live dot + bold LIVE
-             in place of the elapsed-time readout (live playback has no
-             meaningful position/duration to show). -->
+        <!-- A --live dot + bold LIVE in place of the elapsed-time readout
+             (live playback has no meaningful position/duration to show). -->
         <span class="live-indicator" aria-live="off">
           <span class="live-dot" aria-hidden="true"></span>LIVE
         </span>
@@ -1035,8 +1034,8 @@
     letter-spacing: 0.02em;
   }
 
-  /* Dot + bold LIVE in the theme's live red, mirroring the native OSC's
-     badge — one size below the time readout: a badge, not a readout. */
+  /* Dot + bold LIVE in the theme's live red — one size below the time
+     readout: a badge, not a readout. */
   .live-indicator {
     flex: 0 0 auto;
     display: inline-flex;
@@ -1103,10 +1102,9 @@
 
   .menu {
     /* The menu damps the bar's scale: --ctrl-scale tracks the player WIDTH
-       and sits at its 1.6 clamp on any normal desktop window, while the
-       mpv OSC gear menu (the visual reference) scales with the video
-       height and stays near 1. Cap the menu at 1.25 and share the OSC's
-       170px base width so both menus render the same size. */
+       and sits at its 1.6 clamp on any normal desktop window, which would
+       make the menu tower over its gear button. Cap it at 1.25 with a
+       170px base width so the dropdown stays proportional. */
     --menu-scale: min(var(--ctrl-scale, 1), 1.25);
     position: absolute;
     bottom: calc(100% + 6px);

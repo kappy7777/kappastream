@@ -212,7 +212,7 @@ interface MpvTimeEvent {
   duration: number
 }
 
-/** `mpv://volume` payload — the OSC-driven volume/mute mirror (see below). */
+/** `mpv://volume` payload — the engine-reported volume/mute mirror (see below). */
 interface MpvVolumeEvent {
   id: number
   volume: number
@@ -369,12 +369,12 @@ export class MpvBackend implements VideoBackend {
   }
 
   /**
-   * OSC-driven volume/mute (mpv's own in-video slider/buttons) mirrored into
-   * the backend's state — the 'volumechange' emit makes the owning surface
-   * pick it up like an element-side change (App's settings sync in single
-   * view, the tile's audio model in multi-view). The app-side writes echo
-   * back through this with the same value and are absorbed (the emit is
-   * idempotent), so there is no feedback loop.
+   * Engine-reported volume/mute mirrored into the backend's state — the
+   * 'volumechange' emit makes the owning surface pick it up like an
+   * element-side change (App's settings sync in single view, PlayerControls'
+   * state hydration in multi-view). The app-side writes echo back through
+   * this with the same value and are absorbed (the emit is idempotent), so
+   * there is no feedback loop.
    */
   private onVolume(v: MpvVolumeEvent): void {
     this.vol = Math.max(0, Math.min(1, v.volume))

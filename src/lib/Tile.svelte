@@ -118,7 +118,7 @@
   let tileEl = $state<HTMLElement | undefined>(undefined)
   /** Quality variants this tile's channel ACTUALLY offers (the
    *  stream_qualities streamlink probe), or null while unknown — the gear
-   *  menu + OSC list offer only real variants (a channel transcoding 720p60
+   *  menu offers only real variants (a channel transcoding 720p60
    *  but not 720p must not offer plain "720p"). Unknown → full vocabulary. */
   let availableQualities = $state<string[] | null>(null)
   /** The video REGION element — the native surface's rect anchor (the
@@ -158,11 +158,10 @@
       void stale.dispose()
     }
   })
-  /** The list every quality surface offers (HTML strip gear + the OSC feed
-   *  and its reverse map): on the native engine audio_only is absent — mpv
-   *  plays it, but with no video track there is no OSD canvas, and a tile
-   *  that picked it could not switch back from the in-video bar (the HTML
-   *  strip below would remain, but the menu must match the engine anyway). */
+  /** The list every quality surface offers (the HTML gear and its reverse
+   *  map): on the native engine audio_only is absent — the native surface
+   *  has no video track to present, so a tile that switched to it would
+   *  show nothing in-frame (the menu must match the engine anyway). */
   const menuQualities = $derived(mpvBackend ? mpvQualities(availableQualities) : effectiveQualities(availableQualities))
 
   // Native playback state → tile status. An error/ended mid-playback hides
@@ -241,9 +240,9 @@
     // ksvod proxy). A failed load falls through to the hls path for THIS
     // item (mirrors the single-stream policy in App.svelte). The load
     // carries the MODEL-driven audio state (same math as the audio effect):
-    // the backend's local default is unmuted, and a load-time unmute both
-    // plays audio before the effect corrects it and echoes into the OSC
-    // sync as a "user unmute" (the watch-together all-audible bug).
+    // the backend's local default is unmuted, so loading bare would play
+    // audio before the effect corrects it (the watch-together all-audible
+    // bug).
     const mpv = mpvBackend
     if (mpv) {
       const res = await playback.attachMpv(mpv, {
@@ -598,8 +597,10 @@
     if (r) setApertureHole(mpvId, r)
     else clearApertureHole(mpvId)
   })
-  // Unmount/re-home safety: a tile's hole must never outlive it (the engine
-  // id moves with a drag-reorder swap — the stale slot must not keep a hole).
+  // Unmount safety: a tile's hole must never outlive it. Engine ids never
+  // move on a drag-reorder (MultiView's free list reassigns only on tile
+  // close), but a closed tile's id goes back to the pool — a stale hole
+  // keyed by it must not linger into whichever tile claims it next.
   $effect(() => () => clearApertureHole(mpvId))
 
   // ---- native surface pointer input -----------------------------------------

@@ -333,9 +333,8 @@ class SettingsStore {
    * Bumped on EVERY theme application, including re-applying the SAME id.
    * Svelte skips equal writes to `theme`, so saving edits to the ACTIVE
    * custom theme (same id, new values) changes no reactive id — yet effects
-   * that re-read computed theme colours (chat name contrast, the mpv OSC and
-   * infoblock feeds, the tile OSC feeds) must re-run. They key on this
-   * counter instead of the id.
+   * that re-read computed theme colours (chat name contrast) must re-run.
+   * They key on this counter instead of the id.
    */
   themeRev: number = $state(0)
   chatVisible: boolean = $state(readChatVisible())
