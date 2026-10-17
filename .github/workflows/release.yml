@@ -332,17 +332,18 @@ jobs:
             gstreamer1.0-libav \
             libmpv-dev
 
-      # The pipewire client (a hard DT_NEEDED entry of the bundled
-      # libmpv.so.2) cannot come from linuxdeploy: the pinned build has it on
-      # its built-in excludelist (the revision the @tauri-apps/cli 2.12 bump
-      # moved us to added it), so from v1.0.6 to v1.0.7 the AppImage shipped
-      # WITHOUT it and died in the loader on PipeWire-less hosts. Stage the
-      # build host's copy here; tauri.conf.json's `appimage.files` pre-places
-      # it in the AppDir (linuxdeploy leaves pre-placed files alone and still
-      # deploys their dependencies), and the guard step after the build
-      # verifies the result. Fail-closed: if the SONAME does not resolve
-      # through the system libmpv, do not build at all.
-      - name: Stage bundled AppImage libs (pipewire client)
+      # The pipewire and jack clients (hard DT_NEEDED entries of the bundled
+      # libmpv.so.2) cannot come from linuxdeploy: the pinned build has both
+      # on its built-in excludelist. The revision the @tauri-apps/cli 2.12
+      # bump moved us to added pipewire, so from v1.0.6 to v1.0.7 the AppImage
+      # shipped WITHOUT it and died in the loader on PipeWire-less hosts;
+      # libjack has been excluded far longer and was silently left for the
+      # host to provide. Stage the build host's copies here; tauri.conf.json's
+      # `appimage.files` pre-places them in the AppDir (linuxdeploy leaves
+      # pre-placed files alone and still deploys their dependencies), and the
+      # guard step after the build verifies the result. Fail-closed: if either
+      # SONAME does not resolve through the system libmpv, do not build at all.
+      - name: Stage bundled AppImage libs (pipewire + jack clients)
         run: |
           set -euo pipefail
           scripts/stage-appimage-libs.sh | tee staged-libs.txt
