@@ -41,6 +41,22 @@ export interface VersionNotes {
 }
 
 export const RELEASE_NOTES: Record<string, VersionNotes> = {
+  '1.0.8': {
+    added: [
+      'ℹ️ A channel-info panel next to the Videos button: avatar, bio, followers, account creation, live category and viewers, next scheduled stream, and the last broadcast for offline channels.',
+    ],
+    changed: [
+      '🎞️ The native engine renders video behind the page now — tooltips, dialogs, toasts and menus draw over the video instantly, and scrolling behaves like hls.js. The snapshot lag of the early engine is gone.',
+      '🎛️ Native playback uses the same HTML control bar as hls.js — play/pause, seek, volume, quality gear, VOD scrub extras — and native tiles regain the drag handle and reorder buttons. An accent "mpv" pill marks the active engine.',
+      '🪟 Windows starts at 1× UI scale (WebView2 already sizes the 1× design right); Linux and macOS keep 1.25×, and an explicitly chosen scale is kept.',
+    ],
+    fixed: [
+      '🐧 The AppImage launches again on systems without PipeWire or JACK — 1.0.6/1.0.7 could die in the dynamic loader before startup; a build guard now fails the build instead of letting that ship.',
+      '⚙️ Opening Settings no longer boots the native engine when its toggle is off.',
+      '🔧 AUR: kappastream-git builds again under a fresh rustup install.',
+      '🔒 TLS dependencies refreshed, clearing nine RustSec advisories (two high-severity).',
+    ],
+  },
   '1.0.7': {
     changed: [
       '🔍 The UI now starts at 1.25× — the old 1× default read small on laptop and big screens alike. An explicitly chosen scale is kept.',

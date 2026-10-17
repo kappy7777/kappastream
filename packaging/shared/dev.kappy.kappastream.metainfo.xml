@@ -79,6 +79,21 @@
   </content_rating>
 
   <releases>
+    <release version="1.0.8" date="2026-10-17">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.8</url>
+      <description>
+        <p>The native video engine renders behind a transparent page now:
+        tooltips, dialogs, toasts and menus draw over the video instantly,
+        and playback uses the same HTML control bar as hls.js — the quality
+        gear, VOD scrubbing and the multi-view tile controls included. A new
+        channel-info panel shows avatar, bio, followers, schedule and last
+        broadcast next to the Videos button.</p>
+        <p>The AppImage launches again on systems without PipeWire or JACK,
+        opening Settings no longer boots the native engine when its toggle
+        is off, Windows starts at 1× UI scale, and TLS dependencies are
+        refreshed against published advisories.</p>
+      </description>
+    </release>
     <release version="1.0.7" date="2026-10-09">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.7</url>
       <description>

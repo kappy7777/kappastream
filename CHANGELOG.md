@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-10-17
+
+### Added
+
+- **A channel-info panel next to the Videos button.** Avatar, bio,
+  follower count, account-creation date, live category and viewer count,
+  the next scheduled stream, and — for offline channels — the last
+  broadcast, from one anonymous request that fires only when the panel
+  opens. Escape closes it, like the other modals.
+
+### Changed
+
+- **The native engine renders video behind the page.** mpv now draws
+  into a surface below a transparent webview, and the page opens holes
+  where video should appear — so tooltips, dialogs, toasts, menus and
+  the Settings and About panels draw over the video as ordinary,
+  instant, fluid web content. 1.0.5 shipped the engine with
+  snapshot-composited overlays that could appear a beat late and move
+  less fluidly; that trade-off is gone. Pointer input reaches the page
+  directly, and scrolling a native stream under the top bar now behaves
+  exactly like hls.js. The engine stays opt-in under Settings → Player.
+
+- **The native engine uses the player's own HTML controls.** The
+  mpv-styled on-screen bar is gone: play/pause, seeking, volume, the
+  quality gear and the VOD scrub extras are the same HTML control bar
+  hls.js uses, through the same code path. Native multi-view tiles get
+  the standard tile bar again — drag handle and reorder buttons
+  included. A small accent "mpv" pill in the control bar (and in each
+  tile's bar) marks which engine is playing.
+
+- **Windows starts at 1× UI scale.** WebView2 already renders the 1×
+  design at the size Windows users expect; the 1.25× default (kept on
+  Linux and macOS) simply oversized the interface there. Fresh Windows
+  installs start at 1×, and Windows users who never moved the scale
+  slider move to 1× with this update — an explicitly chosen scale is
+  never overridden.
+
+### Fixed
+
+- **The AppImage launches again on systems without PipeWire or JACK.**
+  The bundler's library excludelist silently dropped libpipewire from
+  the 1.0.6 and 1.0.7 images, and libjack had been missing from every
+  AppImage since the native engine shipped — the bundled mpv hard-links
+  both, so on a host without the system twins the AppImage died in the
+  dynamic loader before the app even started. Both libraries ship
+  inside the image again, and the release build now walks the startup
+  library closure and fails on anything unresolved, so this class of
+  breakage can't ship silently again.
+
+- **Opening Settings no longer starts the native engine when its
+  toggle is off.** The availability probe created the engine — and with
+  it the overlay layout, at the cost of native edge-resize for the
+  session — the first time Settings opened, whatever the toggle said.
+  The Settings row now consults a side-effect-free probe; the engine
+  boots only when the toggle is on.
+
+- **kappastream-git builds again under a fresh rustup install.** A
+  brand-new rustup has no default toolchain, so the package's first
+  cargo call aborted; the build now pins RUSTUP_TOOLCHAIN=stable, which
+  the distro-package cargo path ignores.
+
+- **TLS dependencies refreshed** (rustls and quinn-proto), clearing
+  nine published RustSec advisories — two of them high-severity —
+  against the stack under the app's HTTP client and updater.
+
 ## [1.0.7] - 2026-10-09
 
 ### Changed
@@ -1150,7 +1215,8 @@ marks the milestone; it is not a breaking change.
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.0.7...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.0.8...HEAD
+[1.0.8]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.8
 [1.0.7]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.7
 [1.0.6]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.6
 [1.0.5]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.5
