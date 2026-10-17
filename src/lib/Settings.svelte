@@ -936,9 +936,7 @@
               {@render toggleRow(
                 'mpv-engine-label',
                 t('settings_mpvEngine'),
-                mpvAvailable || !mpvUnavailableReason
-                  ? t('settings_mpvEngineHint')
-                  : mpvUnavailableReason,
+                mpvAvailable || !mpvUnavailableReason ? t('settings_mpvEngineHint') : mpvUnavailableReason,
                 settings.mpvEngine,
                 () => settings.toggleMpvEngine(),
               )}

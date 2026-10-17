@@ -26,9 +26,7 @@ describe('borderless resize handles (App.svelte source contract)', () => {
   it('keeps all 8 edge handles, each wired to startWinResize', () => {
     for (const [edge, dir] of handles) {
       expect(source).toMatch(
-        new RegExp(
-          `class="rz rz-${edge}"[^>]*onmousedown=\\{\\(\\) => startWinResize\\('${dir}'\\)\\}`,
-        ),
+        new RegExp(`class="rz rz-${edge}"[^>]*onmousedown=\\{\\(\\) => startWinResize\\('${dir}'\\)\\}`),
       )
     }
     expect(source.match(/class="rz rz-/g)).toHaveLength(8)
