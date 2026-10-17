@@ -46,14 +46,14 @@
   } = $props()
 
   // ---- Experimental native video engine (LINUX mpv-embed builds only) ----
-  // The engine is Linux-only. The probe
-  // ALWAYS resolves: on Linux with the engine compiled in, a failed surface
-  // init carries the Rust-side reason; everywhere else (Windows/macOS, or a
-  // --no-default-features build) the Rust stub answers "not supported on
-  // this platform". Both render a DISABLED row with the reason — only a
-  // live engine shows the working toggle. A persisted mpvEngine=true copied
-  // from a Linux machine stays INERT here: the engine selection requires
-  // mpvAvailable and falls back to hls.js (video-backend.ts).
+  // The engine is Linux-only. Both probes ALWAYS resolve: on Linux with the
+  // engine compiled in, a failure carries the Rust-side reason; everywhere
+  // else (Windows/macOS, or a --no-default-features build) the Rust stub
+  // answers "not supported on this platform" for both. An unsupported build
+  // renders a DISABLED row with the reason — only a live engine shows the
+  // working toggle. A persisted mpvEngine=true copied from a Linux machine
+  // stays INERT here: the engine selection requires mpvAvailable and falls
+  // back to hls.js (video-backend.ts).
   let mpvAvailable = $state(false)
   let mpvUnavailableReason = $state('')
   // Compile-time target OS (the same authoritative `target_os` command App
@@ -82,24 +82,6 @@
       })
   })
 
-  // The mpv_available probe BOOTSTRAPS engine 0 (a libmpv core, a GL context
-  // and the webview reparent) — it must not run merely because this
-  // component (always mounted, hidden until the gear opens) exists. Fire it
-  // on the first panel open; ensure_engine is idempotent for later opens.
-  let mpvProbed = false
-  function probeMpvEngine(): void {
-    if (mpvProbed || !isTauri()) return
-    mpvProbed = true
-    void invoke<MpvAvailability>('mpv_available')
-      .then((a) => {
-        mpvAvailable = a?.available === true
-        mpvUnavailableReason = mpvAvailable ? '' : (a?.reason ?? 'engine init failed')
-      })
-      .catch(() => {
-        mpvAvailable = false // command not registered = default build
-      })
-  }
-
   // ---- Settings window -------------------------------------------------------
   // A centered About-sized modal with a section sidebar — every setting is
   // visible flat in its section pane (no disclosure rows). The last-open
@@ -108,9 +90,32 @@
   let open = $state(false)
   let section = $state<SettingsSection>('general')
 
+  // Which probe decides the engine row. With the engine OFF, opening this
+  // panel must NEVER bootstrap it: `mpv_available` creates engine 0 (a
+  // libmpv core, a GL context, the webview reparent into the native-overlay
+  // layout, MPRIS), which cannot be undone for the session — so the row
+  // reads the side-effect-free `mpv_supported` probe instead (dlopen/dlsym
+  // of the GL provider only, no GL calls). With the engine ON,
+  // `mpv_available` decides: App's gated effect has already bootstrapped
+  // engine 0 by then, so the call only reads the real init result. Fires on
+  // the panel open and re-fires when the toggle flips while the panel is
+  // open.
+  $effect(() => {
+    if (!open || !isTauri()) return
+    void invoke<MpvAvailability>(settings.mpvEngine ? 'mpv_available' : 'mpv_supported')
+      .then((a) => {
+        mpvAvailable = a?.available === true
+        mpvUnavailableReason = mpvAvailable ? '' : (a?.reason ?? 'engine init failed')
+      })
+      .catch(() => {
+        // Neither command registered (non-Tauri runs) — not available.
+        mpvAvailable = false
+        mpvUnavailableReason = ''
+      })
+  })
+
   function toggle(): void {
     open = !open
-    if (open) probeMpvEngine()
   }
 
   function closePanel(): void {
@@ -923,15 +928,21 @@
               settings.lowLatency,
               () => settings.toggleLowLatency(),
             )}
-            {#if mpvAvailable}
+            {#if mpvAvailable || settings.mpvEngine}
+              <!-- With the engine ON but the surface down, the row stays
+                   interactive so the toggle can be switched back off, and
+                   the Rust reason replaces the hint (the player has already
+                   fallen back to hls.js on its own). -->
               {@render toggleRow(
                 'mpv-engine-label',
                 t('settings_mpvEngine'),
-                t('settings_mpvEngineHint'),
+                mpvAvailable || !mpvUnavailableReason
+                  ? t('settings_mpvEngineHint')
+                  : mpvUnavailableReason,
                 settings.mpvEngine,
                 () => settings.toggleMpvEngine(),
               )}
-              {#if settings.mpvEngine}
+              {#if settings.mpvEngine && mpvAvailable}
                 <div class="hwdec-row">
                   <span class="toggle-label" id="mpv-hwdec-label">{t('settings_mpvHwdec')}</span>
                   <div class="lang-grid" role="radiogroup" aria-labelledby="mpv-hwdec-label">
@@ -949,9 +960,10 @@
                 </div>
               {/if}
             {:else if mpvUnavailableReason}
-              <!-- Flagged build whose surface failed to init: show WHY instead of
-                   hiding the row (a hidden row is indistinguishable from a default
-                   build and gives the user nothing to act on). -->
+              <!-- Engine OFF and the build can't run it (stub build, or the
+                   GL provider missing): show WHY instead of hiding the row
+                   (a hidden row is indistinguishable from a default build
+                   and gives the user nothing to act on). -->
               <div class="toggle-row toggle-row--disabled">
                 <span class="toggle-label" id="mpv-engine-label">
                   {t('settings_mpvEngine')}

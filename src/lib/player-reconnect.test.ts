@@ -10,6 +10,7 @@ import { mount, unmount } from 'svelte'
 
 const invokeCalls = vi.hoisted(() => ({
   mpvAvailable: 0,
+  mpvSupported: 0,
 }))
 
 const hlsMock = vi.hoisted(() => {
@@ -45,11 +46,14 @@ vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
   invoke: vi.fn(async (cmd: string) => {
     if (cmd === 'mpv_available') invokeCalls.mpvAvailable++
+    if (cmd === 'mpv_supported') invokeCalls.mpvSupported++
     switch (cmd) {
       case 'target_os':
         return 'linux'
       case 'mpv_available':
         return { available: false }
+      case 'mpv_supported':
+        return { available: true }
       case 'resolve_stream':
         return { ok: true, url: 'https://cdn.example.invalid/live.m3u8' }
       case 'streamlink_status':
@@ -148,6 +152,7 @@ afterEach(() => {
   chatStubControl.neverConnect = false
   chatStubSessions.length = 0
   invokeCalls.mpvAvailable = 0
+  invokeCalls.mpvSupported = 0
   settings.setMpvEngine(false)
   localStorage.clear()
   hlsMock.instances.length = 0
@@ -168,6 +173,81 @@ describe('mpv engine probe is lazy', () => {
     settings.setMpvEngine(true)
     await sleep(100)
     expect(invokeCalls.mpvAvailable).toBeGreaterThanOrEqual(1)
+  }, 15000)
+})
+
+describe('settings engine probe', () => {
+  async function openSettingsPlayback(): Promise<void> {
+    ;(q('.settings-btn') as HTMLButtonElement).click()
+    await sleep(30)
+    // Nav order: general, appearance, chat, playback, favorites, …
+    const nav = document.querySelectorAll<HTMLButtonElement>('.settings-nav-item')
+    nav[3]!.click()
+    await sleep(30)
+  }
+
+  function clickEngineToggle(): void {
+    const label = q('#mpv-engine-label')
+    const row = label.closest('.toggle-row') as HTMLElement | null
+    if (!row) throw new Error('missing engine toggle row')
+    row.click()
+  }
+
+  it('opening Settings with the engine off probes mpv_supported, never mpv_available', async () => {
+    localStorage.setItem('app-last-seen-version-v1', '99.0.0')
+    const target = document.createElement('div')
+    document.body.appendChild(target)
+    view = mount(App, { target })
+    await sleep(150)
+
+    await openSettingsPlayback()
+    await sleep(100)
+
+    // The row may query the side-effect-free capability probe, but the
+    // bootstrapping probe must not have run.
+    expect(invokeCalls.mpvSupported).toBeGreaterThanOrEqual(1)
+    expect(invokeCalls.mpvAvailable).toBe(0)
+  }, 15000)
+
+  it('with the engine on, opening Settings probes mpv_available instead', async () => {
+    settings.setMpvEngine(true)
+    localStorage.setItem('app-last-seen-version-v1', '99.0.0')
+    const target = document.createElement('div')
+    document.body.appendChild(target)
+    view = mount(App, { target })
+    await sleep(150)
+    const probesAfterMount = invokeCalls.mpvAvailable
+    expect(probesAfterMount).toBeGreaterThanOrEqual(1)
+
+    await openSettingsPlayback()
+    await sleep(100)
+
+    expect(invokeCalls.mpvAvailable).toBeGreaterThan(probesAfterMount)
+    expect(invokeCalls.mpvSupported).toBe(0)
+  }, 15000)
+
+  it('re-probes with the right command when the toggle flips while Settings is open', async () => {
+    settings.setMpvEngine(true)
+    localStorage.setItem('app-last-seen-version-v1', '99.0.0')
+    const target = document.createElement('div')
+    document.body.appendChild(target)
+    view = mount(App, { target })
+    await sleep(150)
+
+    await openSettingsPlayback()
+    await sleep(100)
+    expect(invokeCalls.mpvSupported).toBe(0)
+
+    // OFF: the side-effect-free probe takes over again.
+    clickEngineToggle()
+    await sleep(100)
+    expect(invokeCalls.mpvSupported).toBeGreaterThanOrEqual(1)
+
+    // ON: the real (idempotent, already-bootstrapped) probe decides.
+    const availableBefore = invokeCalls.mpvAvailable
+    clickEngineToggle()
+    await sleep(100)
+    expect(invokeCalls.mpvAvailable).toBeGreaterThan(availableBefore)
   }, 15000)
 })
 

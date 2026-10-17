@@ -234,6 +234,16 @@ fn gl_lib() -> Result<&'static GlLib, String> {
     Ok(GL_LIB.get().expect("GL provider just set"))
 }
 
+/// Side-effect-free capability check behind `mpv_supported`: ONLY the GL
+/// provider probe (`gl_lib` — dlopen/dlsym, no GL calls). No GTK, no GL
+/// context, no mpv core, no setlocale, no MPRIS, so a Settings panel opened
+/// with the engine toggle OFF never flips the window into the native-overlay
+/// layout. Warms the shared `GL_LIB` cache, which the first real engine
+/// then reuses.
+pub(super) fn gl_supported() -> Result<(), String> {
+    gl_lib().map(|_| ())
+}
+
 // ---------------------------------------------------------------------------
 // Widget handles across threads
 

@@ -47,8 +47,9 @@ commands plus one custom URI scheme to its WebView. The complete surface
   tiles); no command can mint extra mpv cores. The engine's OSD script
   lives in a private per-user runtime dir (0700, files 0600 — never the
   shared `/tmp`), and OSD bitmaps are passed to mpv by memory, not files.
-  The engine is a Linux-only feature by scope decision (2026-09-18):
-  everywhere else `mpv_available` resolves false with
+  The engine is a Linux-only
+  feature by scope decision (2026-09-18): everywhere else the
+  `mpv_available` / `mpv_supported` probes resolve false with
   "not supported on this platform" and the remaining `mpv_*` commands
   are not registered at all.
 - **Twitch GQL proxy** (`gql_fetch`) — a POST proxy to `gql.twitch.tv`

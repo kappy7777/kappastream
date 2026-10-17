@@ -46,8 +46,9 @@
 //
 // ARCHITECTURE
 //   - A small REGISTRY of engines keyed by id: 0 is the single-stream player
-//     (created lazily by the first `mpv_available` probe, so the Settings
-//     toggle knows availability before anything loads), 1..=4 are multi-view
+//     (created lazily by the first `mpv_available` probe — App fires it once
+//     the user opts in; Settings' pre-opt-in row reads the side-effect-free
+//     `mpv_supported` instead), 1..=4 are multi-view
 //     tile engines created on their first `mpv_load`. The `Mpv` handles are
 //     deliberately LEAKED (`Box::leak` → `&'static Mpv`): libmpv2's
 //     `RenderContext` borrows the `Mpv`, so storing both in one struct would
@@ -671,6 +672,29 @@ async fn with_core<R: Send>(
 pub struct AvailabilityPayload {
     pub available: bool,
     pub reason: Option<String>,
+}
+
+/// Side-effect-free capability probe for the Settings row BEFORE the user
+/// has opted in: "could this build's engine ever come up" without
+/// bootstrapping anything. The only check is the GL provider load
+/// (`linux::gl_supported` — dlopen/dlsym, no GL calls, no GTK, no GL
+/// context, no mpv core, no MPRIS), so merely opening Settings never
+/// reparents the window or disables tauri's undecorated-resize handler.
+/// `mpv_available` remains the real probe once the engine is toggled on:
+/// it creates engine 0 and reports whether the surface actually
+/// initialized.
+#[tauri::command]
+pub fn mpv_supported() -> AvailabilityPayload {
+    match platform::gl_supported() {
+        Ok(()) => AvailabilityPayload {
+            available: true,
+            reason: None,
+        },
+        Err(reason) => AvailabilityPayload {
+            available: false,
+            reason: Some(reason),
+        },
+    }
 }
 
 /// Runtime availability probe for the frontend (also engine 0's eager

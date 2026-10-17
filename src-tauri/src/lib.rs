@@ -22,8 +22,10 @@ mod mpv;
 // RESOLVE with an explicit reason, so the Settings row explains itself
 // ("not supported on this platform") on a disabled toggle instead of
 // silently hiding, and the frontend's engine selection falls back to
-// hls.js. Every other mpv_* command is simply not registered in these
-// builds — invokes reject cleanly (all frontend call sites catch).
+// hls.js. `mpv_supported` mirrors the Linux build's side-effect-free
+// capability probe (Settings fires it before the user has opted in).
+// Every other mpv_* command is simply not registered in these builds —
+// invokes reject cleanly (all frontend call sites catch).
 #[cfg(not(all(feature = "mpv-embed", target_os = "linux")))]
 mod mpv_unavailable {
     use serde::Serialize;
@@ -36,6 +38,14 @@ mod mpv_unavailable {
 
     #[tauri::command]
     pub fn mpv_available() -> AvailabilityPayload {
+        AvailabilityPayload {
+            available: false,
+            reason: Some("not supported on this platform".to_string()),
+        }
+    }
+
+    #[tauri::command]
+    pub fn mpv_supported() -> AvailabilityPayload {
         AvailabilityPayload {
             available: false,
             reason: Some("not supported on this platform".to_string()),
@@ -166,6 +176,10 @@ pub fn run() {
             mpv::mpv_available,
             #[cfg(not(all(feature = "mpv-embed", target_os = "linux")))]
             mpv_unavailable::mpv_available,
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
+            mpv::mpv_supported,
+            #[cfg(not(all(feature = "mpv-embed", target_os = "linux")))]
+            mpv_unavailable::mpv_supported,
             #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_load,
             #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
