@@ -270,10 +270,10 @@
   // True while ANY native (mpv) surface is live: the single player's engine,
   // OR multi-view tiles (native whenever the engine setting is on and the
   // engine compiled in — the same condition MultiView derives as
-  // tilesNative). Drives the app--native-video root class, whose
-  // strip-styling overrides (opaque tooltip/toast/menu pills, disabled
-  // reveal animations) must hold in multi-view too: a semi-transparent pill
-  // over the aperture pre-blends with the video showing through it.
+  // tilesNative). Drives the app--native-video root class, whose aperture
+  // rules (transparent canvas/.app/.video-pane/.player chain, invisible
+  // <video> anchor, the backdrop, the fullscreen chrome hiding) must hold
+  // in multi-view too.
   const anyNativeSurface = $derived(nativeVideoActive || (multiView && settings.mpvEngine && mpvAvailable))
   // Intrinsic display aspect (width/height) of the CURRENT stream. NaN until
   // the active backend reports dimensions (hls: the <video>'s metadata;
@@ -4699,36 +4699,6 @@
     to {
       opacity: 1;
     }
-  }
-
-  /* Native-engine mode: tooltips are composited over the video as bitmap
-     snapshots. Their 0.92-alpha background blends with whatever the PAGE
-     has behind them (the empty player) before the bitmap lands on the
-     video, and the drop shadow reads as a dark smudge over a bright
-     picture — over the video they must be opaque and shadow-free so the
-     composited half matches the live half. The reveal animation is also
-     disabled: a snapshot fired at reveal time would otherwise freeze a
-     HALF-FADED frame into the composited bitmap (there is no settle
-     burst to re-capture; nothing listens for the animation to end).
-     (The notification menu's equivalent override lives in
-     NotifyMenu.svelte — App styles can't reach into child components.) */
-  .app--native-video .global-tooltip {
-    background: var(--bg-panel);
-    box-shadow: none;
-    animation: none;
-  }
-
-  /* Same reveal-freeze reasoning as the tooltip above: the toast's
-     150 ms slide-fade would be captured mid-flight by the page-snapshot
-     overlay. Dismissal is a 3.5 s state timer (element removal), so
-     nothing depends on the animation completing. The background also goes
-     opaque for the same reason as the tooltip's: its semi-transparent
-     --bg-overlay-strong would pre-blend with the dark page inside the
-     snapshot and read as darkened over the video. */
-  .app--native-video .notif-toast {
-    background: var(--bg-panel);
-    box-shadow: none;
-    animation: none;
   }
 
   /* Hidden probe that measures how position:fixed left/top map to visual

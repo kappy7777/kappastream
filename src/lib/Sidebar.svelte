@@ -995,19 +995,6 @@
       visibility 0s linear 0s;
   }
 
-  /* Native-engine mode: the tooltip rides the page-snapshot overlay over
-     the video; the 120 ms opacity fade would be frozen half-faded by the
-     snapshot (see App.svelte's .global-tooltip override — same
-     reasoning). Show AND hide become instant (pure class flips, no
-     listeners to break). The background goes opaque and the shadow drops
-     for the same reason as the tooltip's: semi-transparent
-     --bg-overlay-strong pre-blends with the dark page inside the snapshot
-     bitmap, and the shadow reads as a dark smudge over the picture. */
-  :global(.app--native-video) .fav-tooltip {
-    background: var(--bg-panel);
-    box-shadow: none;
-    transition: none;
-  }
   .fav-tooltip-name {
     font-weight: 700;
     color: var(--text-primary);

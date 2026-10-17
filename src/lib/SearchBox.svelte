@@ -341,25 +341,6 @@
     }
   }
 
-  /* Native-engine mode: the dropdown rides the page-snapshot overlay over
-     the video; the 120 ms slide-fade would be frozen mid-flight by the
-     snapshot (see App.svelte's .global-tooltip override — same
-     reasoning). The dropdown appears/leaves via {#if}, so nothing
-     depends on the animation ending. The drop shadow goes too — it
-     pre-blends with the dark page inside the snapshot bitmap and reads
-     as a dark smudge over the picture. */
-  :global(.app--native-video) .search-dropdown {
-    box-shadow: none;
-    animation: none;
-  }
-
-  /* Same reasoning for the row highlight: over the video the dropdown is a
-     snapshot bitmap refreshed on hover crossing — a 100 ms background fade
-     would be captured mid-flight. Snap the highlight to its final color. */
-  :global(.app--native-video) .search-opt {
-    transition: none;
-  }
-
   .search-status {
     padding: 8px 10px;
     font-size: 12px;
