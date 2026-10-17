@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { backdropRects } from './native-aperture.svelte'
+import { backdropRects, surfaceApertureHole } from './native-aperture.svelte'
 
 const BOX = { x: 0, y: 0, w: 1000, h: 600 }
 
@@ -118,6 +118,79 @@ describe('backdropRects', () => {
       { x: 0, y: 310, w: 1000, h: 290 },
     ])
     expect(rects).toEqual([{ left: 0, top: 290, width: 1000, height: 20 }])
+  })
+})
+
+// The hole vs. the surface: the surface rect itself slides under the top
+// bar unclipped, while the hole carved into the page stops at the scroll
+// viewport's clip line — the backdrop (not the bar's own paint) covers the
+// folded rows, and the hole never escapes the surface (no black-floor
+// seam).
+describe('surfaceApertureHole', () => {
+  it('not scrolled: the hole is the whole surface', () => {
+    expect(surfaceApertureHole({ x: 100, y: 60, w: 800, h: 450 }, 60)).toEqual({
+      x: 100,
+      y: 60,
+      w: 800,
+      h: 450,
+    })
+  })
+
+  it('partly scrolled: the top is raised to the clip line, bottom shared', () => {
+    expect(surfaceApertureHole({ x: 100, y: -40, w: 800, h: 450 }, 60)).toEqual({
+      x: 100,
+      y: 60,
+      w: 800,
+      h: 350,
+    })
+  })
+
+  it('fully scrolled out: no hole', () => {
+    expect(surfaceApertureHole({ x: 100, y: -450, w: 800, h: 450 }, 60)).toBeNull()
+    // The bottom edge exactly AT the clip line is already gone (h < 1).
+    expect(surfaceApertureHole({ x: 100, y: -390, w: 800, h: 450 }, 60)).toBeNull()
+  })
+
+  it('clipTop 0 means no clip beyond the window top GDK enforces anyway', () => {
+    expect(surfaceApertureHole({ x: 10, y: -120, w: 640, h: 360 }, 0)).toEqual({
+      x: 10,
+      y: 0,
+      w: 640,
+      h: 240,
+    })
+  })
+
+  it('a fractional clipTop snaps to whole px (same grid as the surface)', () => {
+    expect(surfaceApertureHole({ x: 0, y: 0, w: 640, h: 360 }, 60.4)).toEqual({
+      x: 0,
+      y: 60,
+      w: 640,
+      h: 300,
+    })
+    expect(surfaceApertureHole({ x: 0, y: 0, w: 640, h: 360 }, 60.6)).toEqual({
+      x: 0,
+      y: 61,
+      w: 640,
+      h: 299,
+    })
+  })
+
+  it('the hole always lies inside the surface', () => {
+    for (const [sy, sh, clipTop] of [
+      [60, 450, 0],
+      [-40, 450, 60],
+      [-400, 450, 60.5],
+      [120, 300, 60],
+      [-450, 450, 60],
+    ] as const) {
+      const surface = { x: 25, y: sy, w: 800, h: sh }
+      const hole = surfaceApertureHole(surface, clipTop)
+      if (hole === null) continue
+      expect(hole.x).toBe(surface.x)
+      expect(hole.w).toBe(surface.w)
+      expect(hole.y).toBeGreaterThanOrEqual(surface.y)
+      expect(hole.y + hole.h).toBe(surface.y + surface.h)
+    }
   })
 })
 

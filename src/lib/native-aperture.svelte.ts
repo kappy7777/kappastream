@@ -71,6 +71,29 @@ export function apertureHoles(): Readonly<Record<number, ApertureRect | undefine
 }
 
 /**
+ * The aperture hole for one engine's surface: the surface rect — already
+ * rounded, the EXACT rect pushed to mpv_set_rect — clipped at the scroll
+ * viewport's top edge `clipTop` (visual px; 0 = no clip). The surface
+ * itself is never clipped: it sits below the webview and simply slides
+ * under the top bar, where the window edge hides the covered part. The
+ * HOLE must stop at the clip line so the opaque backdrop — not the bar's
+ * own paint, which may be translucent at its border — covers the folded
+ * rows, exactly the pixels the hls path clips inside .video-scroll. And it
+ * must stay INSIDE the surface rect (x/w untouched, top raised, bottom
+ * shared): a hole edge beyond the surface would paint the backdrop over
+ * nothing and let the black floor show as a seam.
+ *
+ * `null` when nothing of the surface is below the clip line (scrolled
+ * fully out) — the caller clears the hole instead.
+ */
+export function surfaceApertureHole(surface: ApertureRect, clipTop: number): ApertureRect | null {
+  const top = Math.max(surface.y, Math.round(clipTop))
+  const bottom = surface.y + surface.h
+  if (bottom - top < 1) return null
+  return { x: surface.x, y: top, w: surface.w, h: bottom - top }
+}
+
+/**
  * Decompose `box` minus the union of `holes` into the minimal set of
  * non-overlapping axis-aligned rectangles (a y-sweep: the distinct hole
  * tops/bottoms slice the box into horizontal strips; within each strip the

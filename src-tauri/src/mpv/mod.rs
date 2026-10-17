@@ -178,14 +178,16 @@ impl TimeThrottle {
 }
 
 /// The native region under the webview mpv renders into. All rects in
-/// LOGICAL px, window-relative. The implementation marshals to the UI
-/// thread itself; calls are cheap and non-blocking. `fold_top` is the
-/// number of rows currently hidden ABOVE the rect (the page scrolled the
-/// video under the top bar); the surface clips them at presentation time.
+/// LOGICAL px, window-relative. The rect is the FULL fitted content rect —
+/// it may extend under the top bar or past the window edge (negative x/y
+/// stay valid): whatever is covered is hidden by the page's opaque chrome
+/// and its clipped aperture hole, not by shrinking the surface. The
+/// implementation marshals to the UI thread itself; calls are cheap and
+/// non-blocking.
 pub trait VideoSurface: Send + Sync {
     fn show(&self);
     fn hide(&self);
-    fn set_rect(&self, x: i32, y: i32, w: i32, h: i32, fold_top: i32);
+    fn set_rect(&self, x: i32, y: i32, w: i32, h: i32);
 }
 
 struct Engine {
@@ -914,29 +916,17 @@ pub fn mpris_set_art(
 /// Position the surface (logical px, window-relative, zoom-adjusted by the
 /// frontend). Cheap: the surface marshals to the UI thread itself, so this
 /// never blocks the caller. GTK-ONLY (no libmpv): stays a sync command —
-/// running on the main thread is correct for it. `fold_top` is the number
-/// of picture rows hidden ABOVE the rect: the page scrolled the fold under
-/// the top bar, and the surface — a sibling BELOW the webview, seen through
-/// the aperture hole the page carves — was sized to the still-visible
-/// part. The engine clips those rows at PRESENTATION time (Linux: mpv
-/// renders the full unfolded picture into a constant-size offscreen and a
-/// 1:1 blit presents only the visible band — see OffscreenTarget in
-/// linux.rs), so the clip always lands on the same frame as the window
-/// resize: the same pixels the webview engine shows under the bar, with no
-/// mis-fitted transitional frame.
+/// running on the main thread is correct for it. The rect is the FULL
+/// fitted content rect and may extend under the top bar or past the window
+/// edge (negative x/y stay valid): the surface is a sibling BELOW the
+/// webview, seen through the aperture hole the page carves, and the page's
+/// opaque chrome plus that clipped hole hide whatever is covered.
 #[tauri::command]
-pub fn mpv_set_rect(
-    id: Option<u32>,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    fold_top: Option<i32>,
-) -> Result<(), String> {
+pub fn mpv_set_rect(id: Option<u32>, x: i32, y: i32, w: i32, h: i32) -> Result<(), String> {
     // Pure GTK marshaling (the surface dispatches to the UI thread itself):
     // a brief lock to clone the surface handle, never held across the call.
     let surface = engine_handle(engine_id(id)?)?.surface;
-    surface.set_rect(x, y, w, h, fold_top.unwrap_or(0));
+    surface.set_rect(x, y, w, h);
     Ok(())
 }
 

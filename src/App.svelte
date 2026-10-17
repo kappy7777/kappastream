@@ -68,12 +68,13 @@
   import { initStreamlinkVersion, installedStreamlinkVersion, streamlinkFloorHint } from './lib/streamlink-floor'
   import { formatCompact, formatAge } from './lib/format'
   import { effectiveQualities, mpvQualities } from './lib/qualities'
-  import { clipRectTop, fitContentRect } from './lib/video-fit'
+  import { fitContentRect } from './lib/video-fit'
   import {
     apertureHoles,
     backdropRects,
     clearApertureHole,
     setApertureHole,
+    surfaceApertureHole,
     type ApertureRect,
   } from './lib/native-aperture.svelte'
   import { CHAT_SIZE_MAX, CHAT_SIZE_MIN, nextChatSize } from './lib/chat-size'
@@ -265,7 +266,8 @@
   // frame while the new one loads) and resets on teardown.
   let nativePresented = $state(false)
   // The last rect pushed to mpv_set_rect for engine 0 (visual px) — the
-  // aperture hole rides the exact same geometry, never a second computation.
+  // aperture hole derives from this exact geometry (clipped at the scroll
+  // viewport's top), never a second computation.
   let nativeSurfaceRect = $state<{ x: number; y: number; w: number; h: number } | null>(null)
   // True while ANY native (mpv) surface is live: the single player's engine,
   // OR multi-view tiles (native whenever the engine setting is on and the
@@ -1214,10 +1216,14 @@
   let playerFoldEl = $state<HTMLElement | null>(null)
   let playerBox = $state({ x: 0, y: 0, w: 0, h: 0 })
   // The scroll viewport's top edge in visual px (== the top bar's bottom):
-  // the line where .video-scroll's overflow clip starts hiding the fold. 0
-  // means "no clip" — the window's own top, which GDK enforces on the
-  // surface natively. Fullscreen lifts the player out of the scroll flow
-  // (position: fixed), so nothing clips there.
+  // the line where .video-scroll's overflow clip starts hiding the fold. The
+  // native SURFACE ignores it — it slides under the top bar unclipped and
+  // GDK hides whatever passes the window edge — but the aperture HOLE is
+  // clipped here, so the opaque backdrop (not the bar's own, possibly
+  // translucent paint) covers the folded rows: the same pixels .video-scroll
+  // hides on the hls path. 0 means "no clip" — the window's own top, which
+  // GDK enforces on the surface natively. Fullscreen lifts the player out of
+  // the scroll flow (position: fixed), so nothing clips there.
   let stageClipTop = $state(0)
   $effect(() => {
     const stage = playerVideoEl
@@ -1283,36 +1289,19 @@
     return { x: playerBox.x + c.x, y: playerBox.y + c.y, w: c.w, h: c.h }
   })
 
-  // The content rect clipped at the scroll viewport's top edge (the top
-  // bar): the native surface sits BELOW the page's webview and shows only
-  // through the aperture hole, so it must reproduce the page's own overflow
-  // clip itself — the surface is sized to the still-visible band and the
-  // engine folds the hidden rows away at presentation time (an offscreen
-  // render + blit on its side), so the visible picture fills the clipped
-  // surface edge to edge — the same pixels the hls.js path shows under the
-  // bar.
-  const clippedContentRect = $derived.by(() => {
-    const r = videoContentRect
-    const c = clipRectTop(r.x, r.y, r.w, r.h, stageClipTop)
-    return { x: c.x, y: c.y, w: c.w, h: c.h }
-  })
-
-  // The native surface tracks the CONTENT rect: mpv then fills its surface
-  // edge to edge — no mpv-painted black bars — and the page paints the
-  // letterbox where the bars used to be (via the aperture backdrop below —
-  // identical pixels to the hls path's side bars).
+  // The native surface tracks the full, UNCLIPPED content rect: mpv then
+  // fills its surface edge to edge — no mpv-painted black bars — and the
+  // page paints the letterbox where the bars used to be (via the aperture
+  // backdrop below — identical pixels to the hls path's side bars). The rect
+  // is never shrunk to the scroll viewport's visible band: the surface sits
+  // BELOW the webview, so whatever scrolls under the top bar is covered by
+  // the page's opaque chrome (and, past the window edge, by GDK itself).
+  // The GLArea therefore keeps its size through a scroll — mpv's render
+  // target and picture fit stay constant, with nothing to fold or re-fit.
   $effect(() => {
     if (!nativeVideoActive) return
-    const r = clippedContentRect
+    const r = videoContentRect
     if (r.w < 2 || r.h < 1) return
-    // Rows hidden above the clip line, in px (not a fraction — the engine
-    // blits an integer band and px keep the mapping exact): the full
-    // content height minus the clipped one, so a video scrolled almost
-    // entirely past the line still folds to at most its own height minus
-    // the 1px sliver the clip keeps. The clip rides the same push as the
-    // rect, and the engine applies both on the same frame, so scrolling
-    // cannot squeeze a mis-fitted frame in between.
-    const fold = Math.max(0, Math.round(videoContentRect.h - r.h))
     const rect = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) }
     nativeSurfaceRect = rect
     void invoke('mpv_set_rect', {
@@ -1320,23 +1309,26 @@
       y: rect.y,
       w: rect.w,
       h: rect.h,
-      foldTop: fold,
     }).catch(() => {})
   })
 
   // ---- Native aperture (the transparent hole the video shows through) ------
   // The webview sits ABOVE the native surfaces (linux.rs layering); the page
   // is opaque everywhere except the hole(s) the aperture registry carves.
-  // Engine 0's hole rides the exact rect pushed above and opens only once
-  // the first frame presented (nativePresented) — loading/error overlays
-  // then render over the normal themed page, exactly like the hls path.
+  // Engine 0's hole is the surface rect pushed above, clipped at the scroll
+  // viewport's top edge (surfaceApertureHole): the surface itself slides
+  // under the top bar, but the hole must stop at the clip line so the
+  // backdrop covers the folded rows. The hole opens only once the first
+  // frame presented (nativePresented) — loading/error overlays then render
+  // over the normal themed page, exactly like the hls path.
   $effect(() => {
     if (!nativeVideoActive || !nativePresented) {
       clearApertureHole(0)
       return
     }
     const r = nativeSurfaceRect
-    if (r) setApertureHole(0, r)
+    const hole = r ? surfaceApertureHole(r, stageClipTop) : null
+    if (hole) setApertureHole(0, hole)
     else clearApertureHole(0)
   })
   // Unmount safety: the hole must never outlive this component (the test
