@@ -226,12 +226,6 @@ interface MpvAspectEvent {
   aspect: number | null
 }
 
-/** `mpv://action` payload — an OSD button press on engine `id`. */
-export interface MpvActionEvent {
-  id: number
-  action: string
-}
-
 /** `mpv://seeking` / `mpv://seeked` payloads — just the engine id. */
 type MpvIdEvent = number
 

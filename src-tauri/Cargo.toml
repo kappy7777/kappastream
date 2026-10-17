@@ -53,10 +53,8 @@ mpv-embed = [
   "dep:gtk",
   "dep:glib",
   "dep:gdk",
-  "dep:gio",
   "dep:webkit2gtk",
   "dep:libc",
-  "dep:cairo",
   "dep:zbus",
 ]
 
@@ -115,19 +113,10 @@ libloading = { version = "0.9", optional = true }
 gtk = { version = "0.18", optional = true }
 glib = { version = "0.18", optional = true }
 gdk = { version = "0.18", optional = true }
-# mpv-embed only: the webkit2gtk snapshot API takes a gio cancellable.
-# Version matches what gtk already resolves to so the trees unify.
-gio = { version = "0.18", optional = true }
 webkit2gtk = { version = "2.0", optional = true }
 # mpv-embed only: pin LC_NUMERIC back to "C" before creating the libmpv core
 # (see pin_c_numeric_locale in src/mpv/mod.rs).
 libc = { version = "0.2", optional = true }
-# mpv-embed only: the Linux surface's INPUT-PASS-THROUGH region (the empty
-# cairo::Region handed to the video EventBox's input_shape_combine_region —
-# see src/mpv/linux.rs). Package renamed to the lib name so the code says
-# `cairo::…`; version matches what gtk already resolves to so the trees
-# unify.
-cairo = { version = "0.18", package = "cairo-rs", optional = true }
 # mpv-embed only: the MPRIS D-Bus service that puts the native engine on the
 # desktop's media controls (hardware media keys — the webview's own MPRIS
 # bridge only registers real, audio-producing media elements). Version and

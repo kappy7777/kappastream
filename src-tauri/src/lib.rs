@@ -184,16 +184,6 @@ pub fn run() {
             mpv::mpris_set_art,
             #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_set_rect,
-            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
-            mpv::mpv_pointer,
-            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
-            mpv::mpv_set_surface_visible,
-            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
-            mpv::mpv_page_snapshot,
-            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
-            mpv::mpv_script_msg,
-            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
-            mpv::mpv_set_bitmap,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
