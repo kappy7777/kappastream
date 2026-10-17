@@ -9,56 +9,71 @@
 //      └─ webkit2gtk::WebView         (wry, pack_start'ed, expand+fill)
 //
 // The reparent (all on the GTK main thread, once, at engine init) — the
-// video sits ABOVE the page, not under it:
-//   1. create a GtkOverlay and make the WebView its BASE child (the page,
-//      fully OPAQUE — the app never punches a transparency hole again),
-//   2. add ONE full-size GtkFixed as the overlay's only overlay child, and
-//      place every engine's GtkEventBox (own GdkWindow, wrapping the
-//      GtkGLArea mpv renders into) inside that Fixed via put()/move_().
-//      GtkFixed is THE positioning container here, chosen against the
-//      overlay's own child placement after reading gtkoverlay.c:
-//      gtk_overlay_child_allocate() calls gdk_window_move_resize() on each
-//      visible child's per-child GdkWindow on EVERY allocation pass,
-//      re-defaulting it to the computed halign/valign spot — a correction
-//      hook only survives that if the child's size-allocate re-emits, which
-//      gtk skips for unchanged allocations. With several equal-sized video
-//      quadrants that stranded bottom-row surfaces at the default (0,0)
-//      spot (the "tiles render in the top row" round). GtkFixed instead
-//      positions children THROUGH their allocation (gtk_fixed_size_allocate
-//      → gtk_widget_size_allocate at (child.x, child.y)) — the allocation
-//      IS the position, nothing ever re-defaults the window, and an
-//      unchanged allocation short-circuit leaves the window exactly where
-//      it already is. The Fixed itself is parented into the overlay's
-//      per-child GdkWindow (created at overlay realize, re-shown ⇒ RAISED
-//      above the webview on every pass) which spans the placed children;
-//      input shapes make that full-size window click-through (see below).
-//      (The original "no GtkFixed" objection — it swallowed every click —
-//      predates the 1px-corner input shapes; with them the Fixed's window
-//      is pointer-transparent exactly like the video windows.)
-//   3. REPLACE THE WINDOW'S CHILD: window.remove(vbox), window.add(overlay).
-// Step 3 is load-bearing — the overlay must be the window's direct GtkBin
-// child: tauri's undecorated-resize handler walks `webview.parent().parent()`
-// and unwraps a gtk::Window downcast of the grandparent in a C callback that
-// cannot unwind. webview(base) → overlay → window satisfies it; packing the
-// overlay inside tao's vbox does NOT (grandparent = GtkBox → SIGABRT on the
-// first click — this shipped once). tao's now-unparented vbox stays alive
-// via tao's own reference and is never re-read after startup except by the
-// unused webview-reparenting feature.
+// video sits BELOW the page:
+//   1. create a GtkOverlay; its BASE child is an opaque black DrawingArea
+//      (the "floor") that guarantees the window stays compositor-opaque
+//      everywhere — no desktop-through transparency exists at any layer,
+//   2. add ONE full-size GtkFixed as the overlay's first overlay child —
+//      the video layer — and place every engine's GtkEventBox (own
+//      GdkWindow, wrapping the GtkGLArea mpv renders into) inside that
+//      Fixed via put()/move_(). GtkFixed is THE positioning container
+//      here, chosen against the overlay's own child placement after
+//      reading gtkoverlay.c: gtk_overlay_child_allocate() calls
+//      gdk_window_move_resize() on each visible child's per-child
+//      GdkWindow on EVERY allocation pass, re-defaulting it to the
+//      computed halign/valign spot — a correction hook only survives that
+//      if the child's size-allocate re-emits, which gtk skips for
+//      unchanged allocations. With several equal-sized video quadrants
+//      that stranded bottom-row surfaces at the default (0,0) spot (the
+//      "tiles render in the top row" round). GtkFixed instead positions
+//      children THROUGH their allocation (gtk_fixed_size_allocate →
+//      gtk_widget_size_allocate at (child.x, child.y)) — the allocation IS
+//      the position, nothing ever re-defaults the window, and an unchanged
+//      allocation short-circuit leaves the window exactly where it already
+//      is.
+//   3. add tao's VBOX (the webview's own parent — the webview widget itself
+//      is NEVER unparented) as the overlay's SECOND overlay child on top of
+//      the video Fixed, expanding to fill the overlay. The webview's
+//      background color is set to RGBA(0,0,0,0) at runtime (its backing
+//      layer is the only transparent thing in the stack). Detaching the
+//      webview from the vbox instead — reparenting the webview widget
+//      itself — drags WebKitGTK through its own hierarchy-changed path and
+//      the rebuilt accelerated surface comes up OPAQUE (measured 2026-10-17:
+//      audio + pointer forwarding fine, the page's aperture painted the
+//      black floor over the video); moving the passive vbox keeps the
+//      webview's own widget state untouched.
+//   4. REPLACE THE WINDOW'S CHILD: window.remove(vbox) BEFORE the
+//      overlay.add_overlay(vbox) above (a container refuses a widget that
+//      still has a parent), then window.add(overlay), and give the GTK
+//      window itself an opaque black CSS background so a resize's newly
+//      exposed area can never flash the desktop (belt and suspenders under
+//      the floor).
+// tauri's undecorated-resize handler walks `webview.parent().parent()` and
+// downcasts the grandparent to a gtk::Window — but it does so EXACTLY ONCE,
+// at webview creation time (tauri-runtime-wry attaches the handler while the
+// tree is still webview → vbox → window), so this later reparent cannot
+// affect it; nothing re-resolves the grandparent afterwards.
 //
-// WHY ABOVE (no transparency anywhere): WebKitGTK cannot render
-// transparent regions correctly on this stack — its webview surface NEVER
-// CLEARS between frames (observed three ways: stale-opaque-pixel smears
-// that clear only on a ~20 s incidental flush; a 2/255 fold tint that
-// ACCUMULATED to solid black; and a GL-free vanilla transparent window
-// whose hole lagged seconds behind). Every working web-UI-over-mpv app
-// (Stremio, iptvnator) uses Chromium. So this design uses NO transparency:
-// the page stays opaque, the video surface sits on top of it, and every
-// GdkWindow on the video side (the overlay's per-child window, the
-// EventBox's own, the GLArea's) carries a 1px-corner input shape so every
-// pointer event over the video falls through to the page beneath — the
-// existing HTML click/wheel/dblclick handlers on the (invisible,
-// hit-testable) <video> keep working, and the HTML controls render in a
-// strip BELOW the video instead of over it.
+// WHY BELOW works now (and the old above-page design existed at all): the
+// pre-2026-10 attempts at web-UI-over-video tried DESKTOP-through
+// transparency (transparent OS window + transparent page) — that is the
+// path WebKitGTK cannot do on this stack (never-clearing smears,
+// accumulating tint). The intra-window layout above never shows the
+// desktop: the floor is opaque, the webview composites its page over its
+// own alpha-0 backing, and wherever the PAGE does not paint (the
+// "aperture" the frontend carves around the video rect), the video
+// sibling underneath shows through. The frontend owns the aperture: it
+// keeps the page's painted chrome opaque right up to the video edge
+// (backdrop panels cut around the rect, see src/lib/native-aperture) so
+// the app is pixel-identical to the hls.js engine outside the video. The
+// same mechanism Stremio ships (GTK4/WebKitGTK 6) and the tauri-plugin-video
+// project validated on this exact stack (2026-10).
+//
+// Because the webview is the TOPMOST child, ALL pointer input reaches the
+// page natively — no input shapes, no pass-through, and the existing HTML
+// click/wheel/dblclick handlers work exactly as on the hls.js path. Page
+// UI (dialogs, dropdowns, tooltips, toasts) renders above the video by
+// DOM order alone; the legacy page-snapshot compositing path is dormant.
 //
 // mpv renders through the render API into the GLArea's framebuffer on the
 // GLArea's `render` signal: GTK binds the area's own FBO before emitting it,
@@ -67,17 +82,6 @@
 // (GL renders Y-up, video is Y-down). mpv's update callback marshals to the
 // main thread and calls queue_render(); GTK/GL is never touched from mpv's
 // threads.
-//
-// PAGE UI ABOVE THE VIDEO (the "layers" question): the app's dialogs,
-// dropdowns, tooltips and toasts are webview pixels and the webview sits
-// UNDER the video — GTK cannot raise PART of a webview, and making the
-// whole page transparent is the design WebKitGTK disproved (see the
-// post-mortem above). Instead the engine re-draws their PIXELS over the
-// video: `webkit_web_view_get_snapshot` rasterizes the page, the crop over
-// the overlapping UI is composited through the same overlay-add path as
-// the OSD's avatar/thumbnail bitmaps, and pointer input already falls
-// through the video's input shapes onto the real elements underneath — so
-// the overlaid UI is visible AND interactive (see `page_snapshot`).
 //
 // GL symbols are resolved through a dlopened libGL.so.1 / libOpenGL.so.0 —
 // on GLVND systems (every modern distro) both export the RAW gl* entry
@@ -567,6 +571,15 @@ pub(super) fn create(
     let window = app
         .get_webview_window(crate::tray::MAIN_WINDOW)
         .ok_or("main window not found")?;
+    // The webview's backing layer must composite with alpha for the video
+    // beneath to show through the page's aperture. WebKitGTK derives its
+    // accelerated surface's format from the background it sees, so this is
+    // the Tauri-level call (webview base color AND the window's own
+    // background) dispatched BEFORE the reparent below — the message queue
+    // processes it ahead of the with_webview dispatch.
+    window
+        .set_background_color(Some(tauri::webview::Color(0, 0, 0, 0)))
+        .map_err(|e| format!("webview background color failed: {e}"))?;
     let (tx, rx) = mpsc::channel();
     let app_handle = app.clone();
     window
@@ -587,6 +600,7 @@ fn init_on_main_thread(
     mpv: &'static Mpv,
     app: AppHandle,
 ) -> Result<LinuxSurface, String> {
+    use webkit2gtk::WebViewExt;
     let gl = gl_lib()?;
 
     // ---- one-time reparent (first engine only; see OVERLAY_BOOTSTRAP) ----
@@ -615,53 +629,81 @@ fn init_on_main_thread(
             .ok_or("tao vbox's parent is not a GtkWindow (tao/wry layout changed?)")?;
 
         let overlay = gtk::Overlay::new();
-        // Detach the webview from tao's vbox FIRST — gtk_container_add
-        // refuses a widget that still has a parent (just a warning + no-op,
-        // but the webview would end up parentless and the window blank; this
-        // exact mis-order shipped once).
-        #[allow(deprecated)]
-        vbox.remove(&webview);
-        // The webview becomes the overlay's BASE child — the fully opaque
-        // page.
-        #[allow(deprecated)]
-        overlay.add(&webview);
-        // The overlay must become the WINDOW's direct child — not be packed
-        // into tao's vbox. Load-bearing: tauri's undecorated-resize handler
-        // (tauri-runtime-wry undecorated_resizing.rs, attached to this
-        // webview for the borderless window) walks `webview.parent().parent()`
-        // and UNWRAPS a gtk::Window downcast of the grandparent, in a C
-        // callback that cannot unwind — any other shape aborts the app on the
-        // first click (an earlier version packed the overlay into the vbox,
-        // making the grandparent the GtkBox; exactly that shipped and
-        // crashed). With the overlay as the window's bin child the chain is
-        // webview(base) → overlay → window and both tauri handlers keep
-        // working. tao's vbox itself is only ever re-read by the (unused
-        // here) webview-reparenting feature, so leaving it unparented — still
-        // referenced by tao — is safe.
+        overlay.set_hexpand(true);
+        overlay.set_vexpand(true);
+        // The opaque floor: the overlay's BASE child, painting solid black
+        // and stopping propagation so GTK's default DrawingArea draw cannot
+        // clear the paint back to transparent on some Wayland compositors.
+        // This is what keeps the window compositor-opaque everywhere —
+        // transparency only ever exists BETWEEN the floor and the page.
+        let floor = gtk::DrawingArea::new();
+        floor.set_hexpand(true);
+        floor.set_vexpand(true);
+        floor.connect_draw(|_, context| {
+            context.set_source_rgb(0.0, 0.0, 0.0);
+            let _ = context.paint();
+            gtk::glib::Propagation::Stop
+        });
+
+        // The ONE positioning container for every engine's EventBox (see
+        // the module header): the overlay's first overlay child = the video
+        // layer, BELOW the webview added next. Expands to the overlay's full
+        // size — the per-child GdkWindow GtkOverlay gives it is sized by its
+        // allocation, and a small Fixed would clip every engine's video
+        // window to that extent. Never positioned anywhere but (0,0);
+        // per-engine placement is the Fixed's job. Added BEFORE realize so
+        // the overlay's realize pass creates its per-child GdkWindow.
+        let fixed = gtk::Fixed::new();
+        fixed.set_hexpand(true);
+        fixed.set_vexpand(true);
+        fixed.set_can_focus(false);
+
+        // The whole "HTML above mpv" mechanism in one call: the webview's
+        // own backing layer becomes transparent, so wherever the page does
+        // not paint (the frontend's aperture) the video Fixed beneath shows
+        // through. The OS window never becomes transparent — the floor and
+        // the page's painted chrome keep it opaque.
+        webview.set_background_color(&gdk::RGBA::new(0.0, 0.0, 0.0, 0.0));
+        // Detach tao's vbox from the window FIRST — gtk_container_add
+        // refuses a widget that still has a parent (just a warning + no-op;
+        // this exact mis-order shipped once). The VBOX moves under the
+        // overlay as one unit: the webview widget itself is never unparented
+        // (see the module header — reparenting the webview directly leaves
+        // the rebuilt accelerated surface opaque). As an overlay child it
+        // must EXPAND to fill the overlay (the window-child slot did that
+        // implicitly).
         #[allow(deprecated)]
         window.remove(&vbox);
+        vbox.set_hexpand(true);
+        vbox.set_vexpand(true);
         #[allow(deprecated)]
-        window.add(&overlay);
-        // The ONE positioning container for every engine's EventBox (see
-        // the module header): added as the overlay's only overlay child,
-        // full-size via its natural child extents, never positioned
-        // anywhere but (0,0) — per-engine placement is the Fixed's job.
-        // Added BEFORE realize so the overlay's realize pass creates its
-        // per-child GdkWindow; shown (⇒ raised above the webview) once the
-        // overlay is realized. Windowless (GTK3 Fixed default): the
-        // EventBoxes' GdkWindows are parented straight into the Fixed's
-        // overlay per-child window.
-        let fixed = gtk::Fixed::new();
-        fixed.set_can_focus(false);
+        overlay.add(&floor);
         #[allow(deprecated)]
         overlay.add_overlay(&fixed);
-        // show_all would un-hide the video box — show exactly the widgets
-        // that should be visible. Realizing/mapping the overlay also creates
-        // its per-child GdkWindow for every overlay child (hidden along with
-        // the still-hidden Fixed).
-        overlay.show();
-        overlay.realize();
-        fixed.show();
+        #[allow(deprecated)]
+        overlay.add_overlay(&vbox);
+
+        // The overlay must become the WINDOW's direct child — not stay
+        // detached. tauri's undecorated-resize handler resolved the
+        // webview's grandparent window ONCE at webview creation (before any
+        // of this), so the re-shape cannot break it.
+        #[allow(deprecated)]
+        window.add(&overlay);
+        // The window's own GTK background: opaque black, so a resize's
+        // newly exposed area (before the floor reallocates) can never show
+        // the desktop or the theme default through the transparent webview.
+        let background = gtk::CssProvider::new();
+        background
+            .load_from_data(b".ks-native-video-window { background-color: #000; }")
+            .map_err(|e| format!("window background css failed: {e}"))?;
+        window.style_context().add_class("ks-native-video-window");
+        window
+            .style_context()
+            .add_provider(&background, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        // show_all is safe here: the only widgets in the tree are the floor,
+        // the (still empty) Fixed and the webview — per-engine EventBoxes
+        // are added later and stay hidden until their first frame.
+        window.show_all();
         let _ = OVERLAY_BOOTSTRAP.set(OverlayBootstrap {
             overlay: MainThread(overlay.clone()),
             fixed: MainThread(fixed.clone()),
@@ -673,14 +715,16 @@ fn init_on_main_thread(
     // GL area: hidden until the first frame presents (see mod.rs — the
     // surface is revealed on PlaybackRestart so the page's loading/error
     // overlays aren't covered by a black box during load). It never needs
-    // focus: every video-side GdkWindow is input-shaped, so pointer events
-    // go to the webview below.
+    // focus, and input needs no plumbing at all: the webview is the TOPMOST
+    // overlay child, so every pointer event reaches the page natively.
     let gl_area = gtk::GLArea::new();
     gl_area.set_visible(false);
     gl_area.set_can_focus(false);
     // The EventBox gives the video its own GdkWindow inside the Fixed's
     // overlay per-child window; the Fixed allocates it at the (x, y) the
-    // last set_rect moved it to, sized to its size request.
+    // last set_rect moved it to, sized to its size request. (Historically
+    // the EventBox existed to carry the input pass-through shapes; it stays
+    // because the per-engine GdkWindow structure keeps allocation stable.)
     let video_box = gtk::EventBox::new();
     #[allow(deprecated)] // gtk3 Container::add — the gtk4-style API is not in gtk 0.18
     video_box.add(&gl_area);
@@ -768,20 +812,9 @@ fn init_on_main_thread(
     // render context may ever be used with.
     // Realize top-down: gtk_widget_realize needs every ancestor realized
     // before the GLArea can create its GdkWindow + GL context (the overlay
-    // was realized during the bootstrap above).
+    // was realized during the bootstrap above — show_all realized it).
     video_box.realize();
     gl_area.realize();
-    // INPUT PASS-THROUGH, the whole point of the EventBox: a 1px-corner
-    // input region on every GdkWindow the video owns or rides in makes
-    // every pointer event over the video fall through to the webview
-    // window below — the page keeps its click / wheel / dblclick handling
-    // on the (invisible, hit-testable) <video>, exactly like the hls.js
-    // path. Shaped AFTER realize (all windows exist) and re-applied by the
-    // size-allocate hook (the overlay DESTROYS + recreates the per-child
-    // window on unrealize/realize cycles, and a fresh window starts
-    // unshaped). See apply_input_passthrough for why a 1px corner, not an
-    // empty region.
-    apply_input_passthrough(&video_box, &gl_area);
     if let Some(err) = gl_area.error() {
         return Err(format!("GtkGLArea context error: {}", err.message()));
     }
@@ -886,20 +919,6 @@ fn init_on_main_thread(
         }
         glib::Propagation::Stop
     });
-
-    // PASS-THROUGH HOOK: re-applies the input shapes after every
-    // allocation (the overlay DESTROYS + recreates the Fixed's per-child
-    // window on unrealize/realize cycles, and a fresh window starts
-    // unshaped). POSITIONING needs no hook anymore — the Fixed allocates
-    // the EventBox at its stored (x, y), and nothing ever moves the
-    // window except that allocation.
-    {
-        let video_box_hook = video_box.clone();
-        let gl_area_hook = gl_area.clone();
-        video_box.connect_size_allocate(move |_w, _alloc| {
-            apply_input_passthrough(&video_box_hook, &gl_area_hook);
-        });
-    }
 
     Ok(LinuxSurface {
         app,
@@ -1229,43 +1248,6 @@ fn store_page_snapshot(crop: PageCrop) {
             Err(err) => eprintln!("[mpv] overlay-add: {err}"),
         }
     }
-}
-
-/// A 1×1 corner input region. NOT an empty region on purpose: empty is
-/// ambiguous on some GDK/Wayland paths ("no shape set" ⇒ default FULL
-/// input — which would swallow every click over the video), a 1px corner
-/// has unambiguous pass-through semantics everywhere.
-fn corner_input_region() -> cairo::Region {
-    let region = cairo::Region::create();
-    let corner = cairo::RectangleInt::new(0, 0, 1, 1);
-    let _ = region.union_rectangle(&corner);
-    region
-}
-
-/// Shape one GdkWindow for click-through. The `parent()` guard keeps the
-/// TOPLEVEL GdkWindow (no parent) untouchable — shaping that would swallow
-/// every event in the whole window. `None` (widget not realized yet, or a
-/// windowless widget without a parent window) is skipped; the
-/// size-allocate hook re-applies as windows appear.
-fn shape_pass_through(win: Option<gdk::Window>) {
-    if let Some(win) = win {
-        if win.parent().is_some() {
-            let region = corner_input_region();
-            win.input_shape_combine_region(&region, 0, 0);
-        }
-    }
-}
-
-/// Pass-through for every GdkWindow on the video side: the overlay's
-/// per-child GdkWindow wrapping the GtkFixed (it is the EventBox's parent
-/// window — full-size, and an unshaped one would eat every click in the
-/// whole window), the EventBox's own window, and the GLArea's window if it
-/// has one (a windowless GLArea reports its parent's window, already
-/// shaped).
-fn apply_input_passthrough(video_box: &gtk::EventBox, gl_area: &gtk::GLArea) {
-    shape_pass_through(video_box.parent_window());
-    shape_pass_through(video_box.window());
-    shape_pass_through(gl_area.window());
 }
 
 #[cfg(test)]

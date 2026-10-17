@@ -29,7 +29,7 @@
   import PinnedMessage from './PinnedMessage.svelte'
   import { pinnedChat } from './pinned-chat.svelte'
   import { activeRoomModes } from './irc'
-  import { startPageOverlayManager } from './page-overlay'
+  import { apertureHoles, backdropRects, type ApertureRect } from './native-aperture.svelte'
   import ChatModesPill from './ChatModesPill.svelte'
   import {
     singleChatEntries,
@@ -69,6 +69,10 @@
     onAuthorityEngine: (id: number | null) => void
     /** invoke('mpv_available') result from App (feature build + surface). */
     mpvAvailable: boolean
+    /** The measured UI-scale zoom factor (App's .zoom-probe) — the stage
+     *  backdrop positions its fixed-layer px with the same division by k
+     *  the tooltip math uses. */
+    zoomK: number
   }
   const {
     isWindows,
@@ -78,6 +82,7 @@
     onAuthorityControls,
     onAuthorityEngine,
     mpvAvailable,
+    zoomK,
   }: Props = $props()
 
   // Per-tile shortcut handles (registered by Tile via onTileHandles): every
@@ -238,37 +243,47 @@
     if (next) untrack(() => (mpvIds = next))
   })
 
-  // Per-tile native video areas (registered by Tile via onNativeArea). A
-  // SvelteMap so the overlay manager below genuinely re-runs when tiles come
-  // and go (a plain $state Map is invisible to .set()/.delete()). Keyed by
-  // tile id; the engine id rides along from mpvIds.
-  const nativeAreas = new SvelteMap<string, HTMLElement>()
-  function onNativeArea(tileId: string, el: HTMLElement | null): void {
-    if (el) nativeAreas.set(tileId, el)
-    else nativeAreas.delete(tileId)
-  }
-
   // ---- Page UI vs the native tile surfaces ----------------------------------
-  // The shared page-overlay manager (lib/page-overlay.ts), driven against
-  // EVERY native tile area instead of the one player rect: full modals
-  // (Settings/About/…) hide ALL surfaces (mpv_set_surface_visible
-  // broadcasts), and small strips (tooltips, the update banner, toasts) are
-  // composited OVER each intersecting tile via the same page-snapshot
-  // overlay path (keep-masked, per-tile ks-page geometry + snapshot). THIS
-  // side contributes the per-tile geometry — the grid cell rects, with the
-  // engine ids riding along from mpvIds; tile page UI over the native
-  // surfaces rides mpv's own OSC (the tiles feed it per engine id).
+  // The webview sits ABOVE every native surface (see src-tauri/src/mpv/
+  // linux.rs), so page UI over the tiles is ordinary DOM painting over the
+  // per-tile aperture holes — no compositing, no snapshotting, no modal
+  // ducking. The grid's stage backdrop below paints the #000 the grid
+  // itself used to paint, cut around exactly those holes.
+  let mvGridBox = $state<{ x: number; y: number; w: number; h: number } | null>(null)
   $effect(() => {
-    if (!tilesNative) return
-    if (nativeAreas.size === 0) return
-    return startPageOverlayManager(() =>
-      [...nativeAreas.entries()].flatMap(([tileId, el]) => {
-        const id = mpvIds.get(tileId)
-        if (id === undefined || !el.isConnected) return []
-        return [{ id, box: el.getBoundingClientRect() }]
-      }),
-    )
+    const stage = gridEl
+    if (!tilesNative || !stage) {
+      mvGridBox = null
+      return
+    }
+    void zoomK // a zoom change moves the grid in visual px without resizing it
+    let frame = 0
+    const measure = (): void => {
+      frame = 0
+      if (!stage.isConnected) return
+      const r = stage.getBoundingClientRect()
+      if (r.width < 2 || r.height < 2) return
+      mvGridBox = { x: r.left, y: r.top, w: r.width, h: r.height }
+    }
+    const schedule = (): void => {
+      if (!frame) frame = requestAnimationFrame(measure)
+    }
+    const ro = new ResizeObserver(schedule)
+    ro.observe(stage)
+    ro.observe(document.documentElement)
+    schedule()
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      ro.disconnect()
+    }
   })
+  const mvBackdropRects = $derived.by(() => {
+    const box = mvGridBox
+    if (!box) return []
+    const holeList = Object.values(apertureHoles()).filter((r): r is ApertureRect => r !== undefined)
+    return backdropRects(box, holeList)
+  })
+  const fmtBackdropPx = (v: number): string => String(+(v / (zoomK || 1)).toFixed(2))
 
   // The active chat tab follows tileStore.activeChat (moved by chat-tab clicks
   // AND tile clicks — NOT by anything audio-related).
@@ -814,7 +829,7 @@
 </script>
 
 <div class="mv-main" style="--chat-size:{chatSize}px">
-  <div class="mv-stage">
+  <div class="mv-stage" class:mv-stage--native={tilesNative}>
     {#if count === 0}
       <div class="mv-empty">{t('mv_addStreamHint')}</div>
     {:else}
@@ -827,6 +842,21 @@
         bind:this={gridEl}
         style={gridStyle}
       >
+        {#if tilesNative && mvGridBox}
+          <!-- Stage backdrop for native tiles: paints the grid's #000 around
+               the per-tile aperture holes (below every tile — DOM order —
+               but above the app-wide backdrop, whose themed color it
+               replaces inside the grid exactly like the grid's own
+               background did on the hls path). -->
+          <div class="mv-backdrop" aria-hidden="true">
+            {#each mvBackdropRects as r, i (i)}
+              <div
+                class="mv-backdrop-rect"
+                style={`left:${fmtBackdropPx(r.left - (mvGridBox?.x ?? 0))}px; top:${fmtBackdropPx(r.top - (mvGridBox?.y ?? 0))}px; width:${fmtBackdropPx(r.width)}px; height:${fmtBackdropPx(r.height)}px;`}
+              ></div>
+            {/each}
+          </div>
+        {/if}
         {#each tileStore.tiles as tile, i (tile.id)}
           <Tile
             {tile}
@@ -835,7 +865,6 @@
             isDropTarget={dropTargetId === tile.id}
             {isWindows}
             {onTileHandles}
-            {onNativeArea}
             onTileActivate={activateTile}
             onTileDragStart={startDrag}
             gridArea={tileGridArea(i)}
@@ -1242,6 +1271,24 @@
     flex-direction: column;
     background: #000;
     overflow: hidden;
+  }
+  /* Native-engine tiles: the stage and grid stop painting so the per-tile
+     aperture holes reach the surfaces beneath; the mv-backdrop (first child
+     of the grid) paints the #000 around them — identical pixels to the
+     grid's own background on the hls path, seams included. */
+  .mv-stage--native,
+  .mv-stage--native .mv-grid {
+    background: transparent;
+  }
+  .mv-backdrop {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .mv-backdrop-rect {
+    position: absolute;
+    background: #000;
   }
   .mv-empty {
     flex: 1;

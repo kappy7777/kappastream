@@ -73,7 +73,13 @@
   import { effectiveQualities, mpvQualities, qualityLabel } from './lib/qualities'
   import { stripBitmap, renderInfoBlock } from './lib/osd-bitmaps'
   import { clipRectTop, fitContentRect, pointerFractions } from './lib/video-fit'
-  import { startPageOverlayManager } from './lib/page-overlay'
+  import {
+    apertureHoles,
+    backdropRects,
+    clearApertureHole,
+    setApertureHole,
+    type ApertureRect,
+  } from './lib/native-aperture.svelte'
   import { CHAT_SIZE_MAX, CHAT_SIZE_MIN, nextChatSize } from './lib/chat-size'
   import { mentionMatcher } from './lib/mention'
 
@@ -255,14 +261,23 @@
   // True while a stream is actually loaded on the native engine — drives the
   // page's transparent "video hole" (CSS at the bottom) and the rect pusher.
   let nativeVideoActive = $state(false)
+  // The native engine has presented its first frame (backend 'playing'),
+  // mirroring the Rust-side surface reveal on PlaybackRestart: the aperture
+  // hole opens only then, so the loading/error overlays render over the
+  // normal themed page instead of over the black floor beneath the video.
+  // Stays true across channel switches (the surface keeps showing the old
+  // frame while the new one loads) and resets on teardown.
+  let nativePresented = $state(false)
+  // The last rect pushed to mpv_set_rect for engine 0 (visual px) — the
+  // aperture hole rides the exact same geometry, never a second computation.
+  let nativeSurfaceRect = $state<{ x: number; y: number; w: number; h: number } | null>(null)
   // True while ANY native (mpv) surface is live: the single player's engine,
   // OR multi-view tiles (native whenever the engine setting is on and the
   // engine compiled in — the same condition MultiView derives as
   // tilesNative). Drives the app--native-video root class, whose
   // strip-styling overrides (opaque tooltip/toast/menu pills, disabled
-  // reveal animations) must hold in multi-view too: its tiles snapshot the
-  // same page strips over native surfaces, and a semi-transparent pill
-  // pre-blends with the dark page inside the snapshot bitmap.
+  // reveal animations) must hold in multi-view too: a semi-transparent pill
+  // over the aperture pre-blends with the video showing through it.
   const anyNativeSurface = $derived(nativeVideoActive || (multiView && settings.mpvEngine && mpvAvailable))
   // Intrinsic display aspect (width/height) of the CURRENT stream. NaN until
   // the active backend reports dimensions (hls: the <video>'s metadata;
@@ -418,6 +433,11 @@
   // calc(... / var(--ui-zoom, 1)) sizing in the stylesheets address. The two
   // divergences are independent.)
   let zoomK = $state(1)
+  // The window box in VISUAL px (the documentElement rect — window.innerWidth
+  // has an engine-dependent zoom space). The native-video backdrop computes
+  // its painted rects in this space and divides by zoomK for styling, the
+  // same discipline as the tooltip math below.
+  let visualWinBox = $state({ w: 0, h: 0 })
 
   $effect(() => {
     // Recompute k when the UI scale changes (and once the probe mounts).
@@ -425,6 +445,19 @@
     if (!probeEl) return
     const r = probeEl.getBoundingClientRect()
     zoomK = r.left / 100 || 1
+    const root = document.documentElement.getBoundingClientRect()
+    visualWinBox = { w: Math.round(root.width), h: Math.round(root.height) }
+  })
+
+  // Window resizes move the visual box without a zoom change to re-run the
+  // probe effect above.
+  $effect(() => {
+    const onResize = (): void => {
+      const root = document.documentElement.getBoundingClientRect()
+      visualWinBox = { w: Math.round(root.width), h: Math.round(root.height) }
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   })
 
   $effect(() => {
@@ -998,6 +1031,9 @@
     // it into the player status (the HTML paths transition via their attach
     // callbacks instead).
     if (nativeVideoActive && playerStatus === 'loading') playerStatus = 'playing'
+    // First frame presented → the surface revealed (Rust reveals on
+    // PlaybackRestart) → open the aperture hole.
+    if (nativeVideoActive) nativePresented = true
   }
 
   function onVideoTimeUpdate(): void {
@@ -1255,10 +1291,10 @@
   })
 
   // The native surface tracks the CONTENT rect: mpv then fills its surface
-  // edge to edge — no mpv-painted black bars — and the themed page shows
-  // where the bars used to be (identical to the hls path's side bars). The
-  // OSD width IS the surface width now, so ks-osc's bar spans exactly the
-  // video too.
+  // edge to edge — no mpv-painted black bars — and the page paints the
+  // letterbox where the bars used to be (via the aperture backdrop below —
+  // identical pixels to the hls path's side bars). The OSD width IS the
+  // surface width now, so ks-osc's bar spans exactly the video too.
   $effect(() => {
     if (!nativeVideoActive) return
     const r = clippedContentRect
@@ -1271,14 +1307,54 @@
     // rect, and the engine applies both on the same frame, so scrolling
     // cannot squeeze a mis-fitted frame in between.
     const fold = Math.max(0, Math.round(videoContentRect.h - r.h))
+    const rect = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) }
+    nativeSurfaceRect = rect
     void invoke('mpv_set_rect', {
-      x: Math.round(r.x),
-      y: Math.round(r.y),
-      w: Math.round(r.w),
-      h: Math.round(r.h),
+      x: rect.x,
+      y: rect.y,
+      w: rect.w,
+      h: rect.h,
       foldTop: fold,
     }).catch(() => {})
   })
+
+  // ---- Native aperture (the transparent hole the video shows through) ------
+  // The webview sits ABOVE the native surfaces (linux.rs layering); the page
+  // is opaque everywhere except the hole(s) the aperture registry carves.
+  // Engine 0's hole rides the exact rect pushed above and opens only once
+  // the first frame presented (nativePresented) — loading/error overlays
+  // then render over the normal themed page, exactly like the hls path.
+  $effect(() => {
+    if (!nativeVideoActive || !nativePresented) {
+      clearApertureHole(0)
+      return
+    }
+    const r = nativeSurfaceRect
+    if (r) setApertureHole(0, r)
+    else clearApertureHole(0)
+  })
+  // Unmount safety: the hole must never outlive this component (the test
+  // suite mounts the real App).
+  $effect(() => () => clearApertureHole(0))
+
+  // The canvas-transparent mode rides the same signal as the root class:
+  // html/body's background is the deepest opaque paint over the aperture
+  // (see the :global(html.ks-native-video) rule), and the backdrop already
+  // repaints that exact color around every hole.
+  $effect(() => {
+    const on = anyNativeSurface
+    document.documentElement.classList.toggle('ks-native-video', on)
+    return () => document.documentElement.classList.remove('ks-native-video')
+  })
+
+  // The painted chrome around every open hole, in VISUAL px. Positioning a
+  // fixed element under the UI-scale zoom is engine-dependent (see zoomK), so
+  // the styling pass divides by k — the same discipline as the tooltip math.
+  const appBackdropRects = $derived.by(() => {
+    const holeList = Object.values(apertureHoles()).filter((r): r is ApertureRect => r !== undefined)
+    return backdropRects({ x: 0, y: 0, w: visualWinBox.w, h: visualWinBox.h }, holeList)
+  })
+  const fmtBackdropPx = (v: number): string => String(+(v / (zoomK || 1)).toFixed(2))
 
   // ---- Native surface pointer forwarding (mpv OSC) --------------------------
   // mpv's on-screen controller lives INSIDE mpv (OSD, rendered with the
@@ -1372,45 +1448,10 @@
     }
   })
 
-  // ---- Native surface ducking + page overlays ---------------------------------
-  // The shared page-overlay manager (lib/page-overlay.ts) drives this single
-  // surface and MultiView's per-tile surfaces with the same machinery: full
-  // modals hide the surface, small strips are composited over the video as
-  // masked snapshots. THIS side contributes the geometry — the FITTED
-  // CONTENT rect of the player (same shared fit the surface pusher used —
-  // never a second computation), clipped at the scroll viewport's top edge
-  // exactly like the pushed surface rect (the fractions are relative to the
-  // rect the surface ACTUALLY occupies), re-read on every manager recheck
-  // so the player element and the video aspect stay live effect
-  // dependencies.
-  $effect(() => {
-    if (!nativeVideoActive) return
-    return startPageOverlayManager(() => {
-      const stage = playerVideoEl
-      if (!stage) return []
-      const pr = stage.getBoundingClientRect()
-      if (pr.width < 2 || pr.height < 2) return []
-      const fit = fitContentRect(pr.width, pr.height, videoAspect)
-      const c = clipRectTop(pr.left + fit.x, pr.top + fit.y, fit.w, fit.h, stageClipTop)
-      return [
-        {
-          id: 0,
-          box: {
-            left: c.x,
-            top: c.y,
-            right: c.x + c.w,
-            bottom: c.y + c.h,
-            width: c.w,
-            height: c.h,
-          },
-          // The fold fraction: under a partial scroll the OSD composites in
-          // the FULL (unrolled) composition's space, so the overlay
-          // fractions must be remapped out of the visible-rect space.
-          hiddenTop: c.hidden,
-        },
-      ]
-    })
-  })
+  // (Page UI over the native video needs no compositing since the webview
+  // sits ABOVE the surfaces: dialogs, dropdowns, tooltips and toasts are
+  // ordinary DOM painting over the aperture hole. The snapshot/ducking
+  // machinery the old above-page design needed is retired.)
 
   // ---- Native OSD (ks-osc) wiring --------------------------------------------
   // The in-video controls are mpv's OSD (src-tauri/src/mpv/ks-osc.lua): the
@@ -1915,6 +1956,8 @@
     // the shared session now.
     playbackSession.teardown(videoEl)
     nativeVideoActive = false
+    nativePresented = false
+    nativeSurfaceRect = null
     // The next stream's aspect arrives with its own metadata / video-params;
     // until then the shared content rect falls back to 16/9 (a 9:16 VOD
     // must not impose its shape on the next stream's first frames).
@@ -3424,6 +3467,20 @@
   class:app--fullscreen={isFullscreen}
   class:app--native-video={anyNativeSurface}
 >
+  {#if anyNativeSurface && visualWinBox.w > 0 && visualWinBox.h > 0}
+    <!-- The native-video backdrop: paints the page's opaque chrome around
+         the aperture holes (see lib/native-aperture.svelte.ts). Sits at the
+         very bottom of the page's paint order — every real element paints
+         over it — and is the ONLY thing allowed to paint behind a hole. -->
+    <div class="native-backdrop" aria-hidden="true">
+      {#each appBackdropRects as r, i (i)}
+        <div
+          class="native-backdrop-rect"
+          style={`left:${fmtBackdropPx(r.left)}px; top:${fmtBackdropPx(r.top)}px; width:${fmtBackdropPx(r.width)}px; height:${fmtBackdropPx(r.height)}px;`}
+        ></div>
+      {/each}
+    </div>
+  {/if}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <!-- Double-click on empty title-bar space toggles maximize (mouse-only
        convenience; the dedicated maximize button is the accessible path). -->
@@ -3599,6 +3656,7 @@
         {isWindows}
         {chatSize}
         {mpvAvailable}
+        {zoomK}
         onAuthorityVideo={(el) => {
           authorityTileVideo = el
         }}
@@ -4106,6 +4164,16 @@
     height: 100%;
     width: 100%;
     display: flex;
+  }
+
+  /* Native-engine mode: the html/body background is the DEEPEST page paint
+     over the aperture — every hole would land on it no matter what the
+     subtree does. The class is toggled on documentElement (same signal as
+     the .app--native-video root class); the app-wide backdrop repaints this
+     exact token around every hole, so the canvas itself goes transparent. */
+  :global(html.ks-native-video),
+  :global(html.ks-native-video body) {
+    background: transparent;
   }
 
   :global(::-webkit-scrollbar) {
@@ -4629,36 +4697,45 @@
     background: #000;
   }
 
-  /* Experimental native video engine (mpv-embed builds): the native video
-     surface sits ABOVE the (fully opaque) page and covers exactly the fitted
-     video content rect — input-transparent, so clicks/wheel/dblclick over
-     the video still land on the (invisible, hit-testable) <video> below it
-     and the existing HTML handlers keep working. NO transparency anywhere:
-     WebKitGTK cannot render transparent regions correctly on this stack (its
-     webview surface never clears between frames — smears, accumulating
-     tints, laggy holes; every working web-UI-over-mpv app uses Chromium
-     instead). The in-video CONTROLS are mpv's OSD (ks-osc.lua); only the
-     "Back to live" banner and the VOD resume bar render BELOW the video in
-     .native-strip (see the markup). The page's loading/error overlays stay
-     inside .player — the native surface stays hidden until the first frame
-     presents. */
+  /* Native video engine (mpv-embed builds): the native surfaces sit BELOW
+     the webview (see src-tauri/src/mpv/linux.rs), which itself has an
+     alpha-0 backing layer — the page is opaque everywhere except the
+     APERTURE holes the backdrop carves around the video rects
+     (lib/native-aperture.svelte.ts). Every ancestor that painted a
+     background over the player area goes transparent in this mode; the
+     backdrop panels reproduce those exact pixels (same tokens) around the
+     hole. The <video> stays mounted as the invisible, hit-testable anchor
+     the pointer handlers ride on. The in-video CONTROLS remain mpv's OSD
+     (ks-osc.lua); only the "Back to live" banner and the VOD resume bar
+     render BELOW the video in .native-strip (see the markup). The page's
+     loading/error overlays stay inside .player — the aperture opens only
+     once the first frame presented. */
   .app--native-video .video {
     opacity: 0;
   }
-  /* Native-engine mode: the surface covers exactly the fitted content rect
-     (not the box), so the page paints the letterbox bars here — themed, the
-     same side bars the hls path shows. (Historically this was transparent
-     for the Windows/macOS below-webview designs; those are gone — the
-     engine is Linux-only, and on Linux the surface sits ABOVE the page, so
-     an explicit themed backdrop is both safe and required now that the
-     surface no longer fills the box.) */
+  .app.app--native-video,
+  .app--native-video .video-pane,
   .app--native-video .player {
+    background: transparent;
+  }
+  /* The backdrop: lowest paint order in the page (negative z-index under
+     the root stacking context — .app must never create one), the only
+     thing allowed to paint behind a hole. Its panels carry the themed app
+     background; fullscreen switches them to the hls path's deliberate #000
+     cinema bars. */
+  .native-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: -2147483647;
+    overflow: hidden;
+    pointer-events: none;
+    contain: strict;
+  }
+  .native-backdrop-rect {
+    position: absolute;
     background: var(--bg-app);
   }
-  /* Native fullscreen keeps the hls path's deliberate #000 cinema bars: the
-     surface only covers the content rect there too, so the page must paint
-     the bars black (this overrides the themed backdrop above). */
-  .app--fullscreen.app--native-video .player {
+  .app--fullscreen .native-backdrop-rect {
     background: #000;
   }
   .native-strip {

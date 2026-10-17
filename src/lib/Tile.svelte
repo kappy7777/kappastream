@@ -47,6 +47,7 @@
   import { listen } from '@tauri-apps/api/event'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { settings } from './settings.svelte.ts'
+  import { clearApertureHole, setApertureHole } from './native-aperture.svelte'
   import { toKsvodProxyUrl, shouldRecoverStallAfterPause } from './playback'
   import { PlaybackSession, resolveLiveStream } from './playback-session.svelte'
   import { GQL_REFRESH_INTERVAL_MS } from './gql'
@@ -85,10 +86,6 @@
      *  shared slots) is what keeps a non-authority tile's effect from
      *  wiping the authority's handles. */
     onTileHandles: (tileId: string, handles: TileShortcutHandles | null) => void
-    /** Reports this tile's native-video-area element (the rect the mpv
-     *  surface must cover + the box MultiView's overlay manager checks
-     *  page UI against). Null on unmount. */
-    onNativeArea: (tileId: string, el: HTMLElement | null) => void
     /** Tile activation (video-surface click) — MultiView routes it through
      *  its merged-chats policy (a merged tile moves only audio authority). */
     onTileActivate: (tileId: string) => void
@@ -115,7 +112,6 @@
     isDragging,
     isDropTarget,
     onTileHandles,
-    onNativeArea,
     onTileActivate,
     onTileDragStart,
     gridArea,
@@ -150,6 +146,13 @@
   /** True while the CURRENT load plays on the native engine (drives the
    *  audio-application + shortcut-target branches). */
   let nativeActive = $state(false)
+  /** The tile's engine has presented its first frame — the aperture hole
+   *  opens only then, mirroring the Rust-side surface reveal (see
+   *  App.svelte's nativePresented). */
+  let nativePresented = $state(false)
+  /** The last rect pushed to mpv_set_rect for this tile's engine (visual
+   *  px) — the aperture hole rides the exact same geometry. */
+  let nativeTileRect = $state<{ x: number; y: number; w: number; h: number } | null>(null)
   $effect(() => {
     if (mpvEnabled && !mpvBackend) {
       mpvBackend = new MpvBackend(mpvId)
@@ -157,6 +160,7 @@
       const stale = mpvBackend
       mpvBackend = null
       nativeActive = false
+      nativePresented = false
       void stale.dispose()
     }
   })
@@ -173,11 +177,15 @@
     const b = mpvBackend
     if (!b) return
     const un = [
-      b.on('playing', () => tileStore.setStatus(tile.id, 'playing')),
+      b.on('playing', () => {
+        nativePresented = true
+        tileStore.setStatus(tile.id, 'playing')
+      }),
       b.on('waiting', () => tileStore.setStatus(tile.id, 'loading')),
       b.on('error', () => {
         playback.teardown(videoEl)
         nativeActive = false
+        nativePresented = false
         failTile(b.lastError ?? 'native engine error')
       }),
       b.on('ended', () => {
@@ -185,6 +193,7 @@
         // tile (offline-close) — meanwhile show it uncovered.
         playback.teardown(videoEl)
         nativeActive = false
+        nativePresented = false
         tileStore.setStatus(tile.id, 'offline')
       }),
     ]
@@ -610,6 +619,7 @@
     retryAttempt = 0
     playback.teardown(el)
     nativeActive = false
+    nativePresented = false
     if (channelChanged && !firstRun) tileStore.setStatus(tile.id, 'loading')
     void load(q)
   })
@@ -688,6 +698,7 @@
       const key = `${x},${y},${w},${h}`
       if (key === lastKey) return
       lastKey = key
+      nativeTileRect = { x, y, w, h }
       void invoke('mpv_set_rect', {
         id,
         x,
@@ -709,12 +720,29 @@
     }
   })
 
+  // The tile's aperture hole (see App.svelte's engine-0 effect): rides the
+  // exact rect the pusher sent and opens only once the engine presented,
+  // so the tile's loading/error overlays render over the themed page.
+  $effect(() => {
+    if (!nativeActive || !nativePresented) {
+      clearApertureHole(mpvId)
+      return
+    }
+    const r = nativeTileRect
+    if (r) setApertureHole(mpvId, r)
+    else clearApertureHole(mpvId)
+  })
+  // Unmount/re-home safety: a tile's hole must never outlive it (the engine
+  // id moves with a drag-reorder swap — the stale slot must not keep a hole).
+  $effect(() => () => clearApertureHole(mpvId))
+
   // ---- native surface pointer forwarding (mpv OSC input) --------------------
   // Mirrors App.svelte's single-player forwarder (same normalization, the
   // same click-only mpv constraint, the same drag synthesis from held
   // moves) but scoped to THIS tile's video area and tagged with its engine
-  // id. The page keeps receiving every event (the surface is input-shaped)
-  // — tile activation clicks still work; the OSC just also sees them.
+  // id. The page receives every event natively (the webview is the topmost
+  // window) — tile activation clicks still work; the OSC just also sees
+  // them.
   $effect(() => {
     if (!nativeActive) return
     const stage = areaEl
@@ -883,19 +911,6 @@
     }
   })
 
-  // Report the native video-area element to MultiView (its overlay manager
-  // tests page UI against every native tile's rect).
-  $effect(() => {
-    if (!mpvEnabled) {
-      onNativeArea(tile.id, null)
-      return
-    }
-    const stage = areaEl
-    if (stage) onNativeArea(tile.id, stage)
-    else onNativeArea(tile.id, null)
-    return () => onNativeArea(tile.id, null)
-  })
-
   // ---- offline-close polling ----
   // Periodically check the channel's live status. A genuine live→offline
   // transition closes the tile (handled by the store); a transient GQL error
@@ -960,7 +975,6 @@
     if (b) void b.dispose() // unsubscribes + mpv_stop (hides the surface)
     if (pollTimer) clearInterval(pollTimer)
     onTileHandles(tile.id, null)
-    onNativeArea(tile.id, null)
   })
 
   // Touch + mouse interaction for control visibility (auto-hide). The
@@ -1005,6 +1019,7 @@
   class="mv-tile"
   class:mv-tile--authority={isAuthority}
   class:mv-tile--audible={audible}
+  class:mv-tile--native={nativeActive}
   class:mv-tile--dragging={isDragging}
   class:mv-tile--drop-target={isDropTarget}
   style={gridArea ? `grid-area:${gridArea};` : undefined}
@@ -1226,6 +1241,14 @@
     justify-content: center;
     min-width: 0;
     min-height: 0;
+  }
+  /* Native-engine tile: the box and the anchor <video> stop painting so the
+     aperture hole (the tile's video area, seam-inset) shows the surface
+     beneath; the grid's stage backdrop paints the #000 around it — the same
+     pixels the box itself painted on the hls path. */
+  .mv-tile--native,
+  .mv-tile--native .mv-video {
+    background: transparent;
   }
   /* The video REGION: absolute inset-0 in both engines — the rect the
      native surface tracks in mpv mode (see the rect pusher). */

@@ -27,7 +27,9 @@
 --     The ks-page overlay handler stays live while disabled.
 --   ks-mode <tile|live|vod>
 --     tile: multi-view engines — minimal bar (play/mute/volume/◀▶/gear/X),
---     channel label top-left (ks-label), never a seek strip.
+--     channel label top-left (ks-label), never a seek strip. Every bar
+--     carries the static "mpv" engine badge left of the gear (the OSC
+--     mimics the hls.js bar; the badge is the engine tell).
 --     live: single-view live — never a seek strip (mpv's HLS demuxer
 --     reports a playlist pseudo-duration even on live).
 --     vod:  single-view VOD/clip — full bar with seek strip + time; the
@@ -629,8 +631,13 @@ local function render()
     -- handoff button is LIVE-ONLY (mirrors the hls.js control bar; VOD/clip
     -- playback stays in-app). TILE mode adds the reorder arrows (◀/▶ swap
     -- with the neighbouring slot) and the close X, and drops the
-    -- app-global buttons + fullscreen.
+    -- app-global buttons + fullscreen. The static "mpv" engine badge sits
+    -- immediately left of the gear — the OSC mimics the hls.js bar so
+    -- closely the active engine is otherwise invisible.
     local rx = w - pad
+    local function badge_engine(a, x, y, u, color, al)
+        text_ev(a, x, row_cy, 4, "mpv", 12 * s, theme.accent, 0, true)
+    end
     local buttons = {
         { id = "close",      icon = icon_close,      active = false,            enabled = state.tile },
         { id = "fullscreen", icon = icon_fullscreen, active = state.fullscreen, enabled = not state.tile },
@@ -638,6 +645,7 @@ local function render()
         { id = "mpv",        icon = icon_external,   active = false,            enabled = not state.tile and state.live },
         { id = "pip",        icon = icon_pip,        active = state.pip,        enabled = not state.tile },
         { id = "quality",    icon = icon_gear,       active = false, enabled = state.qualities ~= nil },
+        { id = "engine",     icon = badge_engine,    active = false, enabled = true, plain = true },
         { id = "moveright",  icon = icon_arr_right,  active = false,            enabled = state.tile },
         { id = "moveleft",   icon = icon_arr_left,   active = false,            enabled = state.tile },
     }
@@ -645,15 +653,17 @@ local function render()
     for _, b in ipairs(buttons) do
         rx = rx - btn
         if b.enabled then
-            local hovered = state.hover_id == b.id
+            local hovered = not b.plain and state.hover_id == b.id
             if hovered then
                 rect(a, rx, row_cy - btn / 2, rx + btn, row_cy + btn / 2, theme.text, 224)
             end
             b.icon(a, rx + (btn - 22 * s) / 2, icon_y, icon_u,
                 b.active and theme.accent or theme.text,
                 b.active and 0 or (hovered and 0 or 40))
-            add_hit(rx - 2 * s, row_cy - btn / 2 - 4 * s, rx + btn + 2 * s,
-                row_cy + btn / 2 + 4 * s, b.id)
+            if not b.plain then
+                add_hit(rx - 2 * s, row_cy - btn / 2 - 4 * s, rx + btn + 2 * s,
+                    row_cy + btn / 2 + 4 * s, b.id)
+            end
             if b.id == "quality" then
                 gear_rx = rx
             end

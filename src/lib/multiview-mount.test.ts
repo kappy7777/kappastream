@@ -95,6 +95,7 @@ function mountView(mpvAvailable: boolean): void {
       onAuthorityControls: () => {},
       onAuthorityEngine: () => {},
       mpvAvailable,
+      zoomK: 1,
     },
   })
 }
