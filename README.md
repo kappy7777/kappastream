@@ -309,6 +309,7 @@ cd kappastream
 npm ci
 npm run check
 npm run build
+scripts/stage-appimage-libs.sh                        # Linux only: stage libs the AppImage bundles
 npm run tauri -- build --bundles appimage --no-sign   # Linux (use --bundles nsis on Windows, --bundles app,dmg on macOS)
 ```
 
@@ -318,6 +319,15 @@ in `src-tauri/tauri.conf.json`), so without the flag, and without
 `TAURI_SIGNING_PRIVATE_KEY` set, the bundler writes every artifact and then
 exits with "A public key has been found, but no private key". Release builds
 sign with the CI-held key.
+
+On Linux, `scripts/stage-appimage-libs.sh` must run before the AppImage
+build: it copies the build host's own `libpipewire-0.3.so.0` and
+`libjack.so.0` (resolved through its system `libmpv.so.2`) into the
+gitignored `src-tauri/appimage-staging/`, which `bundle.linux.appimage.files`
+ships into the AppImage. The pinned linuxdeploy build excludes both from
+automatic bundling while the bundled mpv engine needs them at load time, so
+without the staging step the bundler fails on the missing files. The other
+bundle formats don't need this step.
 
 The bundles are written to:
 
