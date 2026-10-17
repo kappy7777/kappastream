@@ -222,18 +222,17 @@ describe('MultiView mount (effect-loop regression)', () => {
     expect(tileStore.count).toBe(4)
   })
 
-  // A native tile whose surface is NOT up — an mpv_load that fails and falls
-  // back to hls.js, an offline/error resolve, a mid-stream engine error —
-  // has no mpv OSC to fall back on. Gating the HTML bar on mpvEnabled alone
-  // left those tiles with NO controls (uncloseable, unmutable); it must be
-  // gated on the surface actually showing instead.
-  it('mpv mode: a tile without a live native surface keeps the HTML controls', async () => {
+  // The HTML bar renders on BOTH engines now (it paints over the native
+  // surface's aperture hole); this still pins the fallback path itself —
+  // a failed mpv_load falls back to the hls player — and the engine
+  // parity of the controls.
+  it('mpv mode: every tile keeps the HTML controls, fallback or native', async () => {
     settings.setMpvEngine(true)
     mountView(true)
     await sleep(60)
     // Tile 1: the native load fails → the tile falls back to the page
-    // player path and the HTML bar must render. (A failed mpv_load is a
-    // REJECTED invoke — a resolved one is always a success.)
+    // player path. (A failed mpv_load is a REJECTED invoke — a resolved one
+    // is always a success.)
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === 'mpv_load') throw new Error('engine unavailable')
       return { ok: true, url: 'https://example.invalid/x.m3u8' }
@@ -245,23 +244,20 @@ describe('MultiView mount (effect-loop regression)', () => {
     expect(tiles()[0]!.querySelector('.mv-tile-controls')).toBeTruthy()
     expect(tiles()[0]!.querySelector('.mv-close')).toBeTruthy()
 
-    // Tile 2: the engine loads fine → the surface is up, the mpv OSC owns
-    // the tile, and the HTML bar stays out of the way.
+    // Tile 2: the engine loads fine → the SAME HTML bar renders over the
+    // native surface (there is no engine-side OSC anymore).
     vi.mocked(invoke).mockImplementation(async () => ({ ok: true, url: 'https://example.invalid/x.m3u8' }))
     tileStore.addOrReplace('chan2', 'best', 1)
     await sleep(250)
     expect(tiles().length).toBe(2)
-    expect(tiles()[1]!.querySelector('.mv-tile-controls')).toBeNull()
-    // The fallback tile keeps its bar.
+    expect(tiles()[1]!.querySelector('.mv-tile-controls')).toBeTruthy()
     expect(tiles()[0]!.querySelector('.mv-tile-controls')).toBeTruthy()
   })
 
-  // Held-move clicks feed the OSC's drag synthesis — but ONLY while a press
-  // that started on the tile is held. A splitter or drag-handle press
-  // crossing a native tile used to forward a click per move, and the OSC
-  // activates the button under any forwarded click (even from its hidden
-  // state), so resizing the grid could close or pause a tile.
-  it('mpv mode: held moves without an on-tile press forward no OSC clicks', async () => {
+  // Pointer input over a native tile belongs to the PAGE (the webview is
+  // the topmost window): nothing forwards into mpv's input queue anymore —
+  // the in-engine OSC that consumed forwarded clicks is retired.
+  it('mpv mode: tile pointer interaction forwards nothing to the engine', async () => {
     settings.setMpvEngine(true)
     mountView(true)
     await sleep(60)
@@ -269,34 +265,23 @@ describe('MultiView mount (effect-loop regression)', () => {
     await sleep(250)
     const stage = document.querySelector<HTMLElement>('.mv-video-area')
     expect(stage).toBeTruthy()
-    // happy-dom lays out nothing — stub a real rect so the forwarder's
-    // fraction math runs.
+    // happy-dom lays out nothing — stub a real rect so the geometry math
+    // in any listener would run.
     stage!.getBoundingClientRect = () =>
       ({ x: 0, y: 0, left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300 }) as DOMRect
     const PE: new (type: string, init?: MouseEventInit) => PointerEvent = ((
       globalThis as { PointerEvent?: typeof MouseEvent }
     ).PointerEvent ?? MouseEvent) as new (type: string, init?: MouseEventInit) => PointerEvent
-    const clicks = (): number =>
-      vi
-        .mocked(invoke)
-        .mock.calls.filter((c) => c[0] === 'mpv_pointer' && (c[1] as { kind?: string } | undefined)?.kind === 'click')
-        .length
-    const move = (x: number, y: number): void => {
-      stage!.dispatchEvent(new PE('pointermove', { buttons: 1, clientX: x, clientY: y }))
-    }
+    const forwarded = (): number => vi.mocked(invoke).mock.calls.filter((c) => c[0] === 'mpv_pointer').length
+    const before = forwarded()
 
-    // A splitter-style drag: button held, but the press started elsewhere.
-    move(390, 290)
-    await sleep(80)
-    expect(clicks()).toBe(0)
-
-    // A press on the tile itself forwards its down click and held moves.
+    // A press + held moves on the tile: page-side only.
     stage!.dispatchEvent(new PE('pointerdown', { button: 0, buttons: 1, clientX: 200, clientY: 150 }))
+    stage!.dispatchEvent(new PE('pointermove', { buttons: 1, clientX: 210, clientY: 150 }))
+    stage!.dispatchEvent(new PE('pointerup', { button: 0, clientX: 210, clientY: 150 }))
+    stage!.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, clientX: 200, clientY: 150 }))
     await sleep(80)
-    expect(clicks()).toBe(1)
-    move(210, 150)
-    await sleep(80)
-    expect(clicks()).toBe(2)
+    expect(forwarded()).toBe(before)
   })
 })
 
@@ -530,11 +515,11 @@ it('an error tile offers a Retry button that re-resolves', async () => {
   expect(resolves()).toBe(2)
 })
 
-// A native tile's resolve/attach window must not flash the full hls look
-// (HTML bar + label + drag handle) before the OSC takes over — the loading
-// state is excluded from htmlControls. Controls come back for the states
-// that need them (offline/error).
-it('native mode: no HTML overlay flash while a tile loads', async () => {
+// The HTML overlay (bar + label + drag handle) renders through the whole
+// native tile lifecycle — loading and playing alike — exactly like an hls
+// tile: the controls paint over the aperture hole, and there is no
+// engine-side OSC to wait for anymore.
+it('native mode: the HTML overlay renders during load and playback alike', async () => {
   settings.setMpvEngine(true)
   mountView(true)
   await sleep(60)
@@ -550,19 +535,20 @@ it('native mode: no HTML overlay flash while a tile loads', async () => {
   tileStore.addOrReplace('chan1', 'best', 1)
   await sleep(250)
   const tile = () => document.querySelector('[data-tile-id]')!
-  // Loading, native attach pending: spinner only, none of the hls look.
+  // Loading, native attach pending: the spinner overlay AND the HTML chrome
+  // (hls parity — nothing waits on an OSC that no longer exists).
   expect(tile().querySelector('.mv-tile-overlay')).toBeTruthy()
-  expect(tile().querySelector('.mv-tile-controls')).toBeNull()
-  expect(tile().querySelector('.mv-drag-handle')).toBeNull()
-  expect(tile().querySelector('.mv-tile-channel')).toBeNull()
+  expect(tile().querySelector('.mv-tile-controls')).toBeTruthy()
+  expect(tile().querySelector('.mv-drag-handle')).toBeTruthy()
+  expect(tile().querySelector('.mv-tile-channel')).toBeTruthy()
 
   releaseLoad!()
   await sleep(200)
-  // Playing natively: the OSC owns the tile, the HTML bar stays away.
-  expect(tile().querySelector('.mv-tile-controls')).toBeNull()
+  // Playing natively: the same HTML chrome stays.
+  expect(tile().querySelector('.mv-tile-controls')).toBeTruthy()
 
-  // An offline-resolving native tile DOES get the HTML controls back
-  // (close/volume/Retry live there).
+  // An offline-resolving native tile keeps the HTML controls (close/volume/
+  // Retry live there) with the offline overlay on top.
   vi.mocked(invoke).mockImplementation(async (cmd: string) => {
     if (cmd === 'resolve_stream') return { ok: false, offline: true }
     return { ok: true, url: 'https://example.invalid/x.m3u8' }

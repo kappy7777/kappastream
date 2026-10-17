@@ -2,7 +2,6 @@
   import { onMount, untrack } from 'svelte'
   import Hls from 'hls.js'
   import { invoke, isTauri } from '@tauri-apps/api/core'
-  import { listen } from '@tauri-apps/api/event'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { renderMessage, isEmoteOnly, type Emote } from './lib/emotes'
   import './lib/emote.css'
@@ -14,7 +13,6 @@
   import ChannelInfoModal from './lib/ChannelInfoModal.svelte'
   import ShortcutsHelp from './lib/ShortcutsHelp.svelte'
   import { singleChatEntries } from './lib/merged-chat'
-  import { osdHexColor } from './lib/custom-themes.svelte'
   import { UI_ZOOM_VAR, shouldCompensateViewportUnits, zoomDivisor } from './lib/ui-zoom'
   import Sidebar from './lib/Sidebar.svelte'
   import PlayerControls from './lib/PlayerControls.svelte'
@@ -34,7 +32,6 @@
     HtmlVideoBackend,
     MpvBackend,
     selectVideoBackend,
-    type MpvActionEvent,
     type MpvAvailability,
     type VideoBackend,
   } from './lib/video-backend'
@@ -70,9 +67,8 @@
   import { t } from './lib/i18n/index.svelte'
   import { initStreamlinkVersion, installedStreamlinkVersion, streamlinkFloorHint } from './lib/streamlink-floor'
   import { formatCompact, formatAge } from './lib/format'
-  import { effectiveQualities, mpvQualities, qualityLabel } from './lib/qualities'
-  import { stripBitmap, renderInfoBlock } from './lib/osd-bitmaps'
-  import { clipRectTop, fitContentRect, pointerFractions } from './lib/video-fit'
+  import { effectiveQualities, mpvQualities } from './lib/qualities'
+  import { clipRectTop, fitContentRect } from './lib/video-fit'
   import {
     apertureHoles,
     backdropRects,
@@ -359,6 +355,19 @@
   function currentVodId(): string | null {
     return playback.kind === 'vod' ? playback.id : null
   }
+
+  // The quality menu the HTML bar offers. On the native engine the list is
+  // the mpv variant (audio_only withheld — the native surface has no video
+  // track to present, so switching to it leaves nothing in-frame; the same
+  // policy the retired OSD gear carried), the hls vocabulary otherwise.
+  // Clips have a fixed quality — no menu.
+  const menuQualities = $derived(
+    playback.kind === 'clip'
+      ? undefined
+      : nativeVideoActive
+        ? mpvQualities(availableQualities)
+        : effectiveQualities(availableQualities),
+  )
 
   function loadSidebarMode(): 'full' | 'icons' | 'hidden' {
     try {
@@ -1356,295 +1365,23 @@
   })
   const fmtBackdropPx = (v: number): string => String(+(v / (zoomK || 1)).toFixed(2))
 
-  // ---- Native surface pointer forwarding (mpv OSC) --------------------------
-  // mpv's on-screen controller lives INSIDE mpv (OSD, rendered with the
-  // video), so interacting with it means feeding mpv's input queue: pointer
-  // events over the SURFACE (the fitted content rect, not the box) are
-  // forwarded NORMALIZED (0..1 within it — Rust rescales by mpv's own OSD
-  // dimensions, so a webview-devicePixelRatio vs GDK-scale mismatch can
-  // never desync the mapping). mpv's command API is CLICK-ONLY (no down/up),
-  // so clicks fire on pointerdown plus throttled held moves — the OSD script
-  // synthesizes drags from that stream (seek scrub + volume drag; it commits
-  // a scrub when the stream goes quiet, so a release click is not just
-  // unneeded — forwarding one would double-activate buttons on slow
-  // presses). Listeners ride the .player SECTION so they also see the themed
-  // letterbox bars: events OUTSIDE the content rect belong to the page again
-  // (the surface isn't there), so fresh ones are ignored and the wheel only
-  // becomes mpv's over the picture; a held drag that leaves the rect is
-  // CLAMPED to the edge so a scrub keeps streaming instead of dying.
-  $effect(() => {
-    if (!nativeVideoActive) return
-    const stage = playerVideoEl
-    if (!stage) return
-    let lastClickAt = 0
-    // Normalized 0..1 within the FULL content rect, recomputed per event (the
-    // same shared fit the surface pusher used — they can never disagree).
-    // While the fold is scrolled under the top bar, mpv still composes its
-    // OSD over the FULL unrolled picture (Rust rescales by osd-height, which
-    // includes the fold; the engine folds hidden rows away at presentation
-    // time), so y stays a fraction of the full height — remapping into the
-    // visible slice would land hits above where the pointer visibly is.
-    // Events over the hidden slice can't arrive (the page's bar covers it).
-    const locate = (e: { clientX: number; clientY: number }) => {
-      const r = stage.getBoundingClientRect()
-      return pointerFractions(e.clientX, e.clientY, r.left, r.top, r.width, r.height, videoAspect, stageClipTop - r.top)
-    }
-    const send = (x: number, y: number, kind: string): void => {
-      void invoke('mpv_pointer', { x, y, kind }).catch(() => {})
-    }
-    const clickAt = (loc: ReturnType<typeof locate>, clamped = false): void => {
-      const now = performance.now()
-      if (now - lastClickAt < 50) return
-      lastClickAt = now
-      send(clamped ? loc.clampX : loc.x, clamped ? loc.clampY : loc.y, 'click')
-    }
-    // Moves coalesce to at most one 'move' per animation frame — pointermove
-    // can outpace the display refresh and every one is an IPC hop the Rust
-    // side turns into an mpv input command. Clicks stay immediate (their
-    // own 50 ms throttle paces the OSD's drag synthesizer).
-    let moveRaf = 0
-    let pendingMove: { x: number; y: number } | null = null
-    const flushMove = (): void => {
-      moveRaf = 0
-      const pending = pendingMove
-      pendingMove = null
-      if (pending) send(pending.x, pending.y, 'move')
-    }
-    const onMove = (e: PointerEvent): void => {
-      const loc = locate(e)
-      if (!loc.inside && e.buttons !== 1) return
-      // Inside (or mid-drag): send as-is / clamped, and keep the click
-      // stream (the drag synthesizer) alive.
-      pendingMove = { x: loc.inside ? loc.x : loc.clampX, y: loc.inside ? loc.y : loc.clampY }
-      if (!moveRaf) moveRaf = requestAnimationFrame(flushMove)
-      if (e.buttons === 1) clickAt(loc, !loc.inside)
-    }
-    const onDown = (e: PointerEvent): void => {
-      if (e.button !== 0) return
-      const loc = locate(e)
-      if (!loc.inside) return
-      // Pointer capture keeps held-drag streams flowing even when the
-      // pointer leaves the content rect mid-drag.
-      try {
-        stage.setPointerCapture(e.pointerId)
-      } catch {
-        /* stage gone mid-gesture */
-      }
-      clickAt(loc)
-    }
-    const onWheel = (e: WheelEvent) => {
-      if (!locate(e).inside) return
-      e.preventDefault()
-      send(0, 0, e.deltaY < 0 ? 'wheel-up' : 'wheel-down')
-    }
-    stage.addEventListener('pointermove', onMove, { passive: true })
-    stage.addEventListener('pointerdown', onDown)
-    stage.addEventListener('wheel', onWheel, { passive: false })
-    return () => {
-      if (moveRaf) cancelAnimationFrame(moveRaf)
-      stage.removeEventListener('pointermove', onMove)
-      stage.removeEventListener('pointerdown', onDown)
-      stage.removeEventListener('wheel', onWheel)
-    }
-  })
+  // ---- Native surface pointer input -----------------------------------------
+  // The webview is the topmost window, so every pointer event over the
+  // native surface reaches the PAGE natively: the invisible anchor <video>
+  // element carries PlayerControls' hover/wheel/click handlers exactly as on
+  // the hls path (the engine has no on-screen controller of its own anymore
+  // — the controls are the HTML overlay).
 
   // (Page UI over the native video needs no compositing since the webview
   // sits ABOVE the surfaces: dialogs, dropdowns, tooltips and toasts are
   // ordinary DOM painting over the aperture hole. The snapshot/ducking
   // machinery the old above-page design needed is retired.)
 
-  // ---- Native OSD (ks-osc) wiring --------------------------------------------
-  // The in-video controls are mpv's OSD (src-tauri/src/mpv/ks-osc.lua): the
-  // app feeds it data over mpv_script_msg and relays its button actions back
-  // onto the same handlers the hls.js overlay controls use.
-  const sendOsd = (args: string[]): void => {
-    void invoke('mpv_script_msg', { args }).catch(() => {})
-  }
-
-  function onNativeOsdAction(name: string): void {
-    if (name === 'stop') onStopClick()
-    else if (name === 'pip') void pipController.toggle()
-    else if (name === 'mpv') onMpvClick()
-    else if (name === 'theater') settings.toggleTheaterMode()
-    else if (name === 'fullscreen') toggleVideoFullscreen()
-    else if (name.startsWith('quality:')) {
-      const label = name.slice('quality:'.length)
-      // Reverse-map against the SAME list the OSC was fed (it can contain
-      // real rungs outside the static vocabulary, e.g. 936p60) — the mpv
-      // variant, so audio_only (never offered) can't match either. Same
-      // source as the feed: the live probe for live, the VOD probe for a
-      // VOD (clips send no list and have no gear to click).
-      const id = mpvQualities(availableQualities).find((qid) => qualityLabel(qid) === label)
-      if (id) void changeQuality(id)
-    }
-  }
-
-  $effect(() => {
-    if (!nativeVideoActive) return
-    let un: (() => void) | undefined
-    let disposed = false
-    void listen<MpvActionEvent>('mpv://action', (e) => {
-      // Engine 0 = the single player's OSD; the tile engines run their own
-      // trimmed OSDs (ks-mode tile) and their actions route through
-      // MultiView.
-      if (e.payload.id !== 0) return
-      onNativeOsdAction(e.payload.action)
-    })
-      .then((u) => {
-        if (disposed) u()
-        else un = u
-      })
-      .catch(() => {})
-    return () => {
-      disposed = true
-      un?.()
-    }
-  })
-
-  // The info block as a WEBVIEW-RENDERED BITMAP: libass cannot select
-  // color-emoji fonts (its fontconfig provider filters outline-only fonts),
-  // but the webview's font stack renders them natively — so the whole
-  // top-left block (avatar + title + "game · N viewers") is rasterized here
-  // at the OSD's device-px metrics and composited over the video via the
-  // same overlay path as the storyboard thumbnails (ks-infoblock / overlay
-  // id 4). Without the bitmap nothing draws in the top-left.
-  //
-  // THEATER-ONLY + LIVE-ONLY, exactly mirroring the hls.js overlay's
-  // .theater-info (PlayerControls): non-theater mode shows the stream info
-  // BELOW the video (.stream-info), and VOD/clip titles have no in-video
-  // info bar on either engine.
-  $effect(() => {
-    if (!nativeVideoActive) return
-    const st = activeStatus
-    const showInfo = settings.theaterMode && st.state === 'live'
-    const title = showInfo ? st.title : ''
-    let extra = ''
-    if (showInfo) {
-      const bits = [st.game]
-      if (st.viewers > 0) bits.push(`${formatCompact(st.viewers)} ${t('viewers')}`)
-      extra = bits.filter(Boolean).join(' · ')
-    }
-    const url = showInfo ? st.avatarUrl : undefined
-    // themeRev, not theme: re-saving the ACTIVE custom theme keeps the id,
-    // and the equal id write would never re-render the bitmap.
-    void settings.themeRev
-    void settings.uiScale
-    // Re-render when the OSD's shape changes: the box (resize, layout
-    // toggles) and the video aspect both feed the fit below.
-    void playerBox
-    void videoAspect
-    const cs = getComputedStyle(document.documentElement)
-    const text = cs.getPropertyValue('--text-primary').trim()
-    const dim = cs.getPropertyValue('--text-secondary').trim()
-    const dpr = window.devicePixelRatio || 1
-    let cancelled = false
-    const push = (): void => {
-      const rect = playerVideoEl?.getBoundingClientRect() ?? null
-      // The OSD spans the fitted content rect (the surface), so its metrics
-      // — and with them the bitmap's scale + max width — are the VIDEO's,
-      // not the box's.
-      const fit = rect ? fitContentRect(rect.width, rect.height, videoAspect) : null
-      const hOsd = fit ? Math.round(fit.h * dpr) : 0
-      if ((!title && !extra) || hOsd < 2) {
-        sendOsd(['ks-infoblock', '0'])
-        return
-      }
-      // Mirror ks-osc.lua's scale math exactly (its s drives the text sizes
-      // this bitmap replaces).
-      const s = Math.min(Math.max((hOsd / 720) * settings.uiScale, 0.6), 3.0)
-      const maxWidth = fit ? Math.round(fit.w * dpr - 28 * s) : 800
-      void renderInfoBlock({
-        title: title ?? '',
-        extra,
-        avatarUrl: url,
-        text,
-        dim,
-        s,
-        uiScale: settings.uiScale,
-        dpr,
-        maxWidth,
-      })
-        .then((bmp) => {
-          if (cancelled) return
-          if (!bmp) {
-            sendOsd(['ks-infoblock', '0'])
-            return
-          }
-          void invoke('mpv_set_bitmap', { key: 'infoblock', b64: bmp.b64, w: bmp.w, h: bmp.h }).catch(() => {})
-          sendOsd(['ks-infoblock', '1', String(bmp.w), String(bmp.h)])
-        })
-        .catch(() => {
-          if (!cancelled) sendOsd(['ks-infoblock', '0'])
-        })
-    }
-    push()
-    const onResize = (): void => push()
-    window.addEventListener('resize', onResize)
-    return () => {
-      cancelled = true
-      window.removeEventListener('resize', onResize)
-    }
-  })
-
-  // Theme colors (the OSD can't read CSS vars; send the resolved ones).
-  $effect(() => {
-    if (!nativeVideoActive) return
-    // themeRev, not theme: re-saving the ACTIVE custom theme keeps the id,
-    // and the equal id write would never re-send the colours.
-    void settings.themeRev
-    const cs = getComputedStyle(document.documentElement)
-    // The OSD lua needs exactly 6 hex chars per color (bgr()); a custom
-    // theme's rgba()/short-hex/#rrggbbaa tokens must be converted, or every
-    // OSD color silently falls back to white.
-    const v = (name: string): string => osdHexColor(cs.getPropertyValue(name).trim())
-    sendOsd([
-      'ks-theme',
-      v('--bg-app'),
-      v('--accent'),
-      v('--text-primary'),
-      v('--text-secondary'),
-      v('--border'),
-      v('--live'),
-    ])
-  })
-
-  // UI-scale following: the OSD scales with the VIDEO height; the app's HTML
-  // scales with uiScale — send the factor so the two stay in step.
-  $effect(() => {
-    if (!nativeVideoActive) return
-    sendOsd(['ks-scale', String(settings.uiScale)])
-  })
-
-  // Live/VOD mode: LIVE hides the OSC's seek strip + time/LIVE block (mpv
-  // reports an HLS pseudo-duration even on live streams, which would draw a
-  // jumpable seek bar). VODs/clips keep it.
-  $effect(() => {
-    if (!nativeVideoActive) return
-    sendOsd(['ks-mode', playback.kind === 'live' ? 'live' : 'vod'])
-  })
-
-  // Quality list (LIVE: the probed variant list; VOD: its OWN probe — VODs
-  // transcode independently of the live stream, so the rungs differ per VOD.
-  // CLIPS: none — clip quality is fixed (best), and an empty list hides the
-  // OSD gear).
-  $effect(() => {
-    if (!nativeVideoActive) return
-    if (playback.kind === 'clip') {
-      sendOsd(['ks-qualities', t('quality'), ''])
-      return
-    }
-    void quality
-    // This effect only runs while the native engine is up (nativeVideoActive),
-    // so the list is always the mpv variant — audio_only never offered (no
-    // OSD canvas in audio-only → no way back; see mpvQualities). null (probe
-    // unknown) degrades to the full vocabulary, exactly like the live menu.
-    sendOsd([
-      'ks-qualities',
-      t('quality'),
-      qualityLabel(quality),
-      ...mpvQualities(availableQualities).map((qid) => qualityLabel(qid)),
-    ])
-  })
+  // The info block over native video is PlayerControls' .theater-info —
+  // plain DOM painting over the aperture hole, identical markup on both
+  // engines (the old engine drew it as a webview-rasterized bitmap because
+  // libass could not select color-emoji fonts; the HTML path renders them
+  // natively).
 
   // The same quality-menu feed for the floating PiP window (the hls
   // vocabulary — PiP never runs the native engine, so audio_only stays in,
@@ -1657,92 +1394,10 @@
     pipController.pushQualityMenu(list, quality)
   })
 
-  // VOD scrubber extras on the OSD: chapter marks + muted segments (pure
-  // data), and the storyboard geometry for the hover preview. vodCtl clears
-  // all three for live/clip playback, which sends the empty variants.
-  $effect(() => {
-    if (!nativeVideoActive) return
-    const chapters = vodCtl.chapters
-    const args = ['ks-chapters', String(chapters.length)]
-    for (const c of chapters) args.push(String(Math.round(c.startSec)), c.label)
-    sendOsd(args)
-  })
+  // VOD scrubber extras (chapter marks, muted spans, the storyboard hover
+  // preview) render from the same vodCtl state PlayerControls already
+  // consumes on the hls path — identical markup over the aperture hole.
 
-  $effect(() => {
-    if (!nativeVideoActive) return
-    const spans = vodCtl.mutedSpans
-    const args = ['ks-muted', String(spans.length)]
-    for (const sp of spans) args.push(String(Math.round(sp.startSec)), String(Math.round(sp.endSec)))
-    sendOsd(args)
-  })
-
-  $effect(() => {
-    if (!nativeVideoActive) return
-    const sb = vodCtl.storyboard
-    if (!sb) {
-      sendOsd(['ks-storyboard', '0'])
-      return
-    }
-    sendOsd([
-      'ks-storyboard',
-      String(sb.intervalSec),
-      String(sb.count),
-      String(sb.cols),
-      String(sb.rows),
-      String(sb.imageUrls.length),
-      String(sb.width),
-      String(sb.height),
-    ])
-    // Strip pixels: decode through the ksvod proxy (CDN sends no CORS) onto a
-    // 160px-tile grid and upload once per VOD; Rust crops tiles per hover.
-    const tileW = 160
-    const tileH = Math.round((160 * sb.height) / sb.width)
-    let cancelled = false
-    sb.imageUrls.forEach((url, i) => {
-      void stripBitmap(toKsvodProxyUrl(url, isWindows), sb.cols, sb.rows, tileW, tileH).then((bmp) => {
-        if (cancelled || !bmp) return
-        void invoke('mpv_set_bitmap', {
-          key: `thumb:${i}`,
-          b64: bmp.b64,
-          w: bmp.w,
-          h: bmp.h,
-          cols: sb.cols,
-          rows: sb.rows,
-        }).catch(() => {})
-      })
-    })
-    return () => {
-      cancelled = true
-    }
-  })
-
-  // Toggle-button highlight states.
-  $effect(() => {
-    if (!nativeVideoActive) return
-    const pip = pipController.isOpen
-    const theater = settings.theaterMode
-    const fs = isFullscreen
-    sendOsd(['ks-pip', pip ? '1' : '0'])
-    sendOsd(['ks-theater', theater ? '1' : '0'])
-    sendOsd(['ks-fullscreen', fs ? '1' : '0'])
-  })
-
-  // With PlayerControls unmounted in native mode (the OSD owns the
-  // controls), the app hydrates mpv's audio state from settings at engine
-  // hand-off and persists backend-reported volume/mute changes itself —
-  // exactly what PlayerControls' onVol did for the element. (PiP and the
-  // native engine are mutually exclusive, so no PiP mute guard is needed.)
-  $effect(() => {
-    if (!nativeVideoActive) return
-    const backend = videoBackend
-    if (!backend) return
-    backend.setVolume(settings.volume)
-    backend.setMuted(settings.muted)
-    return backend.on('volumechange', () => {
-      settings.setVolume(backend.volume)
-      settings.setMuted(backend.muted)
-    })
-  })
   // ---- VOD chat replay ----------------------------------------------------
   // Past-broadcast chat, synced to the playhead. Each replay comment is
   // normalized to the same ChatMessage shape the live renderer uses, so there
@@ -3675,17 +3330,19 @@
         <div class="video-pane">
           <div class="video-scroll" bind:this={videoScrollEl}>
             <div class="player-stage">
-              <!-- The controls bar renders ONLY on the hls.js path, overlaid
-                   on the video. In native mode the mpv OSD owns the controls
-                   (PlayerControls stays unmounted) and only the two banners
-                   render below the video — see .native-strip below. -->
+              <!-- The controls bar overlays the video on BOTH engines: on
+                   the native engine it paints over the aperture hole as
+                   ordinary DOM (the page sits above the surface), driven by
+                   the same VideoBackend abstraction as the hls path. -->
               {#snippet controlsBar()}
                 <PlayerControls
                   video={videoEl}
                   backend={videoBackend}
                   visible={playerActive && (playerStatus === 'playing' || playerStatus === 'paused')}
                   {quality}
-                  qualities={playback.kind === 'clip' ? undefined : effectiveQualities(availableQualities)}
+                  qualities={menuQualities}
+                  showEngineBadge={nativeVideoActive}
+                  aspect={videoAspect}
                   onqualitychange={(q) => void changeQuality(q)}
                   onmpv={onMpvClick}
                   onstop={onStopClick}
@@ -3704,14 +3361,14 @@
                   storyboard={vodCtl.storyboard}
                 />
               {/snippet}
-              {#snippet playbackBanner(strip: boolean, title: string)}
-                <div class="playback-banner" class:playback-banner--strip={strip}>
+              {#snippet playbackBanner(title: string)}
+                <div class="playback-banner">
                   <button type="button" class="playback-back" onclick={backToLive}>{t('backToLive')}</button>
                   <span class="playback-title">{title}</span>
                 </div>
               {/snippet}
-              {#snippet resumeBar(strip: boolean)}
-                <div class="resume-bar" class:resume-bar--strip={strip} role="status">
+              {#snippet resumeBar()}
+                <div class="resume-bar" role="status">
                   <span class="resume-bar-text"
                     >{t('player_resumedFrom', { time: formatVodTime(vodCtl.resumeBar!.position) })}</span
                   >
@@ -3726,8 +3383,8 @@
                   >
                 </div>
               {/snippet}
-              {#if !nativeVideoActive && playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)}
-                {@render playbackBanner(false, playback.title)}
+              {#if playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)}
+                {@render playbackBanner(playback.title)}
               {/if}
               <div class="player-fold" bind:this={playerFoldEl}>
                 <!-- The .player section is the video BOX (a 16:9-aspected
@@ -3744,9 +3401,12 @@
                 >
                   {#if playerActive}
                     <video bind:this={videoEl} class="video" autoplay muted playsinline></video>
-                    {#if !nativeVideoActive}
-                      {@render controlsBar()}
-                    {/if}
+                    <!-- The controls bar rides the anchor <video> element on
+                         BOTH engines: it is the shared input surface (hover,
+                         wheel, click) and — invisible in native mode — the
+                         element the backend abstracts behind when mpv owns
+                         playback. -->
+                    {@render controlsBar()}
                     {#if showPlayerOverlay}
                       <div class="player-overlay" class:player-overlay--error={playerStatus === 'error'}>
                         {#if isPlayerBusy}
@@ -3773,30 +3433,13 @@
                         >
                       </div>
                     {/if}
-                    {#if vodCtl.resumeBar && !nativeVideoActive}
-                      {@render resumeBar(false)}
+                    {#if vodCtl.resumeBar}
+                      {@render resumeBar()}
                     {/if}
                   {:else}
                     <div class="player-placeholder">{t('player_placeholder')}</div>
                   {/if}
                 </section>
-                {#if nativeVideoActive && playerActive && ((playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)) || vodCtl.resumeBar)}
-                  <!-- Native-engine banners: the CONTROLS themselves are
-                       mpv's OSD now (ks-osc.lua, fed + driven by the native
-                       OSD effects below) — only the two banners with no OSD
-                       equivalent remain below the video. The page's loading /
-                       error overlays stay in .player: the native surface is
-                       hidden until the first frame presents, so they render
-                       uncovered. -->
-                  <div class="native-strip">
-                    {#if playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)}
-                      {@render playbackBanner(true, playback.title)}
-                    {/if}
-                    {#if vodCtl.resumeBar}
-                      {@render resumeBar(true)}
-                    {/if}
-                  </div>
-                {/if}
               </div>
               {#if !settings.theaterMode}
                 <div class="stream-info">
@@ -4594,8 +4237,7 @@
   /* "Back to live" banner shown over the player while a VOD/clip is playing.
      Anchored to the VIDEO content rect (the --video-* vars from the shared
      fit), not the player box, so it hugs the picture when the box goes wider
-     than 16:9. The native-engine variant renders static in .native-strip
-     (the --strip override) where these offsets are irrelevant. */
+     than 16:9. */
   .playback-banner {
     position: absolute;
     top: calc(var(--video-top, 0%) + 8px);
@@ -4705,11 +4347,10 @@
      background over the player area goes transparent in this mode; the
      backdrop panels reproduce those exact pixels (same tokens) around the
      hole. The <video> stays mounted as the invisible, hit-testable anchor
-     the pointer handlers ride on. The in-video CONTROLS remain mpv's OSD
-     (ks-osc.lua); only the "Back to live" banner and the VOD resume bar
-     render BELOW the video in .native-strip (see the markup). The page's
-     loading/error overlays stay inside .player — the aperture opens only
-     once the first frame presented. */
+     the pointer handlers ride on. The controls, banners and every overlay
+     are the SAME DOM as the hls path — they paint over the hole. The
+     page's loading/error overlays render uncovered because the aperture
+     opens only once the first frame presented. */
   .app--native-video .video {
     opacity: 0;
   }
@@ -4737,27 +4378,6 @@
   }
   .app--fullscreen .native-backdrop-rect {
     background: #000;
-  }
-  .native-strip {
-    flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    background: var(--bg-panel);
-    border-top: 1px solid var(--border);
-  }
-  /* The banner + resume bar become in-flow rows (their overlay CSS is
-     absolute/positioned over the player, which the native surface covers).
-     Symmetric vertical margins so each row centers in the strip band —
-     the panel background shows on all sides of the pill. */
-  .native-strip .playback-banner--strip {
-    position: static;
-    max-width: none;
-    margin: 6px 8px;
-    animation: none;
-  }
-  .native-strip .resume-bar--strip {
-    position: static;
-    margin: 6px 8px;
   }
 
   /* Status bar: the bottom flex child of .player-stage (NOT of .video-pane),

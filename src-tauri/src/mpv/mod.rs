@@ -1,25 +1,24 @@
-// Experimental embedded-libmpv video engine ("video above the page") —
-// LINUX-ONLY. Windows and macOS build no mpv code at all and run the
-// hls.js engine exclusively; off-Linux support is out of scope rather
-// than pending.
+// Embedded-libmpv video engine — LINUX-ONLY. Windows and macOS build no
+// mpv code at all and run the hls.js engine exclusively; off-Linux support
+// is out of scope rather than pending.
 //
 // When the `mpv-embed` Cargo feature is on AND the runtime toggle is on, the
-// main player renders through libmpv drawing into a native surface positioned
-// ABOVE the (fully opaque) webview — input-transparent, so the HTML keeps all
-// pointer handling; the in-video controls are mpv's OSD. Multi-view tiles run
-// the SAME engine (one mpv core per tile, ids 1..=4) with the SAME OSD in
-// ks-osc's trimmed "tile" mode (no app-global buttons; reorder arrows + a
-// close X in the bar, channel label top-left) — the app's HTML control strip
-// renders on hls tiles only. The PiP window stays on hls.js (out of scope by
-// design).
+// player renders through libmpv into a native surface layered BENEATH the
+// webview (see linux.rs): the webview's backing goes alpha-transparent and
+// the page carves "aperture" holes where video should show, so the HTML
+// controls, banners and overlays paint over the video as ordinary DOM — the
+// SAME markup on both engines; the engine draws no on-screen controller of
+// its own. Multi-view tiles run the SAME engine (one mpv core per tile, ids
+// 1..=4) under the same hole scheme. The PiP window stays on hls.js (out of
+// scope by design).
 //
-// (History: the original design drew the video UNDER the webview through a
-// transparent "hole" in the page. WebKitGTK cannot render transparent
-// regions correctly on this stack — its webview surface never clears between
-// frames, so moving UI left stale copies and any painted content
-// accumulated; verified down to a GL-free vanilla transparent window. Every
-// working web-UI-over-mpv app (Stremio, iptvnator) uses Chromium, whose
-// compositor handles this. Hence: no transparency anywhere.)
+// (History: the ORIGINAL original design drew the video ABOVE the opaque
+// page with an input-transparent window. The later desktop-through approach
+// — a transparent OS window plus a transparent page — is dead on this stack:
+// WebKitGTK's webview surface never clears between frames, leaving stale
+// copies wherever UI moved. The intra-window layout sidesteps that verdict
+// entirely: the OS window stays opaque, only the webview layer above the
+// video goes transparent.)
 //
 // GATING — three layers, all must hold:
 //   1. This module only compiles under
@@ -75,7 +74,6 @@
 //     pixels, already zoom-adjusted by the frontend.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -83,7 +81,7 @@ use libmpv2::events::{Event, PropertyData};
 use libmpv2::Mpv;
 use serde::Serialize;
 use tauri::async_runtime::Mutex as AsyncMutex;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -101,20 +99,9 @@ mod mpris;
 /// compare.
 const MPV_USER_AGENT: &str = crate::gql::USER_AGENT;
 
-/// Kappastream's in-video control OSD (replaces mpv's stock OSC). Lua,
-/// drawn through the same render context as the video; data flows in via
-/// script messages (mpv_script_msg) and button actions come back as
-/// `ks-action` client messages (see the event thread). libmpv loads
-/// scripts from files only, so the engine materializes this at init and
-/// passes it via the `scripts` list option.
-const KS_OSC_LUA: &str = include_str!("ks-osc.lua");
-
-/// The OSC script's mpv client name. Client names derive from the script
-/// FILENAME with every non-alphanumeric character replaced by '_' (mpv's
-/// client-name sanitization), so "kappastream-osc.lua" loads as
-/// "kappastream_osc". Addressing the feed with `script-message-to` instead
-/// of a `script-message` broadcast keeps every other client — this host's
-/// own event thread included — from receiving the app's OSD traffic.
+/// The retired OSC script's mpv client name, still used to address the
+/// `mpv_script_msg` dispatch (`script-message-to kappastream_osc …`) — a
+/// no-op now that no script is loaded, kept until the command's removal.
 const KS_OSC_CLIENT: &str = "kappastream_osc";
 
 /// Min interval between `mpv://time` emits (~4 Hz).
@@ -386,106 +373,12 @@ fn ensure_engine(app: &AppHandle, id: u32) -> Result<(), String> {
     }
 }
 
-/// The engine's private per-user runtime dir — where the materialized
-/// ks-osc.lua script lives. NEVER the shared temp dir: mpv Lua has
-/// os.execute, a PREDICTABLE name in /tmp is a pre-create/symlink race on
-/// multi-user Linux, and fs.protected_regular makes poisoning trivial
-/// anyway. Linux prefers $XDG_RUNTIME_DIR/kappastream (0700 by systemd
-/// convention) when it is set, absolute and exists; everything else falls
-/// back to the per-user cache dir.
-fn select_runtime_base(xdg: Option<&str>, cache: PathBuf) -> PathBuf {
-    match xdg {
-        Some(dir) if Path::new(dir).is_absolute() && Path::new(dir).is_dir() => {
-            Path::new(dir).join("kappastream")
-        }
-        _ => cache.join("mpv"),
-    }
-}
-
-/// Create (or accept an existing) dir and lock it down: 0700 where the
-/// platform has modes, and a REFUSAL (Err) when the path is a symlink or —
-/// on Linux, where the shared-machine threat model lives — not owned by
-/// the current uid. Engine init fails cleanly on refusal; the frontend
-/// hides the engine (mpv_available false) rather than running degraded.
-fn setup_private_dir(dir: &Path) -> Result<PathBuf, String> {
-    let name = dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("runtime dir");
-    if let Ok(meta) = std::fs::symlink_metadata(dir) {
-        if meta.file_type().is_symlink() {
-            return Err(format!("{name}: refusing a symlinked runtime dir"));
-        }
-    }
-    std::fs::create_dir_all(dir).map_err(|e| format!("create {name}: {e}"))?;
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-            .map_err(|e| format!("chmod {name}: {e}"))?;
-    }
-    {
-        use std::os::unix::fs::MetadataExt;
-        let uid = unsafe { libc::getuid() };
-        let owner = std::fs::metadata(dir)
-            .map_err(|e| format!("stat {name}: {e}"))?
-            .uid();
-        if owner != uid {
-            return Err(format!("{name}: runtime dir not owned by the current user"));
-        }
-    }
-    Ok(dir.to_path_buf())
-}
-
-/// Write a file inside the private runtime dir with mode 0600 where the
-/// platform has modes. Truncation is fine there: the dir is 0700 and ours.
-fn write_private_file(path: &Path, contents: &[u8]) -> Result<(), String> {
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("file")
-        .to_string();
-    {
-        use std::io::Write;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|e| format!("open {name}: {e}"))?;
-        file.write_all(contents)
-            .map_err(|e| format!("write {name}: {e}"))?;
-        // `.mode()` only applies at creation — normalize a pre-existing
-        // file that may carry a wider mode from an earlier write style.
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("chmod {name}: {e}"))?;
-        Ok(())
-    }
-}
-
-fn ensure_private_runtime_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let cache = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| format!("app cache dir: {e}"))?;
-    let base = select_runtime_base(std::env::var("XDG_RUNTIME_DIR").ok().as_deref(), cache);
-    setup_private_dir(&base)
-}
-
+/// The engine loads NO scripts (the in-video OSD controller is retired —
+/// controls are the page's HTML overlay): every mpv script/autoloading
+/// option below is off, and nothing is materialized into a runtime dir.
 fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
     // Before ANY libmpv call — mpv_create checks the locale immediately.
     pin_c_numeric_locale();
-    // Materialize the embedded OSD script into the PRIVATE per-user runtime
-    // dir (see ensure_private_runtime_dir) — 0600, never the shared /tmp.
-    let runtime_dir = ensure_private_runtime_dir(app)?;
-    let osc_script = runtime_dir
-        .join("kappastream-osc.lua")
-        .to_str()
-        .ok_or("runtime dir path not UTF-8")?
-        .to_string();
-    write_private_file(Path::new(&osc_script), KS_OSC_LUA.as_bytes())
-        .map_err(|e| format!("write ks-osc.lua: {e}"))?;
     // Platform options that must apply at mpv-create time: Linux pins the
     // render API (vo=libmpv drawing into our GLArea — mpv never creates a
     // window of its own).
@@ -497,35 +390,21 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
             init.set_property("keep-open", "no")?;
             init.set_property("audio-client-name", "kappastream")?;
             init.set_property("user-agent", MPV_USER_AGENT)?;
-            // In-video controls: OUR ks-osc.lua replaces mpv's stock OSC
-            // (same OSD pipeline — rendered through the same render context
-            // as the video — but our layout, fed via script messages; see
-            // KS_OSC_LUA). libmpv's script defaults differ from the CLI
-            // player, so everything is explicit: the STOCK osc off,
-            // ytdl_hook OFF (it would run yt-dlp against every loadfile
-            // URL), default key bindings OFF (all real input arrives as
-            // forwarded pointer events from the webview — mpv_pointer).
-            // load-scripts=no suppresses every autoload path (the user's
-            // ~/.config/mpv/scripts dir, ytdl_hook's own autoload) — the
-            // explicit `scripts` entry below is NOT gated by it (verified
-            // against libmpv 0.40: with load-scripts=no, a scripts= entry
-            // still loads and dispatches).
+            // No scripts of any kind: the in-video controls are the page's
+            // HTML overlay, so every mpv scripting/autoplay option is off —
+            // the STOCK osc, ytdl_hook (it would run yt-dlp against every
+            // loadfile URL), default key bindings (all real input belongs
+            // to the page), and every script autoloading path (the user's
+            // ~/.config/mpv/scripts dir included). Builtin scripts (console,
+            // stats) still load under load-scripts=no — that option only
+            // stops script-directory autoloading — so they are switched off
+            // too; tolerantly, because mpv renamed load-osd-console to
+            // load-console after 0.40 and an unknown name must never fail
+            // engine creation.
             init.set_property("load-scripts", false)?;
             init.set_property("osc", false)?;
-            // NOTE: the CLI's `--scripts-append` is a command-line-only
-            // variant — the client API rejects the name ("option not
-            // found", probed against this exact libmpv) — so the base
-            // `scripts` list option carries our script instead.
-            init.set_property("scripts", osc_script.as_str())?;
             init.set_property("ytdl", false)?;
             init.set_property("input-default-bindings", false)?;
-            // Builtin scripts (console, stats) still load under
-            // load-scripts=no — that option only stops script-directory
-            // autoloading. They sit dormant here (no keyboard input reaches
-            // mpv), but loading them into every engine buys nothing. Set
-            // tolerantly: mpv renamed load-osd-console to load-console after
-            // 0.40, and an unknown name must never fail engine creation —
-            // each line applies where the name exists, no-ops where not.
             let _ = init.set_property("load-stats-overlay", false);
             let _ = init.set_property("load-osd-console", false);
             let _ = init.set_property("load-console", false);
@@ -608,12 +487,14 @@ struct TimePayload {
 struct VolumePayload {
     id: u32,
     /// 0..1 (mpv's property is a percentage, 0..130 with amplification —
-    /// clamped so the OSC can't push the app past full volume).
+    /// clamped so the engine can't push the app past full volume).
     volume: f64,
     muted: bool,
 }
 
-/// `mpv://action` — an ks-osc button press, tagged with its engine.
+/// `mpv://action` — an on-screen-controller button press, tagged with its
+/// engine. Emitted by the RETIRED OSC script; nothing sends it now — the
+/// relay stays until the command cleanup removes it with the rest.
 #[derive(Serialize, Clone)]
 struct ActionPayload {
     id: u32,
@@ -717,9 +598,11 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                     ("duration", PropertyData::Double(d)) if d.is_finite() && d > 0.0 => {
                         duration = d;
                     }
-                    // OSC-driven volume/mute (dragging mpv's own in-video
-                    // slider) mirrors back into the app. Read BOTH fresh so
-                    // either property's change carries a consistent pair.
+                    // Engine-side volume/mute changes mirror back into the
+                    // app (today just the echo of an app-side write; the
+                    // in-engine slider that once drove this is retired).
+                    // Read BOTH fresh so either property's change carries a
+                    // consistent pair.
                     ("volume", _) | ("mute", _) => {
                         let vol = mpv.get_property::<f64>("volume").unwrap_or(100.0);
                         let mute = mpv.get_property::<bool>("mute").unwrap_or(false);
@@ -837,9 +720,12 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                     }
                 }
                 Ok(Event::ClientMessage(args)) => {
-                    // ks-osc button actions (see ks-osc.lua), relayed to the
-                    // frontend, which maps them onto the existing handlers
+                    // Script messages from the RETIRED OSC script (see
+                    // ks-osc.lua): button actions relayed to the frontend,
+                    // which mapped them onto the existing handlers
                     // (stop/PiP/mpv/theater/fullscreen/quality:<label>).
+                    // No script is loaded anymore, so nothing sends these —
+                    // the handling stays until the command cleanup.
                     if args.first().copied() == Some("ks-action") {
                         if let Some(action) = args.get(1) {
                             let _ = app.emit(
@@ -1788,12 +1674,11 @@ pub fn mpv_set_rect(
 }
 
 /// Forward a pointer event over the native video into mpv's input queue —
-/// the ONLY way to interact with mpv's on-screen controller (the OSC lives
-/// in mpv's OSD; the webview's pointer events land on the page UNDER the
-/// native surface). Coordinates are NORMALIZED within the video surface
-/// rect (0..1) and rescaled here by mpv's own OSD dimensions (== the
-/// render size), so a webview-vs-GDK scale mismatch can never desync the
-/// mapping. `kind`: "move" | "click" (button 0) | "wheel-up" | "wheel-down".
+/// built for the RETIRED in-video OSC (pointer forwarding into mpv's
+/// click-only command API); the page owns pointer input now and no caller
+/// remains. Coordinates are NORMALIZED within the video surface rect
+/// (0..1) and rescaled by mpv's own OSD dimensions (== the render size).
+/// `kind`: "move" | "click" (button 0) | "wheel-up" | "wheel-down".
 /// Pointer-normalization size: the cached pair when valid, else the freshly
 /// read one. `None` = unusable, the event drops. Pure, unit-tested.
 fn resolve_osd_dims(cached: (i64, i64), live: Result<(i64, i64), String>) -> Option<(i64, i64)> {
@@ -1908,9 +1793,10 @@ pub fn mpv_set_surface_visible(visible: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Send a script message to the embedded OSD script (ks-osc.lua) — the
-/// app-side data feed: stream info, theme colors, the quality list, and
-/// the pip/theater/fullscreen highlight states. Args pass through
+/// Send a script message to the embedded OSD script — the RETIRED OSC's
+/// app-side data feed (stream info, theme colors, the quality list, the
+/// pip/theater/fullscreen highlight states). No script is loaded anymore,
+/// so this is a no-op kept until the command cleanup. Args pass through
 /// verbatim; args[0] is the message name ("ks-info", "ks-theme", …).
 #[tauri::command]
 pub async fn mpv_script_msg(id: Option<u32>, args: Vec<String>) -> Result<(), String> {
@@ -1984,8 +1870,9 @@ pub fn mpv_page_snapshot(
 /// Upload an OSD image bitmap (base64 BGRA + dims; storyboard strips also
 /// carry their cols × rows tile grid). The webview decodes what it already
 /// has (the info block; storyboard strips via the ksvod proxy) — Rust
-/// never fetches anything. ks-osc.lua later drives the actual on-screen
-/// overlay geometry via `ks-overlay` script messages.
+/// never fetches anything. The RETIRED ks-osc.lua drove the actual
+/// on-screen overlay geometry via `ks-overlay` script messages; no caller
+/// remains until the command cleanup.
 ///
 /// STATE-ONLY (no libmpv, no GTK — a decode plus a brief locked insert):
 /// stays a sync command.
@@ -2106,65 +1993,6 @@ mod tests {
         assert!(resample_bgra(&src, 4, 4, u32::MAX, u32::MAX).is_empty());
         // A sane downscale still produces exactly w*h*4 bytes.
         assert_eq!(resample_bgra(&src, 4, 4, 2, 2).len(), 2 * 2 * 4);
-    }
-
-    #[test]
-    #[cfg(target_os = "linux")]
-    fn runtime_base_prefers_a_live_xdg_dir() {
-        let tmp = std::env::temp_dir().join(format!("ks-mpv-xdg-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-        let cache = PathBuf::from("/nonexistent-cache");
-        // set + absolute + existing → XDG wins
-        assert_eq!(
-            select_runtime_base(Some(tmp.to_str().unwrap()), cache.clone()),
-            tmp.join("kappastream")
-        );
-        // relative, nonexistent or unset → the app cache dir
-        assert_eq!(
-            select_runtime_base(Some("relative/run"), cache.clone()),
-            cache.join("mpv")
-        );
-        assert_eq!(
-            select_runtime_base(Some("/definitely/not/here"), cache.clone()),
-            cache.join("mpv")
-        );
-        assert_eq!(select_runtime_base(None, cache.clone()), cache.join("mpv"));
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn private_dir_is_restricted_and_refuses_symlinks() {
-        use std::os::unix::fs::PermissionsExt;
-        let base = std::env::temp_dir().join(format!("ks-mpv-privdir-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
-
-        // fresh creation lands 0700, not a symlink
-        let dir = setup_private_dir(&base.join("rt")).unwrap();
-        let meta = std::fs::symlink_metadata(&dir).unwrap();
-        assert!(!meta.file_type().is_symlink());
-        assert_eq!(meta.permissions().mode() & 0o777, 0o700);
-
-        // files land 0600 — even when the path pre-exists with a wider mode
-        let file = dir.join("f.bin");
-        std::fs::write(&file, b"x").unwrap();
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
-        write_private_file(&file, b"y").unwrap();
-        assert_eq!(
-            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-
-        // a symlinked runtime dir is refused outright (pre-create race)
-        let real = base.join("real");
-        std::fs::create_dir_all(&real).unwrap();
-        let link = base.join("link");
-        std::os::unix::fs::symlink(&real, &link).unwrap();
-        assert!(setup_private_dir(&link).is_err());
-
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

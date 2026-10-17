@@ -46,6 +46,16 @@
     /** LIVE playback: no seek bar at all — live streams never show a
      *  scrubber; VODs/clips/highlights always do. */
     live?: boolean
+    /** Marks the native-engine surface: a small accent "mpv" badge renders
+     *  left of the gear so the active engine stays identifiable — the HTML
+     *  successor of the badge the old mpv OSC drew in its bar. */
+    showEngineBadge?: boolean
+    /** Intrinsic display aspect of the CURRENT stream (App's videoAspect,
+     *  engine-correct on both backends). The wheel-volume hit test narrows
+     *  the element box to the fitted content rect; on the native engine the
+     *  anchor <video> carries no metadata (videoWidth 0), so this is the
+     *  aspect the fit falls back to instead of 16/9. */
+    aspect?: number
     /** Quality ids the current stream ACTUALLY offers (App's
      *  stream_qualities probe, already intersected + ordered via
      *  effectiveQualities). Undefined → the full vocabulary (VOD/clip or
@@ -70,6 +80,8 @@
     mutedSpans = [],
     storyboard = null,
     live = false,
+    showEngineBadge = false,
+    aspect = Number.NaN,
     qualities = QUALITY_IDS,
   }: Props = $props()
 
@@ -201,11 +213,16 @@
     // wheel swallows the themed side/cinema bars. Over the bars the event
     // stays unclaimed and scrolls the page, matching the native engine,
     // where the surface simply isn't there and the page scrolls instead.
-    // Before metadata (videoWidth 0) the fit falls back to 16:9, the shape
-    // the box will almost certainly take.
+    // The aspect comes from the element's own metadata when it plays (hls);
+    // the native engine's anchor element carries none, so the App-fed
+    // `aspect` prop (mpv's video-params) stands in. Before either is known
+    // the fit falls back to 16:9, the shape the box will almost certainly
+    // take.
     const onWheel = (e: WheelEvent) => {
       const r = v.getBoundingClientRect()
-      const c = fitContentRect(r.width, r.height, v.videoWidth / v.videoHeight)
+      const elW = v.videoWidth
+      const ar = elW > 0 && v.videoHeight > 0 ? elW / v.videoHeight : Number.isFinite(aspect) ? aspect : 16 / 9
+      const c = fitContentRect(r.width, r.height, ar)
       if (
         e.clientX < r.left + c.x ||
         e.clientX > r.left + c.x + c.w ||
@@ -597,6 +614,12 @@
       {/if}
 
       <div class="spacer"></div>
+
+      {#if showEngineBadge}
+        <!-- Engine marker for the native surface (mpv). The name is a proper
+             noun, not translatable prose. -->
+        <span class="engine-badge" aria-label="mpv">mpv</span>
+      {/if}
 
       <div class="menu-wrap">
         <button
@@ -1036,6 +1059,23 @@
 
   .spacer {
     flex: 1 1 auto;
+  }
+
+  /* The native-engine badge: accent-tinted pill matching the LIVE badge's
+     size class — a marker, not a readout. */
+  .engine-badge {
+    flex: 0 0 auto;
+    align-self: center;
+    padding: calc(1px * var(--ctrl-scale)) calc(5px * var(--ctrl-scale));
+    border: 1px solid var(--accent);
+    border-radius: calc(4px * var(--ctrl-scale));
+    color: var(--accent);
+    font-size: calc(10px * var(--ctrl-scale));
+    font-weight: 700;
+    font-family: 'Inter', system-ui, monospace;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+    user-select: none;
   }
 
   .menu-wrap {

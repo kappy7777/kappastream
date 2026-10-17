@@ -17,7 +17,7 @@
 //! follow the same target as the keyboard shortcuts (single view is always
 //! engine 0; a tile becomes the authority by being clicked). Before the
 //! frontend speaks — or when its pick has no live engine — the last engine
-//! that saw a click, an OSD interaction, or a volume/mute/seek write
+//! that saw a click or a volume/mute/seek write
 //! stands in. What the desktop widgets DISPLAY (xesam:title) rides along
 //! with every load: mpv_load records the channel / VOD / clip title for
 //! the engine it loads. Cover art (mpris:artUrl) arrives separately via

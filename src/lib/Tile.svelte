@@ -14,12 +14,10 @@
   //     resolve result).
   //
   // The engine is hls.js OR the embedded native mpv engine (mpvEnabled).
-  // Both cover the same video area (inset-0), but the controls differ: an
-  // hls tile renders the HTML overlay bar (auto-hiding, with label + drag
-  // handle), while a native tile plays the RAW resolved URL through its own
-  // engine id (multi-view = one mpv core per tile; see MultiView's id
-  // allocation) and drives playback through the mpv OSC (ks-osc.lua in tile
-  // mode — see the OSC section below).
+  // Both cover the same video area (inset-0) and render the SAME HTML
+  // overlay controls (the page paints over the native surface's aperture
+  // hole); a native tile plays the RAW resolved URL through its own engine
+  // id (multi-view = one mpv core per tile; see MultiView's id allocation).
   //
   // Audio authority (mirrors src/lib/pip-controller.svelte.ts): the authority
   // tile (the one the user clicked; NOT moved by chat-tab clicks) — its volume
@@ -44,20 +42,17 @@
   import { onDestroy, untrack } from 'svelte'
   import Hls from 'hls.js'
   import { invoke } from '@tauri-apps/api/core'
-  import { listen } from '@tauri-apps/api/event'
-  import { getCurrentWindow } from '@tauri-apps/api/window'
   import { settings } from './settings.svelte.ts'
   import { clearApertureHole, setApertureHole } from './native-aperture.svelte'
   import { toKsvodProxyUrl, shouldRecoverStallAfterPause } from './playback'
   import { PlaybackSession, resolveLiveStream } from './playback-session.svelte'
   import { GQL_REFRESH_INTERVAL_MS } from './gql'
   import { fetchLiveStatus } from './favorites.svelte'
-  import { MpvBackend, type MpvActionEvent, type TileShortcutHandles } from './video-backend'
+  import { MpvBackend, type TileShortcutHandles } from './video-backend'
   import {
     tileStore,
     tileAudible,
     tileControlsIdle,
-    isTileMuteEcho,
     nextTileRetryDelayMs,
     planTileMuteToggle,
     planTileVolumeInput,
@@ -67,7 +62,6 @@
   import { tooltip } from './tooltip.ts'
   import { nextVolume } from './volume'
   import { effectiveQualities, mpvQualities, qualityLabel } from './qualities'
-  import { osdHexColor } from './custom-themes.svelte'
   import { t } from './i18n/index.svelte'
 
   interface Props {
@@ -202,53 +196,9 @@
     }
   })
 
-  // ---- the tile's in-video OSC (mpv-rendered control bar) -------------------
-  // Native tiles use the SAME OSC as the single player (ks-osc.lua), in tile
-  // mode: the app-global buttons (pip / mpv handoff / theater) are hidden,
-  // stop = close the tile, fullscreen = the window. Everything is fed and
-  // received per engine id — no page-snapshot compositing involved (the
-  // snapshot path stays for tooltips/banner/toasts only).
-  const sendOsd = (args: string[]): void => {
-    void invoke('mpv_script_msg', { id: mpvId, args }).catch(() => {})
-  }
-  // Theme colors (the OSC can't read CSS vars), UI scale, tile mode, and
-  // the quality list (labels re-resolve on language switches). Mirrors
-  // App.svelte's single-player feeding — gated on nativeActive (not just
-  // mpvEnabled) because a tile ENGINE only exists once its first load ran;
-  // feeds sent before that would hit "mpv engine unavailable" and die in
-  // the invoke catch.
-  $effect(() => {
-    if (!nativeActive) return
-    void mpvId // re-feed when the tile is re-homed onto another engine
-    // themeRev, not theme: re-saving the ACTIVE custom theme keeps the id,
-    // and the equal id write would never re-run this feed.
-    void settings.themeRev
-    const cs = getComputedStyle(document.documentElement)
-    // Same 6-hex requirement as App's theme feed: the OSD lua's bgr() turns
-    // any non-6-hex token white, and custom themes store rgba()/short-hex.
-    const v = (name: string): string => osdHexColor(cs.getPropertyValue(name).trim())
-    sendOsd([
-      'ks-theme',
-      v('--bg-app'),
-      v('--accent'),
-      v('--text-primary'),
-      v('--text-secondary'),
-      v('--border'),
-      v('--live'),
-    ])
-    sendOsd(['ks-scale', String(settings.uiScale)])
-    sendOsd(['ks-mode', 'tile'])
-    void tile.channel // the label re-feeds when the tile's channel changes
-    sendOsd(['ks-label', tile.channel])
-    // Reading the list through menuQualities tracks it, so the list
-    // re-feeds when the async probe lands.
-    sendOsd([
-      'ks-qualities',
-      t('quality'),
-      qualityLabel(tile.quality),
-      ...menuQualities.map((qid) => qualityLabel(qid)),
-    ])
-  })
+  // The tile's controls are the SAME HTML overlay on both engines (it
+  // paints over the native surface's aperture hole); no engine-side OSD is
+  // fed or listened to.
   // Which variants this tile's channel ACTUALLY offers (stream_qualities
   // probe; one listing per channel change — not per quality switch).
   // Fire-and-forget: unknown (null) degrades to the full vocabulary.
@@ -268,90 +218,6 @@
       disposed = true
     }
   })
-  // The OSC's buttons come back as mpv://action events tagged with the
-  // engine id.
-  $effect(() => {
-    if (!mpvEnabled) return
-    const id = mpvId
-    let un: (() => void) | undefined
-    let disposed = false
-    void listen<MpvActionEvent>('mpv://action', (e) => {
-      if (e.payload.id !== id) return
-      const a = e.payload.action
-      if (a === 'stop' || a === 'close') {
-        // The bar's stop button and the far-right X (hls.js parity) both
-        // close the tile.
-        closeTile()
-      } else if (a === 'fullscreen') {
-        // The native surfaces are window-relative — fullscreen means the
-        // WINDOW (same semantic as the F shortcut in native multi-view).
-        const win = getCurrentWindow()
-        void win
-          .isFullscreen()
-          .then((fs) => win.setFullscreen(!fs))
-          .catch(() => {
-            /* ignore */
-          })
-      } else if (a === 'moveleft' || a === 'moveright') {
-        // The bar's ◀/▶ arrows swap the tile with the neighbouring slot
-        // (clamped at the ends — hls.js parity). Clamped is intended: at
-        // the end the arrow just does nothing.
-        tileStore.move(tile.id, a === 'moveleft' ? -1 : 1)
-      } else if (a.startsWith('quality:')) {
-        const label = a.slice('quality:'.length)
-        // Reverse-map against the SAME list the OSC was fed (it can contain
-        // real rungs outside the static vocabulary, e.g. 936p60).
-        const qid = menuQualities.find((q) => qualityLabel(q) === label)
-        if (qid) changeQuality(qid)
-      }
-    })
-      .then((u) => {
-        if (disposed) u()
-        else un = u
-      })
-      .catch(() => {
-        /* not under Tauri */
-      })
-    return () => {
-      disposed = true
-      un?.()
-    }
-  })
-  // OSC-driven volume/mute (the bar's slider, speaker button, wheel) syncs
-  // back into the tile audio model: the authority tile's bar drives the
-  // GLOBAL settings (persisted), a non-authority bar drives that tile's OWN
-  // volume (never persisted). The unmute direction applies the SAME
-  // explicit-unmute rule as the HTML controls (planTileMuteToggle): an
-  // un-mute click also clears a GLOBAL mute that was blocking the tile —
-  // without it the audio effect re-mutes the tile immediately and the click
-  // "sometimes does nothing" depending on the mute state. Echoes absorb:
-  // the audio effect writes the same values back, mpv reports them, and the
-  // equality checks turn the second write into a no-op. A mute report that
-  // MATCHES the model's expected state is such an echo (isTileMuteEcho) —
-  // the app-caused forced mute used to land here as a fake "user muted this
-  // tile", wiping a listen-along tile's manual unmute on every global-mute
-  // toggle.
-  $effect(() => {
-    const b = mpvBackend
-    if (!b || !nativeActive) return
-    return b.on('volumechange', () => {
-      if (isAuthority) {
-        if (settings.volume !== b.volume) settings.setVolume(b.volume)
-        if (settings.muted !== b.muted) settings.setMuted(b.muted)
-        return
-      }
-      if (tile.volume !== b.volume) tileStore.setTileVolume(tile.id, b.volume)
-      if (isTileMuteEcho(isAuthority, tile.manualUnmute, settings.muted, b.muted)) return
-      const unmuted = !b.muted
-      if (unmuted) {
-        if (!tile.manualUnmute) tileStore.setManualUnmute(tile.id, true)
-        if (settings.muted) settings.setMuted(false)
-      } else if (tile.manualUnmute) {
-        tileStore.setManualUnmute(tile.id, false)
-      }
-    })
-  })
-
   // Audibility (audio authority — see tileAudible): the authority tile follows
   // the global mute; a non-authority tile is audible only if the user manually
   // unmuted it. Global mute silences all.
@@ -736,114 +602,14 @@
   // id moves with a drag-reorder swap — the stale slot must not keep a hole).
   $effect(() => () => clearApertureHole(mpvId))
 
-  // ---- native surface pointer forwarding (mpv OSC input) --------------------
-  // Mirrors App.svelte's single-player forwarder (same normalization, the
-  // same click-only mpv constraint, the same drag synthesis from held
-  // moves) but scoped to THIS tile's video area and tagged with its engine
-  // id. The page receives every event natively (the webview is the topmost
-  // window) — tile activation clicks still work; the OSC just also sees
-  // them.
-  $effect(() => {
-    if (!nativeActive) return
-    const stage = areaEl
-    if (!stage) return
-    const id = mpvId
-    let lastClickAt = 0
-    // True while a pointer press that STARTED on this tile's stage is held.
-    // Held-move clicks are synthesized only for such presses: a splitter or
-    // drag-handle press crossing the tile still fires pointermove here (its
-    // events are un-captured page events landing on whatever is under the
-    // pointer), and every forwarded click hit-tests the OSC — which
-    // activates the button under it even from its hidden state. Without the
-    // gate, resizing the grid could close a tile, pause it or set its
-    // volume.
-    let pressActive = false
-    // Fractions within the tile, computed in the event and coalesced to at
-    // most one 'move' per animation frame (each forward is an IPC hop that
-    // becomes an mpv input command; pointermove can outpace the display
-    // refresh). Clicks stay immediate — their own 50 ms throttle paces the
-    // OSD's drag synthesizer.
-    const send = (x: number, y: number, kind: string): void => {
-      void invoke('mpv_pointer', { id, x, y, kind }).catch(() => {})
-    }
-    const locate = (e: { clientX: number; clientY: number }): { x: number; y: number } | null => {
-      const r = stage.getBoundingClientRect()
-      if (r.width < 1 || r.height < 1) return null
-      return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
-    }
-    let moveRaf = 0
-    let pendingMove: { x: number; y: number } | null = null
-    const flushMove = (): void => {
-      moveRaf = 0
-      const pending = pendingMove
-      pendingMove = null
-      if (pending) send(pending.x, pending.y, 'move')
-    }
-    const click = (e: PointerEvent): void => {
-      const now = performance.now()
-      if (now - lastClickAt < 50) return
-      lastClickAt = now
-      const loc = locate(e)
-      if (loc) send(loc.x, loc.y, 'click')
-    }
-    const onMove = (e: PointerEvent): void => {
-      const loc = locate(e)
-      if (loc) {
-        pendingMove = loc
-        if (!moveRaf) moveRaf = requestAnimationFrame(flushMove)
-      }
-      if (e.buttons === 1 && pressActive) click(e)
-    }
-    const onDown = (e: PointerEvent): void => {
-      if (e.button !== 0) return
-      pressActive = true
-      // Pointer capture keeps held-drag streams flowing even when the
-      // pointer leaves the tile mid-drag.
-      try {
-        stage.setPointerCapture(e.pointerId)
-      } catch {
-        /* stage gone mid-gesture */
-      }
-      click(e)
-    }
-    // Capture retargets the release to the stage, so this clears even when
-    // the pointer left the tile mid-press.
-    const onUp = (): void => {
-      pressActive = false
-    }
-    const onWheelNative = (e: WheelEvent): void => {
-      // mpv owns the wheel in native mode (OSC volume steps) — the page's
-      // scroll-volume handler below skips while native.
-      e.preventDefault()
-      const loc = locate(e)
-      if (loc) send(loc.x, loc.y, e.deltaY < 0 ? 'wheel-up' : 'wheel-down')
-    }
-    // Any click on the native video moves the audio authority here. The
-    // pointer capture above RETARGETS the composed click to the stage (the
-    // .mv-tile-surface button underneath never sees it — that was the
-    // "clicking a native tile does nothing" bug), so the stage listener is
-    // the one that fires. The OSC's own buttons live inside mpv, so their
-    // clicks also land here — focusing the tile you're interacting with is
-    // the intended behaviour.
-    const onClick = (): void => {
-      onTileActivate(tile.id)
-    }
-    stage.addEventListener('pointermove', onMove, { passive: true })
-    stage.addEventListener('pointerdown', onDown)
-    stage.addEventListener('pointerup', onUp)
-    stage.addEventListener('pointercancel', onUp)
-    stage.addEventListener('click', onClick)
-    stage.addEventListener('wheel', onWheelNative, { passive: false })
-    return () => {
-      if (moveRaf) cancelAnimationFrame(moveRaf)
-      stage.removeEventListener('pointermove', onMove)
-      stage.removeEventListener('pointerdown', onDown)
-      stage.removeEventListener('pointerup', onUp)
-      stage.removeEventListener('pointercancel', onUp)
-      stage.removeEventListener('click', onClick)
-      stage.removeEventListener('wheel', onWheelNative)
-    }
-  })
+  // ---- native surface pointer input -----------------------------------------
+  // The page is the topmost window, so pointer input over a native tile
+  // reaches the PAGE: the inset-0 .mv-tile-surface button underneath the
+  // overlays carries tile activation, the wheel rides the section-level
+  // scroll-volume handler below (engine-agnostic — the audio-apply effect
+  // above forwards model writes to whichever backend plays the tile), and
+  // the HTML controls handle everything else. No events are forwarded into
+  // the engine.
 
   // ---- scroll-to-change-volume (reuses the shared nextVolume math that the
   // single-stream PlayerControls also uses). Scrolling a tile nudges THAT tile's
@@ -856,10 +622,6 @@
   //     Mirrors the single-stream "scroll on a muted video unmutes" behaviour.
   function onWheel(e: WheelEvent): void {
     e.preventDefault()
-    // The native engine owns the wheel over the video (its OSC volume-steps
-    // via the forwarded wheel events above) — the page path stays for hls
-    // tiles only.
-    if (nativeActive) return
     const dir = e.deltaY < 0 ? 1 : -1
     if (isAuthority) {
       settings.setVolume(nextVolume(settings.volume, dir))
@@ -995,30 +757,25 @@
     return () => clearInterval(id)
   })
 
-  // The HTML overlay controls (bar, label, drag handle) render for hls
-  // tiles AND for native tiles whose surface is NOT up — an offline/error
-  // resolve, a mid-playback engine error or stream end, or an mpv_load
-  // fallback to hls.js. While the native surface is actually showing, the
-  // mpv OSC owns the tile and the HTML overlay stays away; gating on
-  // mpvEnabled alone left every one of those states with NO controls at
-  // all (uncloseable, unmutable, no quality menu — the OSC's surface was
-  // already hidden). The LOADING state is excluded on purpose too: a
-  // native tile's resolve/attach window would otherwise flash the full
-  // hls look before the OSC takes over (spinner-only until it plays or
-  // fails — a failure lands in offline/error, which bring the bar back).
-  const htmlControls = $derived(controlsShown && !(mpvEnabled && (nativeActive || tile.status === 'loading')))
+  // The auto-hiding overlay chrome (bar, label, drag handle) behaves the
+  // same on both engines: it paints over the native surface's aperture hole
+  // exactly like it paints over the hls <video>.
+  const htmlControls = $derived(controlsShown)
 
   const showOverlay = $derived(tile.status === 'loading' || tile.status === 'offline' || tile.status === 'error')
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- mv-tile--authority carries no visual style: the audio authority is
+     marked by the status bar row + the channel label dim only (an accent
+     ring would paint over the native video's aperture edges). The class
+     stays as a semantic/test hook. -->
 <section
   bind:this={tileEl}
   data-tile-id={tile.id}
   class="mv-tile"
   class:mv-tile--authority={isAuthority}
-  class:mv-tile--audible={audible}
   class:mv-tile--native={nativeActive}
   class:mv-tile--dragging={isDragging}
   class:mv-tile--drop-target={isDropTarget}
@@ -1030,8 +787,7 @@
 >
   <!-- The video REGION — absolute inset-0 in BOTH engines (the mpv surface
        covers exactly this rect). The control bar / label / drag handle are
-       page UI rendered by hls tiles only (htmlControls) — a playing native
-       tile uses the mpv OSC instead. -->
+       page UI painting over either engine (htmlControls). -->
   <div class="mv-video-area" bind:this={areaEl}>
     <video
       bind:this={videoEl}
@@ -1055,8 +811,7 @@
     <!-- Drag handle (pointer-events): grabbing here starts a reorder. Deliberately
          a separate element from the <video> so HTML5/native drag never touches the
          player or its controls. Keyboard users get the ◀/▶ reorder buttons below.
-         Auto-hides with the rest of the tile overlay (controlsShown); native
-         tiles use the mpv OSC instead of the HTML overlay UI. -->
+         Auto-hides with the rest of the tile overlay (controlsShown). -->
     {#if htmlControls}
       <button
         type="button"
@@ -1095,10 +850,8 @@
   </div>
 
   {#if htmlControls}
-    <!-- The auto-hiding gradient bar OVER the video — hls.js tiles, plus
-         native tiles whose surface is down (see htmlControls). A playing
-         native tile uses the mpv OSC instead (in-video, mpv-rendered; see
-         the OSC feeding/effects above). -->
+    <!-- The auto-hiding gradient bar OVER the video — same markup on both
+         engines (it paints over the native surface's aperture hole). -->
     <div class="mv-tile-controls">
       <button type="button" class="mv-ctrl" onclick={togglePlay} aria-label={t('pc_play')} use:tooltip={t('pc_play')}>
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"
@@ -1257,12 +1010,6 @@
     inset: 0;
     min-width: 0;
     min-height: 0;
-  }
-  /* Authority tile gets an accent ring so the audio source is obvious.
-     The ring edges under the video surface are covered in native mode —
-     the visible ring marks are the same as hls.js (parity by design). */
-  .mv-tile--authority {
-    box-shadow: inset 0 0 0 2px var(--accent);
   }
   .mv-video {
     width: 100%;
