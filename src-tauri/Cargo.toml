@@ -122,4 +122,4 @@ libc = { version = "0.2", optional = true }
 # bridge only registers real, audio-producing media elements). Version and
 # the tokio feature unify with the zbus the notification plugin already
 # resolves, so this adds no new dependency tree.
-zbus = { version = "5", features = ["tokio"], optional = true }
+zbus = { version = "6", features = ["tokio"], optional = true }
