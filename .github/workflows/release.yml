@@ -201,7 +201,7 @@ jobs:
       # Debian-12 toolchain and 24.04's produce glibc-incompatible
       # target/ dirs that must never cross-restore.
       - name: Cache Cargo (~/.cargo + src-tauri/target)
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri -> target
           shared-key: native-deb12
@@ -355,7 +355,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cache Cargo (~/.cargo + src-tauri/target)
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri -> target
           shared-key: appimage-2404
@@ -615,7 +615,7 @@ jobs:
 
       # Separate cache key from the Linux jobs (different target triple).
       - name: Cache Cargo (~/.cargo + src-tauri/target)
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri -> target
           shared-key: windows-x86_64
@@ -792,7 +792,7 @@ jobs:
 
       # Separate cache key from the Linux/Windows jobs (aarch64-apple-darwin).
       - name: Cache Cargo (~/.cargo + src-tauri/target)
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri -> target
           shared-key: macos-aarch64
