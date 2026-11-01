@@ -39,9 +39,14 @@ export default defineConfig([
         projectService: {
           // These root config files are not part of any tsconfig; allow them to
           // lint with TypeScript's default project options instead of erroring.
-          // The badge-baseline generator is a plain-Node dev script (scripts/),
-          // not part of the app's TS project, so it lints standalone too.
-          allowDefaultProject: ['eslint.config.js', 'svelte.config.js', 'scripts/generate-badges.mjs'],
+          // The plain-Node dev scripts (scripts/) are not part of the app's TS
+          // project, so they lint standalone too.
+          allowDefaultProject: [
+            'eslint.config.js',
+            'svelte.config.js',
+            'scripts/generate-badges.mjs',
+            'scripts/npm-audit.mjs',
+          ],
         },
         extraFileExtensions: ['.svelte'],
         tsconfigRootDir: import.meta.dirname,
