@@ -85,11 +85,11 @@ jobs:
         # Supply-chain advisory scan over package-lock.json. Mirrors the
         # cargo-audit step at the end of this job; runs right after `npm ci`
         # so a vulnerable dependency fails fast before the type-check / lint /
-        # build work. Exits non-zero on any advisory (prod or dev). npm audit
-        # has no "unmaintained" category (unlike cargo audit) so there is no
-        # equivalent ignore list — a new transitive vuln usually clears via the
-        # next dependabot bump.
-        run: npm audit
+        # build work. The wrapper (scripts/npm-audit.mjs) exits non-zero on
+        # any advisory (prod or dev) unless its GHSA id is allowlisted in the
+        # script itself; allowlist entries carry a hard expiry so a stale
+        # exception fails the build instead of lingering unnoticed.
+        run: node scripts/npm-audit.mjs
 
       - name: Version drift check
         # Fails fast if package.json / Cargo.toml / Cargo.lock disagree, or a
