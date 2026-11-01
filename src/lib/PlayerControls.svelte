@@ -7,6 +7,7 @@
   import type { VodChapter, VodMuteSpan } from './gql'
   import { chapterAt, storyboardThumbAt, type Storyboard } from './vod-extras'
   import { fitContentRect } from './video-fit'
+  import { isKeyboardFocus } from './focus-modality'
   import { isTauri } from '@tauri-apps/api/core'
   import type { VideoBackend } from './video-backend'
   import { t } from './i18n/index.svelte'
@@ -116,7 +117,8 @@
   // the idle hide must be suspended while the user is engaged with the
   // controls themselves: hovering/scrubbing them, an open menu, or keyboard
   // focus inside (arrow keys on the scrubber or volume with the pointer at
-  // rest).
+  // rest — click focus does not count, see the focusin handler). Leaving
+  // the whole player box hides the bar at once instead of idling out.
   let pointerInControls = $state(false)
   let focusInControls = $state(false)
 
@@ -240,20 +242,32 @@
     const onEnter = () => {
       bumpActivity()
     }
-    const onLeave = () => {
-      lastActivityAt = Date.now()
-    }
     const onMove = () => {
       bumpActivity()
     }
     const onClick = () => {
       bumpActivity()
     }
+    // Leaving the whole player box hides the bar at once: the idle window
+    // is for a pointer at rest INSIDE the player, not one that has left
+    // it. The region is .player — the video's box, which also contains
+    // the bar and the menu backdrop — resolved from the anchor element
+    // (single view mounts it around the video), so pointerleave waits
+    // until the pointer clears every descendant and video<->bar
+    // transitions can never fire it. The engaged-pointer flag drops here
+    // as well: if a relayout slid the bar off a resting cursor, its own
+    // pointerleave may never have fired.
+    const player = v.closest('.player')
+    const onPlayerLeave = () => {
+      if (menuOpen || focusInControls) return
+      pointerInControls = false
+      controlsShown = false
+    }
     v.addEventListener('wheel', onWheel, { passive: false })
     v.addEventListener('mouseenter', onEnter)
-    v.addEventListener('mouseleave', onLeave)
     v.addEventListener('mousemove', onMove)
     v.addEventListener('click', onClick)
+    player?.addEventListener('pointerleave', onPlayerLeave)
     bumpActivity()
 
     const ro = new ResizeObserver((entries) => {
@@ -270,9 +284,9 @@
       detachState()
       v.removeEventListener('wheel', onWheel)
       v.removeEventListener('mouseenter', onEnter)
-      v.removeEventListener('mouseleave', onLeave)
       v.removeEventListener('mousemove', onMove)
       v.removeEventListener('click', onClick)
+      player?.removeEventListener('pointerleave', onPlayerLeave)
       ro.disconnect()
     }
   })
@@ -438,6 +452,11 @@
   }
 
   function onControlsKey(e: KeyboardEvent): void {
+    // Any key interaction inside the bar feeds the idle window: a
+    // click-focused scrubber or slider gets no keyboard focus hold, and
+    // arrow-seeking past the idle window would otherwise unmount the bar
+    // (and the focused control with it) mid-interaction.
+    bumpActivity()
     if (e.key === 'Escape' && menuOpen) {
       e.preventDefault()
       closeMenu()
@@ -463,10 +482,11 @@
 {/if}
 
 {#if effectiveVisible}
-  <!-- pointermove/pointerdown/focusin here keep the idle timer fed while the
-       bar (or its full-screen menu backdrop — a child of this element, whose
-       events bubble through these same handlers) has the pointer: the
-       <video>'s own listeners never fire for those moves. -->
+  <!-- pointermove/pointerdown here keep the idle timer fed while the bar (or
+       its full-screen menu backdrop — a child of this element, whose events
+       bubble through these same handlers) has the pointer: the <video>'s own
+       listeners never fire for those moves. focusin holds the bar only for
+       keyboard focus (see the handler). -->
   <div
     class="controls"
     role="presentation"
@@ -474,10 +494,24 @@
     onpointerenter={() => (pointerInControls = true)}
     onpointerleave={() => (pointerInControls = false)}
     onpointermove={bumpActivity}
-    onpointerdown={bumpActivity}
-    onfocusin={() => {
-      focusInControls = true
+    onpointerdown={() => {
+      // A pointer press is mouse-modality evidence: it ends the keyboard
+      // hold (a focusin that follows re-evaluates via :focus-visible, so
+      // an engine whose carry-over heuristic still matches a click-focused
+      // control cannot strand the bar either).
+      focusInControls = false
       bumpActivity()
+    }}
+    onfocusin={(e) => {
+      // Only KEYBOARD focus suspends the idle hide: WebKitGTK also focuses
+      // a control on click, and that click-focused button would pin the
+      // bar open (pointer moves never clear a focus flag — only the bar's
+      // own pointerdown does). Mouse users already fed the timer through
+      // the pointerdown that moved focus.
+      if (isKeyboardFocus(e.target)) {
+        focusInControls = true
+        bumpActivity()
+      }
     }}
     onfocusout={() => (focusInControls = false)}
     style="--ctrl-scale: {ctrlScale.toFixed(3)}"

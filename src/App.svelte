@@ -3372,9 +3372,6 @@
                   >
                 </div>
               {/snippet}
-              {#if playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)}
-                {@render playbackBanner(playback.title)}
-              {/if}
               <div class="player-fold" bind:this={playerFoldEl}>
                 <!-- The .player section is the video BOX (a 16:9-aspected
                      flex item that goes wider than 16:9 when height binds).
@@ -3421,6 +3418,15 @@
                           >{t('player_resumeStream')}</button
                         >
                       </div>
+                    {/if}
+                    {#if playback.kind !== 'live' && activeStatus.state === 'live' && (playerStatus !== 'playing' || controlsVisible)}
+                      <!-- Must be a .player descendant, not a stage-level
+                         sibling: the control bar's immediate hide rides
+                         .player's pointerleave, so a banner outside it
+                         would unmount under the cursor the moment the
+                         pointer crossed onto it — and the --video-* vars
+                         its geometry reads resolve only here. -->
+                      {@render playbackBanner(playback.title)}
                     {/if}
                     {#if vodCtl.resumeBar}
                       {@render resumeBar()}
