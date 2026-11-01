@@ -6,21 +6,4 @@ ignore = [
     # when the transitive graph moves to quick-xml >= 0.41.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
-    # zip extraction advisories (all patched only in zip >= 9, which
-    # tauri-plugin-updater's zip 4 pin cannot reach). zip is a
-    # Windows-only optional dependency of tauri-plugin-updater
-    # ([target.'cfg(target_os = "windows")'.dependencies.zip]) — the
-    # Linux and macOS builds do not link it at all. The exploitable
-    # surface is extract() on an attacker-controlled archive, but
-    # Update::download() verifies the minisign signature BEFORE
-    # returning any bytes, and kappastream installs only bytes that
-    # came out of download() (downloadAndInstall). The Windows updater
-    # artifact is the NSIS -setup.exe, which takes the extract_exe
-    # path, so the zip branch never sees a kappastream artifact; the
-    # Linux updater artifacts are the bare .AppImage/.deb/.rpm files,
-    # not archives. Drop all three when the updater crate moves to
-    # zip >= 9.
-    "RUSTSEC-2026-0367",
-    "RUSTSEC-2026-0368",
-    "RUSTSEC-2026-0369",
 ]
