@@ -7,13 +7,23 @@
 // keyboard focus is inside it — and resume hiding once each engagement
 // ends.
 //
-// Also pins the leave semantics: the bar hides AT ONCE when the pointer
-// leaves the whole .player box (not after the idle window), and click
-// focus inside the bar must never suspend the hide — WebKitGTK focuses a
-// control on mousedown, and that click-focused button used to pin the bar
-// open forever (no pointer event can clear a focus flag).
+// Also pins the leave semantics: the bar hides when the pointer leaves the
+// whole .player box (one deferred task, not after the idle window), the
+// decision rides the tracked pointer position rather than the leave event
+// itself, and click focus inside the bar must never suspend the hide —
+// WebKitGTK focuses a control on mousedown, and that click-focused button
+// used to pin the bar open forever (no pointer event can clear a focus
+// flag).
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, unmount, tick } from 'svelte'
+
+// The leave check hit-tests the tracked pointer coordinates; happy-dom has
+// no layout engine, so the seam is mocked and each scenario states which
+// element sits under the pointer.
+const pointerHit = vi.hoisted(() => ({
+  elementAtPoint: vi.fn<(x: number, y: number) => Element | null>(() => null),
+}))
+vi.mock('./pointer-hit', () => ({ elementAtPoint: pointerHit.elementAtPoint }))
 
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => false,
@@ -65,11 +75,24 @@ function controls(): HTMLElement | null {
   return document.querySelector('.controls')
 }
 
+// Feed the leave check's tracked position (window-level pointermove).
+function movePointer(x: number, y: number): void {
+  window.dispatchEvent(new MouseEvent('pointermove', { clientX: x, clientY: y }))
+}
+
+// Point the hit-test seam at an element (or null = nothing/viewport edge).
+function hitWith(el: Element | null): void {
+  pointerHit.elementAtPoint.mockImplementation(() => el)
+}
+
 // The harness mirrors App's single-view DOM: the anchor <video> and the
 // mounted bar are siblings inside section.player, which is the region the
 // immediate hide rides on (resolved via video.closest('.player')).
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+  // Default: the hit-test finds nothing under the pointer (viewport edge
+  // / no element) — scenarios that want an inside hit state it explicitly.
+  hitWith(null)
   player = document.createElement('section')
   player.className = 'player'
   document.body.appendChild(player)
@@ -98,6 +121,7 @@ afterEach(() => {
   view = null
   player?.remove()
   player = null
+  pointerHit.elementAtPoint.mockReset()
   vi.useRealTimers()
 })
 
@@ -159,11 +183,26 @@ describe('control-bar idle hide', () => {
 })
 
 describe('control-bar leave semantics', () => {
-  it('hides at once when the pointer leaves the whole player box', async () => {
+  it('hides when the pointer leaves the whole player box', async () => {
+    // The hide lands one deferred task after the leave — the deferral is
+    // what lets the check separate a genuine exit from the engine's
+    // fixup artifacts.
+    movePointer(900, 700)
     expect(controls()).not.toBeNull()
     player!.dispatchEvent(new MouseEvent('pointerleave'))
-    await tick()
+    await vi.advanceTimersByTimeAsync(0)
     expect(controls()).toBeNull()
+  })
+
+  it('hides when the tracked position hit-tests onto an element outside the player', async () => {
+    const outside = document.createElement('div')
+    document.body.appendChild(outside)
+    movePointer(900, 700)
+    hitWith(outside)
+    player!.dispatchEvent(new MouseEvent('pointerleave'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(controls()).toBeNull()
+    outside.remove()
   })
 
   it('is not pinned open by click focus inside the controls', async () => {
@@ -197,6 +236,43 @@ describe('control-bar leave semantics', () => {
     await tick()
     expect(controls()).not.toBeNull()
     btn.dispatchEvent(new Event('focusout', { bubbles: true }))
+    await vi.advanceTimersByTimeAsync(4_100)
+    expect(controls()).toBeNull()
+  })
+
+  it('drops the engaged-pointer flag when the fixup leave hits off the bar', async () => {
+    // A relayout can slide the bar off a resting cursor, so the bar's own
+    // pointerleave never fires and the fixup's player-level leave is all
+    // the engine delivers. The skip keeps the bar, but when the tracked
+    // position is not over the controls the engaged flag must drop — or
+    // the idle hide stays suspended forever with the pointer at rest on
+    // the video.
+    controls()!.dispatchEvent(new MouseEvent('pointerenter'))
+    movePointer(300, 300)
+    hitWith(player!.querySelector('video'))
+    player!.dispatchEvent(new MouseEvent('pointerleave'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(controls()).not.toBeNull()
+    await vi.advanceTimersByTimeAsync(4_100)
+    expect(controls()).toBeNull()
+  })
+
+  it('keeps the engaged-pointer flag when the fixup leave hits onto the bar', async () => {
+    // Mirror of the drop above: a synthetic leave whose tracked position
+    // hit-tests onto the bar itself means the pointer demonstrably never
+    // left the controls, so the engagement must survive — dropping the
+    // flag here would let the idle hide retract the bar under a resting
+    // cursor after 4s.
+    controls()!.dispatchEvent(new MouseEvent('pointerenter'))
+    movePointer(300, 300)
+    hitWith(document.querySelector('.ctrl-btn--play'))
+    player!.dispatchEvent(new MouseEvent('pointerleave'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(controls()).not.toBeNull()
+    await vi.advanceTimersByTimeAsync(4_100)
+    expect(controls()).not.toBeNull()
+    // The engagement still ends through the bar's own boundary.
+    controls()!.dispatchEvent(new MouseEvent('pointerleave'))
     await vi.advanceTimersByTimeAsync(4_100)
     expect(controls()).toBeNull()
   })
@@ -255,5 +331,77 @@ describe('control-bar leave semantics', () => {
     expect(controls()).not.toBeNull()
     await vi.advanceTimersByTimeAsync(4_100)
     expect(controls()).toBeNull()
+  })
+
+  it('skips the hide when the tracked pointer still hit-tests inside the player', async () => {
+    // WebKitGTK's hover fixup (the bar mounting under a cursor, the
+    // tooltip popping for the control it landed on) re-fires boundary
+    // events on boxes the pointer never left; a synthetic leave cannot
+    // move the tracked coordinates, so the hit-test still lands inside
+    // the player and the freshly shown bar stays. That is also the path a
+    // genuine exit through the WINDOW edge takes — the coordinates never
+    // leave the player — so such an exit falls to the ordinary idle
+    // window, pinned here too.
+    const video = player!.querySelector('video')!
+    movePointer(300, 300)
+    hitWith(video)
+    player!.dispatchEvent(new MouseEvent('pointerleave'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(controls()).not.toBeNull()
+    await vi.advanceTimersByTimeAsync(4_100)
+    expect(controls()).toBeNull()
+  })
+
+  it('reads the latest tracked position at the deferred check', async () => {
+    // Moves keep landing between the leave and the check: the decision
+    // must ride the position as of check time, not as of leave time.
+    // (Two hops: the tracker drops samples that teleport too far in one
+    // event, so the path approaches the exit continuously.)
+    movePointer(300, 300)
+    player!.dispatchEvent(new MouseEvent('pointerleave'))
+    movePointer(700, 550)
+    movePointer(900, 700)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(pointerHit.elementAtPoint).toHaveBeenCalledWith(900, 700)
+    expect(controls()).toBeNull()
+  })
+
+  it('drops teleporting samples and re-adopts once movement chains up elsewhere', async () => {
+    // A sample far from both the accepted position and the previous one is
+    // junk (engine hover-fixup motion, not the real pointer): the check
+    // must still read the last accepted position. A follow-up sample near
+    // the junk one means the pointer genuinely teleported and now moves
+    // continuously from the new place — adopted from there on.
+    movePointer(300, 300)
+    movePointer(5000, 5000)
+    player!.dispatchEvent(new MouseEvent('pointerleave'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(pointerHit.elementAtPoint).toHaveBeenLastCalledWith(300, 300)
+    // The first check hid the bar; a hidden bar's checks refuse to decide,
+    // so bring it back before pinning the re-adoption.
+    player!.querySelector('video')!.dispatchEvent(new MouseEvent('mousemove'))
+    await tick()
+    movePointer(5010, 5010)
+    player!.dispatchEvent(new MouseEvent('pointerleave'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(pointerHit.elementAtPoint).toHaveBeenLastCalledWith(5010, 5010)
+  })
+
+  it('coalesces overlapping leaves into one check', async () => {
+    movePointer(900, 700)
+    player!.dispatchEvent(new MouseEvent('pointerleave'))
+    player!.dispatchEvent(new MouseEvent('pointerleave'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(pointerHit.elementAtPoint).toHaveBeenCalledTimes(1)
+    expect(controls()).toBeNull()
+  })
+
+  it('a leave with no tracked position never hides', async () => {
+    // No pointermove has landed yet: the check has no coordinates to
+    // trust and refuses to decide (the idle window remains the backstop).
+    player!.dispatchEvent(new MouseEvent('pointerleave'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(controls()).not.toBeNull()
+    expect(pointerHit.elementAtPoint).not.toHaveBeenCalled()
   })
 })

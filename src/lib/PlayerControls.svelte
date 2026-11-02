@@ -8,6 +8,7 @@
   import { chapterAt, storyboardThumbAt, type Storyboard } from './vod-extras'
   import { fitContentRect } from './video-fit'
   import { isKeyboardFocus } from './focus-modality'
+  import { elementAtPoint } from './pointer-hit'
   import { isTauri } from '@tauri-apps/api/core'
   import type { VideoBackend } from './video-backend'
   import { t } from './i18n/index.svelte'
@@ -254,15 +255,81 @@
     // the bar and the menu backdrop — resolved from the anchor element
     // (single view mounts it around the video), so pointerleave waits
     // until the pointer clears every descendant and video<->bar
-    // transitions can never fire it. The engaged-pointer flag drops here
-    // as well: if a relayout slid the bar off a resting cursor, its own
-    // pointerleave may never have fired.
-    const player = v.closest('.player')
-    const onPlayerLeave = () => {
-      if (menuOpen || focusInControls) return
+    // transitions can never fire it.
+    //
+    // The hide decision does NOT read the leave event: WebKitGTK re-runs
+    // hit-testing after DOM changes under a cursor (the bar mounting, the
+    // tooltip popping) and re-fires boundary events on boxes the pointer
+    // never left, and a leave's relatedTarget cannot reliably separate
+    // that fixup artifact from a genuine exit (the synthetic variant has
+    // been observed with an inside, outside and null target). Instead the
+    // check rides the pointer's actually-tracked position: a synthetic
+    // leave cannot move the real pointer, so the coordinates still
+    // hit-test inside .player one task later and the hide is dropped; a
+    // genuine leave's crossing motion event has already landed by then,
+    // so the coordinates resolve outside and the bar hides with one task
+    // of deferral (~imperceptible). The cost taken in exchange: a pointer
+    // that exits the WINDOW while over the player never moves the
+    // tracked coordinates, the check skips, and the ordinary idle window
+    // hides the bar instead.
+    const player = v.closest('.player') as HTMLElement | null
+    // Tracked pointer position, jump-filtered: an engine's hover fixup can
+    // emit motion events whose coordinates do not belong to the real
+    // pointer, and one poisoned sample would misdirect the leave check. A
+    // real pointer moves continuously, so a sample far from both the
+    // accepted position and the previous sample is dropped; a genuine
+    // teleport followed by continuous movement from the new place is
+    // adopted once samples chain up there.
+    let pointerX = Number.NaN
+    let pointerY = Number.NaN
+    let pendingX = Number.NaN
+    let pendingY = Number.NaN
+    let leaveCheck: ReturnType<typeof setTimeout> | null = null
+    const TRACK_JUMP_PX = 600
+    const onPointerTrack = (e: PointerEvent): void => {
+      const x = e.clientX
+      const y = e.clientY
+      if (!Number.isFinite(pointerX)) {
+        pointerX = x
+        pointerY = y
+        pendingX = x
+        pendingY = y
+        return
+      }
+      const nearAccepted = Math.hypot(x - pointerX, y - pointerY) <= TRACK_JUMP_PX
+      const nearPending = Math.hypot(x - pendingX, y - pendingY) <= TRACK_JUMP_PX
+      if (nearAccepted || nearPending) {
+        pointerX = x
+        pointerY = y
+      }
+      pendingX = x
+      pendingY = y
+    }
+    const runLeaveCheck = () => {
+      leaveCheck = null
+      if (menuOpen || focusInControls || !controlsShown) return
+      if (!Number.isFinite(pointerX) || !Number.isFinite(pointerY)) return
+      const hit = elementAtPoint(pointerX, pointerY)
+      if (hit instanceof Node && player?.contains(hit)) {
+        // The pointer demonstrably never left. The leave may stand in for
+        // the bar's own missed pointerleave (a relayout sliding the bar off
+        // a resting cursor): when the hit is not the bar itself, the
+        // pointer is no longer over the controls — drop the engaged flag
+        // so the idle hide stays armed.
+        if (!(hit instanceof Element) || !hit.closest('.controls')) pointerInControls = false
+        return
+      }
       pointerInControls = false
       controlsShown = false
     }
+    const onPlayerLeave = () => {
+      if (menuOpen || focusInControls) return
+      // Coalesce overlapping leaves onto the earliest pending check; it
+      // reads the live tracked coordinates, so a genuine leave arriving
+      // after a fixup artifact still hides.
+      if (leaveCheck === null) leaveCheck = setTimeout(runLeaveCheck, 0)
+    }
+    window.addEventListener('pointermove', onPointerTrack, { passive: true })
     v.addEventListener('wheel', onWheel, { passive: false })
     v.addEventListener('mouseenter', onEnter)
     v.addEventListener('mousemove', onMove)
@@ -282,6 +349,8 @@
 
     return () => {
       detachState()
+      if (leaveCheck !== null) clearTimeout(leaveCheck)
+      window.removeEventListener('pointermove', onPointerTrack)
       v.removeEventListener('wheel', onWheel)
       v.removeEventListener('mouseenter', onEnter)
       v.removeEventListener('mousemove', onMove)
@@ -303,7 +372,9 @@
     }
     const id = setInterval(() => {
       if (menuOpen || pointerInControls || focusInControls) return
-      if (Date.now() - lastActivityAt >= IDLE_HIDE_MS) controlsShown = false
+      if (Date.now() - lastActivityAt >= IDLE_HIDE_MS) {
+        controlsShown = false
+      }
     }, 500)
     return () => clearInterval(id)
   })
@@ -858,16 +929,10 @@
     box-sizing: border-box;
     z-index: 5;
     pointer-events: auto;
-    animation: controls-fade-in 150ms ease;
-  }
-
-  @keyframes controls-fade-in {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
+    /* No mount animation: a composited opacity fade starts and ends with
+       compositing-layer churn on the freshly mounted bar, which on
+       WebKitGTK reads as a one-frame blink of the just-shown control
+       strip. The bar appears instantly instead. */
   }
 
   .progress {

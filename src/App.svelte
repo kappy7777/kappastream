@@ -4251,8 +4251,7 @@
     border-radius: 5px;
     color: #fff;
     font-size: 12px;
-    /* Mirrors the PlayerControls fade-in so the banner reappears in step with
-       the controls on mouse activity. */
+    /* Short mount fade for when mouse activity brings the banner back. */
     animation: playback-banner-in 150ms ease;
   }
   @keyframes playback-banner-in {
