@@ -3,6 +3,7 @@ import { SvelteSet } from 'svelte/reactivity'
 import { settings } from './settings.svelte.ts'
 import { notifications } from './notifications.svelte.ts'
 import {
+  CHANNEL_ID_RE,
   fetchChannelStatuses,
   fetchCollaborators,
   GQL_REFRESH_INTERVAL_MS,
@@ -256,6 +257,14 @@ export class FavoritesStore {
   // fetch owns the channel. Without this, a late response from a poll that no
   // longer represents the current entry would overwrite a fresher status.
   private entryVersions = new Map<string, number>()
+  // Logins whose Stream Together session a successful roster fetch reported
+  // OVER while the status batch keeps serving a (stale) combined count.
+  // applyGqlStatuses suppresses the batch's session signals for these
+  // channels so the stale count cannot re-materialize the badge between
+  // polls; the latch clears when the batch itself stops reporting a session
+  // or a roster lists the channel again. Plain Set — read and written only
+  // inside the synchronous apply methods; reactivity flows through notify().
+  private collabDissolved = new Set<string>()
   // Circuit breaker governing GQL batch retries. On a transport failure this
   // backs off (exponential: 30s → 60s → 120s → 240s, capped at 5 min) and the
   // `rateLimited` flag drives the sidebar's "having trouble reaching Twitch"
@@ -437,6 +446,7 @@ export class FavoritesStore {
     this.entries = this.entries.filter((e) => e.name !== n)
     saveToStorage(this.entries)
     this.statuses.delete(n)
+    this.collabDissolved.delete(n)
     this.notifChannels.delete(n)
     saveNotifChannels(this.notifChannels)
     this.notify()
@@ -680,10 +690,19 @@ export class FavoritesStore {
       // via a separate follow-up request moments later — carry the
       // last-known roster values through while the channel is still in a
       // session (collabViewers), so a poll (or a failed roster fetch) never
-      // blanks the badge. A channel that LEFT its session resets.
-      // costreamDetails (official co-streams) carries its own count/avatar
-      // in the batch itself and wins outright.
-      const roster = cs.collabViewers != null && prev?.status.state === 'live' ? prev.status : null
+      // blanks the badge. A channel that LEFT its session resets: either the
+      // batch itself stopped reporting one, or a roster fetch already
+      // reported it over (collabDissolved) — Twitch can keep serving a stale
+      // combined count after a session ends, and without the latch the stale
+      // batch would re-materialize the badge and the combined count on every
+      // poll. costreamDetails (official co-streams) carries its own
+      // count/avatar in the batch itself and wins outright.
+      const dissolved = this.collabDissolved.has(cs.login)
+      const inSession = !dissolved && cs.collabViewers != null
+      // The latch clears once the batch itself agrees the session is over —
+      // a channel whose session genuinely returns is then a fresh detection.
+      if (dissolved && cs.collabViewers == null) this.collabDissolved.delete(cs.login)
+      const roster = inSession && prev?.status.state === 'live' ? prev.status : null
       const status: LiveStatus = cs.live
         ? {
             state: 'live',
@@ -694,9 +713,9 @@ export class FavoritesStore {
             game: cs.game,
             avatarUrl: cs.avatarUrl,
             userId: cs.userId,
-            collabViewers: cs.collabViewers,
-            collabOthers: cs.collabOthers > 0 ? cs.collabOthers : (roster?.collabOthers ?? 0),
-            collabAvatar: cs.collabAvatar || roster?.collabAvatar || '',
+            collabViewers: inSession ? cs.collabViewers : null,
+            collabOthers: inSession ? (cs.collabOthers > 0 ? cs.collabOthers : (roster?.collabOthers ?? 0)) : 0,
+            collabAvatar: inSession ? cs.collabAvatar || roster?.collabAvatar || '' : '',
             collabMembers: roster?.collabMembers,
             followers: cs.followers,
           }
@@ -733,15 +752,19 @@ export class FavoritesStore {
   // follow-up fetches the real participant lists — logins, avatars, roles,
   // for EVERY member (favorited or not) — via the same anonymous GQL path
   // twitch.tv's channel page uses (channel(id:).collaboration), ONE aliased
-  // request covering all of the poll's session channels. Fired only when a
-  // poll actually saw session channels, and fully best-effort: a failure
-  // leaves the last-applied roster values in place (applyGqlStatuses carries
-  // them over) and must NEVER trip the circuit breaker (the main batch
-  // succeeded).
+  // request covering all of the poll's session channels. Only channels with
+  // a numerically-shaped user id are queried (the shape the roster query's
+  // ID! variables allow), so the queried set is exactly what a successful
+  // roster response is authoritative over: a queried session channel that is
+  // MISSING from one has no session anymore (see applyCollabRosters). Fired
+  // only when a poll actually saw session channels, and fully best-effort: a
+  // failure leaves the last-applied roster values in place (applyGqlStatuses
+  // carries them over) and must NEVER trip the circuit breaker (the main
+  // batch succeeded).
   private async fetchSessionRosters(statuses: ChannelStatus[], versions: Map<string, number>): Promise<void> {
     if (this.disposed) return
     const sessionIds = statuses
-      .filter((s) => s.live && s.collabViewers != null && s.userId && this.has(s.login))
+      .filter((s) => s.live && s.collabViewers != null && s.userId && CHANNEL_ID_RE.test(s.userId) && this.has(s.login))
       .map((s) => s.userId)
     if (sessionIds.length === 0) return
     try {
@@ -757,32 +780,62 @@ export class FavoritesStore {
   // is THE roster source: it overrides whatever costreamDetails carried and
   // sees every session member (favorited or not) with logins, avatars and
   // roles. A served roster with no other members means the session
-  // dissolved — the fields reset to no-session values.
+  // dissolved — the member fields reset to no-session values. A queried
+  // channel ABSENT from a successful response means the same thing (an
+  // active session always lists at least the channel itself): the whole
+  // collab state resets and the channel is latched (collabDissolved) so the
+  // status batch's possibly-stale combined count cannot re-materialize the
+  // badge on the next poll. Transport failures never reach this method — a
+  // throw is swallowed upstream and the last-known values stay.
   private applyCollabRosters(
     rosters: Map<string, Collaborator[]>,
     statuses: ChannelStatus[],
     versions: Map<string, number>,
   ): void {
-    if (this.disposed || rosters.size === 0) return
+    if (this.disposed) return
     let changed = false
     for (const cs of statuses) {
       if (!cs.login || !cs.userId) continue
-      const members = rosters.get(cs.userId)
-      if (!members) continue // not in a session (or no roster served)
+      // Roster subjects: live, batch-reported session, queryable id — the
+      // exact set fetchSessionRosters queried. Anything else in the poll's
+      // status list was never asked about and must not read as "session
+      // dissolved".
+      if (!(cs.live && cs.collabViewers != null && CHANNEL_ID_RE.test(cs.userId))) continue
       if (!this.has(cs.login)) continue // removed mid-flight
       if ((this.entryVersions.get(cs.login) ?? 0) !== (versions.get(cs.login) ?? 0)) {
         continue // a newer fetch owns this channel
       }
       const prev = this.statuses.get(cs.login)
       if (prev?.status.state !== 'live') continue // went offline since
-      const others: CollabMemberInfo[] = members
-        .filter((m) => m.login !== cs.login)
-        .map((m) => ({ login: m.login, avatarUrl: m.avatarUrl, role: m.role }))
-      prev.status = {
-        ...prev.status,
-        collabOthers: others.length,
-        collabAvatar: others[0]?.avatarUrl ?? '',
-        collabMembers: others.length > 0 ? others : undefined,
+      const members = rosters.get(cs.userId)
+      if (members) {
+        this.collabDissolved.delete(cs.login)
+        const others: CollabMemberInfo[] = members
+          .filter((m) => m.login !== cs.login)
+          .map((m) => ({ login: m.login, avatarUrl: m.avatarUrl, role: m.role }))
+        prev.status = {
+          ...prev.status,
+          // Restore the count the latch may have suppressed; identical to
+          // the stored value for an unlatched channel.
+          collabViewers: cs.collabViewers,
+          collabOthers: others.length,
+          collabAvatar: others[0]?.avatarUrl ?? '',
+          collabMembers: others.length > 0 ? others : undefined,
+        }
+      } else {
+        // Absent from a successful response: the session is over even if the
+        // batch keeps serving its stale combined count. A session that
+        // genuinely returns is re-detected by a later poll's roster fetch,
+        // which clears the latch; a roster that is merely not served for one
+        // cycle costs at most one poll interval of a missing badge.
+        this.collabDissolved.add(cs.login)
+        prev.status = {
+          ...prev.status,
+          collabViewers: null,
+          collabOthers: 0,
+          collabAvatar: '',
+          collabMembers: undefined,
+        }
       }
       this.statuses.set(cs.login, prev)
       changed = true

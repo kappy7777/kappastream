@@ -1780,7 +1780,10 @@ interface RawCollaborator {
   } | null
 }
 
-const CHANNEL_ID_RE = /^\d{1,20}$/
+// Shape a Twitch user id must have for the collaboration roster query's ID!
+// variables. Exported so the favorites store can query exactly the id set a
+// roster response is authoritative over.
+export const CHANNEL_ID_RE = /^\d{1,20}$/
 
 function collaborationQuery(count: number): string {
   const fields: string[] = []

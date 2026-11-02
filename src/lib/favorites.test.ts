@@ -779,23 +779,24 @@ describe('Stream Together badge fields (no heuristic grouping)', () => {
   it('same game + matching combined counts alone invent NO members', async () => {
     seedFavorites(['host', 'mate'])
     gql.handler = gqlStatusHandler({
-      host: { live: true, viewers: 4702, collabViewers: 5368, game: 'GeoGuessr' },
-      mate: { live: true, viewers: 600, collabViewers: 5368, game: 'GeoGuessr' },
+      host: { live: true, viewers: 4702, collabViewers: 5368, game: 'GeoGuessr', id: '300000001' },
+      mate: { live: true, viewers: 600, collabViewers: 5368, game: 'GeoGuessr', id: '300000002' },
     })
     const store = new F.FavoritesStore()
     store.start()
     await vi.advanceTimersByTimeAsync(5_000)
-    // The roster served no session, so nothing may be inferred from the
-    // batch's coincidental same-game / same-combined-count pair: members
-    // exist ONLY once a real collaboration roster reported them.
+    // The roster served no session for either channel, so nothing may be
+    // inferred from the batch's coincidental same-game / same-combined-count
+    // pair: members exist ONLY once a real collaboration roster reported
+    // them, and the batch-only session claim itself resets once the roster
+    // (asked precisely because the batch claimed a session) answers "none".
     for (const name of ['host', 'mate']) {
       const st = store.getStatus(name)!.status
       if (st.state !== 'live') throw new Error('expected live')
       expect(st.collabMembers).toBeUndefined()
       expect(st.collabOthers).toBe(0)
       expect(st.collabAvatar).toBe('')
-      // in-session detection is real batch data and still stands
-      expect(st.collabViewers).toBe(5368)
+      expect(st.collabViewers).toBeNull()
     }
   })
 })
@@ -891,5 +892,135 @@ describe('Stream Together collaboration roster fetch (per poll)', () => {
     if (host.state !== 'live') throw new Error('expected live')
     expect(host.collabMembers?.map((m) => m.login)).toEqual(['guest'])
     expect(host.collabOthers).toBe(1)
+  })
+
+  it('a roster that reports no session resets the whole collab state while the batch keeps claiming one', async () => {
+    seedFavorites(['host', 'solo'])
+    let serveRoster = true
+    gql.handler = gqlStatusHandler(
+      {
+        host: { live: true, viewers: 674, collabViewers: 1865, id: '200000001', game: 'IRL' },
+        solo: { live: true, viewers: 50, id: '111', game: 'Other' },
+      },
+      {
+        roster: (id) =>
+          serveRoster && id === '200000001'
+            ? roster(['host', 'Host', 'https://img/h.png', 'LEADER'], ['guest', 'Guest', 'https://img/g.png', 'MEMBER'])
+            : null,
+      },
+    )
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    let host = store.getStatus('host')!.status
+    if (host.state !== 'live') throw new Error('expected live')
+    expect(host.collabMembers?.map((m) => m.login)).toEqual(['guest'])
+    expect(host.collabViewers).toBe(1865)
+    // The streamer ends the Stream Together session but stays live: Twitch
+    // keeps serving the stale combined count while the roster now reports no
+    // session (the channel is absent from the response). The whole collab
+    // state resets — the badge (which renders the empty shell for a
+    // non-null count with no roster) and the combined count must go.
+    serveRoster = false
+    await vi.advanceTimersByTimeAsync(GQL_REFRESH_INTERVAL_MS)
+    host = store.getStatus('host')!.status
+    if (host.state !== 'live') throw new Error('expected live')
+    expect(host.collabViewers).toBeNull()
+    expect(host.collabOthers).toBe(0)
+    expect(host.collabAvatar).toBe('')
+    expect(host.collabMembers).toBeUndefined()
+    expect(host.viewers).toBe(674)
+    expect(F.collabBadge(host)).toBeNull()
+    expect(store.rateLimited).toBe(false)
+    // 2 status batches + 2 roster requests: the roster request still goes
+    // out for the dissolved-only poll — its empty answer IS the reset
+    // signal, so an empty result map must not skip the merge pass.
+    expect(gql.calls).toHaveLength(4)
+  })
+
+  it('once dissolved, the stale batch cannot re-materialize the badge — even when the next roster fetch fails', async () => {
+    seedFavorites(['host'])
+    const serveRoster = false // never served — poll 1 dissolves
+    let failRoster = false
+    gql.handler = gqlStatusHandler(
+      { host: { live: true, viewers: 674, collabViewers: 1865, id: '200000001', game: 'IRL' } },
+      {
+        roster: (id) => {
+          if (failRoster) throw new Error('HTTP 500')
+          return serveRoster && id === '200000001'
+            ? roster(['host', 'Host', 'https://img/h.png', 'LEADER'], ['guest', 'Guest', 'https://img/g.png', 'MEMBER'])
+            : null
+        },
+      },
+    )
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    let host = store.getStatus('host')!.status
+    if (host.state !== 'live') throw new Error('expected live')
+    expect(host.collabViewers).toBeNull()
+    // Next poll: the batch STILL claims a session but the roster request
+    // fails (transport). The dissolved latch must keep the batch's stale
+    // count suppressed — without it, the batch would re-materialize the
+    // badge until a successful roster fetch resets again. No breaker: the
+    // status batch itself succeeded.
+    failRoster = true
+    await vi.advanceTimersByTimeAsync(GQL_REFRESH_INTERVAL_MS)
+    host = store.getStatus('host')!.status
+    if (host.state !== 'live') throw new Error('expected live')
+    expect(host.collabViewers).toBeNull()
+    expect(host.collabOthers).toBe(0)
+    expect(host.collabAvatar).toBe('')
+    expect(host.collabMembers).toBeUndefined()
+    expect(store.rateLimited).toBe(false)
+  })
+
+  it('a re-established session is detected again after a dissolved one', async () => {
+    seedFavorites(['host'])
+    let serveRoster = false
+    gql.handler = gqlStatusHandler(
+      { host: { live: true, viewers: 674, collabViewers: 1865, id: '200000001', game: 'IRL' } },
+      {
+        roster: (id) =>
+          serveRoster && id === '200000001'
+            ? roster(['host', 'Host', 'https://img/h.png', 'LEADER'], ['guest', 'Guest', 'https://img/g.png', 'MEMBER'])
+            : null,
+      },
+    )
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    let host = store.getStatus('host')!.status
+    if (host.state !== 'live') throw new Error('expected live')
+    expect(host.collabViewers).toBeNull()
+    // The session comes back: the poll's roster fetch lists the channel
+    // again, clearing the dissolved latch and restoring the full collab
+    // state.
+    serveRoster = true
+    await vi.advanceTimersByTimeAsync(GQL_REFRESH_INTERVAL_MS)
+    host = store.getStatus('host')!.status
+    if (host.state !== 'live') throw new Error('expected live')
+    expect(host.collabViewers).toBe(1865)
+    expect(host.collabMembers?.map((m) => m.login)).toEqual(['guest'])
+    expect(host.collabOthers).toBe(1)
+    expect(host.collabAvatar).toBe('https://img/g.png')
+    expect(F.collabBadge(host)).toEqual({ others: 1, avatar: 'https://img/g.png' })
+  })
+
+  it('a channel whose id never reaches the roster query keeps its batch collab state', async () => {
+    seedFavorites(['host'])
+    // Default id 'id-host' is not numerically shaped, so the roster query
+    // never fires and no roster answer exists to be authoritative over —
+    // the batch's in-session state stands.
+    gql.handler = gqlStatusHandler({
+      host: { live: true, viewers: 674, collabViewers: 1865, game: 'IRL' },
+    })
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(gql.calls).toHaveLength(1)
+    const host = store.getStatus('host')!.status
+    if (host.state !== 'live') throw new Error('expected live')
+    expect(host.collabViewers).toBe(1865)
   })
 })

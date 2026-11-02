@@ -50,7 +50,13 @@
     normalizeChannelName,
   } from './lib/favorites.svelte'
   import type { ChannelVideo, ChannelClip } from './lib/gql'
-  import { fetchClipInfo, fetchCollaborators, GQL_REFRESH_INTERVAL_MS, type Collaborator } from './lib/gql'
+  import {
+    CHANNEL_ID_RE,
+    fetchClipInfo,
+    fetchCollaborators,
+    GQL_REFRESH_INTERVAL_MS,
+    type Collaborator,
+  } from './lib/gql'
   import { VodPlaybackController, formatVodTime } from './lib/vod-playback.svelte.ts'
   import { VodChatController, fetchVodComments } from './lib/vodchat.svelte.ts'
   import { initBadgeRefresh } from './lib/badges'
@@ -2097,12 +2103,20 @@
   const sessionOthers = $derived.by(() => {
     const host = channelJoined
     if (!host) return []
+    const s = activeStatus
+    // The join-time roster fetch runs once per joined channel and is never
+    // refreshed, so the list is gated on the session still standing: the
+    // store's current session signal for favorites, the join-time dissolve
+    // verdict for everyone else. A dissolved session's stale join-time
+    // roster must not keep this list — and the watch-together button —
+    // alive.
+    if (collabSessionEnded) return []
+    if (s.state !== 'live' || (s.collabViewers == null && !s.collabOthers)) return []
     const byLogin = new Map<string, { role: string }>()
     for (const m of collabRoster ?? []) {
       byLogin.set(m.login, { role: m.role })
     }
-    const s = activeStatus
-    if (s.state === 'live' && s.collabMembers) {
+    if (s.collabMembers) {
       for (const m of s.collabMembers) {
         if (!byLogin.has(m.login)) byLogin.set(m.login, { role: m.role ?? '' })
       }
@@ -2591,8 +2605,9 @@
   // Status-bar badge data for the active channel: the store badge,
   // upgraded by the per-channel roster fetch the moment it lands (real "other
   // channels" count + a real co-streamer avatar, with no favorites dependency).
+  // A join-time dissolve verdict (collabSessionEnded) suppresses it entirely.
   const activeCollab = $derived.by(() => {
-    const badge = collabBadge(activeStatus)
+    const badge = collabSessionEnded ? null : collabBadge(activeStatus)
     if (!badge) return null
     const host = channelJoined
     const others = (collabRoster ?? []).filter((m) => m.login !== host)
@@ -2614,6 +2629,14 @@
   let collabRosterChannel: string | null = '' // plain (non-reactive): which channel the state belongs to
   let collabRosterAttempted = false
   let collabRosterToken = 0
+  // Join-time dissolve verdict for channels the favorites store does NOT own
+  // (non-favorites refresh activeStatus via the interval, which carries the
+  // raw batch count and no roster authority): when the status claimed a
+  // session but the join-time roster fetch answers "no ACTIVE session", that
+  // count is stale — suppress this channel's session UI until the status
+  // itself stops claiming one. The store keeps the same per-poll verdict for
+  // favorites (collabDissolved).
+  let collabSessionEnded = $state(false)
   $effect(() => {
     const channel = channelJoined
     if (channel !== collabRosterChannel) {
@@ -2621,15 +2644,30 @@
       collabRosterAttempted = false
       collabRosterToken++
       collabRoster = null
+      collabSessionEnded = false
+    }
+    const s = activeStatus
+    // Same recovery rules as the store's latch: the verdict expires once the
+    // status stops claiming a session, AND on positive evidence that the
+    // session is real — non-empty collabMembers can only come from a served
+    // roster (the raw batch mapping never sets it), so a store roster
+    // re-detection heals a false join-time verdict within one poll.
+    if (
+      collabSessionEnded &&
+      (s.state !== 'live' || (s.collabMembers?.length ?? 0) > 0 || (s.collabViewers == null && !s.collabOthers))
+    ) {
+      collabSessionEnded = false
     }
     if (!channel || collabRosterAttempted) return
     // Fires when the join-time fetch or a poll refresh first reports a live
     // session for this channel.
-    const s = activeStatus
     if (s.state !== 'live') return
     if (s.collabViewers == null && !s.collabOthers) return
     const userId = s.userId ?? ''
-    if (!userId) return
+    // Only a numerically-shaped id is queryable (fetchCollaborators filters
+    // on the same shape) — an unqueryable id must NOT be fetched, or its
+    // guaranteed-empty answer would read as a dissolve verdict.
+    if (!CHANNEL_ID_RE.test(userId)) return
     collabRosterAttempted = true
     const myToken = collabRosterToken
     void (async () => {
@@ -2637,8 +2675,13 @@
         const rosters = await fetchCollaborators([userId])
         if (myToken !== collabRosterToken || channelJoined !== channel) return
         collabRoster = rosters.get(userId) ?? null
+        // The roster is the ACTIVE-session authority: a successful answer
+        // that does not list this channel means the claimed session is over
+        // and the batch's count is stale.
+        if (collabRoster === null) collabSessionEnded = true
       } catch {
-        /* no roster — store roster values remain */
+        /* no verdict this cycle — favorites keep the store's roster values;
+           a non-favorite keeps the raw status claim (no roster ran) */
       }
     })()
   })
@@ -3505,7 +3548,7 @@
                       {#if activeStatus.game}<span class="stream-info-game">{activeStatus.game}</span>{/if}
                       <span class="stream-info-dot">·</span>
                       <span class="stream-info-viewers">{formatCompact(activeStatus.viewers)} {t('viewers')}</span>
-                      {#if activeStatus.collabViewers != null}
+                      {#if !collabSessionEnded && activeStatus.collabViewers != null}
                         <span class="stream-info-dot">·</span>
                         <span class="stream-info-collab-viewers"
                           >{formatCompact(activeStatus.collabViewers)} {t('si_collabViewers')}</span
