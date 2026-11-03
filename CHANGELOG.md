@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **No more "live statuses may be stale" flicker from Twitch hiccups.**
+  Twitch intermittently fails just the follower-count field of the
+  favorites status query while the rest of the answer arrives intact;
+  the app treated that as a full outage and showed the stale-status
+  banner for ~30 seconds. Those partial answers are now accepted (the
+  follower count simply shows as unknown for a cycle), a failed request
+  no longer discards the channels that already resolved, and the banner
+  only appears after two consecutive failed polls — so it now means
+  Twitch really is unreachable, not momentarily flaky.
+
 ## [1.0.8] - 2026-10-17
 
 ### Added
