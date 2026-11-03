@@ -14,8 +14,9 @@ import { GQL_REFRESH_INTERVAL_MS } from './gql'
  * The central behaviors under test:
  *  - one batched GQL request resolves the whole list (live/offline/null = ok);
  *  - on a GQL transport failure there is NO fallback — channels keep their
- *    last-known status, the circuit breaker trips (rateLimited banner), and a
- *    backoff retry of the SAME batch is scheduled;
+ *    last-known status, a quiet backoff retry of the SAME batch is scheduled,
+ *    and the circuit breaker (rateLimited banner) trips only on the SECOND
+ *    consecutive failure;
  *  - a successful retry clears the breaker and refreshes statuses;
  *  - fetchLiveStatus resolves a single channel via the same transport.
  */
@@ -304,7 +305,7 @@ describe('GQL transport failure — no fallback', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
   })
 
-  it('keeps last-known status, trips the breaker, and shows rateLimited', async () => {
+  it('a single transient failure stays quiet, keeps last-known status, and retries', async () => {
     seedFavorites(['alpha', 'beta'])
     // First poll succeeds: alpha live, beta offline.
     gql.handler = gqlStatusHandler({ alpha: { live: true }, beta: { live: false } })
@@ -316,31 +317,86 @@ describe('GQL transport failure — no fallback', () => {
     expect(store.rateLimited).toBe(false)
     const callsAfterSuccess = gql.calls.length
 
-    // Now GQL goes down. retryFetch forces a poll (no per-channel fetch
-    // exists anymore — it just re-runs the batch), which fails.
+    // GQL fails once (retryFetch forces a poll — no per-channel fetch exists
+    // anymore). ONE consecutive failure must NOT trip the banner; a quiet
+    // 30s backoff retry is scheduled instead.
     gql.handler = gqlStatusHandler({}, { fail: 'transport' })
     store.retryFetch('alpha')
     await vi.advanceTimersByTimeAsync(2_000)
-    expect(store.rateLimited).toBe(true) // breaker tripped
+    expect(store.rateLimited).toBe(false) // first failure stays quiet
     // Last-known statuses are RETAINED — never reset to error/unknown.
     expect(store.getStatus('alpha')!.status.state).toBe('live')
     expect(store.getStatus('beta')!.status.state).toBe('offline')
     expect(gql.calls.length).toBeGreaterThan(callsAfterSuccess) // GQL was attempted
+
+    // GQL recovers; the scheduled quiet retry lands after the 30s backoff.
+    gql.handler = gqlStatusHandler({ alpha: { live: true }, beta: { live: false } })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(store.rateLimited).toBe(false)
+    expect(gql.calls.length).toBeGreaterThan(callsAfterSuccess + 1) // retry actually ran
+  })
+
+  it('the SECOND consecutive failure trips the breaker and shows rateLimited', async () => {
+    seedFavorites(['alpha', 'beta'])
+    gql.handler = gqlStatusHandler({ alpha: { live: true }, beta: { live: false } })
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    // Two failures in a row with no successful batch between them.
+    gql.handler = gqlStatusHandler({}, { fail: 'transport' })
+    store.retryFetch('alpha')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(store.rateLimited).toBe(false) // first failure: quiet
+    store.retryFetch('alpha')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(store.rateLimited).toBe(true) // breaker tripped on the second
+    // Last-known statuses are RETAINED — never reset to error/unknown.
+    expect(store.getStatus('alpha')!.status.state).toBe('live')
+    expect(store.getStatus('beta')!.status.state).toBe('offline')
+  })
+
+  it('a successful poll between failures resets the consecutive count', async () => {
+    seedFavorites(['solo'])
+    const store = new F.FavoritesStore()
+    gql.handler = gqlStatusHandler({}, { fail: 'transport' })
+    store.start()
+    await vi.advanceTimersByTimeAsync(2_000) // failure #1 (quiet)
+    expect(store.rateLimited).toBe(false)
+
+    // Recovery before another failure: the quiet retry succeeds.
+    gql.handler = gqlStatusHandler({ solo: { live: true } })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(store.getStatus('solo')!.status.state).toBe('live')
+    expect(store.rateLimited).toBe(false)
+
+    // The NEXT failure is "first consecutive" again — still no banner.
+    gql.handler = gqlStatusHandler({}, { fail: 'transport' })
+    store.retryFetch('solo')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(store.rateLimited).toBe(false)
+    // ...and the failure after that trips.
+    store.retryFetch('solo')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(store.rateLimited).toBe(true)
   })
 
   it('a backoff retry of the SAME batch recovers and clears the breaker', async () => {
     seedFavorites(['alpha', 'beta'])
-    // Initial poll fails -> breaker trips (30s cooldown), retry scheduled.
     gql.handler = gqlStatusHandler({}, { fail: 'transport' })
     const store = new F.FavoritesStore()
     store.start()
-    await vi.advanceTimersByTimeAsync(2_000)
-    expect(store.rateLimited).toBe(true)
+    await vi.advanceTimersByTimeAsync(2_000) // failure #1: quiet, retry at 30s
+    expect(store.rateLimited).toBe(false)
     expect(store.getStatus('alpha')!.status.state).toBe('unknown') // never resolved yet
+
+    // The 30s quiet retry also fails -> second consecutive failure trips.
+    await vi.advanceTimersByTimeAsync(35_000)
+    expect(store.rateLimited).toBe(true)
     const failedCalls = gql.calls.length
 
-    // GQL recovers; advance past the 30s cooldown + jitter so the scheduled
-    // batch retry fires.
+    // GQL recovers; advance past the tripped cooldown + jitter so the next
+    // scheduled batch retry fires.
     gql.handler = gqlStatusHandler({ alpha: { live: true }, beta: { live: false } })
     await vi.advanceTimersByTimeAsync(60_000)
     expect(store.getStatus('alpha')!.status.state).toBe('live')
@@ -354,7 +410,9 @@ describe('GQL transport failure — no fallback', () => {
     gql.handler = gqlStatusHandler({}, { fail: 'transport' })
     const store = new F.FavoritesStore()
     store.start()
-    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(2_000) // failure #1: quiet
+    expect(store.rateLimited).toBe(false)
+    await vi.advanceTimersByTimeAsync(35_000) // quiet retry fails -> trips
     expect(store.rateLimited).toBe(true)
     // Advance through several backoff cycles; GQL keeps failing.
     await vi.advanceTimersByTimeAsync(600_000) // 10 min
@@ -362,20 +420,115 @@ describe('GQL transport failure — no fallback', () => {
     expect(store.getStatus('solo')!.status.state).toBe('unknown') // still last-known
   })
 
+  it('a persistently failing chunk of a multi-chunk poll eventually trips the breaker', async () => {
+    // >100 favorites = 2 chunks. Chunk 2 keeps failing while chunk 1
+    // resolves: every poll applies chunk 1's statuses AND counts as a
+    // partial failure, so the banner trips on the second consecutive cycle
+    // instead of the stale half going unnoticed forever.
+    const many = Array.from({ length: 150 }, (_, i) => 'chan' + i)
+    seedFavorites(many)
+    gql.handler = async (body) => {
+      const logins = (JSON.parse(body) as { variables: { logins: string[] } }).variables.logins
+      // The second chunk (logins 100..149) fails on the transport level.
+      if (logins.includes('chan100')) throw new Error('HTTP 500')
+      return JSON.stringify({
+        data: { users: logins.map((l) => ({ id: '1', login: l, displayName: l, stream: null })) },
+      })
+    }
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(store.getStatus('chan0')!.status.state).toBe('offline') // partial data applied
+    expect(store.getStatus('chan149')!.status.state).toBe('unknown') // failed chunk keeps last-known
+    expect(store.rateLimited).toBe(false) // first partial: quiet
+    // The quiet retry at ~30s comes back partial again -> second consecutive.
+    await vi.advanceTimersByTimeAsync(35_000)
+    expect(store.rateLimited).toBe(true)
+  })
+
+  it('a pending quiet retry consumed inside a tripped cooldown is re-armed', async () => {
+    seedFavorites(['x'])
+    gql.handler = gqlStatusHandler({}, { fail: 'transport' })
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(2_000) // failure #1: quiet retry scheduled for t≈30.25s
+    // A second failure a few seconds in trips the breaker with a cooldown
+    // (until t≈35s) that OUTLASTS the pending quiet-retry deadline — without
+    // the re-arm, that timer is consumed without polling and the retry
+    // window goes dead until the 150s floor poll.
+    store.retryFetch('x')
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(store.rateLimited).toBe(true)
+    const failedCalls = gql.calls.length
+
+    // GQL recovers; the re-armed retry must fire just past the cooldown end
+    // (t≈35.25s), well before the 150s floor poll.
+    gql.handler = gqlStatusHandler({ x: { live: true } })
+    await vi.advanceTimersByTimeAsync(33_000)
+    expect(store.getStatus('x')!.status.state).toBe('live')
+    expect(store.rateLimited).toBe(false)
+    expect(gql.calls.length).toBeGreaterThan(failedCalls)
+  })
+
   it('does NOT schedule duplicate batch retries while one is pending', async () => {
     seedFavorites(['x'])
     gql.handler = gqlStatusHandler({}, { fail: 'transport' })
     const store = new F.FavoritesStore()
     store.start()
-    await vi.advanceTimersByTimeAsync(2_000) // first failure -> one retry scheduled
-    const afterFirst = gql.calls.length
-    // Hammer retryFetch while a retry is already pending + cooldown active.
+    await vi.advanceTimersByTimeAsync(2_000) // failure #1 -> one retry scheduled
+    // A second failure trips the breaker (cooldown active).
     store.retryFetch('x')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(store.rateLimited).toBe(true)
+    const afterTrip = gql.calls.length
+    // Hammer retryFetch while a retry is already pending + cooldown active.
     store.retryFetch('x')
     store.retryFetch('x')
     await vi.advanceTimersByTimeAsync(2_000)
     // No additional requests got out during the cooldown (isOnCooldown gate).
-    expect(gql.calls.length).toBe(afterFirst)
+    expect(gql.calls.length).toBe(afterTrip)
+  })
+
+  it('a field-scoped errors batch is a SUCCESS — statuses apply, breaker never involved', async () => {
+    // The endpoint intermittently answers users(logins:) with "server error"
+    // on followers.totalCount while the users array stays complete. Such a
+    // poll must resolve statuses normally (followers unknown) and never count
+    // as a transport failure — repeated across polls, no banner ever.
+    seedFavorites(['alpha'])
+    const fieldErr = async (): Promise<string> =>
+      JSON.stringify({
+        data: {
+          users: [
+            {
+              id: '1',
+              login: 'alpha',
+              displayName: 'alpha',
+              followers: { totalCount: null },
+              stream: {
+                id: 's',
+                title: 'T',
+                type: 'live',
+                viewersCount: 5,
+                createdAt: new Date().toISOString(),
+                game: { name: 'g', displayName: 'G' },
+              },
+            },
+          ],
+        },
+        errors: [{ message: 'server error', path: ['users', 'followers', 'totalCount'] }],
+      })
+    gql.handler = fieldErr
+    const store = new F.FavoritesStore()
+    store.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    const s = store.getStatus('alpha')!.status
+    expect(s.state).toBe('live')
+    if (s.state === 'live') expect(s.followers).toBeNull()
+    expect(store.rateLimited).toBe(false)
+    // Second poll, same flaky-but-complete response: still no failure.
+    await vi.advanceTimersByTimeAsync(GQL_REFRESH_INTERVAL_MS + 5_000)
+    expect(store.getStatus('alpha')!.status.state).toBe('live')
+    expect(store.rateLimited).toBe(false)
   })
 })
 

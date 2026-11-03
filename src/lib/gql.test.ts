@@ -130,13 +130,89 @@ describe('gql favorites layer (refactor smoke)', () => {
     await expect(G.fetchChannelStatuses(['alpha', 'beta'])).rejects.toThrow('gql short response')
   })
 
-  it('throws with the GQL reason on a partial {data, errors} envelope', async () => {
-    // The batch carries usable data AND a top-level errors array: the errors
-    // win (the query failed to execute), and the thrown text carries the
-    // server's reason rather than a generic label.
+  it('accepts a {data, errors} envelope for the status batch — field-scoped errors only null their leaf', async () => {
+    // The endpoint intermittently answers users(logins:) with "server error"
+    // on optional leaves (observed on followers.totalCount) while data.users
+    // stays complete — a GraphQL PARTIAL result, not an outage. The status
+    // batch must accept it: the nulled leaf maps to `followers: null`, every
+    // other field arrives intact.
     gql.handler = async () =>
-      partialErrors({ users: [{ id: '1', login: 'alpha', displayName: 'alpha', stream: null }] })
-    await expect(G.fetchChannelStatuses(['alpha'])).rejects.toThrow('schema error')
+      JSON.stringify({
+        data: {
+          users: [
+            {
+              id: '1',
+              login: 'alpha',
+              displayName: 'alpha',
+              followers: { totalCount: null },
+              stream: null,
+            },
+          ],
+        },
+        errors: [{ message: 'server error', path: ['users', 'followers', 'totalCount'] }],
+      })
+    const statuses = await G.fetchChannelStatuses(['alpha'])
+    expect(statuses).toHaveLength(1)
+    expect(statuses[0]).toMatchObject({ login: 'alpha', live: false, followers: null })
+  })
+
+  it('still throws when an errors-envelope carries an incomplete users array', async () => {
+    // Tolerance requires a complete positional users array — a short array
+    // inside a leaf-scoped {data, errors} envelope is still anomalous and
+    // must throw so favorites keeps last-known status instead of committing
+    // wrong rows.
+    gql.handler = async () =>
+      JSON.stringify({
+        data: { users: [] },
+        errors: [{ message: 'server error', path: ['users', 'followers', 'totalCount'] }],
+      })
+    await expect(G.fetchChannelStatuses(['alpha'])).rejects.toThrow('gql short response')
+  })
+
+  it('rejects errors whose paths could null a whole entry or the stream object', async () => {
+    // Tolerance is path-scoped. An error nulling a whole positional entry
+    // (["users", 0] — reads as a nonexistent login) or rooted at the stream
+    // object (["users","stream",…] — reads as offline) would let a degraded
+    // 200 flip a live channel offline downstream, so those keep the strict
+    // throw and the caller keeps last-known status.
+    gql.handler = async () =>
+      JSON.stringify({
+        data: { users: [null] },
+        errors: [{ message: 'server error', path: ['users', 0] }],
+      })
+    await expect(G.fetchChannelStatuses(['alpha'])).rejects.toThrow('server error')
+
+    gql.handler = async () =>
+      JSON.stringify({
+        data: { users: [{ id: '1', login: 'alpha', displayName: 'alpha', stream: null }] },
+        errors: [{ message: 'server error', path: ['users', 'stream', 'viewersCount'] }],
+      })
+    await expect(G.fetchChannelStatuses(['alpha'])).rejects.toThrow('server error')
+  })
+
+  it('keeps successfully-resolved chunks when a later chunk fails', async () => {
+    // Two chunks (>100 logins): the first resolves, the second fails on the
+    // transport level. The resolved half is returned — a multi-chunk poll is
+    // a PARTIAL success, and the missing logins keep their last-known status
+    // at the caller.
+    const many = Array.from({ length: 150 }, (_, i) => 'chan' + i)
+    gql.handler = async (body) => {
+      const logins = (JSON.parse(body) as { variables: { logins: string[] } }).variables.logins
+      // The second chunk (logins 100..149) fails on the transport level.
+      if (logins.includes('chan100')) throw new Error('HTTP 500')
+      return ok({ users: logins.map((login) => ({ id: '1', login, displayName: login, stream: null })) })
+    }
+    const statuses = await G.fetchChannelStatuses(many)
+    expect(statuses).toHaveLength(100)
+    expect(statuses[0].login).toBe('chan0')
+    expect(statuses[99].login).toBe('chan99')
+  })
+
+  it('throws only when EVERY chunk of a batch fails', async () => {
+    gql.handler = async () => {
+      throw new Error('HTTP 500')
+    }
+    await expect(G.fetchChannelStatuses(['alpha', 'beta'])).rejects.toThrow('HTTP 500')
   })
 })
 

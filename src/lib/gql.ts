@@ -141,18 +141,39 @@ interface RawStream {
 
 // A 200 GQL response envelope. `data` is an untyped object keyed by the
 // operation's top-level selection set; callers narrow it via the generic on
-// gqlRequest. A top-level `errors` array means the query failed to execute.
+// gqlRequest. A top-level `errors` array means the query failed to execute —
+// except for the path-scoped partial results gqlRequest may be asked to
+// tolerate (see `errorsAreLeafScoped`).
 interface GqlEnvelope {
   data?: Record<string, unknown> | null
   errors?: unknown
 }
 
 /**
+ * Whether every entry of a GQL `errors` array points at an optional LEAF
+ * below `users(logins:)`: a path of depth >= 3 whose second segment is not
+ * `stream` — the observed shape being ["users","followers","totalCount"]
+ * (Twitch's paths omit the array index). An error on the users array itself,
+ * a whole positional entry, or the stream object would null exactly the
+ * fields whose absence reads as "nonexistent login" / "channel offline"
+ * downstream, so those never qualify for tolerance.
+ */
+function errorsAreLeafScoped(errors: unknown): boolean {
+  if (!Array.isArray(errors)) return false
+  return errors.every((e) => {
+    if (!e || typeof e !== 'object') return false
+    const path = (e as { path?: unknown }).path
+    return Array.isArray(path) && path.length >= 3 && path[0] === 'users' && path[1] !== 'stream'
+  })
+}
+
+/**
  * POST one query body to gql_fetch. Throws on ANY transport-level problem
  * (network error, non-2xx, malformed JSON, top-level GQL `errors`, or an
- * aborted signal). The favorites caller treats a throw as "GQL unavailable →
- * keep last-known status + back off and retry"; the discovery callers
- * (search/browse) treat it as a visible, non-blocking error state.
+ * aborted signal) — with one opt-in exception, see `tolerateErrorsWithData`.
+ * The favorites caller treats a throw as "GQL unavailable → keep last-known
+ * status + back off and retry"; the discovery callers (search/browse) treat
+ * it as a visible, non-blocking error state.
  *
  * The Rust `gql_fetch` command has no cancellation channel, so aborting the
  * signal cannot truly cancel the in-flight HTTP request — but checking the
@@ -164,6 +185,7 @@ async function gqlRequest<T = Record<string, unknown>>(
   query: string,
   variables: Record<string, unknown>,
   signal?: AbortSignal,
+  opts: { tolerateErrorsWithData?: boolean } = {},
 ): Promise<T> {
   if (signal?.aborted) throw new Error('aborted')
   const body = JSON.stringify({ query, variables })
@@ -177,12 +199,25 @@ async function gqlRequest<T = Record<string, unknown>>(
   } catch {
     throw new Error('malformed gql response')
   }
-  // A 200 with a top-level `errors` array means the query itself failed to
-  // execute (schema drift, persistent-query issue, rate limit, …) — treat it
-  // as a transport failure so callers surface an error rather than empty data.
-  if (!parsed || parsed.errors || typeof parsed.data !== 'object' || parsed.data === null) {
+  // A missing/null `data` object means the query failed to execute — always
+  // a transport failure, tolerance or not.
+  if (!parsed || typeof parsed.data !== 'object' || parsed.data === null) {
     const reason = parsed?.errors ? gqlErrorReason(parsed.errors) : 'no data'
     throw new Error('gql: ' + reason)
+  }
+  // A 200 with a top-level `errors` array AND a present `data` object is a
+  // PARTIAL result by GraphQL semantics: each error is field-scoped and only
+  // nulls its own leaf inside `data` (the endpoint intermittently answers
+  // users(logins:) with "server error" on `followers.totalCount` while every
+  // other field arrives intact). Callers that validate the data shape
+  // themselves (the favorites status batch checks the positional users
+  // array) may opt into accepting that shape — but only when every error
+  // path points at a leaf whose nulling cannot imitate a meaningful value
+  // (errorsAreLeafScoped). Everyone else keeps the strict reading — the
+  // errors array means the query failed (schema drift, rate limit, …) and
+  // callers surface an error rather than degraded data.
+  if (parsed.errors && !(opts.tolerateErrorsWithData && errorsAreLeafScoped(parsed.errors))) {
+    throw new Error('gql: ' + gqlErrorReason(parsed.errors))
   }
   return parsed.data as T
 }
@@ -302,30 +337,64 @@ export async function resolveUserIds(logins: string[], signal?: AbortSignal): Pr
  * request (per GQL_BATCH_SIZE). The returned array preserves the input order,
  * with empty-login placeholders for nonexistent users so callers can zip by
  * index if needed.
+ *
+ * Failure discipline: a chunk that fails on the transport level (network /
+ * HTTP / timeout / missing data) does NOT discard the chunks that already
+ * resolved — the successfully-resolved logins are returned and the missing
+ * ones simply keep their last-known status until the next poll. Only when
+ * EVERY chunk fails does this throw, so the caller can treat the whole poll
+ * as an outage. Field-scoped errors riding a complete users array (see
+ * gqlRequest's `tolerateErrorsWithData`) are not failures at all — the
+ * affected leaves (e.g. the follower count) arrive as null and the mapping
+ * below already treats them as unknown.
  */
 export async function fetchChannelStatuses(logins: string[], signal?: AbortSignal): Promise<ChannelStatus[]> {
   const out: ChannelStatus[] = []
+  let lastError: unknown = null
+  let failedChunks = 0
   for (const batch of chunk(logins, GQL_BATCH_SIZE)) {
-    if (signal?.aborted) return out
-    const data = await gqlRequest<{ users?: (RawUser | null)[] | null }>(USER_STATUS_QUERY, { logins: batch }, signal)
-    const users = data?.users ?? []
-    // A short `users` array (fewer entries than requested) is anomalous — a
-    // legitimate batch always returns one positional entry per login (null for
-    // unknown). Zipping positionally with `users[i] ?? null` would silently mark
-    // every unreturned channel offline; throw so the caller treats it as a
-    // transport failure (favorites keeps last-known status) rather than
-    // committing a wrong status. (Note: `{"data":null}` is already rejected
-    // upstream in gqlRequest via the `data === null` check.)
-    if (users.length !== batch.length) {
-      throw new Error('gql short response')
+    if (signal?.aborted) throw new Error('aborted')
+    try {
+      const data = await gqlRequest<{ users?: (RawUser | null)[] | null }>(
+        USER_STATUS_QUERY,
+        { logins: batch },
+        signal,
+        {
+          tolerateErrorsWithData: true,
+        },
+      )
+      const users = data?.users ?? []
+      // A short `users` array (fewer entries than requested) is anomalous — a
+      // legitimate batch always returns one positional entry per login (null for
+      // unknown). Zipping positionally with `users[i] ?? null` would silently mark
+      // every unreturned channel offline; throw so the caller treats it as a
+      // transport failure (favorites keeps last-known status) rather than
+      // committing a wrong status. (Note: `{"data":null}` is already rejected
+      // upstream in gqlRequest via the `data === null` check.)
+      if (users.length !== batch.length) {
+        throw new Error('gql short response')
+      }
+      for (let i = 0; i < batch.length; i++) {
+        const status = toChannelStatus(users[i] ?? null)
+        // Preserve the input login for null (nonexistent) entries, since the
+        // raw user is null and carries no login field.
+        if (!status.login) status.login = batch[i]
+        out.push(status)
+      }
+    } catch (err) {
+      // An aborted caller wants the rejection, not partial data — rethrow the
+      // caught error untouched.
+      if (signal?.aborted) throw err
+      failedChunks++
+      lastError = err
     }
-    for (let i = 0; i < batch.length; i++) {
-      const status = toChannelStatus(users[i] ?? null)
-      // Preserve the input login for null (nonexistent) entries, since the
-      // raw user is null and carries no login field.
-      if (!status.login) status.login = batch[i]
-      out.push(status)
-    }
+  }
+  if (out.length === 0 && failedChunks > 0) throw lastError
+  if (failedChunks > 0) {
+    console.warn(
+      `[gql] ${failedChunks} status chunk(s) failed (${logins.length - out.length} logins keep last-known):`,
+      lastError,
+    )
   }
   return out
 }

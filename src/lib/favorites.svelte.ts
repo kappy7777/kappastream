@@ -69,10 +69,11 @@ export const MAX_FAVORITES = 1000
 //
 // On a GQL transport failure (network / non-2xx / timeout / malformed body)
 // there is NO fallback service. The store keeps every channel's LAST-KNOWN
-// status (it is never reset to error/unknown on an outage), trips a circuit
-// breaker so the sidebar can show a "having trouble reaching Twitch" banner,
-// and schedules an exponential-backoff retry of the SAME GQL batch. Channels
-// simply stop updating until the next successful poll.
+// status (it is never reset to error/unknown on an outage) and schedules an
+// exponential-backoff retry of the SAME GQL batch. The circuit breaker — and
+// with it the sidebar's "having trouble reaching Twitch" banner — trips only
+// on the SECOND consecutive failure; a single transient failure gets a quiet
+// backoff retry (channels simply wait for the next successful poll).
 const CIRCUIT_BREAKER_MS = 30_000
 const RETRY_JITTER_MS = 5_000
 
@@ -271,8 +272,16 @@ export class FavoritesStore {
   // banner. A successful GQL batch clears it.
   private gqlCooldownUntil = 0
   private circuitBreakerStreak = 0
-  // A single batch-retry timer. Set when a GQL poll fails (after tripping the
-  // breaker) and fires pollOnce() again once the cooldown + jitter elapses.
+  // Consecutive transport failures with no successful GQL batch in between.
+  // The banner trips only on the SECOND consecutive failure (see
+  // noteGqlFailure): one lost poll leaves every channel on its last-known
+  // status — exactly what the banner's "may be stale" note would announce —
+  // and a single failed request is routinely transient, so it gets a quiet
+  // backoff retry instead of a user-visible outage banner.
+  private consecutiveGqlFailures = 0
+  // A single batch-retry timer. Set when a GQL poll fails — tripped breaker
+  // or quiet first failure alike — and fires pollOnce() again once the
+  // cooldown (or the quiet retry's backoff floor) + jitter elapses.
   private batchRetryTimer: ReturnType<typeof setTimeout> | null = null
   // Guards against overlapping batch GQL polls (start() + a fired poll timer +
   // an import all racing). If a second pollOnce is requested while one is in
@@ -559,7 +568,8 @@ export class FavoritesStore {
     if (this.started) return
     this.started = true
     // Initial pass: one batched GQL poll classifies the whole favorites list. On a
-    // transport failure the breaker trips and a backoff retry is scheduled.
+    // transport failure a backoff retry is scheduled (the breaker/banner only
+    // engages on a second consecutive failure).
     if (this.entries.length > 0) void this.pollOnce()
     this.scheduleNextPoll()
   }
@@ -602,11 +612,11 @@ export class FavoritesStore {
   // The primary refresh path: ONE batched GQL request resolves every
   // favorite's live/offline + title/game/viewers/avatar in a single round
   // trip. On any transport-level failure (network, non-2xx, malformed body,
-  // timeout) there is no fallback — the breaker trips (rateLimited banner),
-  // every channel keeps its last-known status, and a backoff retry of this
-  // same batch is scheduled. A channel that's simply OFFLINE (stream: null)
-  // or nonexistent (null entry) is a SUCCESS here and must never trip the
-  // breaker.
+  // timeout) there is no fallback — every channel keeps its last-known status
+  // and a backoff retry of this same batch is scheduled; the breaker
+  // (rateLimited banner) trips only on the SECOND consecutive failure. A
+  // channel that's simply OFFLINE (stream: null) or nonexistent (null entry)
+  // is a SUCCESS here and must never count as a failure.
   private async pollOnce(): Promise<void> {
     if (this.disposed) return
     if (this.polling) {
@@ -622,18 +632,31 @@ export class FavoritesStore {
     // while this batch is in flight can be detected and skipped on apply.
     const versions = this.snapshotVersions(names)
     // GQL is in a backed-off cooldown (a recent transport failure). Defer this
-    // poll to the scheduled batch retry rather than hammering the endpoint.
-    if (this.isOnCooldown()) return
+    // poll to the scheduled batch retry rather than hammering the endpoint —
+    // and make sure one EXISTS: a pending retry scheduled against an earlier,
+    // shorter cooldown can fire inside a since-extended one and be consumed
+    // without polling, so re-arm it at the current cooldown's end.
+    if (this.isOnCooldown()) {
+      this.scheduleBatchRetry()
+      return
+    }
     this.polling = true
     try {
       const statuses = await fetchChannelStatuses(names)
       if (this.disposed) return
       this.applyGqlStatuses(statuses, versions)
+      // A FULL batch is the only thing that resets the consecutive-failure
+      // count. A partial poll (some chunks failed transport-level) applied
+      // what it got, but the missing channels are stale — count it as a GQL
+      // failure so a chunk that keeps failing eventually surfaces the banner
+      // instead of half-resolving every cycle. One transient partial stays
+      // quiet like any other first failure.
+      if (statuses.length < names.length) this.noteGqlFailure()
+      else this.consecutiveGqlFailures = 0
       await this.fetchSessionRosters(statuses, versions)
     } catch {
       if (this.disposed) return
-      this.tripCircuitBreaker()
-      this.scheduleBatchRetry()
+      this.noteGqlFailure()
     } finally {
       this.polling = false
       if (this.pollRequested && !this.disposed) {
@@ -651,8 +674,9 @@ export class FavoritesStore {
 
   // Single-channel GQL resolve for a freshly-added favorite (good UX: the new
   // channel resolves immediately instead of waiting up to GQL_REFRESH_INTERVAL
-  // for the next batch). On transport failure it trips the breaker + schedules
-  // a batch retry (which covers this channel) — there is no second source.
+  // for the next batch). On transport failure it counts toward the
+  // consecutive-failure gate + schedules a batch retry (which covers this
+  // channel) — there is no second source.
   private async resolveSingle(name: string): Promise<void> {
     if (this.disposed) return
     if (this.isOnCooldown()) return
@@ -661,10 +685,12 @@ export class FavoritesStore {
       const statuses = await fetchChannelStatuses([name])
       if (this.disposed) return
       this.applyGqlStatuses(statuses, new Map([[name, version]]))
+      // A single-channel resolve is all-or-nothing, so success is a full
+      // success for breaker-counting purposes.
+      this.consecutiveGqlFailures = 0
     } catch {
       if (this.disposed) return
-      this.tripCircuitBreaker()
-      this.scheduleBatchRetry()
+      this.noteGqlFailure()
     }
   }
 
@@ -740,7 +766,9 @@ export class FavoritesStore {
       changed = true
     }
     // A clean GQL batch is proof the endpoint recovered, so let a lapsed
-    // breaker clear (it can only have been tripped by a prior failure).
+    // breaker clear (it can only have been tripped by a prior failure). The
+    // consecutive-failure count resets at the poll/resolve level, where a
+    // PARTIAL batch can be told apart from a full one.
     this.clearCircuitBreakerIfExpired()
     if (changed) {
       this.notify()
@@ -849,6 +877,20 @@ export class FavoritesStore {
     return Date.now() < this.gqlCooldownUntil
   }
 
+  // One GQL transport failure (poll or single-channel resolve). The FIRST
+  // consecutive failure stays quiet: a backoff retry of the batch is
+  // scheduled, but the breaker — and with it the sidebar banner — trips only
+  // on the SECOND consecutive failure, when "statuses may be stale" has
+  // actually been true for a full interval.
+  private noteGqlFailure(): void {
+    this.consecutiveGqlFailures++
+    if (this.consecutiveGqlFailures >= 2) this.tripCircuitBreaker()
+    // Even un-tripped, the retry respects the same initial backoff window
+    // (30s) rather than double-tapping the endpoint seconds after a failure;
+    // once tripped, the cooldown governs the delay instead.
+    this.scheduleBatchRetry(CIRCUIT_BREAKER_MS)
+  }
+
   private tripCircuitBreaker(): void {
     if (!this.rateLimited) {
       this.rateLimited = true
@@ -874,12 +916,13 @@ export class FavoritesStore {
   // Schedule a single backoff retry of the GQL batch. One timer at a time: if a
   // retry is already pending, the in-flight one will re-run the poll (which
   // covers any channels added since). Fires at cooldownEnd + jitter so repeated
-  // failures don't all retry on the exact same tick.
-  private scheduleBatchRetry(): void {
+  // failures don't all retry on the exact same tick. `minDelayMs` floors the
+  // wait when no breaker cooldown is active (the quiet first-failure retry).
+  private scheduleBatchRetry(minDelayMs = 0): void {
     if (this.disposed) return
     if (this.batchRetryTimer) return
     const now = Date.now()
-    const delay = Math.max(0, this.gqlCooldownUntil - now) + 250 + Math.random() * RETRY_JITTER_MS
+    const delay = Math.max(minDelayMs, this.gqlCooldownUntil - now) + 250 + Math.random() * RETRY_JITTER_MS
     this.batchRetryTimer = setTimeout(() => {
       this.batchRetryTimer = null
       if (this.disposed) return
