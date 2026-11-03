@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The control bar now hides as soon as the pointer leaves the player,
+  and clicking a control no longer pins it open.** On Linux a click
+  focuses the clicked control, and that focus read as engagement: after
+  clicking the theater button (or any control) the bar stayed up until
+  something else took focus. The idle hold now tracks real keyboard
+  interaction, and a click ends it immediately.
+
+- **No more one-frame flicker when the cursor enters the video.** The
+  webview synthesizes a spurious pointer-leave as the cursor crosses
+  onto the video, which momentarily hid the freshly shown control bar.
+  The hide decision now hit-tests the real pointer position, so only a
+  genuine exit hides the bar — and the bar now appears instantly,
+  without the mount fade that read as a blink.
+
+- **Stream Together badges clear when the session ends.** Twitch keeps
+  serving a stale combined viewer count after a session is over, which
+  left an empty badge shell and the combined count on screen
+  indefinitely; the collaboration roster is now treated as the
+  authority, so the badge resets the moment it no longer lists the
+  channel.
+
 - **No more "live statuses may be stale" flicker from Twitch hiccups.**
   Twitch intermittently fails just the follower-count field of the
   favorites status query while the rest of the answer arrives intact;
@@ -18,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer discards the channels that already resolved, and the banner
   only appears after two consecutive failed polls — so it now means
   Twitch really is unreachable, not momentarily flaky.
+
+- **Dependencies refreshed** (notably the updater and notification
+  plugins, Svelte/Vite tooling, and the Rust TLS/webpki chain),
+  clearing the current npm and cargo audit advisories.
 
 ## [1.0.8] - 2026-10-17
 
