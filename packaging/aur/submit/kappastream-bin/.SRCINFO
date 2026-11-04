@@ -18,6 +18,6 @@ pkgbase = kappastream-bin
 	conflicts = kappastream
 	conflicts = kappastream-git
 	source = https://github.com/kappy7777/kappastream/releases/download/v1.0.9/kappastream-1.0.9-x86_64.tar.gz
-	sha256sums = f0f528f08a163064944d9831ab5c56466b2a9c85f03d9d8828219c6fb14e1178
+	sha256sums = 2e21d1f0c4165290e2aecc744e9ac35484223568a17ea879b08f3a83463f2ba4
 
 pkgname = kappastream-bin
