@@ -5,7 +5,7 @@ All notable changes to **kappastream** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.9] - 2026-11-04
 
 ### Fixed
 
@@ -41,8 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Twitch really is unreachable, not momentarily flaky.
 
 - **Dependencies refreshed** (notably the updater and notification
-  plugins, Svelte/Vite tooling, and the Rust TLS/webpki chain),
-  clearing the current npm and cargo audit advisories.
+  plugins, hls.js, Svelte/Vite tooling, and the Rust TLS/webpki
+  chain), clearing the current npm and cargo audit advisories.
 
 ## [1.0.8] - 2026-10-17
 
@@ -1252,7 +1252,8 @@ marks the milestone; it is not a breaking change.
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.0.8...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.0.9...HEAD
+[1.0.9]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.9
 [1.0.8]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.8
 [1.0.7]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.7
 [1.0.6]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.6

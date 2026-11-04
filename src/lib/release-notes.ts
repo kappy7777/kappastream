@@ -41,6 +41,15 @@ export interface VersionNotes {
 }
 
 export const RELEASE_NOTES: Record<string, VersionNotes> = {
+  '1.0.9': {
+    fixed: [
+      '🖱️ The control bar hides as soon as the pointer leaves the player, and clicking a control no longer pins it open.',
+      '✨ No one-frame flicker when the cursor enters the video — the control bar appears instantly now.',
+      '🤝 Stream Together badges clear the moment the session ends; no more empty badge with a stale combined viewer count.',
+      '📡 No more "live statuses may be stale" flicker from momentary Twitch hiccups — the banner now appears only after two consecutive failed polls.',
+      '🔒 Dependencies refreshed, clearing the current npm and cargo audit advisories.',
+    ],
+  },
   '1.0.8': {
     added: [
       'ℹ️ A channel-info panel next to the Videos button: avatar, bio, followers, account creation, live category and viewers, next scheduled stream, and the last broadcast for offline channels.',

@@ -79,6 +79,20 @@
   </content_rating>
 
   <releases>
+    <release version="1.0.9" date="2026-11-04">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.9</url>
+      <description>
+        <p>The control bar now hides as soon as the pointer leaves the
+        player and clicking a control no longer pins it open, entering
+        the video no longer flickers the bar for a frame, and Stream
+        Together badges clear the moment the session ends instead of
+        lingering with a stale combined count.</p>
+        <p>Momentary Twitch hiccups no longer flash the "live statuses
+        may be stale" banner — it now appears only after two consecutive
+        failed polls — and dependencies are refreshed against published
+        advisories.</p>
+      </description>
+    </release>
     <release version="1.0.8" date="2026-10-17">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.8</url>
       <description>
