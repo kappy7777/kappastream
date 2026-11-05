@@ -1,4 +1,4 @@
-//! Linux graphics-compatibility setup.
+//! Linux graphics- and audio-compatibility setup.
 //!
 //! Invoked from the very top of `main()` (see `main.rs`), before `tauri::Builder`
 //! and therefore before GTK, WebKitGTK, EGL or any Tauri webview initializes.
@@ -6,9 +6,10 @@
 //! There are two independent NVIDIA-specific workarounds, each applied only on
 //! the matching session type and only when the user has not already supplied a
 //! value; one AppImage-only backend selection (`GDK_BACKEND`, see the
-//! dedicated section below) that is deliberately GPU-independent; and one
+//! dedicated section below) that is deliberately GPU-independent; one
 //! AppImage-only pipewire-client swap performed by a one-shot re-exec (also
-//! with its own section below). AMD, Intel
+//! with its own section below); and one flatpak-only audio-latency default
+//! (`PULSE_LATENCY_MSEC`, see the flatpak section below). AMD, Intel
 //! and unknown sessions are never touched by the NVIDIA rules, and the two
 //! workarounds are never both selected during a single session.
 //!
@@ -119,6 +120,15 @@
 //! vs SONAME, symlinked lib dir), so the same-file (dev+ino) check and this
 //! guard — not string equality — are what keep it from re-exec'ing.
 //!
+//! ## Flatpak — `PULSE_LATENCY_MSEC=20`
+//!
+//! The webview's media pipeline (the hls engine) plays through GStreamer's
+//! pulsesink, which buffers ~200 ms against the pulse transport unless
+//! `PULSE_LATENCY_MSEC` names a smaller target. Inside the sandbox
+//! (`FLATPAK_ID` set) the variable is set to `20` when absent: the runtime's
+//! GStreamer pulsesink shows video pacing jank with the coarse default that
+//! current distro builds do not. Native builds are untouched.
+//!
 //! ## Common rules
 //!
 //! The variables are applied only when ALL hold for their respective path:
@@ -136,6 +146,8 @@ use std::path::Path;
 
 const NV_EXPLICIT_SYNC_VAR: &str = "__NV_DISABLE_EXPLICIT_SYNC";
 const WEBKIT_DMABUF_VAR: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+const FLATPAK_PULSE_LATENCY_VAR: &str = "PULSE_LATENCY_MSEC";
+const FLATPAK_PULSE_LATENCY_VALUE: &str = "20";
 const GDK_BACKEND_VAR: &str = "GDK_BACKEND";
 const KAPPASTREAM_GDK_BACKEND_VAR: &str = "KAPPASTREAM_GDK_BACKEND";
 const KAPPASTREAM_PIPEWIRE_PRELOAD_VAR: &str = "KAPPASTREAM_PIPEWIRE_PRELOAD";
@@ -306,6 +318,30 @@ fn select_actions(inputs: &CompatInputs) -> CompatActions {
         Session::Other | Session::Unknown => {}
     }
     actions
+}
+
+/// The `PULSE_LATENCY_MSEC` value to set for a flatpak run, or `None` to
+/// leave the environment alone.
+///
+/// The webview's media pipeline (the hls engine) plays through GStreamer's
+/// pulsesink, which buffers ~200 ms against the pulse transport unless
+/// `PULSE_LATENCY_MSEC` names a smaller target in milliseconds. That coarse
+/// buffer shows up as video pacing jank in the sandbox (the runtime's
+/// GStreamer is older than current distro builds, whose pulsesink does not
+/// exhibit it), and a 20 ms target smooths it. Flatpak-only (the `FLATPAK_ID`
+/// signal) so native builds, including their own webview pipelines, are
+/// never touched, and only when the user has not already supplied a value.
+fn select_flatpak_pulse_latency(
+    flatpak_id: Option<&str>,
+    existing: Option<&str>,
+) -> Option<&'static str> {
+    if flatpak_id.is_none_or(|v| v.is_empty()) {
+        return None;
+    }
+    if existing.is_some() {
+        return None;
+    }
+    Some(FLATPAK_PULSE_LATENCY_VALUE)
 }
 
 /// Select the `GDK_BACKEND` value for an AppImage run, or `None` to leave the
@@ -568,6 +604,12 @@ pub fn configure() {
     }
     if actions.disable_webkit_dmabuf_renderer {
         std::env::set_var(WEBKIT_DMABUF_VAR, "1");
+    }
+    if let Some(value) = select_flatpak_pulse_latency(
+        std::env::var("FLATPAK_ID").ok().as_deref(),
+        std::env::var(FLATPAK_PULSE_LATENCY_VAR).ok().as_deref(),
+    ) {
+        std::env::set_var(FLATPAK_PULSE_LATENCY_VAR, value);
     }
     if let Some(backend) = actions.gdk_backend {
         // The one call in this function that may OVERWRITE an existing value:
@@ -1439,5 +1481,33 @@ mod tests {
         );
         assert_eq!(ldconfig_path_for(cache, "libpipewire-9.so.9"), None);
         assert_eq!(ldconfig_path_for(cache, ""), None);
+    }
+
+    // #34 Flatpak-only: no FLATPAK_ID (or an empty one) never sets the
+    //     latency, even unset, so native builds are untouched by
+    //     construction.
+    #[test]
+    fn flatpak_pulse_latency_needs_flatpak_id() {
+        assert_eq!(select_flatpak_pulse_latency(None, None), None);
+        assert_eq!(select_flatpak_pulse_latency(Some(""), None), None);
+        assert_eq!(
+            select_flatpak_pulse_latency(Some("io.github.x.y"), None),
+            Some("20")
+        );
+    }
+
+    // #35 A user-supplied PULSE_LATENCY_MSEC is preserved, including an
+    //     empty value, which counts as "user supplied" like the other
+    //     user-override variables.
+    #[test]
+    fn flatpak_pulse_latency_respects_user_value() {
+        assert_eq!(
+            select_flatpak_pulse_latency(Some("io.github.x.y"), Some("40")),
+            None
+        );
+        assert_eq!(
+            select_flatpak_pulse_latency(Some("io.github.x.y"), Some("")),
+            None
+        );
     }
 }
