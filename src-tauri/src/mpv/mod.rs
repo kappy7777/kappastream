@@ -332,6 +332,15 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
                 // them off. Tolerant like the scripting options: the
                 // option only exists when the pulse output does.
                 let _ = init.set_property("pulse-latency-hacks", false);
+                // With the hacks off the reported latency is honest but
+                // coarse: pipewire-pulse serves the default pulse buffer
+                // in ~60 ms quanta, and that granularity leaves a slow
+                // clock drift that audio-slaved pacing corrects with a
+                // 2-frame drop every ~9 s. A 50 ms pulse buffer refines
+                // the granularity until the drift disappears; the only
+                // residual is a single drop at startup, matching the
+                // ao=pipewire baseline.
+                let _ = init.set_property("pulse-buffer", 50i64);
             }
             // No scripts of any kind: the in-video controls are the page's
             // HTML overlay, so every mpv scripting/autoplay option is off —
