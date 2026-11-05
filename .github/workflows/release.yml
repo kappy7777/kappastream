@@ -854,41 +854,61 @@ jobs:
           retention-days: 7
 
   # ── Flatpak: single-file .flatpak bundle ─────────────────────────────
-  # The flathub action is a node wrapper that runs flatpak-builder directly
-  # on the ubuntu-latest runner (no container) against the
-  # packaging/flatpak/ manifest (GNOME 50 SDK + rust-stable/node22
-  # extensions; ffmpeg/libplacebo/mpv/libass/libappindicator/streamlink are
-  # built in-manifest, so nothing links the host's libraries). The bundle
-  # embeds the updater-off binary — same policy as the AUR packages:
-  # flatpak installs update through their repo, never in-app. Not a tauri
-  # updater target, so no .sig is produced or expected (like the AUR
-  # tarball). The manifest consumes the checked-out tree via a dir source,
-  # so the version guard below pins what the bundle embeds.
+  # The flathub action is a node wrapper around flatpak-builder and runs in
+  # the flathub-infra container below, the only environment its own CI
+  # tests: a bare ubuntu-latest runner has no flatpak-builder at all (the
+  # action unconditionally prefixes the build with xvfb-run, so the first
+  # CI attempt failed in seconds with "xvfb-run: flatpak-builder: not
+  # found"). The image (freedesktop-sdk based, tag matching the manifest's
+  # GNOME 50 runtime) ships flatpak-builder + the bwrap sandbox; the
+  # privileged option is what lets bubblewrap work inside a container. The
+  # manifest itself (GNOME 50 SDK + rust-stable/node22 extensions;
+  # ffmpeg/libplacebo/mpv/libass/libappindicator/streamlink built
+  # in-manifest, so nothing links the host's libraries) consumes the
+  # checked-out tree via a dir source, so the version guard below pins
+  # what the bundle embeds. The bundle embeds the updater-off binary —
+  # same policy as the AUR packages: flatpak installs update through
+  # their repo, never in-app. Not a tauri updater target, so no .sig is
+  # produced or expected (like the AUR tarball).
   build-flatpak:
-    name: build flatpak · ubuntu-latest
+    name: build flatpak · flathub-infra container
     needs: [check, verify-dispatch-tag]
     # Skipped needs-jobs must not skip the build (see build-native-packages).
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # The bundle filename carries package.json's version on every run
       # (dispatch smoke builds an unbumped tree by design); the tag-verify
-      # below enforces tag == version only where it must hold.
+      # below enforces tag == version only where it must hold. Version
+      # parsing is sed, not node: this job's freedesktop-sdk container
+      # is not guaranteed to ship a node binary.
       - name: Resolve package version
         shell: bash
         run: |
           set -eu
-          echo "KAPPASTREAM_VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+          pkgver="$(sed -nE 's/^  "version": "([^"]+)",?$/\1/p' package.json)"
+          if [ -z "$pkgver" ]; then
+            echo 'ERROR: could not parse "version" from package.json' >&2
+            exit 1
+          fi
+          echo "KAPPASTREAM_VERSION=${pkgver}" >> "$GITHUB_ENV"
 
       - name: Verify release tag matches package version
         if: ${{ github.event_name == 'push' }}
         shell: bash
         run: |
           set -eu
-          pkgver="$(node -p "require('./package.json').version")"
+          pkgver="$(sed -nE 's/^  "version": "([^"]+)",?$/\1/p' package.json)"
+          if [ -z "$pkgver" ]; then
+            echo 'ERROR: could not parse "version" from package.json' >&2
+            exit 1
+          fi
           tagver="${RELEASE_TAG#v}"
           if [ "$pkgver" != "$tagver" ]; then
             echo "ERROR: tag '${RELEASE_TAG}' (v-stripped '${tagver}') != package.json version '${pkgver}'" >&2
