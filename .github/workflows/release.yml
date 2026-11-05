@@ -3,8 +3,9 @@
 #
 # Triggered by pushing a tag matching `v*` (e.g. `v0.1.8`), or manually via
 # `workflow_dispatch`. The pipeline first runs the full CI gate set (check),
-# then builds the bundles across four parallel platform jobs (native deb/rpm
-# + AUR, AppImage, Windows NSIS, macOS app/dmg) and finally publishes from a
+# then builds the bundles across five parallel platform jobs (native deb/rpm
+# + AUR, AppImage, Windows NSIS, macOS app/dmg, flatpak) and finally
+# publishes from a
 # single job — so a broken commit can never ship as a tag, and a failed bundle
 # build can never produce a partially-published release.
 #
@@ -852,6 +853,81 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # ── Flatpak: single-file .flatpak bundle ─────────────────────────────
+  # The flathub action is a node wrapper that runs flatpak-builder directly
+  # on the ubuntu-latest runner (no container) against the
+  # packaging/flatpak/ manifest (GNOME 50 SDK + rust-stable/node22
+  # extensions; ffmpeg/libplacebo/mpv/libass/libappindicator/streamlink are
+  # built in-manifest, so nothing links the host's libraries). The bundle
+  # embeds the updater-off binary — same policy as the AUR packages:
+  # flatpak installs update through their repo, never in-app. Not a tauri
+  # updater target, so no .sig is produced or expected (like the AUR
+  # tarball). The manifest consumes the checked-out tree via a dir source,
+  # so the version guard below pins what the bundle embeds.
+  build-flatpak:
+    name: build flatpak · ubuntu-latest
+    needs: [check, verify-dispatch-tag]
+    # Skipped needs-jobs must not skip the build (see build-native-packages).
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # The bundle filename carries package.json's version on every run
+      # (dispatch smoke builds an unbumped tree by design); the tag-verify
+      # below enforces tag == version only where it must hold.
+      - name: Resolve package version
+        shell: bash
+        run: |
+          set -eu
+          echo "KAPPASTREAM_VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+
+      - name: Verify release tag matches package version
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          set -eu
+          pkgver="$(node -p "require('./package.json').version")"
+          tagver="${RELEASE_TAG#v}"
+          if [ "$pkgver" != "$tagver" ]; then
+            echo "ERROR: tag '${RELEASE_TAG}' (v-stripped '${tagver}') != package.json version '${pkgver}'" >&2
+            exit 1
+          fi
+          echo "OK: tag ${RELEASE_TAG} matches package.json ${pkgver}"
+
+      - name: Build flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
+        with:
+          bundle: kappastream-${{ env.KAPPASTREAM_VERSION }}-x86_64.flatpak
+          manifest-path: packaging/flatpak/io.github.kappy7777.kappastream.json
+          # The action's own artifact upload stays off: the explicit
+          # "Upload flatpak artifact" step below already publishes the
+          # bundle (the action's default would upload it twice under a
+          # different name).
+          upload-artifact: false
+          # Hash the offline dep sources too: the manifest references them
+          # by filename only, so without this a dep bump that only changes
+          # sources/*.json restores a stale cache key.
+          cache-key: flatpak-builder-v1-${{ hashFiles('packaging/flatpak/io.github.kappy7777.kappastream.json', 'packaging/flatpak/sources/*.json') }}
+
+      - name: Stage flatpak bundle
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p staging
+          cp kappastream-*-x86_64.flatpak staging/
+          echo "Staged flatpak artifacts:"
+          find staging -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Upload flatpak artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: flatpak
+          path: staging/
+          if-no-files-found: error
+          retention-days: 7
+
   # ── Single publication job ────────────────────────────────────────────
   # The ONLY job that creates/edits the GitHub release. Build jobs have read
   # permissions only and never touch the release, so two builds can never race
@@ -859,7 +935,7 @@ jobs:
   # SHA256SUMS are attached; only then is it flipped to public.
   publish-release:
     name: publish release
-    needs: [check, build-native-packages, build-appimage, build-windows, build-macos]
+    needs: [check, build-native-packages, build-appimage, build-windows, build-macos, build-flatpak]
     # Publish on a real tag push, or an explicit manual opt-in. A manual
     # dispatch without `publish` builds everything and keeps the workflow
     # artifacts without creating a release.
@@ -943,6 +1019,10 @@ jobs:
           assert_one '*.app.tar.gz' 'macOS app updater tarball'
           assert_one '*.app.tar.gz.sig' 'macOS app signature'
           assert_one '*.dmg' 'macOS disk image'
+          # No .sig: the flatpak bundle is not an in-app updater target
+          # (its binary is updater-off, like the AUR tarball's), and flatpak
+          # verifies installs via repo GPG, not minisign.
+          assert_one '*.x86_64.flatpak' 'Flatpak bundle'
           echo "=== All expected artifacts present exactly once ==="
 
       # Build the tauri-plugin-updater manifest from the actual signed artifacts
@@ -1112,6 +1192,7 @@ jobs:
             *_amd64.deb *_amd64.deb.sig \
             *.x86_64.rpm *.x86_64.rpm.sig \
             *-x86_64.tar.gz \
+            *.x86_64.flatpak \
             *-setup.exe *-setup.exe.sig \
             *.app.tar.gz *.app.tar.gz.sig \
             *.dmg \
@@ -1138,6 +1219,7 @@ jobs:
             *-setup.exe *-setup.exe.sig \
             *.app.tar.gz *.app.tar.gz.sig \
             *.dmg \
+            *.x86_64.flatpak \
             latest.json \
             | sort -k2 > SHA256SUMS
           echo "Generated checksums:"

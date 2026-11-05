@@ -17,7 +17,7 @@ entry.
 | File | Purpose |
 | --- | --- |
 | `kappastream.desktop` | Desktop entry (native, `Exec=kappastream` — AUR and local deb/rpm builds only; tauri-bundler generates its own for the release packages and the AppImage). |
-| `dev.kappy.kappastream.metainfo.xml` | AppStream metadata for GNOME Software / KDE Discover. Installed directly by the AUR/local layouts; the release `.deb`/`.rpm` ship it via `tauri.conf.json`'s `files` maps. |
+| `io.github.kappy7777.kappastream.metainfo.xml` | AppStream metadata for GNOME Software / KDE Discover. Installed directly by the AUR/local layouts; the release `.deb`/`.rpm` ship it via `tauri.conf.json`'s `files` maps. |
 | `kappastream.sh` | Thin runtime launcher (the NVIDIA EGL-Wayland explicit-sync compatibility is handled in the Rust binary at startup, not here). Installed at `/usr/bin/kappastream` by the AUR/local layouts; the real binary lives at `/usr/lib/kappastream/kappastream`. |
 
 Edit these here, not in the per-distro directories. Bump the metainfo

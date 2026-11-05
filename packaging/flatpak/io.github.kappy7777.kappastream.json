@@ -1,0 +1,217 @@
+{
+  "id": "io.github.kappy7777.kappastream",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "50",
+  "sdk": "org.gnome.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.rust-stable",
+    "org.freedesktop.Sdk.Extension.node22"
+  ],
+  "command": "kappastream",
+  "finish-args": [
+    "--share=network",
+    "--share=ipc",
+    "--socket=wayland",
+    "--socket=fallback-x11",
+    "--socket=pulseaudio",
+    "--device=dri",
+    "--talk-name=org.freedesktop.Notifications",
+    "--talk-name=org.kde.StatusNotifierWatcher",
+    "--own-name=org.mpris.MediaPlayer2.kappastream",
+    "--own-name=io.github.kappy7777.kappastream.SingleInstance"
+  ],
+  "cleanup": [
+    "/include",
+    "/lib/pkgconfig",
+    "/share/pkgconfig",
+    "/lib/*.la",
+    "/share/gtk-doc",
+    "/share/man",
+    "/share/doc"
+  ],
+  "modules": [
+    "shared-modules/libappindicator/libappindicator-gtk3-12.10.json",
+    {
+      "name": "nv-codec-headers",
+      "buildsystem": "simple",
+      "build-commands": ["make install PREFIX=/app"],
+      "sources": [
+        {
+          "type": "git",
+          "url": "https://git.videolan.org/git/ffmpeg/nv-codec-headers.git",
+          "tag": "n13.1.15.0",
+          "commit": "0a6fba9a2820628b8103464f4c8753ee05838baa"
+        }
+      ]
+    },
+    {
+      "name": "ffmpeg",
+      "config-opts": [
+        "--enable-shared",
+        "--disable-static",
+        "--disable-programs",
+        "--disable-doc",
+        "--disable-debug",
+        "--disable-encoders",
+        "--disable-muxers",
+        "--disable-devices",
+        "--enable-gnutls",
+        "--enable-vaapi",
+        "--enable-nvdec",
+        "--enable-protocol=https"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz",
+          "sha256": "7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3"
+        }
+      ],
+      "cleanup": ["/share/ffmpeg"]
+    },
+    {
+      "name": "libass",
+      "config-opts": ["--enable-shared", "--disable-static"],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://github.com/libass/libass/releases/download/0.17.5/libass-0.17.5.tar.gz",
+          "sha256": "caab4b993dd7be6187c55623b789ed75dddefea6e65938af134637c732fe094a"
+        }
+      ]
+    },
+    {
+      "name": "libplacebo",
+      "buildsystem": "meson",
+      "config-opts": [
+        "-Ddemos=false",
+        "-Dtests=false",
+        "-Dvulkan=disabled",
+        "-Dd3d11=disabled",
+        "-Dshaderc=disabled"
+      ],
+      "sources": [
+        {
+          "type": "git",
+          "url": "https://github.com/haasn/libplacebo.git",
+          "tag": "v7.387.0",
+          "commit": "451d8ea5661c868562725e6500deda7fdd4e9a1e"
+        }
+      ]
+    },
+    {
+      "name": "mpv",
+      "buildsystem": "meson",
+      "config-opts": [
+        "-Dcplayer=false",
+        "-Dlibmpv=true",
+        "-Dbuild-date=false",
+        "-Dlua=disabled",
+        "-Djavascript=disabled",
+        "-Duchardet=disabled",
+        "-Dcplugins=disabled",
+        "-Djpeg=disabled",
+        "-Dlcms2=disabled",
+        "-Drubberband=disabled",
+        "-Dvapoursynth=disabled",
+        "-Dzimg=disabled",
+        "-Ddvbin=disabled",
+        "-Ddvda=disabled",
+        "-Ddvdnav=disabled",
+        "-Dcdda=disabled",
+        "-Dlibbluray=disabled",
+        "-Dlibarchive=disabled",
+        "-Dlibcurl=enabled",
+        "-Dlibavdevice=disabled",
+        "-Dvulkan=disabled",
+        "-Dshaderc=disabled",
+        "-Dmanpage-build=disabled"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://github.com/mpv-player/mpv/archive/refs/tags/v0.42.0.tar.gz",
+          "sha256": "bcfebbfa2b65a6d88dc97ea18117831072373e38b5785a2afb874ed4df5070dd"
+        }
+      ],
+      "cleanup": ["/share/mpv"]
+    },
+    {
+      "name": "gst-libav",
+      "buildsystem": "meson",
+      "config-opts": ["-Ddoc=disabled"],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://gstreamer.freedesktop.org/src/gst-libav/gst-libav-1.26.11.tar.xz",
+          "sha256": "9bb3d2681ef0de92d1b1a9d955186236ee22e64f372db9bfc0d22e2d0df19865"
+        }
+      ]
+    },
+    "sources/streamlink-sources.json",
+    {
+      "name": "kappastream",
+      "buildsystem": "simple",
+      "build-options": {
+        "append-path": "/usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin",
+        "env": {
+          "CARGO_HOME": "/run/build/kappastream/cargo-home",
+          "npm_config_cache": "/run/build/kappastream/flatpak-node/npm-cache",
+          "AWS_LC_SYS_USE_SYSTEM": "0",
+          "RUSTFLAGS": "-L/app/lib"
+        }
+      },
+      "build-commands": [
+        "npm ci --offline --no-audit --no-fund",
+        "npm run build",
+        "cd src-tauri && cargo build --offline --release --locked --no-default-features --features \"mpv-embed,tauri/custom-protocol\"",
+        "install -Dm755 src-tauri/target/release/kappastream /app/bin/kappastream",
+        "install -Dm644 src-tauri/icons/32x32.png /app/share/icons/hicolor/32x32/apps/kappastream.png",
+        "install -Dm644 src-tauri/icons/64x64.png /app/share/icons/hicolor/64x64/apps/kappastream.png",
+        "install -Dm644 src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/kappastream.png",
+        "install -Dm644 src-tauri/icons/128x128@2x.png /app/share/icons/hicolor/256x256/apps/kappastream.png",
+        "install -Dm644 src-tauri/icons/icon.png /app/share/icons/hicolor/512x512/apps/kappastream.png",
+        "install -Dm644 packaging/shared/kappastream.desktop /app/share/applications/io.github.kappy7777.kappastream.desktop",
+        "sed -i 's|>kappastream.desktop<|>io.github.kappy7777.kappastream.desktop<|' packaging/shared/io.github.kappy7777.kappastream.metainfo.xml",
+        "install -Dm644 packaging/shared/io.github.kappy7777.kappastream.metainfo.xml /app/share/metainfo/io.github.kappy7777.kappastream.metainfo.xml",
+        "install -Dm644 LICENSE /app/share/licenses/kappastream/LICENSE"
+      ],
+      "sources": [
+        "sources/cargo-sources.json",
+        "sources/node-sources.json",
+        {
+          "type": "file",
+          "path": "sources/cargo-config.toml",
+          "dest": ".cargo",
+          "dest-filename": "config.toml"
+        },
+        {
+          "type": "dir",
+          "path": "../..",
+          "skip": [
+            ".git",
+            ".zcode",
+            ".zcodeignore",
+            ".env",
+            ".flatpak-builder",
+            "flatpak_app",
+            "repo",
+            "build",
+            "node_modules",
+            "dist",
+            "src-tauri/target",
+            "src-tauri/gen/schemas",
+            "src-tauri/appimage-staging",
+            "streamlink-bundle",
+            "packaging/aur/dist",
+            "packaging/flatpak/.flatpak-builder",
+            "packaging/flatpak/build",
+            "packaging/flatpak/repo",
+            "AGENTS.md",
+            "AGENTS-notes.md"
+          ]
+        }
+      ]
+    }
+  ]
+}

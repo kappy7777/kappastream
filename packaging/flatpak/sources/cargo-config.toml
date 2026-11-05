@@ -1,0 +1,11 @@
+# Vendored-crates source replacement for the flatpak build (installed as
+# .cargo/config.toml next to the source root). cargo-sources.json unpacks
+# every crate of src-tauri/Cargo.lock under cargo/vendor/, and this makes
+# every cargo command resolve crates.io from there — combined with
+# --offline, the build never touches the network (flatpak-builder disables
+# it inside build steps anyway).
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "cargo/vendor"

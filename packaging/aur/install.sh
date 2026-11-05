@@ -30,8 +30,8 @@ install_files() {
 	install -Dm755 "$HERE/kappastream.sh" "$PREFIX/bin/kappastream"
 	install -Dm644 "$HERE/kappastream.desktop" \
 		"$PREFIX/share/applications/kappastream.desktop"
-	install -Dm644 "$HERE/dev.kappy.kappastream.metainfo.xml" \
-		"$PREFIX/share/metainfo/dev.kappy.kappastream.metainfo.xml"
+	install -Dm644 "$HERE/io.github.kappy7777.kappastream.metainfo.xml" \
+		"$PREFIX/share/metainfo/io.github.kappy7777.kappastream.metainfo.xml"
 	# License (GPLv3) — same /usr/share/licenses location the AUR packages use.
 	install -Dm644 "$HERE/LICENSE" \
 		"$PREFIX/share/licenses/kappastream/LICENSE"
@@ -52,7 +52,7 @@ uninstall_files() {
 	rm -f "$PREFIX/bin/kappastream" \
 		"$LIBDIR/kappastream" \
 		"$PREFIX/share/applications/kappastream.desktop" \
-		"$PREFIX/share/metainfo/dev.kappy.kappastream.metainfo.xml" \
+		"$PREFIX/share/metainfo/io.github.kappy7777.kappastream.metainfo.xml" \
 		"$PREFIX/share/licenses/kappastream/LICENSE"
 	# POSIX for-loop: this script runs under /bin/sh (dash on Debian/Ubuntu),
 	# which does not brace-expand, so a {32x32,...} glob would try to remove a

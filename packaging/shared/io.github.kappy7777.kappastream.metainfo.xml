@@ -3,12 +3,12 @@
   AppStream metainfo for kappastream.
 
   Validate before committing (requires appstream / libappstream-glib):
-    appstream-util validate-relax dev.kappy.kappastream.metainfo.xml
+    appstream-util validate-relax io.github.kappy7777.kappastream.metainfo.xml
   or:
-    appstreamcli validate dev.kappy.kappastream.metainfo.xml
+    appstreamcli validate io.github.kappy7777.kappastream.metainfo.xml
 -->
 <component type="desktop-application">
-  <id>dev.kappy.kappastream</id>
+  <id>io.github.kappy7777.kappastream</id>
 
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>

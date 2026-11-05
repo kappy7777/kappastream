@@ -30,6 +30,18 @@ src-tauri/gen/schemas/
 *.AppImage.zsync
 src-tauri/target/
 
+# Flatpak local build state (flatpak-builder work dirs, local repo, bundles)
+packaging/flatpak/.flatpak-builder/
+packaging/flatpak/build/
+packaging/flatpak/repo/
+*.flatpak
+# Same state if flatpak-builder is ever invoked from the repo root (the
+# manifest's dir-source skip list covers those roots too)
+/.flatpak-builder/
+/build/
+/repo/
+/flatpak_app/
+
 # Local secrets — never commit
 .env
 .env.*

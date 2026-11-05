@@ -115,7 +115,7 @@ Download the `.deb` package from the [latest release](../../releases/latest), th
 sudo apt install ./kappastream_*_amd64.deb
 ```
 
-The package declares `streamlink`, `libmpv` and the GStreamer libav codecs as dependencies. It is built on Debian 12 and needs **glibc 2.36 or newer** (Debian 12+, Ubuntu 24.04+). Ubuntu 22.04's glibc 2.35 is below both the `.deb` floor and the AppImage floor (2.39), so no kappastream artifact runs there.
+The package declares `streamlink`, `libmpv` and the GStreamer libav codecs as dependencies. It is built on Debian 12 and needs **glibc 2.36 or newer** (Debian 12+, Ubuntu 24.04+). Ubuntu 22.04's glibc 2.35 is below both the `.deb` floor and the AppImage floor (2.39) — use the Flatpak bundle there, which brings its own runtime.
 
 ### 🐧 Fedora
 
@@ -142,6 +142,16 @@ sudo dnf install ./kappastream-*.x86_64.rpm
 The swap replaces Fedora's `ffmpeg-free` libraries with RPM Fusion's, which provide the H.264 decoder Twitch streams need. Without it, streams may play audio over a black video surface.
 
 The package also declares `streamlink` and `libmpv` as dependencies.
+
+### 📦 Flatpak (any distro)
+
+Download the `.flatpak` bundle from the [latest release](../../releases/latest), then install it with:
+
+```bash
+flatpak install --user kappastream-*-x86_64.flatpak
+```
+
+Everything kappastream needs — streamlink, the native mpv engine and its codec stack — is bundled inside the sandbox, so no system dependencies or codec setup apply, and it runs wherever Flatpak runs regardless of the host's glibc. To update, install the newer bundle from a later release; flatpak replaces the old version in place, which is why the in-app updater stays out of the way on Flatpak installs.
 
 ### 🖥️ Windows
 
@@ -219,7 +229,7 @@ The application contacts only the services required for playback, chat, metadata
 | **Twitch static CDN** — `static-cdn.jtvnw.net` | Load native emotes and chat badges |
 | **Twitch GQL** — `gql.twitch.tv` | Source for favorites live status, viewer count, title, game, avatar, and Twitch user-ID lookup |
 | **7TV, BTTV and FFZ** | Load third-party emotes |
-| **GitHub Releases** — `github.com/kappy7777/kappastream/releases` | On startup, check whether a newer kappastream release is available and, if so, offer to download, verify (minisign signature), and install it (AppImage / .deb / .rpm / Windows / macOS). AUR installs never make this request. |
+| **GitHub Releases** — `github.com/kappy7777/kappastream/releases` | On startup, check whether a newer kappastream release is available and, if so, offer to download, verify (minisign signature), and install it (AppImage / .deb / .rpm / Windows / macOS). AUR and Flatpak installs never make this request. |
 
 These third-party services can see normal request info like your IP address — never your Twitch account, an OAuth token, or your profile.
 

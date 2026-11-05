@@ -5,6 +5,26 @@ All notable changes to **kappastream** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A Flatpak bundle joins the release artifacts.** A single-file
+  `.flatpak` built on the GNOME 50 runtime, bundling the full embedded
+  engine stack (libmpv with its ffmpeg/libplacebo/libass dependencies
+  and the GStreamer codecs) plus streamlink, so playback works out of
+  the box on any distro that runs Flatpak. New versions arrive as newer
+  bundles from the release page (flatpak replaces the old install in
+  place), so the in-app updater stays out of the way there.
+
+### Changed
+
+- **The application ID is now `io.github.kappy7777.kappastream`.** The
+  old `dev.kappy.kappastream` ID named a domain the project does not
+  own; the io.github form is verifiable through the project's GitHub
+  account. All existing data — favorites, settings, VOD positions —
+  carries over automatically on the first launch of the renamed build.
+
 ## [1.0.9] - 2026-11-04
 
 ### Fixed

@@ -1,6 +1,7 @@
 mod env_spawn;
 mod export;
 mod gql;
+mod migrate;
 mod opener;
 mod platform;
 mod player;
@@ -62,6 +63,13 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // BEFORE any webview exists: the identifier rename relocated the
+    // webview's storage directory (localStorage — the app's only
+    // persistence), so the old directory must be moved into place first or
+    // every pre-rename user would launch into an empty profile. See
+    // migrate.rs.
+    migrate::migrate();
+
     let mut builder = tauri::Builder::default()
         .manage(gql::GqlClient::new().expect("failed to build GQL HTTP client"));
 

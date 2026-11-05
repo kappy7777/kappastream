@@ -93,7 +93,7 @@ Checklist for cutting a release:
    at the tagged commit ships in the release's `latest.json`). Clear it
    back to empty once the release has published.
 4. Add a `<release version="<version>" date="<YYYY-MM-DD>">` entry to
-   `packaging/shared/dev.kappy.kappastream.metainfo.xml` at the top of the
+   `packaging/shared/io.github.kappy7777.kappastream.metainfo.xml` at the top of the
    `<releases>` block (newest first), with a `<url>` pointing at the GitHub
    release. The date must match the CHANGELOG heading.
 5. Run the version-drift guard to confirm nothing has drifted:

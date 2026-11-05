@@ -1,0 +1,29 @@
+{
+    "name": "dbus-glib",
+    "cleanup": [
+        "*.la",
+        "/bin",
+        "/etc",
+        "/include",
+        "/lib/pkgconfig",
+        "/libexec",
+        "/share/gtk-doc",
+        "/share/man"
+    ],
+    "config-opts": [
+        "--disable-static",
+        "--disable-gtk-doc"
+    ],
+    "sources": [
+        {
+            "type": "archive",
+            "url": "https://dbus.freedesktop.org/releases/dbus-glib/dbus-glib-0.116.tar.gz",
+            "sha256": "e3f3d4487e2883800770ed5899ed111bdc4ba7056af34a255c4c46ad8a2486f3",
+            "x-checker-data": {
+                "type": "anitya",
+                "project-id": 1979,
+                "url-template": "https://dbus.freedesktop.org/releases/dbus-glib/dbus-glib-$version.tar.gz"
+            }
+        }
+    ]
+}

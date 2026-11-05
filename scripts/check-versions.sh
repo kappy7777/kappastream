@@ -82,7 +82,7 @@ fi
 # Skipped for prereleases: the metainfo tracks stable releases only, so a
 # prerelease current version is allowed to differ from the latest metainfo
 # <release> (which stays at the prior stable).
-METAINFO_PATH="packaging/shared/dev.kappy.kappastream.metainfo.xml"
+METAINFO_PATH="packaging/shared/io.github.kappy7777.kappastream.metainfo.xml"
 if [ "$IS_PRERELEASE" = "true" ]; then
   echo "check-versions: prerelease ($PKG_VER) — skipping metainfo <release> equality check"
 else

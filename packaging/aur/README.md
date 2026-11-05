@@ -31,7 +31,7 @@ Shared assets (also used by the Debian/Fedora packages, live in
 | File | Purpose |
 | --- | --- |
 | `kappastream.desktop` | Desktop entry (native, not the AppImage one). |
-| `dev.kappy.kappastream.metainfo.xml` | AppStream metadata for GNOME Software / KDE Discover. |
+| `io.github.kappy7777.kappastream.metainfo.xml` | AppStream metadata for GNOME Software / KDE Discover. |
 | `kappastream.sh` | Thin runtime launcher (NVIDIA EGL-Wayland explicit-sync compat is applied in the binary at startup, not here). |
 
 ## `-git` vs `-bin`
@@ -67,7 +67,7 @@ makepkg -si            # builds + installs + pulls streamlink/webkit2gtk deps
 
 # 2. Validate the metadata (do this before every upload):
 desktop-file-validate kappastream.desktop
-appstream-util validate-relax dev.kappy.kappastream.metainfo.xml
+appstream-util validate-relax io.github.kappy7777.kappastream.metainfo.xml
 namcap PKGBUILD
 namcap kappastream-*.pkg.tar.zst
 
@@ -152,8 +152,9 @@ git push origin master
 
 - **Runtime dep: `streamlink`** is in `depends=`, so `makepkg -si` / `yay` pulls it
   automatically. Users who installed without deps must `pacman -S streamlink` themselves.
-- **App ID:** the desktop file and metainfo use `dev.kappy.kappastream`. AUR does not
-  verify domain ownership, so this is fine for AUR. If you later target Flathub, you'd
-  need an ID under a domain you control.
+- **App ID:** the metainfo uses `io.github.kappy7777.kappastream` (the desktop file carries no
+  app ID — its name, icon and StartupWMClass stay `kappastream`). AUR does not verify domain
+  ownership; the io.github form is also the one Flathub verifies through the GitHub account
+  (see `packaging/flatpak/`).
 - **The desktop file is native** (`Exec=kappastream`, no AppImage runtime) — it matches
   the binary the PKGBUILD installs to `/usr/bin/kappastream`.

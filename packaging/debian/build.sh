@@ -94,8 +94,8 @@ install -Dm644 "$ICONS/icon.png"       "$STAGE/usr/share/icons/hicolor/512x512/a
 # Desktop entry + AppStream metainfo (shared with AUR/Fedora).
 install -Dm644 "$SHARED/${PKG}.desktop" \
 	"$STAGE/usr/share/applications/${PKG}.desktop"
-install -Dm644 "$SHARED/dev.kappy.kappastream.metainfo.xml" \
-	"$STAGE/usr/share/metainfo/dev.kappy.kappastream.metainfo.xml"
+install -Dm644 "$SHARED/io.github.kappy7777.kappastream.metainfo.xml" \
+	"$STAGE/usr/share/metainfo/io.github.kappy7777.kappastream.metainfo.xml"
 
 # License (Debian convention: /usr/share/doc/<pkg>/copyright) + changelog.
 install -Dm644 "$REPO_ROOT/LICENSE" "$STAGE/usr/share/doc/${PKG}/copyright"

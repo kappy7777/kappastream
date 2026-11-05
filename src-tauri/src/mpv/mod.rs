@@ -321,13 +321,19 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
             // ~/.config/mpv/scripts dir included). Builtin scripts (console,
             // stats) still load under load-scripts=no — that option only
             // stops script-directory autoloading — so they are switched off
-            // too; tolerantly, because mpv renamed load-osd-console to
-            // load-console after 0.40 and an unknown name must never fail
-            // engine creation.
-            init.set_property("load-scripts", false)?;
-            init.set_property("osc", false)?;
-            init.set_property("ytdl", false)?;
+            // too. Every scripting-subsystem name here is set tolerantly:
+            // mpv registers load-scripts when any of lua, javascript or
+            // cplugins is compiled in and the other five only under lua,
+            // so a no-scripting libmpv (the flatpak bundles one: all three
+            // off) has neither the scripts nor the options — and such a
+            // build can neither autoload nor run a script in the first
+            // place. mpv renamed load-osd-console to load-console in 0.40,
+            // keeping the old name as an alias. An unknown name must never
+            // fail engine creation.
             init.set_property("input-default-bindings", false)?;
+            let _ = init.set_property("load-scripts", false);
+            let _ = init.set_property("osc", false);
+            let _ = init.set_property("ytdl", false);
             let _ = init.set_property("load-stats-overlay", false);
             let _ = init.set_property("load-osd-console", false);
             let _ = init.set_property("load-console", false);

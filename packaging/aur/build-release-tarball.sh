@@ -67,7 +67,7 @@ install -m755 "$SHARED/${PKG}.sh"                               "$STAGE/${PKG}.s
 # it) — only used by people running `sudo ./install.sh` from an extraction.
 install -m755 "$SCRIPT_DIR/install.sh"                          "$STAGE/install.sh"
 install -m644 "$SHARED/${PKG}.desktop"                          "$STAGE/${PKG}.desktop"
-install -m644 "$SHARED/dev.kappy.kappastream.metainfo.xml"      "$STAGE/dev.kappy.kappastream.metainfo.xml"
+install -m644 "$SHARED/io.github.kappy7777.kappastream.metainfo.xml"      "$STAGE/io.github.kappy7777.kappastream.metainfo.xml"
 install -m644 "$REPO_ROOT/LICENSE"                              "$STAGE/LICENSE"
 ICONS="$REPO_ROOT/src-tauri/icons"
 install -m644 "$ICONS/32x32.png"      "$STAGE/32x32.png"
