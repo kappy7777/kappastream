@@ -37,6 +37,25 @@ artifacts; everything below is the local equivalent.
   startup and the process panics when neither loads. No flatpak runtime
   ships one, so the manifest bundles it — the same module most Flathub
   apps with a tray use.
+- **Tray icon transport (why the tray can render blank)**: this
+  libappindicator predates the `IconPixmap` DBus property — the ONLY
+  icon channel is the `IconName` string, which tray-icon fills with an
+  absolute path to a PNG it writes under `$XDG_RUNTIME_DIR/tray-icon`.
+  Inside the sandbox that directory is a PRIVATE tmpfs over the
+  desktop's `/run/user/<uid>` (the PNG is visible through
+  `/proc/<pid>/root` but absent on the host), so the desktop gets a
+  path it cannot read and shows an empty slot. `tray.rs` therefore
+  redirects the PNG to `$XDG_CACHE_HOME/tray-icon` when `FLATPAK_ID` is
+  set — that per-app directory exists at the SAME absolute path inside
+  and outside the sandbox. Do not remove the `temp_dir_path` call.
+- **`rename-icon: kappastream`**: flatpak exports `share/icons` to the
+  host ONLY for icons named after the app ID. The icons are installed
+  as `kappastream.png` (shared with the AUR/native packaging), so the
+  key renames them to `io.github.kappy7777.kappastream.png` and rewrites
+  the exported desktop file's `Icon=` (including localized variants) —
+  without it the launcher icon silently resolves to nothing host-side
+  and flatpak-builder warns `Icon referenced in desktop file but not
+  exported` on every build.
 - **nv-codec-headers**: NVIDIA's CUVID header set, build-time only — the
   GNOME SDK does not ship it. ffmpeg compiles its nvdec decoders against
   it; at runtime those decoders load the host driver's `libnvcuvid`,

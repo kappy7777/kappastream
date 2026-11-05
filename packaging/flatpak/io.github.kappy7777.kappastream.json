@@ -29,6 +29,7 @@
     "/share/man",
     "/share/doc"
   ],
+  "rename-icon": "kappastream",
   "modules": [
     "shared-modules/libappindicator/libappindicator-gtk3-12.10.json",
     {
