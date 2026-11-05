@@ -313,6 +313,26 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
             init.set_property("keep-open", "no")?;
             init.set_property("audio-client-name", "kappastream")?;
             init.set_property("user-agent", MPV_USER_AGENT)?;
+            // Both pulse pacing options below apply only under flatpak,
+            // the one build where playback always lands on ao=pulse: the
+            // sandbox exposes audio only through the pulse socket and the
+            // bundled libmpv ships no pipewire output. Native builds keep
+            // mpv's defaults. They pick ao=pipewire wherever a pipewire
+            // server runs, and on a real PulseAudio server the latency
+            // hacks are mpv's documented workaround, so they stay
+            // untouched there.
+            if std::env::var_os("FLATPAK_ID").is_some_and(|v| !v.is_empty()) {
+                // ao_pulse's "latency hacks" (default on) replace the
+                // server's timing with mpv's own elaborate latency
+                // calculation, a workaround for PulseAudio timing bugs.
+                // Against pipewire-pulse that calculation jitters, and the
+                // default video-sync=audio pacing reads frames as late and
+                // drops them: with vo=libmpv the drop counter climbs ~30
+                // frames/s with the hacks on, and the storm stops with
+                // them off. Tolerant like the scripting options: the
+                // option only exists when the pulse output does.
+                let _ = init.set_property("pulse-latency-hacks", false);
+            }
             // No scripts of any kind: the in-video controls are the page's
             // HTML overlay, so every mpv scripting/autoplay option is off —
             // the STOCK osc, ytdl_hook (it would run yt-dlp against every
