@@ -151,7 +151,9 @@ Download the `.flatpak` bundle from the [latest release](../../releases/latest),
 flatpak install --user kappastream-*-x86_64.flatpak
 ```
 
-Everything kappastream needs — streamlink, the native mpv engine and its codec stack — is bundled inside the sandbox, so no system dependencies or codec setup apply, and it runs wherever Flatpak runs regardless of the host's glibc. To update, install the newer bundle from a later release; flatpak replaces the old version in place, which is why the in-app updater stays out of the way on Flatpak installs.
+Streamlink, the mpv engine and the codecs all run from inside the sandbox — nothing to install or configure on the host, and any distro with Flatpak works.
+
+**The Flatpak never checks for updates and will not notify you about new releases** — watch the [releases page](../../releases/latest) and install a newer bundle to update; it replaces the installed version.
 
 ### 🖥️ Windows
 
