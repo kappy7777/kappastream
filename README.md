@@ -28,19 +28,18 @@ It is designed for people who want to open a stream, read the real chat, and get
 Chat is read anonymously through Twitch IRC. Stream playback is resolved locally with [streamlink](https://streamlink.github.io/) and played through `hls.js`, or — on Linux — an experimental embedded mpv engine. Favorites, settings, notifications, themes, and cached state remain on your device.
 
 <p align="center">
-  <img src="docs/screenshots/2.png" alt="kappastream interface" width="100%">
+  <img src="docs/screenshots/blacklight.png" alt="kappastream interface" width="100%">
 </p>
 
 <details>
 <summary><strong>More theme previews</strong></summary>
 <br>
 <p align="center">
-  <img src="docs/screenshots/1.png" alt="kappastream interface" width="49%">
-  <img src="docs/screenshots/3.png" alt="kappastream interface" width="49%">
+  <img src="docs/screenshots/gruvbox.png" alt="kappastream interface" width="49%">
+  <img src="docs/screenshots/riptide.png" alt="kappastream interface" width="49%">
 </p>
 <p align="center">
-  <img src="docs/screenshots/4.png" alt="kappastream interface" width="49%">
-  <img src="docs/screenshots/5.png" alt="kappastream interface" width="49%">
+  <img src="docs/screenshots/merlot.png" alt="kappastream interface" width="49%">
 </p>
 </details>
 
