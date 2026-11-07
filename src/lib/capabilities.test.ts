@@ -3,13 +3,15 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-// Drift guard for the window-capability split: the main window holds the
-// full permission set, and the PiP window — a second webview whose page
-// renders the same app bundle — holds ONLY the window APIs its code
-// actually calls (close/destroy, sizing, always-on-top, dragging, events).
-// A permission silently added to the pip capability (or the pip window
-// creeping back into default.json) widens what a compromised PiP page
-// could reach, so the shape is pinned here.
+// Drift guards for the webview trust posture. Window capabilities: the
+// main window holds the full permission set, and the PiP window — a
+// second webview whose page renders the same app bundle — holds ONLY the
+// window APIs its code actually calls (close/destroy, sizing,
+// always-on-top, dragging, events). A permission silently added to the
+// pip capability (or the pip window creeping back into default.json)
+// widens what a compromised PiP page could reach, so the shape is pinned
+// here. Document posture: index.html (shared by both windows) pins the
+// no-referrer policy.
 
 // (node:path resolution rather than `new URL(relative, import.meta.url)`:
 // the test environment's URL implementation does not resolve relative
@@ -71,5 +73,16 @@ describe('the main window capability (default.json)', () => {
 
   it('applies only to the main window', () => {
     expect(main.windows).toEqual(['main'])
+  })
+})
+
+describe('the webview document (index.html)', () => {
+  it('sends no referrer, on every window that shares the document', () => {
+    // WebView2 (Windows) attaches Referer: http://tauri.localhost/ to
+    // cross-origin requests from the app page by default; the WebKit
+    // engines send none. The meta tag makes it none everywhere, so no
+    // external service learns the local app origin.
+    const html = readFileSync(join(here, '../../index.html'), 'utf8')
+    expect(html).toContain('<meta name="referrer" content="no-referrer" />')
   })
 })
