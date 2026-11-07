@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **A Flatpak bundle joins the release artifacts.** A single-file
-  `.flatpak` built on the GNOME 50 runtime, bundling the full embedded
+  `.flatpak` built on the GNOME 51 runtime, bundling the full embedded
   engine stack (libmpv with its ffmpeg/libplacebo/libass dependencies
   and the GStreamer codecs) plus streamlink, so playback works out of
   the box on any distro that runs Flatpak. New versions arrive as newer
