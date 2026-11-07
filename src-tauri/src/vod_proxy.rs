@@ -120,6 +120,10 @@ fn proxy_client() -> &'static reqwest::Client {
             // path genuinely needs one, re-validate each hop via `Policy::custom`
             // rather than re-enabling the default (10-hop) follower.
             .redirect(reqwest::redirect::Policy::none())
+            // The same shared browser UA every other Rust transport sends,
+            // instead of no UA at all — the CDN sees a plain browser-shaped
+            // client either way.
+            .user_agent(crate::gql::USER_AGENT)
             .connect_timeout(PROXY_CONNECT_TIMEOUT)
             .timeout(PROXY_TIMEOUT)
             .build()
