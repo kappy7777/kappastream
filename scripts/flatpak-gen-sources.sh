@@ -29,7 +29,9 @@ MANIFEST="$repo/packaging/flatpak/io.github.kappy7777.kappastream.json"
 # The pip wheels must resolve against the runtime the manifest pins (they
 # carry the runtime's python ABI), so read runtime-version from the
 # manifest instead of hard-coding it here — the two must never drift.
-RUNTIME_VERSION="$(python3 -c 'import json; print(json.load(open("'"$MANIFEST"'"))["runtime-version"])')"
+# (The path is passed through the environment: splicing it into the
+# python source would break on quotes in the checkout path.)
+RUNTIME_VERSION="$(MANIFEST="$MANIFEST" python3 -c 'import json, os; print(json.load(open(os.environ["MANIFEST"]))["runtime-version"])')"
 RUNTIME="org.gnome.Sdk//${RUNTIME_VERSION}"
 # The streamlink pin lives in the generated module itself (the manifest
 # only includes the file), so read it back from the committed copy.

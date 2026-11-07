@@ -27,23 +27,37 @@ const problems = []
 const lockText = readFileSync(join(repo, 'src-tauri/Cargo.lock'), 'utf8')
 /** @type {Map<string, string>} `<name>-<version>` -> hex checksum ('' when absent) */
 const lockPackages = new Map()
+/** Every `<name>-<version>` in the lock, whatever the source — git/path
+ *  packages are vendored too, so the reverse direction must not flag them. */
+const lockKeysAll = new Set()
 {
   let pkg = null
-  for (const line of lockText.split('\n')) {
-    if (line === '[[package]]') {
-      if (pkg?.source?.startsWith('registry+')) {
+  const flush = () => {
+    if (pkg?.name) {
+      lockKeysAll.add(`${pkg.name}-${pkg.version}`)
+      if (pkg.source?.startsWith('registry+')) {
         lockPackages.set(`${pkg.name}-${pkg.version}`, pkg.checksum ?? '')
       }
+    }
+    pkg = null
+  }
+  for (const line of lockText.split('\n')) {
+    if (line === '[[package]]') {
+      flush()
       pkg = {}
+      continue
+    }
+    // Any other section header ([patch...], [metadata], ...) ends the
+    // current package: its fields must not be absorbed into it.
+    if (line.startsWith('[')) {
+      flush()
       continue
     }
     if (pkg === null) continue
     const m = /^(name|version|source|checksum) = "(.*)"$/.exec(line)
     if (m) pkg[m[1]] = JSON.parse(`"${m[2]}"`)
   }
-  if (pkg?.source?.startsWith('registry+')) {
-    lockPackages.set(`${pkg.name}-${pkg.version}`, pkg.checksum ?? '')
-  }
+  flush()
 }
 
 /** @type {Map<string, string>} vendor dir -> hex sha256 (archive entries only) */
@@ -64,7 +78,7 @@ for (const [key, checksum] of lockPackages) {
   }
 }
 for (const key of vendorDirs.keys()) {
-  if (!lockPackages.has(key)) {
+  if (!lockKeysAll.has(key)) {
     problems.push(`cargo: ${key} is in cargo-sources.json but not in Cargo.lock`)
   }
 }
@@ -77,6 +91,9 @@ for (const [path, meta] of Object.entries(packageLock.packages ?? {})) {
   if (!path) continue // the root package
   if (meta.link) continue // workspace link: no tarball
   if (typeof meta.resolved === 'string') {
+    // Registry tarballs only: a future git/file dependency resolves to a
+    // non-http URL the node generator would vendor differently.
+    if (!/^https?:\/\//.test(meta.resolved)) continue
     lockUrls.set(meta.resolved, typeof meta.integrity === 'string' ? meta.integrity : '')
   }
 }

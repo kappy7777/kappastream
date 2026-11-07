@@ -35,6 +35,10 @@ updates:
         versions: [">=0.19"]
       - dependency-name: "gdkx11-sys"
         versions: [">=0.19"]
+      # webkit2gtk sits on the same gtk-rs line (2.0.x ↔ gtk 0.18); a
+      # hypothetical 2.1+ would pull the newer stack in.
+      - dependency-name: "webkit2gtk"
+        versions: [">=2.1"]
 
   # github-actions — keep the workflow actions pinned-to-tags but current
   - package-ecosystem: "github-actions"
