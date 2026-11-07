@@ -6,24 +6,44 @@
 //     latest.json, or the plugin being unregistered (AUR build, where the
 //     `updater` Cargo feature is off) must never surface any UI. Errors are
 //     logged to the console only.
-//   • When an update exists, the banner shows the new version and waits for an
-//     explicit click. Nothing auto-downloads; nothing auto-installs.
+//   • When an update exists, the banner shows the new version and waits for
+//     an explicit click. Nothing auto-downloads; nothing auto-installs.
 //
 // On an AUR build the updater + process plugins are not registered, so
 // `check()` rejects with "plugin ... not found" immediately — caught here and
 // swallowed. No AUR user ever sees a prompt (pacman owns updates there).
+// The flatpak is in the same registration state, but its updates are
+// installed by replacing the whole bundle, so there the same check() runs
+// one notify-only fetch of the updater's own latest.json (the
+// `release_notice` command) and the banner points at the release page
+// instead of downloading anything.
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
-import { isTauri } from '@tauri-apps/api/core'
+import { invoke, isTauri } from '@tauri-apps/api/core'
 import { isVersionNewer } from './version'
+import { toast } from './toast.svelte'
+import { t } from './i18n/index.svelte'
 
 export type UpdateStatus =
   | 'idle' // no update / not yet checked / check failed silently
   | 'available' // an update is waiting for an explicit click
+  | 'notice' // a newer release exists, to be downloaded manually (flatpak build)
   | 'downloading'
   | 'installing'
   | 'restart' // installed, but the automatic relaunch failed — manual restart needed
   | 'error' // download/install/verify failed (only after a user click)
+
+/** Shape of the `release_notice` command's non-null result. */
+interface ReleaseNoticeResult {
+  version: string
+  currentVersion: string
+  notes: string | null
+  pubDate: string | null
+}
+
+interface OpenReleasePageResult {
+  ok: boolean
+}
 
 interface UpdateState {
   status: UpdateStatus
@@ -54,6 +74,7 @@ class UpdateStore {
     return (
       !this.dismissed &&
       (this.status === 'available' ||
+        this.status === 'notice' ||
         this.status === 'downloading' ||
         this.status === 'installing' ||
         this.status === 'restart' ||
@@ -75,6 +96,29 @@ class UpdateStore {
   /** Check for an update. Silent on every failure path (see file header). */
   async check(): Promise<void> {
     if (!isTauri()) return
+    // Flatpak builds have no updater plugin but can still learn that a
+    // newer release exists: one notify-only fetch of the updater's own
+    // latest.json. Inside the flatpak the plugin path below could only
+    // reject, so this returns either way; everywhere else the command
+    // answers null without touching the network and the plugin path runs
+    // unchanged. A failed fetch degrades to exactly that null.
+    try {
+      const notice = (await invoke('release_notice')) as ReleaseNoticeResult | null
+      if (notice) {
+        if (isVersionNewer(notice.version, notice.currentVersion)) {
+          this.version = notice.version
+          this.currentVersion = notice.currentVersion
+          this.notes = notice.notes ?? null
+          this.pubDate = notice.pubDate ?? null
+          this.status = 'notice'
+          this.dismissed = false
+          this.errorMsg = null
+        }
+        return
+      }
+    } catch {
+      // Silent, like every other failed check.
+    }
     try {
       const update = await check({ timeout: 20000 })
       if (update && isVersionNewer(update.version, update.currentVersion)) {
@@ -147,6 +191,22 @@ class UpdateStore {
   dismiss(): void {
     if (this.busy) return
     this.dismissed = true
+  }
+
+  /** User clicked "Download page" (notice state): open the GitHub
+   * releases page in the system browser. Flatpak bundles update by
+   * installing a newer bundle, so the app can only point at it. */
+  openDownloadPage(): void {
+    if (!isTauri()) return
+    void (async () => {
+      try {
+        const r = (await invoke('open_release_page')) as OpenReleasePageResult
+        if (r.ok) return
+        toast(t('toast_openLinkFailed'))
+      } catch {
+        toast(t('toast_openLinkFailed'))
+      }
+    })()
   }
 }
 

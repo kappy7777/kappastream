@@ -133,7 +133,13 @@ fn parse_version(raw: &str) -> Option<String> {
     let mut parts = core.split('.');
     for _ in 0..3 {
         let part = parts.next()?;
-        if part.is_empty() || part.len() > 4 || !part.bytes().all(|b| b.is_ascii_digit()) {
+        if part.is_empty()
+            || part.len() > 4
+            || !part.bytes().all(|b| b.is_ascii_digit())
+            || (part.len() > 1 && part.starts_with('0'))
+        {
+            // No leading zeros: the project's own version scheme never
+            // produces one, so "01.0.9" is not a release number.
             return None;
         }
     }
@@ -258,14 +264,16 @@ mod tests {
             parse_version("1.1.0-2026.11.07").as_deref(),
             Some("1.1.0-2026.11.07")
         );
-        // Four numeric parts, an empty part, oversized parts, an empty or
-        // hostile prerelease.
+        // Four numeric parts, an empty part, oversized parts, a leading
+        // zero, an empty or hostile prerelease.
         for raw in [
             "1.0.9.2",
             "1..9",
             "1.0.",
             ".1.0.9",
             "12345.0.9",
+            "01.0.9",
+            "1.0.09",
             "1.0.9-",
             "1.0.9-rc 1",
             "1.0.9-rc/1",

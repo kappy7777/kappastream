@@ -25,6 +25,9 @@ const updater = vi.hoisted(() => ({
   // Swapped per test; rejects to simulate a failed relaunch.
   relaunchImpl: (): Promise<void> => Promise.resolve(),
   tauriEnabled: true,
+  // invoke() dispatcher, keyed by tauri command name.
+  invokeImpl: (_cmd: string): Promise<unknown> => Promise.resolve(null),
+  invokeCalls: [] as string[],
 }))
 
 vi.mock('@tauri-apps/plugin-updater', () => ({
@@ -42,6 +45,10 @@ vi.mock('@tauri-apps/plugin-process', () => ({
 }))
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => updater.tauriEnabled,
+  invoke: (cmd: string): Promise<unknown> => {
+    updater.invokeCalls.push(cmd)
+    return updater.invokeImpl(cmd)
+  },
 }))
 
 type UpdateMod = typeof import('./update.svelte')
@@ -85,6 +92,8 @@ beforeEach(async () => {
   updater.relaunchImpl = () => Promise.resolve()
   updater.tauriEnabled = true
   updater.checkImpl = async () => null
+  updater.invokeCalls = []
+  updater.invokeImpl = () => Promise.resolve(null)
   // The store logs failures to the console by design; keep test output clean.
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -367,5 +376,115 @@ describe('apply() — the explicit-click path', () => {
     await store.apply()
     expect(store.status).toBe('error')
     expect(store.errorMsg).toBe('plain string failure')
+  })
+})
+
+const toaster = vi.hoisted(() => ({ calls: [] as string[] }))
+vi.mock('./toast.svelte', () => ({
+  toast: (msg: string) => {
+    toaster.calls.push(msg)
+  },
+}))
+
+describe('the flatpak release notice (release_notice command path)', () => {
+  function noticeResult(version: string, currentVersion = '1.0.4') {
+    return { version, currentVersion, notes: 'Release notes.', pubDate: '2026-11-04T08:17:00Z' }
+  }
+
+  it('a newer notice sets status notice and never calls the plugin', async () => {
+    updater.invokeImpl = (cmd) =>
+      cmd === 'release_notice' ? Promise.resolve(noticeResult('1.0.5')) : Promise.resolve(null)
+    await store.check()
+    expect(updater.invokeCalls).toEqual(['release_notice'])
+    expect(updater.checkCalls).toBe(0)
+    expect(store.status).toBe('notice')
+    expect(store.visible).toBe(true)
+    expect(store.version).toBe('1.0.5')
+    expect(store.currentVersion).toBe('1.0.4')
+    expect(store.notes).toBe('Release notes.')
+    expect(store.pubDate).toBe('2026-11-04T08:17:00Z')
+  })
+
+  it('an equal-version notice stays idle and never calls the plugin', async () => {
+    updater.invokeImpl = (cmd) =>
+      cmd === 'release_notice' ? Promise.resolve(noticeResult('1.0.4')) : Promise.resolve(null)
+    await store.check()
+    expect(updater.checkCalls).toBe(0)
+    expect(store.status).toBe('idle')
+    expect(store.visible).toBe(false)
+  })
+
+  it('an OLDER notice version stays idle too (downgrade guard)', async () => {
+    updater.invokeImpl = (cmd) =>
+      cmd === 'release_notice' ? Promise.resolve(noticeResult('1.0.3')) : Promise.resolve(null)
+    await store.check()
+    expect(updater.checkCalls).toBe(0)
+    expect(store.status).toBe('idle')
+    expect(store.visible).toBe(false)
+    expect(store.version).toBeNull()
+  })
+
+  it('a null result (not a flatpak) falls through to the plugin path', async () => {
+    updater.invokeImpl = () => Promise.resolve(null)
+    updater.checkImpl = async () => fakeUpdate()
+    await store.check()
+    expect(updater.invokeCalls).toEqual(['release_notice'])
+    expect(updater.checkCalls).toBe(1)
+    expect(store.status).toBe('available')
+  })
+
+  it('a throwing invoke falls through to the plugin path, silently', async () => {
+    updater.invokeImpl = () => Promise.reject(new Error('command failed'))
+    updater.checkImpl = async () => fakeUpdate()
+    await store.check()
+    expect(updater.checkCalls).toBe(1)
+    expect(store.status).toBe('available')
+    expect(store.errorMsg).toBeNull()
+  })
+
+  it('notice is dismissable and not busy; apply() stays a no-op', async () => {
+    updater.invokeImpl = () => Promise.resolve(noticeResult('1.0.5'))
+    await store.check()
+    expect(store.busy).toBe(false)
+    store.dismiss()
+    expect(store.visible).toBe(false)
+    await store.apply()
+    expect(store.status).toBe('notice') // nothing was downloaded or installed
+  })
+})
+
+describe('openDownloadPage (the notice button)', () => {
+  it('invokes open_release_page and stays silent on ok', async () => {
+    toaster.calls.length = 0
+    updater.invokeImpl = (cmd) => (cmd === 'open_release_page' ? Promise.resolve({ ok: true }) : Promise.resolve(null))
+    store.openDownloadPage()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(updater.invokeCalls).toContain('open_release_page')
+    expect(toaster.calls).toHaveLength(0)
+  })
+
+  it('toasts on an ok:false result', async () => {
+    toaster.calls.length = 0
+    updater.invokeImpl = (cmd) => (cmd === 'open_release_page' ? Promise.resolve({ ok: false }) : Promise.resolve(null))
+    store.openDownloadPage()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(toaster.calls).toHaveLength(1)
+  })
+
+  it('toasts on a rejection', async () => {
+    toaster.calls.length = 0
+    updater.invokeImpl = () => Promise.reject(new Error('no opener'))
+    store.openDownloadPage()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(toaster.calls).toHaveLength(1)
+  })
+
+  it('does nothing outside tauri', async () => {
+    toaster.calls.length = 0
+    updater.tauriEnabled = false
+    store.openDownloadPage()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(updater.invokeCalls).toHaveLength(0)
+    expect(toaster.calls).toHaveLength(0)
   })
 })

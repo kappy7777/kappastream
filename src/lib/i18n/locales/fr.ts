@@ -355,6 +355,7 @@ export const fr: Record<TKey, string> = {
   update_failed: 'La mise à jour vers v{version} a échoué',
   update_dismiss: 'Masquer l’avis de mise à jour',
   update_available: 'kappastream v{version} est disponible',
+  update_downloadPage: 'Page de téléchargement',
   update_youHave: ' (vous avez la v{version})',
   update_sigError: 'la signature de la mise à jour n’a pas pu être vérifiée',
   update_pkgDeps: 'une dépendance système a changé ; installez la mise à jour via votre gestionnaire de paquets',

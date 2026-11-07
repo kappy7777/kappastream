@@ -380,6 +380,7 @@ export const en = {
   update_failed: 'Update to v{version} failed',
   update_dismiss: 'Dismiss update notice',
   update_available: 'kappastream v{version} is available',
+  update_downloadPage: 'Download page',
   update_youHave: ' (you have v{version})',
   update_sigError: 'the update signature could not be verified',
   update_pkgDeps: 'a system dependency changed; install the update with your package manager',

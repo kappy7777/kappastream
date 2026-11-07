@@ -356,6 +356,7 @@ export const de: Record<TKey, string> = {
   update_failed: 'Update auf v{version} fehlgeschlagen',
   update_dismiss: 'Update-Hinweis ausblenden',
   update_available: 'kappastream v{version} ist verfügbar',
+  update_downloadPage: 'Download-Seite',
   update_youHave: ' (du hast v{version})',
   update_sigError: 'die Update-Signatur konnte nicht verifiziert werden',
   update_pkgDeps: 'eine Systemabhängigkeit hat sich geändert; installiere das Update über deine Paketverwaltung',

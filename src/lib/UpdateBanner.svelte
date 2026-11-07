@@ -88,6 +88,32 @@
           aria-label={t('update_dismiss')}>×</button
         >
       </div>
+    {:else if updateStore.status === 'notice'}
+      {@const notes = displayUpdateNotes(updateStore.notes, updateStore.version)}
+      <div class="update-banner__main">
+        <span class="update-banner__icon" aria-hidden="true">↑</span>
+        <span class="update-banner__text">
+          {t('update_available', { version: updateStore.version ?? '' })}
+          {#if updateStore.currentVersion}<span class="update-banner__reason"
+              >{t('update_youHave', { version: updateStore.currentVersion ?? '' })}</span
+            >{/if}
+          {#if fmtReleased(updateStore.pubDate)}<span class="update-banner__reason">
+              · {fmtReleased(updateStore.pubDate)}</span
+            >{/if}
+          {#if notes}<span class="update-banner__reason"> — {notes}</span>{/if}
+        </span>
+        <button
+          type="button"
+          class="update-banner__btn update-banner__btn--primary"
+          onclick={() => updateStore.openDownloadPage()}>{t('update_downloadPage')}</button
+        >
+        <button
+          type="button"
+          class="update-banner__btn update-banner__btn--ghost"
+          onclick={() => updateStore.dismiss()}
+          aria-label={t('update_dismiss')}>×</button
+        >
+      </div>
     {:else}
       {@const notes = displayUpdateNotes(updateStore.notes, updateStore.version)}
       <div class="update-banner__main">
