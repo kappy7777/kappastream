@@ -12,6 +12,15 @@ on:
   # Also callable from release.yml so a tagged release runs these exact
   # gates before building/publishing anything.
   workflow_call:
+    inputs:
+      # The flatpak offline-sources freshness check runs warning-only on
+      # push/PR (a dependabot lockfile PR is "stale" until its companion
+      # regeneration lands — that must not redden unrelated checks), but
+      # a release refuses to build on stale sources.
+      strict_flatpak_sources:
+        description: Fail the job when the flatpak offline sources are stale
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -96,6 +105,15 @@ jobs:
         # packaging README / PKGBUILD carries a stale hardcoded version. Runs
         # before the type-check so a half-bumped tree is caught immediately.
         run: sh scripts/check-versions.sh
+
+      - name: Flatpak offline sources freshness
+        # The committed packaging/flatpak/sources/*.json must match the
+        # lockfiles they were generated from (flatpak-builder builds with
+        # networking disabled). Warning-only on push/PR so dependabot
+        # lockfile PRs stay green; strict (continue-on-error off) when a
+        # release calls this workflow with strict_flatpak_sources: true.
+        run: node scripts/check-flatpak-sources.mjs
+        continue-on-error: ${{ !inputs.strict_flatpak_sources }}
 
       - name: Type-check (svelte-check + tsc)
         run: npm run check

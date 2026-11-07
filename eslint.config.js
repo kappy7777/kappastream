@@ -46,6 +46,7 @@ export default defineConfig([
             'svelte.config.js',
             'scripts/generate-badges.mjs',
             'scripts/npm-audit.mjs',
+            'scripts/check-flatpak-sources.mjs',
           ],
         },
         extraFileExtensions: ['.svelte'],

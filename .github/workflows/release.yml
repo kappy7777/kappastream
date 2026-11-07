@@ -78,10 +78,15 @@ concurrency:
 jobs:
   # Reuse the exact CI gates (npm run check + npm test + cargo fmt + clippy
   # -D warnings + cargo test + version-drift check) so a tagged commit can't
-  # ship unless it passes the same checks as main.
+  # ship unless it passes the same checks as main. The flatpak offline
+  # sources check runs STRICT here: the flatpak build consumes the
+  # committed sources with networking disabled, so a release must refuse
+  # to start on a stale set (instead of failing 30 min into the build).
   check:
     name: check
     uses: ./.github/workflows/ci.yml
+    with:
+      strict_flatpak_sources: true
 
   # A manual dispatch builds the commit it was dispatched from (github.sha)
   # while the release is published under the `tag` input — and the checkouts
