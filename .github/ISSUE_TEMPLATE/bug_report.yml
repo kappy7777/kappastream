@@ -53,7 +53,10 @@ body:
         - AppImage
         - .deb package
         - .rpm package
-        - Browser (npm run dev)
+        - Flatpak
+        - "AUR (kappastream-bin / kappastream-git)"
+        - Windows installer
+        - "macOS (.dmg)"
         - Other / not sure
     validations:
       required: true
@@ -63,7 +66,7 @@ body:
     attributes:
       label: App version
       description: The version shown in the About modal, or `git describe` / the release tag.
-      placeholder: "0.1.0"
+      placeholder: "1.x.y"
 
   - type: input
     id: os

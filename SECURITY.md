@@ -35,7 +35,12 @@ commands plus one custom URI scheme to its WebView. The complete surface
   streamlink as a direct argv element, never through a shell. Every URL
   streamlink returns is itself re-validated (https-only, no userinfo,
   default port, allowlisted Twitch media host families) before the
-  frontend ever sees it.
+  frontend ever sees it. The same validation gates the probe commands
+  `stream_qualities` / `vod_qualities` (streamlink `--json` quality
+  listings for an already-named channel or VOD) and `streamlink_status`
+  (a read-only binary-presence probe); `external_player_supported` is a
+  flatpak-sandbox check only, and the handoff itself (`launch_player`)
+  refuses to spawn until an `mpv` binary answers `--version`.
 - **Embedded mpv engine** (`mpv_*`, when the `mpv-embed` Cargo feature is
   compiled in — the default for LINUX release builds; Windows and macOS
   builds compile no mpv code at all) — libmpv renders video
@@ -52,7 +57,16 @@ commands plus one custom URI scheme to its WebView. The complete surface
   feature by scope decision (2026-09-18): everywhere else the
   `mpv_available` / `mpv_supported` probes resolve false with
   "not supported on this platform" and the remaining `mpv_*` commands
-  are not registered at all.
+  are not registered at all. `mpv_set_rect` only positions the native
+  surface inside the window (a rectangle, nothing else), and
+  `mpris_set_authority` only names which engine answers the MPRIS
+  service below.
+- **MPRIS D-Bus service** (Linux, native engine) — the
+  `org.mpris.MediaPlayer2.kappastream` name exposes Play, Pause and
+  Stop against the native engine, nothing more. Its cover art comes
+  from `mpris_set_art`, which downloads an https avatar from
+  `static-cdn.jtvnw.net` only, time- and size-bounded, into the app
+  cache.
 - **Twitch GQL proxy** (`gql_fetch`) — a POST proxy to `gql.twitch.tv`
   that bypasses browser CORS, with Twitch's public web Client-ID pinned
   in the native binary so the page cannot change or omit it.
@@ -61,18 +75,29 @@ commands plus one custom URI scheme to its WebView. The complete surface
   CORS headers, so the WebView's fetch is otherwise blocked) and returns
   it with `Access-Control-Allow-Origin: *`. Only allowlisted Twitch media
   hosts are fetched, redirects are disabled (so an allowlisted host can't
-  bounce a fetch elsewhere), and response sizes are capped.
+  bounce a fetch elsewhere), and response sizes are capped. Every
+  response is served as inert data: a sandbox CSP and `nosniff`, with
+  any content type that could name an active document neutralized.
 - **URL opening** (`open_url_robust`) — opens `twitch.tv` HTTPS URLs
   through the system browser/opener; URLs are validated before launch.
-- **Favorites export** (`save_favorites_export`) — a native save dialog
-  for backing up favorites to a JSON file the user chooses.
+  `open_release_page` opens one fixed GitHub releases URL through the
+  same validated spawn path.
+- **Release notice** (`release_notice`) — flatpak builds only: one GET
+  of the project's `latest.json` on GitHub (bounded in time, size and
+  redirect hops) to say "a newer release exists". Notify only — nothing
+  is ever downloaded or installed by it.
+- **Favorites export** (`save_favorites_export`, `save_theme_export`) —
+  a native save dialog for backing up favorites to a JSON file (or a
+  custom theme) the user chooses.
 - **Platform query** (`target_os`) — returns the compile-time target OS
   string (read-only, no side effects).
 - **Window / Picture-in-Picture controls and OS notifications** — core
-  window APIs (Picture-in-Picture is a second always-on-top webview) and
-  the notification plugin. The in-app updater (when the `updater` Cargo
-  feature is compiled in — it is not in the AUR builds) verifies a
-  minisign signature before installing anything.
+  window APIs (Picture-in-Picture is a second always-on-top webview,
+  running under its own reduced permission set: only the window and
+  event APIs its code calls) and the notification plugin. The in-app
+  updater (when the `updater` Cargo feature is compiled in — it is not
+  in the AUR or flatpak builds) verifies a minisign signature before
+  installing anything.
 
 No command accepts arbitrary URLs, hosts, file paths, or shell arguments
 from the page unvalidated.
