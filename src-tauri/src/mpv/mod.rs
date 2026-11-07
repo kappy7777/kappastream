@@ -840,19 +840,22 @@ pub async fn mpv_available(app: AppHandle) -> AvailabilityPayload {
 
 /// Normalize the persisted `settings.mpvHwdec` into the `hwdec` priority
 /// list handed to mpv. The stored value is a frontend dropdown id; mpv's
-/// `hwdec` is a comma-separated priority list, so `vaapi` becomes
-/// `vaapi,vaapi-copy`: zero-copy interop needs the native display handed
-/// into the render context AND an EGL context (see linux.rs — GTK3's X11
-/// GLArea is GLX, so there interop cannot engage), while vaapi-copy
-/// decodes into system memory with no interop at all and covers that
-/// case. An unknown value (a setting persisted on another platform, or a
-/// retired id) resolves to software decode rather than risking a broken
-/// playback startup — Settings resets its dropdown on the next open.
+/// `hwdec` is a comma-separated priority list, and both explicit hardware
+/// methods need one: a bare method id decodes in software the moment its
+/// zero-copy path cannot come up, while the copy variant next to it still
+/// hardware-decodes into system memory. The nvdec 0-copy path dies at
+/// CUDA device creation wherever its interop cannot engage (inside the
+/// flatpak sandbox, for one), and vaapi 0-copy needs the native display
+/// handed into the render context AND an EGL context (see linux.rs —
+/// GTK3's X11 GLArea is GLX, so there interop cannot engage). An unknown
+/// value (a setting persisted on another platform, or a retired id)
+/// resolves to software decode rather than risking a broken playback
+/// startup — Settings resets its dropdown on the next open.
 fn mpv_hwdec_value(setting: &str) -> &'static str {
     match setting {
         "no" => "no",
         "auto-safe" => "auto-safe",
-        "nvdec" => "nvdec",
+        "nvdec" => "nvdec,nvdec-copy",
         "vaapi" => "vaapi,vaapi-copy",
         other => {
             eprintln!("[mpv] unknown hwdec mode {other:?}, falling back to software decode");
@@ -1078,8 +1081,10 @@ mod tests {
     fn hwdec_values_map_to_the_mpv_priority_lists() {
         assert_eq!(mpv_hwdec_value("no"), "no");
         assert_eq!(mpv_hwdec_value("auto-safe"), "auto-safe");
-        // Verified on NVIDIA hardware; passed through untouched.
-        assert_eq!(mpv_hwdec_value("nvdec"), "nvdec");
+        // nvdec gains the copy fallback as the second choice: the 0-copy
+        // CUDA device fails to come up in some setups (the flatpak
+        // sandbox among them) where nvdec-copy still hardware-decodes.
+        assert_eq!(mpv_hwdec_value("nvdec"), "nvdec,nvdec-copy");
         // vaapi gains the interop-free copy fallback as the second choice.
         assert_eq!(mpv_hwdec_value("vaapi"), "vaapi,vaapi-copy");
         // Anything else — a value persisted on another platform (the
