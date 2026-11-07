@@ -36,6 +36,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use zbus::interface;
 use zbus::zvariant::{ObjectPath, OwnedValue, Value};
 
@@ -207,6 +208,9 @@ fn http() -> &'static reqwest::Client {
         reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .user_agent(crate::gql::USER_AGENT)
+            // An avatar fetch must never hang the art task indefinitely.
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(20))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new())
     })
@@ -267,9 +271,22 @@ async fn fetch_art(app: &tauri::AppHandle, id: u32, url: &url::Url) -> Result<()
     if !resp.status().is_success() {
         return Err(format!("fetch: status {}", resp.status()));
     }
-    let bytes = resp.bytes().await.map_err(|e| format!("fetch: {e}"))?;
-    if bytes.len() > MAX_ART_BYTES {
-        return Err(format!("fetch: {} bytes exceeds the cap", bytes.len()));
+    if resp
+        .content_length()
+        .is_some_and(|len| len > MAX_ART_BYTES as u64)
+    {
+        return Err("fetch: response exceeds the cap".to_string());
+    }
+    // Streamed cap (the gql_fetch pattern): neither a lying
+    // Content-Length nor a chunked body can grow memory past the cap.
+    let mut bytes = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("fetch: {e}"))?;
+        if bytes.len().saturating_add(chunk.len()) > MAX_ART_BYTES {
+            return Err("fetch: response exceeds the cap".to_string());
+        }
+        bytes.extend_from_slice(&chunk);
     }
     let ext = match url.path().rsplit('.').next() {
         Some("png") => "png",
