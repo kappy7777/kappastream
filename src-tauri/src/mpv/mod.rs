@@ -383,7 +383,7 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
             init.set_property("keep-open", "no")?;
             init.set_property("audio-client-name", "kappastream")?;
             init.set_property("user-agent", MPV_USER_AGENT)?;
-            // Both pulse pacing options below apply only under flatpak,
+            // The pulse pacing option below applies only under flatpak,
             // the one build where playback always lands on ao=pulse: the
             // sandbox exposes audio only through the pulse socket, and the
             // bundled libmpv is built WITHOUT the pipewire and jack outputs
@@ -403,15 +403,14 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
                 // them off. Tolerant like the scripting options: the
                 // option only exists when the pulse output does.
                 let _ = init.set_property("pulse-latency-hacks", false);
-                // With the hacks off the reported latency is honest but
-                // coarse: pipewire-pulse serves the default pulse buffer
-                // in ~60 ms quanta, and that granularity leaves a slow
-                // clock drift that audio-slaved pacing corrects with a
-                // 2-frame drop every ~9 s. A 50 ms pulse buffer refines
-                // the granularity until the drift disappears; the only
-                // residual is a single drop at startup, matching the
-                // ao=pipewire baseline.
-                let _ = init.set_property("pulse-buffer", 50i64);
+                // No explicit buffer size is requested: compat.rs exports
+                // PULSE_LATENCY_MSEC=20 for the whole sandbox process
+                // unless the user set the variable (the webview's audio
+                // path needs it), and libpulse derives every stream's
+                // tlength from that variable whenever it names a usable
+                // target — a pulse-buffer set here is rewritten by it.
+                // The process-wide target is the one real knob, and
+                // pacing under it sits at the ao=pipewire baseline.
             }
             // No scripts of any kind: the in-video controls are the page's
             // HTML overlay, so every mpv scripting/autoplay option is off —
