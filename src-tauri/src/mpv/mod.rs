@@ -317,6 +317,10 @@ fn maybe_start_diag_task() {
 async fn diag_task() {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(10));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // tokio intervals fire their FIRST tick immediately; burn it so the
+    // first line lands 10 s in (an engine created this instant has no
+    // measurements worth reading yet anyway).
+    tick.tick().await;
     loop {
         tick.tick().await;
         let ids: Vec<u32> = lock_or_recover(engines()).keys().copied().collect();

@@ -110,7 +110,7 @@ describe('external-player button gate', () => {
     expect(mpvButton()).toBeNull()
   })
 
-  it('forwards clicks to the passed handler only', async () => {
+  it('forwards clicks to the passed handler', async () => {
     const onmpv = vi.fn()
     view = mount(PlayerControls, {
       target: player!,
