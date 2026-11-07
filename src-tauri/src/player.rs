@@ -91,6 +91,26 @@ fn external_player_missing_message() -> String {
     }
 }
 
+/// Whether the external-player handoff exists on this build at all. The
+/// flatpak sandbox cannot start programs on the host (the bundled mpv is
+/// a library, `-Dcplayer=false`, and host binaries are unreachable), so
+/// the frontend hides the button; a `true` here is the every-other-build
+/// answer.
+#[tauri::command]
+pub fn external_player_supported() -> bool {
+    !crate::env_spawn::in_flatpak()
+}
+
+/// Pure core of the flatpak denial: `Some(message)` when the handoff must
+/// refuse to run (defense in depth behind `external_player_supported` —
+/// a stale frontend or a direct invoke must not reach the spawn).
+fn player_handoff_error(in_flatpak: bool) -> Option<String> {
+    in_flatpak.then(|| {
+        "The external player handoff is not available inside the Flatpak sandbox: it cannot start programs on the host."
+            .to_string()
+    })
+}
+
 /// Hand the stream off to an external player (mpv) by letting streamlink
 /// own the lifecycle. For live channels:
 ///   `streamlink --player=mpv twitch.tv/<channel> <quality>`
@@ -110,6 +130,12 @@ pub async fn launch_player(
     vod_id: Option<String>,
     clip_slug: Option<String>,
 ) -> Result<LaunchPlayerResponse, String> {
+    if let Some(message) = player_handoff_error(crate::env_spawn::in_flatpak()) {
+        return Ok(LaunchPlayerResponse {
+            ok: false,
+            error: Some(message),
+        });
+    }
     let q_raw = quality.unwrap_or_else(|| "best".to_string());
     let q = q_raw.trim().to_lowercase();
     if !is_quality_valid(&q) {
@@ -244,5 +270,16 @@ mod tests {
     #[test]
     fn mpv_bin_falls_back_to_bare_on_non_macos_host() {
         assert_eq!(mpv_bin(), PathBuf::from("mpv"));
+    }
+
+    #[test]
+    fn the_handoff_is_denied_only_inside_the_flatpak() {
+        assert!(player_handoff_error(true).is_some());
+        let message = player_handoff_error(true).unwrap();
+        assert!(
+            message.to_lowercase().contains("flatpak"),
+            "the denial must name the sandbox: {message}"
+        );
+        assert!(player_handoff_error(false).is_none());
     }
 }

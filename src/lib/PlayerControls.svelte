@@ -25,7 +25,10 @@
     visible: boolean
     quality: string
     onqualitychange: (q: string) => void
-    onmpv: () => void
+    // Optional: absent where the handoff cannot work (the Flatpak build —
+    // the sandbox cannot start programs on the host), which hides the
+    // button entirely.
+    onmpv?: () => void
     onstop: () => void
     onplayintent: (playing: boolean) => void
     activeStatus: LiveStatus
@@ -787,11 +790,13 @@
         </button>
       {/if}
 
-      <!-- External-player handoff is live-only: the mpv button hides during
-           VOD/clip playback (the launch_player path covers live streams;
-           floating-window playback of VODs/clips is PiP's job, position
-           handoff included). -->
-      {#if live}
+      <!-- External-player handoff is live-only AND build-gated: the mpv
+           button hides during VOD/clip playback (the launch_player path
+           covers live streams; floating-window playback of VODs/clips is
+           PiP's job, position handoff included) and wherever no handler
+           was passed (the Flatpak sandbox cannot start programs on the
+           host). -->
+      {#if live && onmpv}
         <button type="button" class="ctrl-btn" onclick={onmpv} aria-label={t('pc_mpv')} use:tooltip={t('pc_mpv')}>
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
             <path

@@ -112,6 +112,12 @@
   // toKsvodProxyUrl) is user-triggered and runs after that resolves.
   let isWindows = $state(false)
 
+  // Whether the external-player handoff exists on this build: false inside
+  // the Flatpak (the sandbox cannot start programs on the host), which
+  // removes the PlayerControls mpv button. Default true; a failed probe
+  // keeps the button (the Rust side denies the handoff anyway).
+  let externalPlayerSupported = $state(true)
+
   onMount(() => {
     if (!isTauri()) return
     void invoke<string>('target_os')
@@ -123,6 +129,13 @@
       })
       .catch((e) => {
         console.error('[platform] target_os failed; assuming non-Windows (live playback may regress on Windows)', e)
+      })
+    void invoke<boolean>('external_player_supported')
+      .then((supported) => {
+        externalPlayerSupported = supported
+      })
+      .catch((e) => {
+        console.error('[platform] external_player_supported failed; keeping the handoff button', e)
       })
   })
 
@@ -3376,7 +3389,7 @@
                   showEngineBadge={nativeVideoActive}
                   aspect={videoAspect}
                   onqualitychange={(q) => void changeQuality(q)}
-                  onmpv={onMpvClick}
+                  onmpv={externalPlayerSupported ? onMpvClick : undefined}
                   onstop={onStopClick}
                   onplayintent={(p) => {
                     playbackSession.userPaused = !p

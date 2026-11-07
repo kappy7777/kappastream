@@ -171,6 +171,7 @@ pub fn run() {
             resolve::vod_qualities,
             resolve::streamlink_status,
             player::launch_player,
+            player::external_player_supported,
             platform::target_os,
             opener::open_url_robust,
             gql::gql_fetch,
