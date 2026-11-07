@@ -383,7 +383,7 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
             init.set_property("keep-open", "no")?;
             init.set_property("audio-client-name", "kappastream")?;
             init.set_property("user-agent", MPV_USER_AGENT)?;
-            // The pulse pacing option below applies only under flatpak,
+            // Both pulse pacing options below apply only under flatpak,
             // the one build where playback always lands on ao=pulse: the
             // sandbox exposes audio only through the pulse socket, and the
             // bundled libmpv is built WITHOUT the pipewire and jack outputs
@@ -403,14 +403,21 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
                 // them off. Tolerant like the scripting options: the
                 // option only exists when the pulse output does.
                 let _ = init.set_property("pulse-latency-hacks", false);
-                // No explicit buffer size is requested: compat.rs exports
-                // PULSE_LATENCY_MSEC=20 for the whole sandbox process
-                // unless the user set the variable (the webview's audio
-                // path needs it), and libpulse derives every stream's
-                // tlength from that variable whenever it names a usable
-                // target — a pulse-buffer set here is rewritten by it.
-                // The process-wide target is the one real knob, and
-                // pacing under it sits at the ao=pipewire baseline.
+                // The requested tlength is load-bearing with the hacks
+                // off: mpv's clock then follows libpulse's interpolated
+                // latency, which is built from pipewire-pulse timing
+                // replies that are stale by up to one graph quantum, and
+                // pipewire-pulse sizes that quantum from this stream's
+                // buffer (node latency = tlength - 2 * minreq). The 100 ms
+                // default lands on a 2048-frame cycle whose periodic clock
+                // corrections exceed one frame interval, so a displayed
+                // frame is dropped roughly every 10 s; 50 ms lands on 1024
+                // frames and the corrections stay below the threshold.
+                // PULSE_LATENCY_MSEC cannot stand in for this: libpulse
+                // applies it only to streams created with a fixed sample
+                // spec, and ao_pulse creates its stream before the format
+                // is negotiated.
+                let _ = init.set_property("pulse-buffer", 50i64);
             }
             // No scripts of any kind: the in-video controls are the page's
             // HTML overlay, so every mpv scripting/autoplay option is off —
