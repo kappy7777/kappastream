@@ -68,6 +68,45 @@ describe('parseStoryboard', () => {
     expect(parseStoryboard([{}, LOW], BASE)!.width).toBe(160)
   })
 
+  it('drops file names that are not plain tokens (they end up in an inline CSS url)', () => {
+    const hostile = {
+      ...HIGH,
+      images: [
+        "evil'-quote.jpg",
+        'x)-paren.jpg',
+        'a/b.jpg',
+        '../0.jpg',
+        '..',
+        'a b.jpg',
+        '.hidden.jpg',
+        // The two real shapes stay valid alongside the junk.
+        '5000000001-high-0.jpg',
+        's-0.jpg',
+        // A 128-char plain name fits; 129 does not.
+        `${'a'.repeat(122)}-0.jpg`,
+        `${'a'.repeat(123)}-0.jpg`,
+      ],
+    }
+    const sb = parseStoryboard([hostile], BASE)
+    expect(sb!.imageUrls).toEqual([
+      'https://d2vi6trrdongqn.cloudfront.net/abc/vod/storyboards/5000000001-high-0.jpg',
+      'https://d2vi6trrdongqn.cloudfront.net/abc/vod/storyboards/s-0.jpg',
+      `https://d2vi6trrdongqn.cloudfront.net/abc/vod/storyboards/${'a'.repeat(122)}-0.jpg`,
+    ])
+  })
+
+  it('rejects a base URL that is not a clean https URL', () => {
+    expect(parseStoryboard([HIGH], 'http://d2vi6trrdongqn.cloudfront.net/abc/info.json')).toBeNull()
+    expect(parseStoryboard([HIGH], "https://evil.example/a'b/info.json")).toBeNull()
+    expect(parseStoryboard([HIGH], 'https://evil.example/a(b)/info.json')).toBeNull()
+    expect(parseStoryboard([HIGH], 'https://evil.example/a\\b/info.json')).toBeNull()
+    expect(parseStoryboard([HIGH], 'https://evil.example/a%20b/info.json?x=1 2')).toBeNull()
+    expect(parseStoryboard([HIGH], 'not a url')).toBeNull()
+    // Percent-encoding is inert inside a CSS string and real CDN URLs
+    // carry signed query params, so an encoded quote stays allowed.
+    expect(parseStoryboard([HIGH], 'https://evil.example/a%27b/info.json')).not.toBeNull()
+  })
+
   it('floors fractional grid values and keeps one valid variant among duplicates', () => {
     const sb = parseStoryboard([{ ...LOW, width: 160.7, height: 90.2, rows: 40.9 }], BASE)
     expect(sb!.width).toBe(160)

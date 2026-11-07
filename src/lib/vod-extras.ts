@@ -64,12 +64,32 @@ function positiveNumber(v: unknown): number | null {
 }
 
 /**
+ * A storyboard image URL ends up interpolated into an inline CSS
+ * `url('…')` (the hover-preview background image), so both halves must be
+ * plain: the base URL must parse as a clean https URL with no quotes,
+ * parentheses, backslashes or whitespace, and a file name must be a plain
+ * alphanumeric token (no leading dot, no path separators — which also
+ * keeps any traversal form out).
+ */
+const PLAIN_FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+
+function plainStoryboardBase(baseUrl: string): boolean {
+  if (/['"()\\\s]/.test(baseUrl)) return false
+  try {
+    return new URL(baseUrl).protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/**
  * Parse the storyboard JSON into the widest usable variant (crisper hover
  * previews; the low variant is the fallback). Returns null for any malformed
  * shape — the caller treats seek previews as strictly optional.
  */
 export function parseStoryboard(raw: unknown, baseUrl: string): Storyboard | null {
   if (!Array.isArray(raw) || raw.length === 0) return null
+  if (!plainStoryboardBase(baseUrl)) return null
   // Filenames resolve against the storyboard URL's directory
   // (.../storyboards/<vod>-info.json -> .../storyboards/<vod>-high-0.jpg).
   const slash = baseUrl.lastIndexOf('/')
@@ -86,7 +106,7 @@ export function parseStoryboard(raw: unknown, baseUrl: string): Storyboard | nul
     const intervalSec = positiveNumber(v.interval)
     if (!width || !height || !cols || !rows || !count || !intervalSec) continue
     const files = Array.isArray(v.images)
-      ? v.images.filter((f): f is string => typeof f === 'string' && f.length > 0)
+      ? v.images.filter((f): f is string => typeof f === 'string' && PLAIN_FILE_NAME.test(f))
       : []
     if (files.length === 0) continue
     const sb: Storyboard = {
