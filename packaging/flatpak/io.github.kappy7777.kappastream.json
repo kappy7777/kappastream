@@ -101,6 +101,18 @@
       ]
     },
     {
+      "name": "libdisplay-info",
+      "buildsystem": "meson",
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://gitlab.freedesktop.org/-/project/14497/uploads/289d58230e2981b51f23d31faf25bef9/libdisplay-info-0.4.0.tar.xz",
+          "sha256": "43b180baa143e2035654759d84e2b2f5ee77d5fe817c423838c7fe59c0d68459"
+        }
+      ],
+      "cleanup": ["/bin"]
+    },
+    {
       "name": "mpv",
       "buildsystem": "meson",
       "config-opts": [
@@ -128,6 +140,8 @@
         "-Djack=disabled",
         "-Dvulkan=disabled",
         "-Dshaderc=disabled",
+        "-Ddrm=enabled",
+        "-Dvaapi-drm=enabled",
         "-Dmanpage-build=disabled"
       ],
       "sources": [

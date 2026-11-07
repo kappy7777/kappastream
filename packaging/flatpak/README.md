@@ -81,12 +81,27 @@ artifacts; everything below is the local equivalent.
   drops libva or the ffnvcodec headers stop resolving, configure fails
   the build instead of silently shipping a software-only stack — the
   app's hwdec dropdown offers `vaapi` and `nvdec`, and every other Linux
-  artifact's ffmpeg carries both. Audio outputs are pulse-only: pipewire
+  artifact's ffmpeg carries both. How `hwdec=vaapi` engages at runtime:
+  zero-copy interop needs the native display handed into the mpv render
+  context by the app (`native_display_param` in src/mpv/linux.rs) AND an
+  EGL context — GTK3's X11 GLArea is GLX, so on X11 the interop can never
+  engage and mpv falls through to `vaapi-copy`, which needs no interop at
+  all but stands up its VA display through mpv's DRM path (hence
+  libdisplay-info below). Audio outputs are pulse-only: pipewire
   and jack are compiled OUT (the sandbox exposes audio solely through the
   pulse socket, so ao=pipewire could never connect and mpv would fall
   back anyway — compiling it out just makes the selection deterministic);
   alsa stays because the runtime routes it to pulse and it sorts after
   pulse in mpv's output list.
+- **libdisplay-info**: required by mpv's `-Ddrm=enabled` (the DRM output
+  path). The SDK ships libdrm and gbm but NOT libdisplay-info, so it is
+  built in-manifest; its hwdata dependency resolves through the
+  hardcoded `/usr/share/hwdata/pnp.ids` fallback (the SDK has no
+  hwdata.pc). The `-Ddrm=enabled` / `-Dvaapi-drm=enabled` pair are
+  configure tripwires in the same spirit as ffmpeg's protocol options:
+  `vaapi-copy` (the `hwdec=vaapi` fallback mode) stands up its own VA
+  display through mpv's DRM path, so if the SDK ever drops something the
+  build fails instead of silently shipping without hardware decode.
 - **streamlink**: pip-installed into `/app` (the runtime's python3). The
   app resolves streamlink through `PATH` (or `STREAMLINK_BIN`), and
   `/app/bin` is on `PATH` inside the sandbox — no code changes needed.
