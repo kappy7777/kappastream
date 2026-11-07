@@ -127,6 +127,43 @@ fn proxy_client() -> &'static reqwest::Client {
     })
 }
 
+/// The headers EVERY proxy reply carries: the CORS header hls.js needs,
+/// plus the two that make the relayed bytes inert as a document. The
+/// proxy hands third-party CDN bodies to the webview — served with a
+/// sandbox CSP and `nosniff`, those bytes can only ever be read as data
+/// (which is all hls.js and the storyboard `fetch()` ever do), never
+/// executed or navigated to as an active page.
+fn hardened(builder: tauri::http::response::Builder) -> tauri::http::response::Builder {
+    builder
+        .header("access-control-allow-origin", "*")
+        .header("content-security-policy", "sandbox; default-src 'none'")
+        .header("x-content-type-options", "nosniff")
+}
+
+/// Media types the proxy never passes through: anything that could be
+/// rendered as an active document (HTML, XML, SVG — including the
+/// `*+xml` family) is served as `application/octet-stream` instead.
+/// Everything else — HLS playlists, media segments, JSON — keeps its
+/// real content type, parameters included.
+fn safe_content_type(upstream: &str) -> String {
+    let base = upstream
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let active = matches!(
+        base.as_str(),
+        "text/html" | "application/xhtml+xml" | "image/svg+xml" | "text/xml" | "application/xml"
+    ) || base.ends_with("+xml")
+        || base.contains("html");
+    if active {
+        "application/octet-stream".to_string()
+    } else {
+        upstream.to_string()
+    }
+}
+
 /// Parse the custom-scheme URI and reconstruct the original HTTPS URL
 /// (`https://host/path?q=1`). Returns `None` unless the reconstructed
 /// target passes the ONE shared media-URL validator
@@ -173,9 +210,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
             Some(t) => t,
             None => {
                 responder.respond(
-                    tauri::http::Response::builder()
-                        .status(403u16)
-                        .header("access-control-allow-origin", "*")
+                    hardened(tauri::http::Response::builder().status(403u16))
                         .body(Cow::from(b"host not allowed".to_vec()))
                         .unwrap(),
                 );
@@ -213,12 +248,12 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
             match result {
                 Ok(resp) => {
                     let status = resp.status();
-                    let content_type = resp
-                        .headers()
-                        .get("content-type")
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("application/octet-stream")
-                        .to_string();
+                    let content_type = safe_content_type(
+                        resp.headers()
+                            .get("content-type")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("application/octet-stream"),
+                    );
                     // Forward the ranged-response headers so hls.js sees the
                     // slice bounds (206 + content-range) and knows the resource
                     // is rangeable (accept-ranges).
@@ -238,9 +273,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
                         .is_some_and(|len| len > MAX_RESPONSE_BYTES as u64)
                     {
                         responder.respond(
-                            tauri::http::Response::builder()
-                                .status(413u16)
-                                .header("access-control-allow-origin", "*")
+                            hardened(tauri::http::Response::builder().status(413u16))
                                 .body(Cow::from(b"response too large".to_vec()))
                                 .unwrap(),
                         );
@@ -262,9 +295,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
                                 // a 200 with an empty body (which hls.js would
                                 // read as a truncated-but-valid segment).
                                 responder.respond(
-                                    tauri::http::Response::builder()
-                                        .status(502u16)
-                                        .header("access-control-allow-origin", "*")
+                                    hardened(tauri::http::Response::builder().status(502u16))
                                         .body(Cow::from(b"proxy read failed".to_vec()))
                                         .unwrap(),
                                 );
@@ -279,19 +310,16 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
                     }
                     if oversize {
                         responder.respond(
-                            tauri::http::Response::builder()
-                                .status(413u16)
-                                .header("access-control-allow-origin", "*")
+                            hardened(tauri::http::Response::builder().status(413u16))
                                 .body(Cow::from(b"response too large".to_vec()))
                                 .unwrap(),
                         );
                         return;
                     }
 
-                    let mut builder = tauri::http::Response::builder()
-                        .status(status.as_u16())
-                        .header("content-type", content_type)
-                        .header("access-control-allow-origin", "*");
+                    let mut builder =
+                        hardened(tauri::http::Response::builder().status(status.as_u16()))
+                            .header("content-type", content_type);
                     if let Some(cr) = content_range {
                         builder = builder.header("content-range", cr);
                     }
@@ -302,9 +330,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
                 }
                 Err(_) => {
                     responder.respond(
-                        tauri::http::Response::builder()
-                            .status(502u16)
-                            .header("access-control-allow-origin", "*")
+                        hardened(tauri::http::Response::builder().status(502u16))
                             .body(Cow::from(b"proxy fetch failed".to_vec()))
                             .unwrap(),
                     );
@@ -318,6 +344,69 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn safe_content_type_passthrough_and_neutralization() {
+        // Media and data types pass through verbatim, parameters included.
+        for keep in [
+            "application/vnd.apple.mpegurl",
+            "video/mp2t",
+            "video/mp4",
+            "application/json",
+            "binary/octet-stream",
+            "text/plain; charset=utf-8",
+            "APPLICATION/JSON; charset=utf-8",
+        ] {
+            assert_eq!(safe_content_type(keep), keep, "rewrote {keep}");
+        }
+        // Anything that could render as an active document is neutralized.
+        for neutralize in [
+            "text/html",
+            "text/html; charset=utf-8",
+            "Text/HTML",
+            "application/xhtml+xml",
+            "image/svg+xml",
+            "text/xml",
+            "application/xml; charset=utf-8",
+            "application/atom+xml",
+            "text/x-html-thing",
+        ] {
+            assert_eq!(
+                safe_content_type(neutralize),
+                "application/octet-stream",
+                "passed through {neutralize}"
+            );
+        }
+        // An empty type passes through untouched — the octet-stream
+        // default for a missing header is the capture site's job.
+        assert_eq!(safe_content_type(""), "");
+    }
+
+    #[test]
+    fn every_response_kind_carries_the_hardening_headers() {
+        for status in [200u16, 403, 413, 502] {
+            let resp = hardened(tauri::http::Response::builder().status(status))
+                .body(Cow::<'static, [u8]>::from(Vec::new()))
+                .unwrap();
+            assert_eq!(
+                resp.headers().get("access-control-allow-origin"),
+                Some(&tauri::http::HeaderValue::from_static("*")),
+                "status {status}"
+            );
+            assert_eq!(
+                resp.headers().get("content-security-policy"),
+                Some(&tauri::http::HeaderValue::from_static(
+                    "sandbox; default-src 'none'"
+                )),
+                "status {status}"
+            );
+            assert_eq!(
+                resp.headers().get("x-content-type-options"),
+                Some(&tauri::http::HeaderValue::from_static("nosniff")),
+                "status {status}"
+            );
+        }
+    }
 
     #[test]
     fn reconstruct_cloudfront_manifest() {
