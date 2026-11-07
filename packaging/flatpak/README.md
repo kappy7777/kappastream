@@ -89,16 +89,20 @@ artifacts; everything below is the local equivalent.
   all but stands up its VA display through mpv's DRM path (hence
   libdisplay-info below). Audio: the pipewire output is compiled in as a
   configure tripwire (`-Dpipewire=enabled`, mirroring the ffmpeg options
-  above; the SDK ships libpipewire) and the finish-args expose the
-  pipewire socket, so the engine pins `ao=pipewire,pulse`: pipewire talks
-  to the server natively and recomputes its timing against each cycle's
-  own timestamp, and pulse stays the fallback for hosts or permission
-  setups without the socket, with its pacing options living in the
-  engine's flatpak block. The socket grant is graph-visible (a client
-  can enumerate the whole pipewire graph; there is no narrower
-  audio-only grant, the standard shape for apps that talk to pipewire
-  directly). Jack stays compiled OUT; alsa stays compiled in, and the
-  engine's pin never selects it.
+  above; the SDK ships libpipewire), and the engine pins
+  `ao=pipewire,pulse`. The pipewire socket is NOT granted by default:
+  a `--filesystem=xdg-run/pipewire-0` grant exposes the whole pipewire
+  graph to the sandbox — every node, including video nodes such as
+  cameras and screen-share streams — while the pulse protocol the
+  `--socket=pulseaudio` grant carries is audio-only. The default
+  install therefore plays through pulse (pipewire-pulse on every
+  modern host), with its pacing options living in the engine's flatpak
+  block. Opt in to the native pipewire path with:
+  `flatpak override --user --filesystem=xdg-run/pipewire-0 io.github.kappy7777.kappastream`
+  (undo with `flatpak override --user --nofilesystem=xdg-run/pipewire-0
+  io.github.kappy7777.kappastream`).
+  Jack stays compiled OUT; alsa stays compiled in, and the engine's pin
+  never selects it.
 - **libdisplay-info**: required by mpv's `-Ddrm=enabled` (the DRM output
   path). The SDK ships libdrm and gbm but NOT libdisplay-info, so it is
   built in-manifest; its hwdata dependency resolves through the

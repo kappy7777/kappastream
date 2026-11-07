@@ -384,17 +384,19 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
             init.set_property("audio-client-name", "kappastream")?;
             init.set_property("user-agent", MPV_USER_AGENT)?;
             // Under flatpak the audio output is pinned: pipewire whenever
-            // the sandbox exposes its socket (the flatpak manifest's
-            // finish-args request it), pulse as the fallback for hosts
-            // and permission setups without it. The two pulse pacing
-            // options below guard that fallback and are tuned against
-            // pipewire-pulse, the server a pulse fallback realistically
-            // meets; a real PulseAudio host inherits them too, an
-            // accepted trade-off over a second tuning. Native builds
-            // keep mpv's defaults: they pick ao=pipewire wherever a
-            // pipewire server runs, and on a real PulseAudio server the
-            // latency hacks are mpv's documented workaround, so they
-            // stay untouched there.
+            // the sandbox exposes its socket, pulse otherwise — and the
+            // socket is OPT-IN (a `flatpak override --filesystem=xdg-run/
+            // pipewire-0`): granting it exposes the whole pipewire graph
+            // to the sandbox, video nodes such as cameras included, so
+            // the default install ships without it and pulse is the path
+            // every stock install takes. The two pulse pacing options
+            // below are tuned against pipewire-pulse, the server a pulse
+            // fallback realistically meets; a real PulseAudio host
+            // inherits them too, an accepted trade-off over a second
+            // tuning. Native builds keep mpv's defaults: they pick
+            // ao=pipewire wherever a pipewire server runs, and on a real
+            // PulseAudio server the latency hacks are mpv's documented
+            // workaround, so they stay untouched there.
             if crate::env_spawn::in_flatpak() {
                 // Pipewire talks to the server natively and recomputes
                 // its timing against each cycle's own timestamp; the
