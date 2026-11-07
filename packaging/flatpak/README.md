@@ -91,8 +91,13 @@ artifacts; everything below is the local equivalent.
   playback would be black video without help. `gst-libav` is built
   in-manifest against the same in-manifest ffmpeg and installs its plugin
   into `/app/lib/gstreamer-1.0`, which the runtime's
-  `GST_PLUGIN_SYSTEM_PATH` lists FIRST — no codec extension download, no
-  runtime-version coupling. Verify with
+  `GST_PLUGIN_SYSTEM_PATH` lists FIRST — no codec extension download. The
+  VERSION must track the runtime's GStreamer minor series (a plugin
+  refuses to load into a different minor), so whenever
+  `runtime-version` changes, bump the tarball to the runtime's
+  `libgstreamer-1.0.so.0.*` version — check with:
+  `flatpak run --command=sh org.gnome.Sdk//<ver> -c 'ls /usr/lib/x86_64-linux-gnu/libgstreamer-1.0.so.0.*'`.
+  Verify the shipped plugin with
   `flatpak run --command=gst-inspect-1.0 io.github.kappy7777.kappastream avdec_h264`.
 
 The app itself builds exactly like the AUR packages

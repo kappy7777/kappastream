@@ -144,8 +144,8 @@
       "sources": [
         {
           "type": "archive",
-          "url": "https://gstreamer.freedesktop.org/src/gst-libav/gst-libav-1.26.11.tar.xz",
-          "sha256": "9bb3d2681ef0de92d1b1a9d955186236ee22e64f372db9bfc0d22e2d0df19865"
+          "url": "https://gstreamer.freedesktop.org/src/gst-libav/gst-libav-1.28.6.tar.xz",
+          "sha256": "71e6eafb4fff2a66d1bb0ba8d078224dfe7e3397307d8c0bba3dc23606e08f51"
         }
       ]
     },
