@@ -49,6 +49,7 @@
     </p>
   </description>
 
+  <replaces><id>dev.kappy.kappastream</id></replaces>
   <launchable type="desktop-id">kappastream.desktop</launchable>
 
   <screenshots>
