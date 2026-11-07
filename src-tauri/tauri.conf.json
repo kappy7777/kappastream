@@ -85,6 +85,7 @@
       "icons/icon.icns"
     ],
     "category": "Video",
+    "publisher": "kappy",
     "licenseFile": "../LICENSE",
     "windows": {
       "minimumWebview2Version": "110.0.1531.0",
