@@ -11,12 +11,12 @@
 # loudly (npm ENOTCACHED, cargo vendor-vs-lockfile mismatch, pip
 # resolution error).
 #
-# Needs: python3 (>=3.11), network, node on PATH. The single-file
-# generators are fetched at the pinned commit below
-# (flatpak/flatpak-builder-tools); flatpak-node-generator is a python
-# package and is pip-installed if missing. On PEP 668 systems (stock
-# Fedora, Debian 12+) those pip3 --user bootstraps need
-# --break-system-packages appended.
+# Needs: python3 (>=3.11, with venv/ensurepip), network, node on PATH.
+# The single-file generators are fetched at the pinned commit below
+# (flatpak/flatpak-builder-tools) and verified against a sha256; the pip
+# packages run from a throwaway venv at pinned versions — the versions
+# that produced the committed sources — so regeneration never depends on
+# whatever happens to be installed on the host.
 set -eu
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,6 +24,10 @@ cd "$repo"
 
 FBT_COMMIT=9d86d336a39b9af38b86f114b6ce5820fe260f91
 FBT_BASE="https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/${FBT_COMMIT}"
+# sha256 of the two generator scripts at that commit; the fetch below
+# fails the run when the pinned commit serves different bytes.
+CARGO_GEN_SHA256=0a2db6be87d75910facef28ab46d4d6460802e8419ab850d0caa6a364d26b380
+PIP_GEN_SHA256=b69db8f3b506ec471274a75aaf3f40989afd8670df132467b1d44d38700dd62f
 OUT="$repo/packaging/flatpak/sources"
 MANIFEST="$repo/packaging/flatpak/io.github.kappy7777.kappastream.json"
 # The pip wheels must resolve against the runtime the manifest pins (they
@@ -42,16 +46,20 @@ trap 'rm -rf "$work"' EXIT
 
 curl -fsSL "${FBT_BASE}/cargo/flatpak-cargo-generator.py" -o "$work/cargo.py"
 curl -fsSL "${FBT_BASE}/pip/flatpak-pip-generator.py" -o "$work/pip.py"
+printf '%s  %s\n' "$CARGO_GEN_SHA256" "$work/cargo.py" >"$work/generators.sha256"
+printf '%s  %s\n' "$PIP_GEN_SHA256" "$work/pip.py" >>"$work/generators.sha256"
+sha256sum -c "$work/generators.sha256"
 
-# tomlkit is the cargo generator's one dependency; requirements-parser the
-# pip generator's (plus whatever flatpak-node-generator installs).
-python3 -c 'import tomlkit' 2>/dev/null || pip3 install --user tomlkit
-python3 -c 'import requirements_parser' 2>/dev/null || pip3 install --user requirements-parser
-command -v flatpak-node-generator >/dev/null || pip3 install --user flatpak-node-generator
+# tomlkit is the cargo generator's one dependency; requirements-parser
+# the pip generator's. Pinned to the versions that produced the committed
+# sources, in a throwaway venv (also sidesteps PEP 668 --user installs).
+venv="$work/venv"
+python3 -m venv "$venv"
+"$venv/bin/pip" install --quiet tomlkit==0.15.2 requirements-parser==0.13.1 flatpak-node-generator==0.1.1
 
 # --runtime resolves wheels against the SDK's python (the wheels must match
 # the runtime, not the generator host's interpreter).
-python3 "$work/cargo.py" src-tauri/Cargo.lock -o "$OUT/cargo-sources.json"
+"$venv/bin/python" "$work/cargo.py" src-tauri/Cargo.lock -o "$OUT/cargo-sources.json"
 
 # The node generator MUST run where no node_modules/ exists: it treats any
 # lockfile package that is physically present next to the lockfile as a
@@ -61,8 +69,8 @@ python3 "$work/cargo.py" src-tauri/Cargo.lock -o "$OUT/cargo-sources.json"
 nodegen_dir="$work/nodegen"
 mkdir -p "$nodegen_dir"
 cp package.json package-lock.json "$nodegen_dir/"
-(cd "$nodegen_dir" && flatpak-node-generator npm package-lock.json -o "$OUT/node-sources.json")
-python3 "$work/pip.py" --runtime "$RUNTIME" "streamlink==${STREAMLINK_VERSION}" -o "$OUT/streamlink-sources.json"
+(cd "$nodegen_dir" && "$venv/bin/flatpak-node-generator" npm package-lock.json -o "$OUT/node-sources.json")
+"$venv/bin/python" "$work/pip.py" --runtime "$RUNTIME" "streamlink==${STREAMLINK_VERSION}" -o "$OUT/streamlink-sources.json"
 
 # The generated pip command must --ignore-installed: the SDK's python ships
 # some of streamlink's dependencies (e.g. lxml) in /usr site-packages, so
