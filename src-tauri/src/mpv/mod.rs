@@ -383,16 +383,25 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
             init.set_property("keep-open", "no")?;
             init.set_property("audio-client-name", "kappastream")?;
             init.set_property("user-agent", MPV_USER_AGENT)?;
-            // Both pulse pacing options below apply only under flatpak,
-            // the one build where playback always lands on ao=pulse: the
-            // sandbox exposes audio only through the pulse socket, and the
-            // bundled libmpv is built WITHOUT the pipewire and jack outputs
-            // (see the flatpak manifest), so nothing else can win the
-            // audio-output selection. Native builds keep mpv's defaults.
-            // They pick ao=pipewire wherever a pipewire server runs, and
-            // on a real PulseAudio server the latency hacks are mpv's
-            // documented workaround, so they stay untouched there.
+            // Under flatpak the audio output is pinned: pipewire whenever
+            // the sandbox exposes its socket (the flatpak manifest's
+            // finish-args request it), pulse as the fallback for hosts
+            // and permission setups without it. The two pulse pacing
+            // options below guard that fallback and are tuned against
+            // pipewire-pulse, the server a pulse fallback realistically
+            // meets; a real PulseAudio host inherits them too, an
+            // accepted trade-off over a second tuning. Native builds
+            // keep mpv's defaults: they pick ao=pipewire wherever a
+            // pipewire server runs, and on a real PulseAudio server the
+            // latency hacks are mpv's documented workaround, so they
+            // stay untouched there.
             if crate::env_spawn::in_flatpak() {
+                // Pipewire talks to the server natively and recomputes
+                // its timing against each cycle's own timestamp; the
+                // pulse path below rides the pipewire-pulse translation,
+                // whose timing replies carry a per-quantum staleness the
+                // pacing options compensate for.
+                let _ = init.set_property("ao", "pipewire,pulse");
                 // ao_pulse's "latency hacks" (default on) replace the
                 // server's timing with mpv's own elaborate latency
                 // calculation, a workaround for PulseAudio timing bugs.

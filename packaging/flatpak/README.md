@@ -87,12 +87,18 @@ artifacts; everything below is the local equivalent.
   EGL context — GTK3's X11 GLArea is GLX, so on X11 the interop can never
   engage and mpv falls through to `vaapi-copy`, which needs no interop at
   all but stands up its VA display through mpv's DRM path (hence
-  libdisplay-info below). Audio outputs are pulse-only: pipewire
-  and jack are compiled OUT (the sandbox exposes audio solely through the
-  pulse socket, so ao=pipewire could never connect and mpv would fall
-  back anyway — compiling it out just makes the selection deterministic);
-  alsa stays because the runtime routes it to pulse and it sorts after
-  pulse in mpv's output list.
+  libdisplay-info below). Audio: the pipewire output is compiled in as a
+  configure tripwire (`-Dpipewire=enabled`, mirroring the ffmpeg options
+  above; the SDK ships libpipewire) and the finish-args expose the
+  pipewire socket, so the engine pins `ao=pipewire,pulse`: pipewire talks
+  to the server natively and recomputes its timing against each cycle's
+  own timestamp, and pulse stays the fallback for hosts or permission
+  setups without the socket, with its pacing options living in the
+  engine's flatpak block. The socket grant is graph-visible (a client
+  can enumerate the whole pipewire graph; there is no narrower
+  audio-only grant, the standard shape for apps that talk to pipewire
+  directly). Jack stays compiled OUT; alsa stays compiled in, and the
+  engine's pin never selects it.
 - **libdisplay-info**: required by mpv's `-Ddrm=enabled` (the DRM output
   path). The SDK ships libdrm and gbm but NOT libdisplay-info, so it is
   built in-manifest; its hwdata dependency resolves through the
