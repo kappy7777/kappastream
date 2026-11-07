@@ -175,7 +175,7 @@
         "install -Dm644 packaging/shared/kappastream.desktop /app/share/applications/io.github.kappy7777.kappastream.desktop",
         "sed -i 's|>kappastream.desktop<|>io.github.kappy7777.kappastream.desktop<|' packaging/shared/io.github.kappy7777.kappastream.metainfo.xml",
         "install -Dm644 packaging/shared/io.github.kappy7777.kappastream.metainfo.xml /app/share/metainfo/io.github.kappy7777.kappastream.metainfo.xml",
-        "install -Dm644 LICENSE /app/share/licenses/kappastream/LICENSE"
+        "install -Dm644 LICENSE /app/share/licenses/io.github.kappy7777.kappastream/LICENSE"
       ],
       "sources": [
         "sources/cargo-sources.json",
