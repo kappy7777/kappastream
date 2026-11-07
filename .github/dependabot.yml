@@ -17,6 +17,24 @@ updates:
     directory: "/src-tauri"
     schedule:
       interval: "weekly"
+    ignore:
+      # The gtk-rs 0.19+ line requires a newer gtk4-stack/ Rust edition
+      # baseline than Tauri's pinned gtk3 0.18 crates can coexist with:
+      # tauri/wry/tao resolve gtk/glib/gio 0.18, and a lone 0.19+ bump of
+      # any layer splits the types (gtk::Widget vs gtk4's) and fails the
+      # build. Hold every gtk-rs crate at 0.18.x until Tauri moves.
+      - dependency-name: "glib"
+        versions: [">=0.19"]
+      - dependency-name: "gio"
+        versions: [">=0.19"]
+      - dependency-name: "gtk"
+        versions: [">=0.19"]
+      - dependency-name: "gdk"
+        versions: [">=0.19"]
+      - dependency-name: "gdkwayland-sys"
+        versions: [">=0.19"]
+      - dependency-name: "gdkx11-sys"
+        versions: [">=0.19"]
 
   # github-actions — keep the workflow actions pinned-to-tags but current
   - package-ecosystem: "github-actions"
