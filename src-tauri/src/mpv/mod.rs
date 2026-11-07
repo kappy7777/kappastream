@@ -284,6 +284,7 @@ fn ensure_engine(app: &AppHandle, id: u32) -> Result<(), String> {
         Ok(engine) => {
             lock_or_recover(engines()).insert(id, engine);
             mpris::ensure_started();
+            maybe_start_diag_task();
             Ok(())
         }
         Err(err) => {
@@ -294,6 +295,71 @@ fn ensure_engine(app: &AppHandle, id: u32) -> Result<(), String> {
             Err(err)
         }
     }
+}
+
+/// One-shot guard for the diagnostics task (see `maybe_start_diag_task`).
+static DIAG_TASK: std::sync::Once = std::sync::Once::new();
+
+/// While `KAPPASTREAM_MPV_DIAG=1`, print one diagnostics line per engine
+/// every 10 s: which hardware decoder actually engaged (`hwdec-current`),
+/// which audio output was selected (`current-ao`), and the drop counters
+/// that expose pacing problems — the measurements stutter reports ask
+/// for, only observable from inside the process. Absent the variable
+/// nothing runs. Started with the first engine, never stopped.
+fn maybe_start_diag_task() {
+    DIAG_TASK.call_once(|| {
+        if std::env::var("KAPPASTREAM_MPV_DIAG").as_deref() == Ok("1") {
+            tauri::async_runtime::spawn(diag_task());
+        }
+    });
+}
+
+async fn diag_task() {
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(10));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tick.tick().await;
+        let ids: Vec<u32> = lock_or_recover(engines()).keys().copied().collect();
+        for id in ids {
+            // The engine can be gone by the time its gate opens; an empty
+            // line means "nothing loaded" (engine idle). Both stay quiet.
+            if let Ok(line) = with_core(id, move |mpv| diag_line(id, mpv)).await {
+                if !line.is_empty() {
+                    eprintln!("{line}");
+                }
+            }
+        }
+    }
+}
+
+/// One engine's diagnostics line, or "" while nothing is loaded. Every
+/// property read is tolerant: before decoding starts several of these do
+/// not exist yet, and a "-" placeholder beats a missing line.
+fn diag_line(id: u32, mpv: &'static Mpv) -> Result<String, String> {
+    let loaded = mpv
+        .get_property::<String>("path")
+        .map(|p| !p.is_empty())
+        .unwrap_or(false);
+    if !loaded {
+        return Ok(String::new());
+    }
+    let text = |name: &str| {
+        mpv.get_property::<String>(name)
+            .unwrap_or_else(|_| "-".into())
+    };
+    let count = |name: &str| {
+        mpv.get_property::<i64>(name)
+            .map(|v| v.to_string())
+            .unwrap_or_else(|_| "-".into())
+    };
+    Ok(format!(
+        "[mpv] engine {id} diag: hwdec-current={} current-ao={} frame-drop={} decoder-frame-drop={} vo-delayed-frames={}",
+        text("hwdec-current"),
+        text("current-ao"),
+        count("frame-drop-count"),
+        count("decoder-frame-drop-count"),
+        count("vo-delayed-frame-count"),
+    ))
 }
 
 /// The engine loads NO scripts (the in-video OSD controller is retired —
