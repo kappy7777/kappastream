@@ -615,14 +615,18 @@ fn init_on_main_thread(
     // closure below — one render context per engine, on that engine's own
     // GL context (never a shared slot: two engines would race their
     // contexts through it).
+    let mut params = vec![
+        RenderParam::ApiType(RenderParamApiType::OpenGl),
+        RenderParam::InitParams(OpenGLInitParams {
+            get_proc_address: mpv_get_proc_address,
+            ctx: gl.clone(),
+        }),
+    ];
+    if let Some(param) = native_display_param(&gl_area.display()) {
+        params.push(param);
+    }
     let mut render = mpv
-        .create_render_context(vec![
-            RenderParam::ApiType(RenderParamApiType::OpenGl),
-            RenderParam::InitParams(OpenGLInitParams {
-                get_proc_address: mpv_get_proc_address,
-                ctx: gl.clone(),
-            }),
-        ])
+        .create_render_context(params)
         .map_err(|e| format!("mpv render context failed: {e}"))?;
 
     {
@@ -669,6 +673,37 @@ fn init_on_main_thread(
         shown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         want_visible: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     })
+}
+
+/// The native-display render param for the GDK backend the GLArea's
+/// display is on: `wl_display*` on Wayland, `Display*` on X11. mpv's
+/// vaapi interop derives its VA display ONLY from one of these render
+/// params — without it, `hwdec=vaapi` can never engage, on any build, so
+/// the app hands its own display in. GDK owns the display for the process
+/// lifetime, so the raw pointer outlives the render context.
+///
+/// On X11 this still does not make zero-copy vaapi interop engage: GTK3's
+/// X11 GLArea is a GLX context and the vaapi interop is EGL-only, so
+/// `hwdec=vaapi` there resolves through the vaapi-copy fallback instead
+/// (see mod.rs). `None` for a null lookup or any other backend — no
+/// param, exactly the behavior of a render context created without one.
+fn native_display_param(display: &gdk::Display) -> Option<RenderParam<GlLib>> {
+    unsafe {
+        let instance_type = display.type_();
+        if instance_type.is_a(glib::translate::from_glib(
+            gdk_wayland_sys::gdk_wayland_display_get_type(),
+        )) {
+            let wl = gdk_wayland_sys::gdk_wayland_display_get_wl_display(display.as_ptr().cast());
+            (!wl.is_null()).then(|| RenderParam::WaylandDisplay(wl.cast()))
+        } else if instance_type.is_a(glib::translate::from_glib(
+            gdk_x11_sys::gdk_x11_display_get_type(),
+        )) {
+            let x = gdk_x11_sys::gdk_x11_display_get_xdisplay(display.as_ptr().cast());
+            (!x.is_null()).then(|| RenderParam::X11Display(x.cast()))
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
