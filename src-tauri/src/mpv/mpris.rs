@@ -326,6 +326,21 @@ fn snapshot() -> Option<(u32, Status)> {
     map.get(&id).map(|status| (id, *status))
 }
 
+/// The DesktopEntry name desktop shells resolve against the installed
+/// .desktop files (the name without the `.desktop` suffix). Outside the
+/// sandbox every package stages the file as `kappastream.desktop`
+/// (AppImage/deb/rpm under that name; the AUR tarball installs it so);
+/// the flatpak exports it under the app id
+/// (`io.github.kappy7777.kappastream.desktop`), and inside that sandbox
+/// `FLATPAK_ID` carries exactly that id — so the media widget finds the
+/// app's icon and name instead of a missing entry.
+fn desktop_entry_for(flatpak_id: Option<&str>) -> String {
+    match flatpak_id {
+        Some(id) if !id.is_empty() => id.to_string(),
+        _ => "kappastream".to_string(),
+    }
+}
+
 struct Root;
 
 #[interface(name = "org.mpris.MediaPlayer2")]
@@ -353,11 +368,8 @@ impl Root {
         "kappastream"
     }
     #[zbus(property)]
-    fn desktop_entry(&self) -> &str {
-        // The installed desktop file is kappastream.desktop everywhere
-        // (AppImage/deb/rpm stage it under that name; the AUR tarball
-        // installs it as kappastream.desktop too).
-        "kappastream"
+    fn desktop_entry(&self) -> String {
+        desktop_entry_for(std::env::var("FLATPAK_ID").ok().as_deref())
     }
     #[zbus(property)]
     fn supported_uri_schemes(&self) -> Vec<&str> {
@@ -673,6 +685,19 @@ mod tests {
             Value::Str(s) => Some(s.to_string()),
             _ => None,
         }
+    }
+
+    #[test]
+    fn desktop_entry_names_the_flatpak_export_or_the_bare_name() {
+        // Outside the sandbox the desktop file is kappastream.desktop.
+        assert_eq!(desktop_entry_for(None), "kappastream");
+        assert_eq!(desktop_entry_for(Some("")), "kappastream");
+        // Inside the flatpak FLATPAK_ID carries the exported desktop
+        // file's name (minus .desktop): the app id.
+        assert_eq!(
+            desktop_entry_for(Some("io.github.kappy7777.kappastream")),
+            "io.github.kappy7777.kappastream"
+        );
     }
 
     #[test]
