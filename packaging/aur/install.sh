@@ -32,6 +32,9 @@ install_files() {
 		"$PREFIX/share/applications/kappastream.desktop"
 	install -Dm644 "$HERE/io.github.kappy7777.kappastream.metainfo.xml" \
 		"$PREFIX/share/metainfo/io.github.kappy7777.kappastream.metainfo.xml"
+	# Pre-rename metainfo: an in-place upgrade over a pre-1.1 install
+	# would otherwise leave a second (stale) AppStream entry behind.
+	rm -f "$PREFIX/share/metainfo/dev.kappy.kappastream.metainfo.xml"
 	# License (GPLv3) — same /usr/share/licenses location the AUR packages use.
 	install -Dm644 "$HERE/LICENSE" \
 		"$PREFIX/share/licenses/kappastream/LICENSE"
@@ -53,6 +56,7 @@ uninstall_files() {
 		"$LIBDIR/kappastream" \
 		"$PREFIX/share/applications/kappastream.desktop" \
 		"$PREFIX/share/metainfo/io.github.kappy7777.kappastream.metainfo.xml" \
+		"$PREFIX/share/metainfo/dev.kappy.kappastream.metainfo.xml" \
 		"$PREFIX/share/licenses/kappastream/LICENSE"
 	# POSIX for-loop: this script runs under /bin/sh (dash on Debian/Ubuntu),
 	# which does not brace-expand, so a {32x32,...} glob would try to remove a
