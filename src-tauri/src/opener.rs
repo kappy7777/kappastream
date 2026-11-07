@@ -240,9 +240,10 @@ fn run_candidate(name: &str, path: &str, args: &[String], child_path: &str) -> C
     }
 }
 
-#[tauri::command]
-pub async fn open_url_robust(url: String) -> Result<OpenResult, String> {
-    let (inherited_path, display, dbus_session) = if cfg!(debug_assertions) {
+/// The opener diagnostics captured for the OpenResult (debug builds only,
+/// so a failed open can be reported with the environment it ran in).
+fn debug_env() -> (Option<String>, Option<String>, Option<String>) {
+    if cfg!(debug_assertions) {
         (
             std::env::var("PATH").ok(),
             std::env::var("DISPLAY").ok(),
@@ -250,24 +251,19 @@ pub async fn open_url_robust(url: String) -> Result<OpenResult, String> {
         )
     } else {
         (None, None, None)
-    };
+    }
+}
 
-    let Some(url) = validated_url(&url) else {
-        return Ok(OpenResult {
-            ok: false,
-            method: "validation".to_string(),
-            path: None,
-            exit_code: None,
-            stderr: "URL must be an HTTPS twitch.tv page without credentials or a custom port"
-                .to_string(),
-            url,
-            inherited_path,
-            display,
-            dbus_session,
-            candidates: vec![],
-        });
-    };
-
+/// The post-validation half of every opener command: spawn the platform
+/// candidate list for an ALREADY-VALIDATED URL and assemble the result.
+/// Every caller must have run its URL through a validator first — the
+/// spawn path trusts its input.
+async fn open_validated(
+    url: String,
+    inherited_path: Option<String>,
+    display: Option<String>,
+    dbus_session: Option<String>,
+) -> Result<OpenResult, String> {
     let opener_url = url.clone();
     let per_candidate = tauri::async_runtime::spawn_blocking(move || {
         // PATH forwarded to env_spawn::configure() when running from an
@@ -423,9 +419,105 @@ pub async fn open_url_robust(url: String) -> Result<OpenResult, String> {
     })
 }
 
+#[tauri::command]
+pub async fn open_url_robust(url: String) -> Result<OpenResult, String> {
+    let (inherited_path, display, dbus_session) = debug_env();
+
+    let Some(url) = validated_url(&url) else {
+        return Ok(OpenResult {
+            ok: false,
+            method: "validation".to_string(),
+            path: None,
+            exit_code: None,
+            stderr: "URL must be an HTTPS twitch.tv page without credentials or a custom port"
+                .to_string(),
+            url,
+            inherited_path,
+            display,
+            dbus_session,
+            candidates: vec![],
+        });
+    };
+
+    open_validated(url, inherited_path, display, dbus_session).await
+}
+
+/// The project's releases page — the download target the update banner
+/// points at on builds that install updates outside the app.
+const RELEASE_PAGE_URL: &str = "https://github.com/kappy7777/kappastream/releases/latest";
+
+/// The release-page analogue of `validated_url`: the constant is checked
+/// against the same rules (https, no userinfo, default port, no
+/// whitespace/quote/backslash/control characters) with github.com and the
+/// exact repo path in place of the twitch host allowlist. A constant, so
+/// this is defense in depth against the URL ever being edited into
+/// something the spawn path must not see.
+fn validated_release_page_url() -> Option<String> {
+    let parsed = Url::parse(RELEASE_PAGE_URL).ok()?;
+    if parsed.scheme() != "https"
+        || parsed.host_str() != Some("github.com")
+        || parsed.path() != "/kappy7777/kappastream/releases/latest"
+        || has_explicit_userinfo(RELEASE_PAGE_URL)
+        || !parsed[Position::BeforeUsername..Position::BeforeHost].is_empty()
+        || parsed.port_or_known_default() != Some(443)
+    {
+        return None;
+    }
+    let serialized = parsed.to_string();
+    if serialized
+        .chars()
+        .any(|c| c == '\\' || c == '"' || c.is_whitespace() || c.is_control())
+    {
+        return None;
+    }
+    Some(serialized)
+}
+
+/// Opens the project's releases page in the system browser. Same
+/// machinery as `open_url_robust`, but for a URL the app itself owns —
+/// no page-supplied input is involved.
+#[tauri::command]
+pub async fn open_release_page() -> Result<OpenResult, String> {
+    let (inherited_path, display, dbus_session) = debug_env();
+
+    let Some(url) = validated_release_page_url() else {
+        return Ok(OpenResult {
+            ok: false,
+            method: "validation".to_string(),
+            path: None,
+            exit_code: None,
+            stderr: "the built-in release page URL failed validation".to_string(),
+            url: RELEASE_PAGE_URL.to_string(),
+            inherited_path,
+            display,
+            dbus_session,
+            candidates: vec![],
+        });
+    };
+
+    open_validated(url, inherited_path, display, dbus_session).await
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{rundll_url_args, system32_binary, validated_url, windows_candidates};
+    use super::{
+        rundll_url_args, system32_binary, validated_release_page_url, validated_url,
+        windows_candidates, RELEASE_PAGE_URL,
+    };
+
+    #[test]
+    fn release_page_url_is_a_validated_github_https_url() {
+        // The download-page button's fixed target: parsed https on the
+        // github.com host at the exact repo path, default port, and clean
+        // of every character the spawn-path backstop rejects.
+        let url = validated_release_page_url().expect("constant must validate");
+        assert_eq!(url, RELEASE_PAGE_URL);
+        let parsed = url::Url::parse(&url).unwrap();
+        assert_eq!(parsed.scheme(), "https");
+        assert_eq!(parsed.host_str(), Some("github.com"));
+        assert_eq!(parsed.path(), "/kappy7777/kappastream/releases/latest");
+        assert_eq!(parsed.port_or_known_default(), Some(443));
+    }
 
     #[test]
     fn accepts_and_normalizes_twitch_https_urls() {

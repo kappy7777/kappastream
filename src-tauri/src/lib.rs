@@ -5,6 +5,7 @@ mod migrate;
 mod opener;
 mod platform;
 mod player;
+mod release_notice;
 mod resolve;
 mod tray;
 mod vod_proxy;
@@ -174,6 +175,8 @@ pub fn run() {
             player::external_player_supported,
             platform::target_os,
             opener::open_url_robust,
+            opener::open_release_page,
+            release_notice::release_notice,
             gql::gql_fetch,
             export::save_favorites_export,
             export::save_theme_export,
