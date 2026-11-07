@@ -1042,7 +1042,7 @@ jobs:
           # No .sig: the flatpak bundle is not an in-app updater target
           # (its binary is updater-off, like the AUR tarball's), and flatpak
           # verifies installs via repo GPG, not minisign.
-          assert_one '*.x86_64.flatpak' 'Flatpak bundle'
+          assert_one '*-x86_64.flatpak' 'Flatpak bundle'
           echo "=== All expected artifacts present exactly once ==="
 
       # Build the tauri-plugin-updater manifest from the actual signed artifacts
@@ -1212,7 +1212,7 @@ jobs:
             *_amd64.deb *_amd64.deb.sig \
             *.x86_64.rpm *.x86_64.rpm.sig \
             *-x86_64.tar.gz \
-            *.x86_64.flatpak \
+            *-x86_64.flatpak \
             *-setup.exe *-setup.exe.sig \
             *.app.tar.gz *.app.tar.gz.sig \
             *.dmg \
@@ -1239,7 +1239,7 @@ jobs:
             *-setup.exe *-setup.exe.sig \
             *.app.tar.gz *.app.tar.gz.sig \
             *.dmg \
-            *.x86_64.flatpak \
+            *-x86_64.flatpak \
             latest.json \
             | sort -k2 > SHA256SUMS
           echo "Generated checksums:"
