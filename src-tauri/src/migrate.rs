@@ -45,6 +45,12 @@
 //!   both are left untouched: the marked profile stays authoritative and
 //!   the old directory is kept as-is. Data written by such a downgrade
 //!   stays in the old directory and is ignored — preserved, not migrated.
+//! - A profile with NO old-ID sibling (a fresh install, or a completed
+//!   migration whose old directory was never re-created) is stamped with
+//!   the marker the same way, so it can never be mistaken for an
+//!   incomplete attempt later. A migration that fails with the old
+//!   directory present is NOT stamped: its next launch must let the old
+//!   profile displace the bootstrap profile (set aside, never deleted).
 //!
 //! Every failure path prints to stderr, naming the paths involved, and
 //! returns; the untouched old directory lets the next launch retry.
@@ -67,9 +73,10 @@ const OLD_IDENTIFIER: &str = "dev.kappy.kappastream";
 const NEW_IDENTIFIER: &str = "io.github.kappy7777.kappastream";
 
 /// Marks a data directory whose identifier migration COMPLETED. Written
-/// into the source of a move before the move whenever possible, and into
-/// a staging copy before it is flipped into place — never after the fact,
-/// so a marked directory is always a complete one.
+/// into the source of a move before the move whenever possible, into a
+/// staging copy before it is flipped into place, or stamped onto a fresh
+/// profile with no old-ID sibling (a fresh profile is complete by
+/// definition) — so a marked directory is always a complete one.
 const MARKER: &str = ".kappastream-migrated";
 
 /// Backoff between rename attempts, after the immediate first try.
@@ -92,7 +99,9 @@ const STALE_STAGING_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const RESCUE_PROBE_LIMIT: u32 = 9;
 
 /// Runs the migration (see the module docs). Cheap when there is nothing
-/// to do: one `is_dir()` stat when the old directory is absent.
+/// to migrate: one `is_dir()` stat when the old directory is absent, plus
+/// at most one directory create and one marker write to stamp the fresh
+/// profile (see the module docs).
 pub fn migrate() {
     if let Some(base) = data_root() {
         migrate_dir(&base.join(OLD_IDENTIFIER), &base.join(NEW_IDENTIFIER));
@@ -191,6 +200,7 @@ struct Ops<'a> {
     copy_tree: &'a mut dyn FnMut(&Path, &Path) -> io::Result<()>,
     remove_tree: &'a mut dyn FnMut(&Path) -> io::Result<()>,
     write_file: &'a mut dyn FnMut(&Path, &[u8]) -> io::Result<()>,
+    create_dir: &'a mut dyn FnMut(&Path) -> io::Result<()>,
     sleep: &'a mut dyn FnMut(Duration),
 }
 
@@ -200,6 +210,7 @@ fn migrate_dir(old: &Path, new: &Path) {
     let mut copy_tree = |from: &Path, to: &Path| copy_dir_recursive(from, to);
     let mut remove_tree = |dir: &Path| fs::remove_dir_all(dir);
     let mut write_file = |path: &Path, bytes: &[u8]| fs::write(path, bytes);
+    let mut create_dir = |dir: &Path| fs::create_dir_all(dir);
     let mut sleep = |delay: Duration| std::thread::sleep(delay);
     migrate_dir_with(
         old,
@@ -209,6 +220,7 @@ fn migrate_dir(old: &Path, new: &Path) {
             copy_tree: &mut copy_tree,
             remove_tree: &mut remove_tree,
             write_file: &mut write_file,
+            create_dir: &mut create_dir,
             sleep: &mut sleep,
         },
     );
@@ -218,7 +230,11 @@ fn migrate_dir(old: &Path, new: &Path) {
 /// completes the move or leaves both directories on disk.
 fn migrate_dir_with(old: &Path, new: &Path, ops: &mut Ops) {
     if !old.is_dir() {
-        return; // Fresh install, already migrated, or never ran the old ID.
+        // Fresh install, already migrated, or never ran the old ID. Stamp
+        // the profile so a later re-created old directory takes the
+        // marked-new branch below instead of displacing the live profile.
+        stamp_fresh_profile(new, ops);
+        return;
     }
 
     if new.exists() {
@@ -329,6 +345,45 @@ fn migrate_dir_with(old: &Path, new: &Path, ops: &mut Ops) {
 /// copy path treats a failure as fatal, see `migrate_dir_with`).
 fn write_marker(path: &Path, ops: &mut Ops) -> io::Result<()> {
     (ops.write_file)(path, b"identifier rename complete\n")
+}
+
+/// Marks a profile that exists without an old-ID sibling: a fresh install
+/// (both directories absent) or a completed migration whose old directory
+/// was never re-created. A fresh profile is complete by definition, and
+/// stamping it gives it the same on-disk shape every migrated profile
+/// already carries — so if an old-ID build later recreates the old
+/// directory, the next launch takes the marked-new branch above and
+/// leaves BOTH directories alone instead of setting the live profile
+/// aside. Best effort throughout: a failure only means the marker is
+/// retried on a later launch.
+fn stamp_fresh_profile(new: &Path, ops: &mut Ops) {
+    if new.is_dir() {
+        if !new.join(MARKER).exists() {
+            if let Err(err) = write_marker(&new.join(MARKER), ops) {
+                eprintln!(
+                    "kappastream: could not mark the fresh webview data at {}: {err}",
+                    new.display()
+                );
+            }
+        }
+        return;
+    }
+    if new.exists() {
+        return; // A stray file: leave it alone.
+    }
+    if let Err(err) = (ops.create_dir)(new) {
+        eprintln!(
+            "kappastream: could not create the fresh webview data directory {}: {err}",
+            new.display()
+        );
+        return;
+    }
+    if let Err(err) = write_marker(&new.join(MARKER), ops) {
+        eprintln!(
+            "kappastream: could not mark the fresh webview data at {}: {err}",
+            new.display()
+        );
+    }
 }
 
 /// Moves an unmarked live `new` aside to a unique
@@ -503,15 +558,184 @@ mod tests {
     }
 
     #[test]
-    fn no_op_without_old() {
-        let base = scratch("noop");
+    fn fresh_install_creates_a_marked_new_profile() {
+        let base = scratch("fresh");
         let old = base.join("old");
         let new = base.join("new");
         fs::create_dir_all(&base).expect("create base");
 
         run_real(&old, &new);
 
-        assert!(!old.exists() && !new.exists());
+        assert!(!old.exists());
+        assert!(new.is_dir());
+        // The stamped marker is byte-identical to a migrated one.
+        assert_eq!(
+            fs::read_to_string(new.join(MARKER)).unwrap(),
+            "identifier rename complete\n"
+        );
+        assert!(side_dirs(&base).is_empty());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fresh_stamp_marks_an_unmarked_existing_new_and_touches_nothing_else() {
+        // An engine-created profile (nested subdirs and files) at the new
+        // name without the marker: only the marker is added.
+        let base = scratch("fresh-unmarked");
+        let old = base.join("old");
+        let new = base.join("new");
+        write(&new.join("EBWebView").join("Cache").join("data_0"), "x");
+        write(&new.join("localstorage").join("db.sqlite"), "favorites");
+
+        run_real(&old, &new);
+
+        assert_eq!(
+            fs::read_to_string(new.join("EBWebView").join("Cache").join("data_0")).unwrap(),
+            "x"
+        );
+        assert_eq!(
+            fs::read_to_string(new.join("localstorage").join("db.sqlite")).unwrap(),
+            "favorites"
+        );
+        assert!(new.join(MARKER).is_file());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fresh_stamp_of_a_marked_new_writes_and_creates_nothing() {
+        let base = scratch("fresh-marked");
+        let old = base.join("old");
+        let new = base.join("new");
+        fs::create_dir_all(&new).expect("create new");
+        write(&new.join(MARKER), "identifier rename complete\n");
+
+        let mut rename = |_a: &Path, _b: &Path| -> io::Result<()> { panic!("no rename expected") };
+        let mut copy_tree = |_a: &Path, _b: &Path| -> io::Result<()> { panic!("no copy expected") };
+        let mut remove_tree = |_a: &Path| -> io::Result<()> { panic!("no remove expected") };
+        let mut write_file =
+            |_p: &Path, _b: &[u8]| -> io::Result<()> { panic!("no write expected") };
+        let mut create_dir = |_d: &Path| -> io::Result<()> { panic!("no create expected") };
+        let mut sleep = |_d: Duration| {};
+        migrate_dir_with(
+            &old,
+            &new,
+            &mut Ops {
+                rename: &mut rename,
+                copy_tree: &mut copy_tree,
+                remove_tree: &mut remove_tree,
+                write_file: &mut write_file,
+                create_dir: &mut create_dir,
+                sleep: &mut sleep,
+            },
+        );
+
+        assert!(new.join(MARKER).is_file());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fresh_stamp_leaves_a_stray_file_at_new_alone() {
+        let base = scratch("fresh-file");
+        let old = base.join("old");
+        let new = base.join("new");
+        fs::create_dir_all(&base).expect("create base");
+        fs::write(&new, "not a directory").expect("write stray file");
+
+        run_real(&old, &new);
+
+        assert_eq!(fs::read_to_string(&new).unwrap(), "not a directory");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fresh_stamp_failures_never_panic_or_touch_anything_else() {
+        // create_dir fails => no marker write is even attempted.
+        let base = scratch("fresh-createfail");
+        let old = base.join("old");
+        let new = base.join("new");
+        fs::create_dir_all(&base).expect("create base");
+        let mut rename = |_a: &Path, _b: &Path| -> io::Result<()> { Ok(()) };
+        let mut copy_tree = |_a: &Path, _b: &Path| -> io::Result<()> { Ok(()) };
+        let mut remove_tree = |_a: &Path| -> io::Result<()> { Ok(()) };
+        let mut write_file =
+            |_p: &Path, _b: &[u8]| -> io::Result<()> { panic!("no write expected") };
+        let mut create_dir = |_d: &Path| -> io::Result<()> { Err(io::Error::other("test: ro")) };
+        let mut sleep = |_d: Duration| {};
+        migrate_dir_with(
+            &old,
+            &new,
+            &mut Ops {
+                rename: &mut rename,
+                copy_tree: &mut copy_tree,
+                remove_tree: &mut remove_tree,
+                write_file: &mut write_file,
+                create_dir: &mut create_dir,
+                sleep: &mut sleep,
+            },
+        );
+        assert!(!new.exists());
+        let _ = fs::remove_dir_all(&base);
+
+        // The marker write fails => the directory exists, unmarked.
+        let base = scratch("fresh-writefail");
+        let old = base.join("old");
+        let new = base.join("new");
+        fs::create_dir_all(&base).expect("create base");
+        let mut rename = |_a: &Path, _b: &Path| -> io::Result<()> { Ok(()) };
+        let mut copy_tree = |_a: &Path, _b: &Path| -> io::Result<()> { Ok(()) };
+        let mut remove_tree = |_a: &Path| -> io::Result<()> { Ok(()) };
+        let mut write_file =
+            |_p: &Path, _b: &[u8]| -> io::Result<()> { Err(io::Error::other("test: ro")) };
+        let mut create_dir = |d: &Path| fs::create_dir_all(d);
+        let mut sleep = |_d: Duration| {};
+        migrate_dir_with(
+            &old,
+            &new,
+            &mut Ops {
+                rename: &mut rename,
+                copy_tree: &mut copy_tree,
+                remove_tree: &mut remove_tree,
+                write_file: &mut write_file,
+                create_dir: &mut create_dir,
+                sleep: &mut sleep,
+            },
+        );
+        assert!(new.is_dir());
+        assert!(!new.join(MARKER).exists());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn stamped_fresh_profile_is_never_displaced_by_a_recreated_old() {
+        // The regression this closes: a fresh install ran first (stamped),
+        // an old-ID build later recreated the old directory, and the next
+        // new-ID launch must NOT set the live profile aside.
+        let base = scratch("fresh-then-old");
+        let old = base.join("old");
+        let new = base.join("new");
+        fs::create_dir_all(&base).expect("create base");
+
+        // First launch: fresh install, both absent -> stamped.
+        run_real(&old, &new);
+        assert!(new.join(MARKER).is_file());
+        write(&new.join("live-profile"), "LIVE");
+
+        // An old-ID build runs in between and recreates the old directory.
+        write(&old.join("stale"), "DOWNGRADE");
+
+        // Second launch: marked new + old present -> both stay untouched.
+        run_real(&old, &new);
+
+        assert_eq!(
+            fs::read_to_string(new.join("live-profile")).unwrap(),
+            "LIVE"
+        );
+        assert_eq!(fs::read_to_string(old.join("stale")).unwrap(), "DOWNGRADE");
+        assert!(new.join(MARKER).is_file());
+        assert!(
+            side_dirs(&base).is_empty(),
+            "no .pre-migration-* sibling may appear"
+        );
         let _ = fs::remove_dir_all(&base);
     }
 
@@ -535,6 +759,7 @@ mod tests {
         let mut copy_tree = |a: &Path, b: &Path| copy_dir_recursive(a, b);
         let mut remove_tree = |a: &Path| fs::remove_dir_all(a);
         let mut write_file = |p: &Path, bytes: &[u8]| fs::write(p, bytes);
+        let mut create_dir = |d: &Path| fs::create_dir_all(d);
         let mut sleep = |d: Duration| sleeps.push(d.as_millis() as u64);
         migrate_dir_with(
             &old,
@@ -544,6 +769,7 @@ mod tests {
                 copy_tree: &mut copy_tree,
                 remove_tree: &mut remove_tree,
                 write_file: &mut write_file,
+                create_dir: &mut create_dir,
                 sleep: &mut sleep,
             },
         );
@@ -579,6 +805,7 @@ mod tests {
         let mut copy_tree = |a: &Path, b: &Path| copy_dir_recursive(a, b);
         let mut remove_tree = |a: &Path| fs::remove_dir_all(a);
         let mut write_file = |p: &Path, bytes: &[u8]| fs::write(p, bytes);
+        let mut create_dir = |d: &Path| fs::create_dir_all(d);
         let mut sleep = |d: Duration| sleeps.push(d.as_millis() as u64);
         migrate_dir_with(
             &old,
@@ -588,6 +815,7 @@ mod tests {
                 copy_tree: &mut copy_tree,
                 remove_tree: &mut remove_tree,
                 write_file: &mut write_file,
+                create_dir: &mut create_dir,
                 sleep: &mut sleep,
             },
         );
@@ -627,6 +855,7 @@ mod tests {
         let mut copy_tree = |a: &Path, b: &Path| copy_dir_recursive(a, b);
         let mut remove_tree = |a: &Path| fs::remove_dir_all(a);
         let mut write_file = |p: &Path, bytes: &[u8]| fs::write(p, bytes);
+        let mut create_dir = |d: &Path| fs::create_dir_all(d);
         let mut sleep = |d: Duration| sleeps.push(d.as_millis() as u64);
         migrate_dir_with(
             &old,
@@ -636,6 +865,7 @@ mod tests {
                 copy_tree: &mut copy_tree,
                 remove_tree: &mut remove_tree,
                 write_file: &mut write_file,
+                create_dir: &mut create_dir,
                 sleep: &mut sleep,
             },
         );
@@ -673,6 +903,7 @@ mod tests {
         let mut copy_tree = |a: &Path, b: &Path| copy_dir_recursive(a, b);
         let mut remove_tree = |a: &Path| fs::remove_dir_all(a);
         let mut write_file = |p: &Path, bytes: &[u8]| fs::write(p, bytes);
+        let mut create_dir = |d: &Path| fs::create_dir_all(d);
         let mut sleep = |d: Duration| sleeps.push(d.as_millis() as u64);
         migrate_dir_with(
             &old,
@@ -682,6 +913,7 @@ mod tests {
                 copy_tree: &mut copy_tree,
                 remove_tree: &mut remove_tree,
                 write_file: &mut write_file,
+                create_dir: &mut create_dir,
                 sleep: &mut sleep,
             },
         );
@@ -711,6 +943,7 @@ mod tests {
             |_a: &Path, _b: &Path| -> io::Result<()> { Err(io::Error::other("test: copy")) };
         let mut remove_tree = |a: &Path| fs::remove_dir_all(a);
         let mut write_file = |p: &Path, bytes: &[u8]| fs::write(p, bytes);
+        let mut create_dir = |d: &Path| fs::create_dir_all(d);
         let mut sleep = |_d: Duration| {};
         migrate_dir_with(
             &old,
@@ -720,12 +953,15 @@ mod tests {
                 copy_tree: &mut copy_tree,
                 remove_tree: &mut remove_tree,
                 write_file: &mut write_file,
+                create_dir: &mut create_dir,
                 sleep: &mut sleep,
             },
         );
 
         assert_eq!(fs::read_to_string(old.join("db")).unwrap(), "favorites");
         assert!(!new.exists());
+        // A failed migration must not fabricate or mark a new profile.
+        assert!(!new.join(MARKER).exists());
         assert!(side_dirs(&base).is_empty(), "the staging dir is cleaned up");
         let _ = fs::remove_dir_all(&base);
     }
@@ -748,6 +984,7 @@ mod tests {
         let mut remove_tree = |a: &Path| fs::remove_dir_all(a);
         let mut write_file =
             |_p: &Path, _b: &[u8]| -> io::Result<()> { Err(io::Error::other("test: ro")) };
+        let mut create_dir = |d: &Path| fs::create_dir_all(d);
         let mut sleep = |_d: Duration| {};
         migrate_dir_with(
             &old,
@@ -757,6 +994,7 @@ mod tests {
                 copy_tree: &mut copy_tree,
                 remove_tree: &mut remove_tree,
                 write_file: &mut write_file,
+                create_dir: &mut create_dir,
                 sleep: &mut sleep,
             },
         );
@@ -780,6 +1018,7 @@ mod tests {
         let mut remove_tree = |a: &Path| fs::remove_dir_all(a);
         let mut write_file =
             |_p: &Path, _b: &[u8]| -> io::Result<()> { Err(io::Error::other("test: ro")) };
+        let mut create_dir = |d: &Path| fs::create_dir_all(d);
         let mut sleep = |_d: Duration| {};
         migrate_dir_with(
             &old,
@@ -789,6 +1028,7 @@ mod tests {
                 copy_tree: &mut copy_tree,
                 remove_tree: &mut remove_tree,
                 write_file: &mut write_file,
+                create_dir: &mut create_dir,
                 sleep: &mut sleep,
             },
         );
@@ -881,6 +1121,7 @@ mod tests {
         let mut copy_tree = |a: &Path, b: &Path| copy_dir_recursive(a, b);
         let mut remove_tree = |a: &Path| fs::remove_dir_all(a);
         let mut write_file = |p: &Path, bytes: &[u8]| fs::write(p, bytes);
+        let mut create_dir = |d: &Path| fs::create_dir_all(d);
         let mut sleep = |_d: Duration| {};
         migrate_dir_with(
             &old,
@@ -890,6 +1131,7 @@ mod tests {
                 copy_tree: &mut copy_tree,
                 remove_tree: &mut remove_tree,
                 write_file: &mut write_file,
+                create_dir: &mut create_dir,
                 sleep: &mut sleep,
             },
         );
@@ -998,6 +1240,7 @@ mod tests {
         let mut copy_tree = |a: &Path, b: &Path| copy_dir_recursive(a, b);
         let mut remove_tree = |_a: &Path| -> io::Result<()> { Err(io::Error::other("test: busy")) };
         let mut write_file = |p: &Path, bytes: &[u8]| fs::write(p, bytes);
+        let mut create_dir = |d: &Path| fs::create_dir_all(d);
         let mut sleep = |_d: Duration| {};
         migrate_dir_with(
             &old,
@@ -1007,6 +1250,7 @@ mod tests {
                 copy_tree: &mut copy_tree,
                 remove_tree: &mut remove_tree,
                 write_file: &mut write_file,
+                create_dir: &mut create_dir,
                 sleep: &mut sleep,
             },
         );
@@ -1041,6 +1285,7 @@ mod tests {
             fs::remove_dir_all(a)
         };
         let mut write_file = |_p: &Path, _b: &[u8]| -> io::Result<()> { Ok(()) };
+        let mut create_dir = |_d: &Path| -> io::Result<()> { Ok(()) };
         let mut sleep = |_d: Duration| {};
 
         // Zero threshold: anything with our naming goes.
@@ -1052,6 +1297,7 @@ mod tests {
                 copy_tree: &mut copy_tree,
                 remove_tree: &mut remove_tree,
                 write_file: &mut write_file,
+                create_dir: &mut create_dir,
                 sleep: &mut sleep,
             },
         );
@@ -1076,6 +1322,7 @@ mod tests {
                 copy_tree: &mut copy_tree,
                 remove_tree: &mut remove_tree,
                 write_file: &mut write_file,
+                create_dir: &mut create_dir,
                 sleep: &mut sleep,
             },
         );
