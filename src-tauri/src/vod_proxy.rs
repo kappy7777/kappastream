@@ -373,6 +373,7 @@ mod tests {
             "text/xml",
             "application/xml; charset=utf-8",
             "application/atom+xml",
+            "APPLICATION/XHTML+XML",
             "text/x-html-thing",
         ] {
             assert_eq!(
@@ -520,10 +521,11 @@ mod tests {
     }
 
     #[test]
-    fn reconstruct_rejects_non_twitch_cloudfront_labels() {
-        // Only the single-label d<a-z0-9>{13} shape is a Twitch media
-        // distribution; anything else under *.cloudfront.net belongs to
-        // another AWS customer.
+    fn reconstruct_rejects_non_distribution_cloudfront_labels() {
+        // The single-label d<a-z0-9>{13} shape is a distribution HOSTNAME;
+        // what the check can actually tell apart is the apex and
+        // multi-label hosts, which it rejects. Whatever else passes is
+        // served back as inert data (the hardened responses).
         assert_eq!(
             reconstruct_https_url("ksvod://localhost/a.b.cloudfront.net/x"),
             None

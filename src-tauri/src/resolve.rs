@@ -677,9 +677,12 @@ pub(crate) fn is_allowed_vod_host(host: &str) -> bool {
 
 /// Twitch's CloudFront media distributions all have the single-label shape
 /// `d[a-z0-9]{13}.cloudfront.net` (observed on VOD playlist URIs and clip
-/// MP4s: d2nvs31859zcd8, d3vd9lfkzbru3h, d2vi6trrdongqn, d1ndex63qxojbr).
-/// Requiring exactly that shape keeps every OTHER AWS customer hosted
-/// under `*.cloudfront.net` — and the bare apex — out of the fetch set.
+/// MP4s: d2nvs31859zcd8, d3vd9lfkzbru3h, d2vi6trrdongqn, d1ndex63qxojbr)
+/// — and so does every other AWS customer's distribution: the shape
+/// identifies a distribution HOSTNAME, not its owner. What the check
+/// actually keeps out is the bare apex and multi-label hosts under
+/// cloudfront.net; whatever it lets through, the proxy serves back as
+/// inert data (see vod_proxy's hardened responses).
 fn is_twitch_cloudfront_host(host: &str) -> bool {
     let Some(label) = host.strip_suffix(".cloudfront.net") else {
         return false;
