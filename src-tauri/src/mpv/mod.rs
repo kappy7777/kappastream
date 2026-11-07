@@ -834,6 +834,29 @@ pub async fn mpv_available(app: AppHandle) -> AvailabilityPayload {
     }
 }
 
+/// Normalize the persisted `settings.mpvHwdec` into the `hwdec` priority
+/// list handed to mpv. The stored value is a frontend dropdown id; mpv's
+/// `hwdec` is a comma-separated priority list, so `vaapi` becomes
+/// `vaapi,vaapi-copy`: zero-copy interop needs the native display handed
+/// into the render context AND an EGL context (see linux.rs — GTK3's X11
+/// GLArea is GLX, so there interop cannot engage), while vaapi-copy
+/// decodes into system memory with no interop at all and covers that
+/// case. An unknown value (a setting persisted on another platform, or a
+/// retired id) resolves to software decode rather than risking a broken
+/// playback startup — Settings resets its dropdown on the next open.
+fn mpv_hwdec_value(setting: &str) -> &'static str {
+    match setting {
+        "no" => "no",
+        "auto-safe" => "auto-safe",
+        "nvdec" => "nvdec",
+        "vaapi" => "vaapi,vaapi-copy",
+        other => {
+            eprintln!("[mpv] unknown hwdec mode {other:?}, falling back to software decode");
+            "no"
+        }
+    }
+}
+
 /// Load a media URL on the engine `id` (0 = single player, 1..=4 = tiles)
 /// and show the surface. The URL is the STREAMLINK-RESOLVED one, passed
 /// THROUGH directly — mpv is not a browser, so no ksvod proxy, no CORS.
@@ -883,6 +906,7 @@ pub async fn mpv_load(
         .map_err(|e| format!("engine bootstrap task failed: {e}"))??;
     // All libmpv, no registry state: runs on the async runtime thread (off
     // the GTK main/render thread), FIFO per engine.
+    let hwdec = mpv_hwdec_value(&hwdec).to_string();
     with_core(id, move |mpv| {
         mpv.set_property("hwdec", hwdec.as_str())
             .map_err(|err| format!("set hwdec: {err}"))?;
@@ -1044,6 +1068,23 @@ mod tests {
         assert!(crate::gql::USER_AGENT.starts_with("Mozilla/5.0"));
         assert!(!crate::gql::USER_AGENT.to_lowercase().contains("streamlink"));
         assert!(!crate::gql::USER_AGENT.contains("Kappastream"));
+    }
+
+    #[test]
+    fn hwdec_values_map_to_the_mpv_priority_lists() {
+        assert_eq!(mpv_hwdec_value("no"), "no");
+        assert_eq!(mpv_hwdec_value("auto-safe"), "auto-safe");
+        // Verified on NVIDIA hardware; passed through untouched.
+        assert_eq!(mpv_hwdec_value("nvdec"), "nvdec");
+        // vaapi gains the interop-free copy fallback as the second choice.
+        assert_eq!(mpv_hwdec_value("vaapi"), "vaapi,vaapi-copy");
+        // Anything else — a value persisted on another platform (the
+        // frontend's union includes videotoolbox/d3d11va), a retired id,
+        // garbage — must not reach mpv: software decode, never a broken
+        // startup.
+        for foreign in ["videotoolbox", "d3d11va", "vaapi-copy", "", "NVDEC"] {
+            assert_eq!(mpv_hwdec_value(foreign), "no", "value {foreign:?}");
+        }
     }
 
     #[test]
