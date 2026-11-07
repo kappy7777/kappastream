@@ -73,6 +73,14 @@ pub(crate) fn in_appimage() -> bool {
     std::env::var("APPIMAGE").is_ok()
 }
 
+/// True inside a flatpak sandbox (the runtime always exports a non-empty
+/// `FLATPAK_ID` to the app process). One shared detector so every
+/// flatpak-only behavior — the mpv audio pacing options, the MPRIS desktop
+/// entry, the external-player handoff — agrees about what a flatpak run is.
+pub(crate) fn in_flatpak() -> bool {
+    std::env::var_os("FLATPAK_ID").is_some_and(|v| !v.is_empty())
+}
+
 /// Filter an XDG-style colon-separated search path for forwarding out of an
 /// AppImage: drop every entry that lives inside $APPDIR. The runtime's
 /// apprun-hooks prepend the bundled `usr/` tree to XDG_DATA_DIRS /

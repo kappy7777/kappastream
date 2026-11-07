@@ -321,7 +321,7 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
             // server runs, and on a real PulseAudio server the latency
             // hacks are mpv's documented workaround, so they stay
             // untouched there.
-            if std::env::var_os("FLATPAK_ID").is_some_and(|v| !v.is_empty()) {
+            if crate::env_spawn::in_flatpak() {
                 // ao_pulse's "latency hacks" (default on) replace the
                 // server's timing with mpv's own elaborate latency
                 // calculation, a workaround for PulseAudio timing bugs.
