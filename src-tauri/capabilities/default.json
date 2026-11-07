@@ -1,16 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Notification operations + the window/webview/event permissions that power the custom Picture-in-Picture window and the custom title bar + the in-app updater (gated out at compile time on AUR builds)",
+  "description": "Notification operations + the main window's window/webview/event permissions (custom title bar, fullscreen, PiP creation) + the in-app updater (gated out at compile time on AUR builds). The PiP window has its own reduced capability file (pip.json).",
   "windows": [
-    "main",
-    "pip"
+    "main"
   ],
   "permissions": [
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "notification:allow-notify",
-
     "core:webview:allow-create-webview-window",
     "core:window:allow-close",
     "core:window:allow-destroy",
@@ -28,11 +26,9 @@
     "core:window:allow-outer-size",
     "core:window:allow-current-monitor",
     "core:window:allow-available-monitors",
-
     "core:event:allow-emit",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
-
     "updater:default",
     "process:allow-restart"
   ]
