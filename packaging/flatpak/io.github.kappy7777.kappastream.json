@@ -17,8 +17,7 @@
     "--device=dri",
     "--talk-name=org.freedesktop.Notifications",
     "--talk-name=org.kde.StatusNotifierWatcher",
-    "--own-name=org.mpris.MediaPlayer2.kappastream",
-    "--own-name=io.github.kappy7777.kappastream.SingleInstance"
+    "--own-name=org.mpris.MediaPlayer2.kappastream"
   ],
   "cleanup": [
     "/include",
