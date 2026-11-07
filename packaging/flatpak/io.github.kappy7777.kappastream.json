@@ -124,6 +124,8 @@
         "-Dlibarchive=disabled",
         "-Dlibcurl=enabled",
         "-Dlibavdevice=disabled",
+        "-Dpipewire=disabled",
+        "-Djack=disabled",
         "-Dvulkan=disabled",
         "-Dshaderc=disabled",
         "-Dmanpage-build=disabled"

@@ -381,12 +381,13 @@ fn build_engine(app: &AppHandle, id: u32) -> Result<Engine, String> {
             init.set_property("user-agent", MPV_USER_AGENT)?;
             // Both pulse pacing options below apply only under flatpak,
             // the one build where playback always lands on ao=pulse: the
-            // sandbox exposes audio only through the pulse socket and the
-            // bundled libmpv ships no pipewire output. Native builds keep
-            // mpv's defaults. They pick ao=pipewire wherever a pipewire
-            // server runs, and on a real PulseAudio server the latency
-            // hacks are mpv's documented workaround, so they stay
-            // untouched there.
+            // sandbox exposes audio only through the pulse socket, and the
+            // bundled libmpv is built WITHOUT the pipewire and jack outputs
+            // (see the flatpak manifest), so nothing else can win the
+            // audio-output selection. Native builds keep mpv's defaults.
+            // They pick ao=pipewire wherever a pipewire server runs, and
+            // on a real PulseAudio server the latency hacks are mpv's
+            // documented workaround, so they stay untouched there.
             if crate::env_spawn::in_flatpak() {
                 // ao_pulse's "latency hacks" (default on) replace the
                 // server's timing with mpv's own elaborate latency

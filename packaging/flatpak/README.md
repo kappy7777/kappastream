@@ -81,7 +81,12 @@ artifacts; everything below is the local equivalent.
   drops libva or the ffnvcodec headers stop resolving, configure fails
   the build instead of silently shipping a software-only stack — the
   app's hwdec dropdown offers `vaapi` and `nvdec`, and every other Linux
-  artifact's ffmpeg carries both.
+  artifact's ffmpeg carries both. Audio outputs are pulse-only: pipewire
+  and jack are compiled OUT (the sandbox exposes audio solely through the
+  pulse socket, so ao=pipewire could never connect and mpv would fall
+  back anyway — compiling it out just makes the selection deterministic);
+  alsa stays because the runtime routes it to pulse and it sorts after
+  pulse in mpv's output list.
 - **streamlink**: pip-installed into `/app` (the runtime's python3). The
   app resolves streamlink through `PATH` (or `STREAMLINK_BIN`), and
   `/app/bin` is on `PATH` inside the sandbox — no code changes needed.
