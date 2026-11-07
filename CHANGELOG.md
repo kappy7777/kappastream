@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   account. All existing data — favorites, settings, VOD positions —
   carries over automatically on the first launch of the renamed build.
 
+### Fixed
+
+- **Hardware video decoding works in the mpv engine.** The render
+  context never handed libmpv the display it renders on, so the VA-API
+  interop had no device to resolve and hardware decoding silently fell
+  back to software on every Linux build. The Wayland and X11 display
+  handles are now passed at render-context creation — under X11, where
+  GTK3's GL context is GLX and the zero-copy interop cannot engage, the
+  engine falls back to copy-based `vaapi-copy` so decoding is still
+  hardware-assisted.
+
 ## [1.0.9] - 2026-11-04
 
 ### Fixed
