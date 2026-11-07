@@ -94,10 +94,12 @@ const RESCUE_PROBE_LIMIT: u32 = 9;
 /// Runs the migration (see the module docs). Cheap when there is nothing
 /// to do: one `is_dir()` stat when the old directory is absent.
 pub fn migrate() {
-    let Some(base) = data_root() else {
-        return;
-    };
-    migrate_dir(&base.join(OLD_IDENTIFIER), &base.join(NEW_IDENTIFIER));
+    if let Some(base) = data_root() {
+        migrate_dir(&base.join(OLD_IDENTIFIER), &base.join(NEW_IDENTIFIER));
+    }
+    if let Some(base) = config_root() {
+        migrate_config_dir(&base.join(OLD_IDENTIFIER), &base.join(NEW_IDENTIFIER));
+    }
 }
 
 /// The identifier-named storage base for the current platform (see the
@@ -136,6 +138,50 @@ fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
+}
+
+/// The identifier-named CONFIG base for the current platform — where
+/// tauri-plugin-window-state keeps `.window-state.json` (saved window
+/// geometry; `dirs::config_dir()/<identifier>`). Distinct from the data
+/// root above; `None` under the same conditions.
+fn config_root() -> Option<PathBuf> {
+    if cfg!(target_os = "linux") {
+        // Same XDG treatment as `data_root`: empty is unset, relative is
+        // invalid, and both fall back to the default the app resolves.
+        match std::env::var_os("XDG_CONFIG_HOME") {
+            Some(v) if !v.is_empty() && Path::new(&v).is_absolute() => Some(PathBuf::from(v)),
+            _ => home_dir().map(|h| h.join(".config")),
+        }
+    } else if cfg!(target_os = "windows") {
+        // %APPDATA% (Roaming) equals the known folder for standard
+        // profiles; the redirection caveat of `data_root` applies.
+        std::env::var_os("APPDATA")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        home_dir().map(|h| h.join("Library").join("Application Support"))
+    } else {
+        None
+    }
+}
+
+/// Carries the saved window geometry across the rename: a plain rename of
+/// the old config dir into the new name when nothing has written the new
+/// one yet. Anything else — no old dir, or a new dir already present — is
+/// a no-op: the file is one JSON blob the plugin regenerates on close, so
+/// the marker/move-aside machinery of the data migration buys nothing
+/// here, and a both-exist state simply lets the newer file win.
+fn migrate_config_dir(old: &Path, new: &Path) {
+    if !old.is_dir() || new.exists() {
+        return;
+    }
+    if let Err(err) = fs::rename(old, new) {
+        eprintln!(
+            "kappastream: could not carry the saved window geometry from {} to {}: {err}",
+            old.display(),
+            new.display()
+        );
+    }
 }
 
 /// Injectable filesystem operations, so every branch of the decision tree
@@ -1038,6 +1084,50 @@ mod tests {
             "young staging dirs are left alone"
         );
         assert!(stale.exists() && young.exists());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn config_dir_renames_when_new_is_absent() {
+        let base = scratch("cfg-rename");
+        let old = base.join("old");
+        let new = base.join("new");
+        write(&old.join(".window-state.json"), "{\"size\":null}");
+
+        migrate_config_dir(&old, &new);
+
+        assert!(new.join(".window-state.json").is_file());
+        assert!(!old.exists());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn config_dir_is_a_no_op_without_old_or_with_new_present() {
+        // No old dir at all.
+        let base = scratch("cfg-noop-1");
+        let old = base.join("old");
+        let new = base.join("new");
+        fs::create_dir_all(&base).expect("create base");
+        migrate_config_dir(&old, &new);
+        assert!(!old.exists() && !new.exists());
+        let _ = fs::remove_dir_all(&base);
+
+        // Both present: the newer file at the new name wins, the old dir
+        // stays where it is.
+        let base = scratch("cfg-noop-2");
+        let old = base.join("old");
+        let new = base.join("new");
+        write(&old.join(".window-state.json"), "OLD");
+        write(&new.join(".window-state.json"), "NEW");
+        migrate_config_dir(&old, &new);
+        assert_eq!(
+            fs::read_to_string(new.join(".window-state.json")).unwrap(),
+            "NEW"
+        );
+        assert_eq!(
+            fs::read_to_string(old.join(".window-state.json")).unwrap(),
+            "OLD"
+        );
         let _ = fs::remove_dir_all(&base);
     }
 }
