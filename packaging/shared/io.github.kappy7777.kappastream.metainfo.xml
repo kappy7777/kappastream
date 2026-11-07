@@ -16,6 +16,10 @@
   <name>kappastream</name>
   <summary>Lightweight, anonymous Twitch viewer</summary>
 
+  <developer id="io.github.kappy7777">
+    <name>kappy</name>
+  </developer>
+
   <url type="homepage">https://github.com/kappy7777/kappastream</url>
   <url type="bugtracker">https://github.com/kappy7777/kappastream/issues</url>
   <url type="vcs-browser">https://github.com/kappy7777/kappastream</url>
