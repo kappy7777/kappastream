@@ -860,9 +860,9 @@ jobs:
   # action unconditionally prefixes the build with xvfb-run, so the first
   # CI attempt failed in seconds with "xvfb-run: flatpak-builder: not
   # found"). The image (freedesktop-sdk based, tag matching the manifest's
-  # GNOME 50 runtime) ships flatpak-builder + the bwrap sandbox; the
+  # GNOME 51 runtime) ships flatpak-builder + the bwrap sandbox; the
   # privileged option is what lets bubblewrap work inside a container. The
-  # manifest itself (GNOME 50 SDK + rust-stable/node22 extensions;
+  # manifest itself (GNOME 51 SDK + rust-stable/node22 extensions;
   # ffmpeg/libplacebo/mpv/libass/libappindicator/streamlink built
   # in-manifest, so nothing links the host's libraries) consumes the
   # checked-out tree via a dir source, so the version guard below pins
@@ -877,7 +877,7 @@ jobs:
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
       options: --privileged
     steps:
       - name: Checkout

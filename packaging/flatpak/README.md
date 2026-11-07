@@ -8,7 +8,7 @@ artifacts; everything below is the local equivalent.
 ## Layout
 
 - `io.github.kappy7777.kappastream.json` — the flatpak-builder manifest
-  (GNOME 50 runtime + SDK, `rust-stable` + `node22` SDK extensions).
+  (GNOME 51 runtime + SDK, `rust-stable` + `node22` SDK extensions).
 - `shared-modules/` — vendored copy of the three modules the app needs
   from Flathub's [shared-modules] repo (pinned at commit
   `fb3a4070f1f1b8a14ba8e5bc088ea9665f795550`):
@@ -116,7 +116,7 @@ flatpak-builder --user --install-deps-from=flathub --ccache --force-clean \
   --repo=repo build io.github.kappy7777.kappastream.json
 ```
 
-First run downloads the GNOME 50 SDK + extensions (~1.5 GB) and compiles
+First run downloads the GNOME 51 SDK + extensions (~1.5 GB) and compiles
 the C stack (ffmpeg/libplacebo/mpv) plus the Rust app — expect 25-40 min.
 Later runs reuse `build/` and the ccache.
 
