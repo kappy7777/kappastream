@@ -25,7 +25,12 @@ cd "$repo"
 FBT_COMMIT=9d86d336a39b9af38b86f114b6ce5820fe260f91
 FBT_BASE="https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/${FBT_COMMIT}"
 OUT="$repo/packaging/flatpak/sources"
-RUNTIME="org.gnome.Sdk//50"
+MANIFEST="$repo/packaging/flatpak/io.github.kappy7777.kappastream.json"
+# The pip wheels must resolve against the runtime the manifest pins (they
+# carry the runtime's python ABI), so read runtime-version from the
+# manifest instead of hard-coding it here — the two must never drift.
+RUNTIME_VERSION="$(python3 -c 'import json; print(json.load(open("'"$MANIFEST"'"))["runtime-version"])')"
+RUNTIME="org.gnome.Sdk//${RUNTIME_VERSION}"
 # The streamlink pin lives in the generated module itself (the manifest
 # only includes the file), so read it back from the committed copy.
 STREAMLINK_VERSION="$(python3 -c 'import json,re; m=re.search(r"streamlink==([0-9.]+)", open("packaging/flatpak/sources/streamlink-sources.json").read()); assert m; print(m.group(1))')"
