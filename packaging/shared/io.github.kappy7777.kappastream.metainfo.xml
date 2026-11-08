@@ -55,7 +55,7 @@
   <screenshots>
     <screenshot type="default">
       <caption>Favorites, channel page and chat in the gruvbox theme</caption>
-      <image type="source" width="1920" height="988">https://raw.githubusercontent.com/kappy7777/kappastream/561131deb3bc80f86c84a7f9e2ecca6f47019a87/docs/screenshots/gruvbox.png</image>
+      <image type="source" width="1745" height="891">https://raw.githubusercontent.com/kappy7777/kappastream/d1988c57866dbd4901e0ebf84fc3a2ae5334eb4a/docs/screenshots/gruvbox.png</image>
     </screenshot>
     <screenshot>
       <caption>The main interface in the blacklight theme</caption>
