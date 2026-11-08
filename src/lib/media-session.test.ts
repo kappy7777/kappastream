@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { bindMediaSessionPlayPause, setMediaSessionMetadata } from './media-session'
+import { applyMediaAction, bindMediaSessionPlayPause, setMediaSessionMetadata } from './media-session'
 
 /*
  * The Media Session helpers against a stubbed navigator.mediaSession. The
@@ -160,5 +160,27 @@ describe('setMediaSessionMetadata', () => {
 
   it('does nothing (and does not throw) without MediaMetadata', () => {
     expect(() => setMediaSessionMetadata('chan1')).not.toThrow()
+  })
+})
+
+describe('applyMediaAction', () => {
+  it('pauses only while playing and plays only while paused', () => {
+    let playing = true
+    const toggle = vi.fn()
+    const controls = { playing: () => playing, toggle }
+    applyMediaAction('pause', controls)
+    expect(toggle).toHaveBeenCalledTimes(1)
+    playing = false
+    applyMediaAction('pause', controls)
+    expect(toggle).toHaveBeenCalledTimes(1)
+    applyMediaAction('play', controls)
+    expect(toggle).toHaveBeenCalledTimes(2)
+    playing = true
+    applyMediaAction('play', controls)
+    expect(toggle).toHaveBeenCalledTimes(2)
+  })
+
+  it('is a no-op without controls', () => {
+    expect(() => applyMediaAction('pause', null)).not.toThrow()
   })
 })

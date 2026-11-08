@@ -6,7 +6,8 @@
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { PhysicalSize } from '@tauri-apps/api/dpi'
   import { shouldRecoverStallAfterPause, toKsvodProxyUrl } from './lib/playback'
-  import { bindMediaSessionPlayPause } from './lib/media-session'
+  import { bindMediaSessionPlayPause, type MediaSessionControls } from './lib/media-session'
+  import { bindPageMprisActions, createPageMprisReporter, pageMediaState, watchMediaElement } from './lib/page-mpris'
   import { PlaybackSession } from './lib/playback-session.svelte'
   import { readSavedPipRect, writeSavedPipRect, type PipRectShape } from './lib/pip-rect'
   import { STORAGE_KEYS } from './lib/storage-keys'
@@ -31,6 +32,7 @@
 
   interface InitPayload {
     url: string
+    channel?: string
     volume: number
     muted: boolean
     quality?: string
@@ -345,12 +347,36 @@
   // Media keys pause this window's stream through the same discipline (the
   // PiP webview is its own document with its own Media Session). Without the
   // handler a hardware pause looks like a stall and recovery force-resumes it.
-  onMount(() =>
-    bindMediaSessionPlayPause(() => {
-      const el = videoEl
-      return el ? { playing: () => !el.paused, toggle: togglePlay } : null
-    }),
-  )
+  function mediaControls(): MediaSessionControls | null {
+    const el = videoEl
+    return el ? { playing: () => !el.paused, toggle: togglePlay } : null
+  }
+  onMount(() => bindMediaSessionPlayPause(mediaControls))
+
+  // Inside the flatpak this window reports its own playback to the Rust
+  // MPRIS stand-in (it is the audio authority while open, so it serves
+  // ahead of the main window there) and receives desktop play/pause the
+  // same way. The title is the channel from ks://pip-init; PiP has no
+  // avatar. Outside the flatpak the reporter goes quiet after one answer.
+  const pageMpris = createPageMprisReporter()
+  let pipChannel = $state<string | null>(null)
+  let pageMediaTick = $state(0)
+  $effect(() => {
+    const el = videoEl
+    if (!el) return
+    return watchMediaElement(el, () => {
+      pageMediaTick++
+    })
+  })
+  $effect(() => {
+    void pageMediaTick
+    pageMpris.report({
+      state: pageMediaState(videoEl ?? null, errorMsg !== ''),
+      title: pipChannel,
+      artUrl: null,
+    })
+  })
+  onMount(() => (isTauri() ? bindPageMprisActions(getCurrentWindow().label, mediaControls) : () => {}))
 
   async function gesturePlay(): Promise<void> {
     if (!videoEl) return
@@ -651,6 +677,7 @@
 
     const uInit = await listen<InitPayload>(EV_INIT, (e) => {
       const p = e.payload
+      pipChannel = p.channel ?? null
       volume = typeof p.volume === 'number' ? Math.max(0, Math.min(1, p.volume)) : 1
       muted = !!p.muted
       if (videoEl) {

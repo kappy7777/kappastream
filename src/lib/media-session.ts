@@ -13,6 +13,10 @@
 // registers real, audio-producing media elements, and a stand-in element
 // (muted or not) never registers — so native media keys are served by the
 // Rust-side MPRIS D-Bus service instead (src-tauri/src/mpv/mpris.rs).
+// Inside the Flatpak that bridge never registers at all, and the Rust
+// service stands in for the webview player too — its desktop play/pause
+// requests arrive as an event routed through the same applyMediaAction
+// (see page-mpris.ts).
 //
 // Feature-detected per action: engines without Media Session, or that
 // reject an action name, keep the previous behavior and bind nothing.
@@ -27,6 +31,16 @@ export interface MediaSessionControls {
   toggle: () => void
 }
 
+/** Apply one media action through the surface's controls: a pause request
+ * while paused must never resume, and vice versa — the same discipline the
+ * action handlers below and the Rust MPRIS stand-in's play/pause event
+ * both need. */
+export function applyMediaAction(action: 'play' | 'pause', controls: MediaSessionControls | null): void {
+  if (!controls) return
+  if (action === 'pause' && controls.playing()) controls.toggle()
+  if (action === 'play' && !controls.playing()) controls.toggle()
+}
+
 /**
  * Route the pause/play media actions into the surface `getControls`
  * returns. Each action only toggles when it would actually change the
@@ -37,16 +51,9 @@ export function bindMediaSessionPlayPause(getControls: () => MediaSessionControl
   const ms = typeof navigator === 'undefined' ? undefined : navigator.mediaSession
   if (!ms) return () => {}
   const bound: MediaSessionAction[] = []
-  const intents: Array<{ action: MediaSessionAction; when: (playing: boolean) => boolean }> = [
-    { action: 'pause', when: (playing) => playing },
-    { action: 'play', when: (playing) => !playing },
-  ]
-  for (const { action, when } of intents) {
+  for (const action of ['pause', 'play'] as const) {
     try {
-      ms.setActionHandler(action, () => {
-        const controls = getControls()
-        if (controls && when(controls.playing())) controls.toggle()
-      })
+      ms.setActionHandler(action, () => applyMediaAction(action, getControls()))
       bound.push(action)
     } catch {
       // Unsupported action on this engine — its default behavior stays.

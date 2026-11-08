@@ -63,7 +63,14 @@
   import { notifications } from './lib/notifications.svelte.ts'
   import { tooltipState } from './lib/tooltip.svelte.ts'
   import { tileStore } from './lib/tile-store.svelte.ts'
-  import { bindMediaSessionPlayPause, setMediaSessionMetadata } from './lib/media-session'
+  import { bindMediaSessionPlayPause, setMediaSessionMetadata, type MediaSessionControls } from './lib/media-session'
+  import {
+    bindPageMprisActions,
+    createPageMprisReporter,
+    pageMediaElement,
+    pageMediaState,
+    watchMediaElement,
+  } from './lib/page-mpris'
   import MultiView from './lib/MultiView.svelte'
   import PinnedMessage from './lib/PinnedMessage.svelte'
   import { pinnedChat } from './lib/pinned-chat.svelte'
@@ -633,27 +640,31 @@
   // OS media keys (keyboard pause/play, desktop media controls) route through
   // the same discipline as the on-screen controls — otherwise the engine
   // delivers the pause as a plain video event and live stall recovery undoes
-  // it ~1s later. See lib/media-session.ts.
-  onMount(() =>
-    bindMediaSessionPlayPause(() => {
-      if (multiView) {
-        const controls = authorityTileControls
-        return controls ? { playing: () => !controls.isPaused(), toggle: controls.togglePlay } : null
-      }
-      const backend = videoBackend
-      return backend ? { playing: () => !backend.paused, toggle: toggleVideoPlay } : null
-    }),
-  )
+  // it ~1s later. See lib/media-session.ts. The same controls also serve
+  // the Rust MPRIS stand-in's play/pause event (below).
+  function mediaControls(): MediaSessionControls | null {
+    if (multiView) {
+      const controls = authorityTileControls
+      return controls ? { playing: () => !controls.isPaused(), toggle: controls.togglePlay } : null
+    }
+    const backend = videoBackend
+    return backend ? { playing: () => !backend.paused, toggle: toggleVideoPlay } : null
+  }
+  onMount(() => bindMediaSessionPlayPause(mediaControls))
 
   // Desktop media controls show the stream they would act on: title plus
   // cover art (the channel avatar). This feeds the WEBVIEW's own media
   // session (the hls engine's bridge); native playback gets its art
   // through the MPRIS cache below.
-  $effect(() => {
+  function mediaMetadata(): { title: string | null; artUrl: string | null } {
     const authority = multiView ? tileStore.authority : null
     const title = channelJoined ?? authority?.channel ?? null
     const live = multiView ? (authority?.liveStatus ?? null) : activeStatus
-    setMediaSessionMetadata(title, avatarOf(live))
+    return { title, artUrl: avatarOf(live) }
+  }
+  $effect(() => {
+    const meta = mediaMetadata()
+    setMediaSessionMetadata(meta.title, meta.artUrl)
   })
 
   // Native-engine media keys are served by the Rust MPRIS service, and it
@@ -674,6 +685,33 @@
     if (!isTauri() || multiView) return
     void invoke('mpris_set_art', { id: 0, url: avatarOf(activeStatus) }).catch(() => {})
   })
+
+  // Inside the flatpak the webview's own media-session bridge never
+  // registers, so the Rust MPRIS service stands in and the page reports
+  // its playback to it (see lib/page-mpris.ts). The command answers false
+  // outside the flatpak and the reporter goes quiet, so native behavior
+  // is unchanged. Reports follow the element's own events plus any
+  // metadata/status change; a native-engine surface (no element here)
+  // reports "stopped", leaving the name to the engines.
+  const pageMpris = createPageMprisReporter()
+  let pageMediaTick = $state(0)
+  const pageMediaEl = $derived(
+    pageMediaElement({ multiView, authorityVideo: authorityTileVideo, backend: videoBackend }),
+  )
+  $effect(() => {
+    const el = pageMediaEl
+    if (!el) return
+    return watchMediaElement(el, () => {
+      pageMediaTick++
+    })
+  })
+  $effect(() => {
+    void pageMediaTick
+    const failed = !multiView && (playerStatus === 'error' || playerStatus === 'offline')
+    const meta = mediaMetadata()
+    pageMpris.report({ state: pageMediaState(pageMediaEl, failed), ...meta })
+  })
+  onMount(() => bindPageMprisActions(currentWin()?.label, mediaControls))
 
   function toggleVideoMute(): void {
     if (multiView) {
