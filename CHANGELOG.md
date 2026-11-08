@@ -27,14 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Hardware video decoding works in the mpv engine.** The render
-  context never handed libmpv the display it renders on, so the VA-API
-  interop had no device to resolve and hardware decoding silently fell
-  back to software on every Linux build. The Wayland and X11 display
-  handles are now passed at render-context creation — under X11, where
-  GTK3's GL context is GLX and the zero-copy interop cannot engage, the
-  engine falls back to copy-based `vaapi-copy` so decoding is still
-  hardware-assisted.
+- **Hardware video decoding engages where it previously could not.**
+  The render context now hands libmpv the display it renders on, so the
+  VA-API interop can resolve a device; where zero-copy cannot engage —
+  X11's GLX context, or the Flatpak sandbox — the engine falls back to
+  copy-based `vaapi-copy`/`nvdec-copy` instead of silently dropping to
+  software.
+
+- **Hardened the trust boundary around third-party data.** Proxy
+  responses are served as inert data, the cover-art download is
+  bounded, the webview sends no Referrer, storyboard file names are
+  validated, and the picture-in-picture window holds only the
+  permissions it uses.
 
 ## [1.0.9] - 2026-11-04
 
