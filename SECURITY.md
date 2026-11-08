@@ -61,12 +61,18 @@ commands plus one custom URI scheme to its WebView. The complete surface
   surface inside the window (a rectangle, nothing else), and
   `mpris_set_authority` only names which engine answers the MPRIS
   service below.
-- **MPRIS D-Bus service** (Linux, native engine) — the
+- **MPRIS D-Bus service** (Linux) — the
   `org.mpris.MediaPlayer2.kappastream` name exposes Play, Pause and
   Stop against the native engine, nothing more. Its cover art comes
   from `mpris_set_art`, which downloads an https avatar from
   `static-cdn.jtvnw.net` only, time- and size-bounded, into the app
-  cache.
+  cache. Flatpak builds additionally take webview-player reports via
+  `mpris_note_page` (a playing/paused/stopped token, a length-capped
+  title, and an avatar URL under the same rules; keyed to the calling
+  window, recorded only inside the sandbox, where the webview's own
+  media-session bridge never registers) and answer desktop play/pause
+  with a plain play-or-pause request event to exactly that window —
+  every other build records nothing and sends nothing.
 - **Twitch GQL proxy** (`gql_fetch`) — a POST proxy to `gql.twitch.tv`
   that bypasses browser CORS, with Twitch's public web Client-ID pinned
   in the native binary so the page cannot change or omit it.
