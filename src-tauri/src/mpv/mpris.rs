@@ -400,6 +400,13 @@ impl Root {
 
 struct Player;
 
+/// The paused value PlayPause must SET: the opposite of the current state.
+/// Passing the current state back (Paused → paused, Playing → playing) made
+/// the toggle a silent no-op.
+fn engine_paused_for_play_pause(status: Status) -> bool {
+    status == Status::Playing
+}
+
 #[interface(name = "org.mpris.MediaPlayer2.Player")]
 impl Player {
     async fn next(&self) {}
@@ -421,7 +428,7 @@ impl Player {
     }
     async fn play_pause(&self) {
         if let Some((id, status)) = snapshot() {
-            let _ = mpv_set_paused(Some(id), status == Status::Paused).await;
+            let _ = mpv_set_paused(Some(id), engine_paused_for_play_pause(status)).await;
         }
     }
     async fn seek(&self, _offset: i64) {}
@@ -741,6 +748,12 @@ mod tests {
             _ => panic!("trackid is not an object path"),
         };
         assert_ne!(path(&a), path(&b));
+    }
+
+    #[test]
+    fn play_pause_pauses_a_playing_engine_and_resumes_a_paused_one() {
+        assert!(engine_paused_for_play_pause(Status::Playing));
+        assert!(!engine_paused_for_play_pause(Status::Paused));
     }
 
     #[test]
