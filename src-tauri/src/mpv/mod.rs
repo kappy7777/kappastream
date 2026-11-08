@@ -708,12 +708,13 @@ fn spawn_event_thread(app: AppHandle, mpv: &'static Mpv, id: u32) {
                     // The display aspect drives the shared content rect (the
                     // mpv surface rect AND every page overlay aligned to the
                     // video). Read it fresh on every reconfig instead of
-                    // observing the property: an observed property's
-                    // "became unavailable" change arrives with a NULL payload
-                    // that libmpv2 maps to NO event, so observation could
-                    // never see the params disappear — but a reconfig always
-                    // fires when video appears, changes shape, or goes away.
-                    // Deduped: reconfigs burst during startup.
+                    // observing the property: a property that becomes
+                    // unavailable delivers its change with an empty payload
+                    // (PropertyData::None), which this loop drops, so
+                    // observation would never see the params disappear. A
+                    // reconfig always fires when video appears, changes
+                    // shape, or goes away. Deduped: reconfigs burst during
+                    // startup.
                     let aspect = video_display_aspect(mpv);
                     if aspect != last_aspect {
                         last_aspect = aspect;
