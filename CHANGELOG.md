@@ -40,6 +40,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validated, and the picture-in-picture window holds only the
   permissions it uses.
 
+- **Desktop play/pause now toggles mpv playback.** The play-pause
+  media-key action re-applied the current state instead of flipping it,
+  so hardware media keys and desktop players did nothing while the
+  embedded engine played.
+
+- **Desktop media controls work in the Flatpak while the default engine
+  plays.** Inside the sandbox the webview's media-session bridge never
+  registers, so media keys and the desktop media widget did nothing
+  while the hls engine played. The app's own media-control service now
+  stands in there: the widget shows the channel and its avatar, and
+  desktop play/pause goes through the player's own controls.
+
 ## [1.0.9] - 2026-11-04
 
 ### Fixed
