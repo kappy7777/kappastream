@@ -152,7 +152,7 @@ flatpak install --user kappastream-*-x86_64.flatpak
 
 Streamlink, the mpv engine and the codecs all run from inside the sandbox — nothing to install or configure on the host, and any distro with Flatpak works.
 
-**The Flatpak never checks for updates and will not notify you about new releases** — watch the [releases page](../../releases/latest) and install a newer bundle to update; it replaces the installed version.
+**Updates:** the Flatpak checks for new releases at startup (Settings → 'Check for updates' can turn it off) and shows a banner that opens the release page — it never downloads or installs anything; install a newer bundle to update. Audio plays through PulseAudio by default; for native PipeWire output from the embedded mpv engine: `flatpak override --user --filesystem=xdg-run/pipewire-0 io.github.kappy7777.kappastream` (undo with `--nofilesystem=xdg-run/pipewire-0`).
 
 ### 🖥️ Windows
 
@@ -230,7 +230,7 @@ The application contacts only the services required for playback, chat, metadata
 | **Twitch static CDN** — `static-cdn.jtvnw.net` | Load native emotes and chat badges |
 | **Twitch GQL** — `gql.twitch.tv` | Source for favorites live status, viewer count, title, game, avatar, and Twitch user-ID lookup |
 | **7TV, BTTV and FFZ** | Load third-party emotes |
-| **GitHub Releases** — `github.com/kappy7777/kappastream/releases` | On startup, check whether a newer kappastream release is available and, if so, offer to download, verify (minisign signature), and install it (AppImage / .deb / .rpm / Windows / macOS). AUR and Flatpak installs never make this request. |
+| **GitHub Releases** — `github.com/kappy7777/kappastream/releases` | On startup, check whether a newer kappastream release is available and, if so, offer to download, verify (minisign signature), and install it (AppImage / .deb / .rpm / Windows / macOS). The Flatpak makes the same check, notify-only; AUR installs never make this request. |
 
 These third-party services can see normal request info like your IP address — never your Twitch account, an OAuth token, or your profile.
 
@@ -238,7 +238,7 @@ The update check is a single anonymous HTTPS GET to the project's own GitHub Rel
 
 **Data sources.** Favorites load through one batched, anonymous Twitch request per refresh. If that request fails, the app holds each channel's last known status and retries with backoff — there is no second data source.
 
-**VODs and clips.** Past broadcasts and clips are served from Twitch's CloudFront CDN. Because CloudFront sends no CORS headers, past-broadcast HLS is fetched through a small in-app proxy (the `ksvod` URI scheme) and handed to the player; clips play directly. The proxy contacts only Twitch's own media hosts.
+**VODs and clips.** Past broadcasts and clips are served from Twitch's CloudFront CDN. Because CloudFront sends no CORS headers, past-broadcast HLS is fetched through a small in-app proxy (the `ksvod` URI scheme) and handed to the player; clips play directly. The proxy contacts only allowlisted Twitch media hosts (the twitch.tv, ttvnw.net and ttv-clips.net families, and CloudFront distribution hostnames) and serves every response as inert data.
 
 kappastream does not use Twitch Helix or Kraken and cannot authenticate as you.
 
@@ -246,7 +246,7 @@ kappastream does not use Twitch Helix or Kraken and cannot authenticate as you.
 
 Release packages are built by GitHub Actions from the repository source. The [release workflow](.github/workflows/release.yml) and its [public build logs](../../actions) can be inspected directly.
 
-Each release includes a `SHA256SUMS` file covering every published artifact: the AppImage, Debian package, RPM package, Windows installer, macOS disk image and app bundle, and the prebuilt Linux tarball (the payload the AUR `kappastream-bin` package installs).
+Each release includes a `SHA256SUMS` file covering every published artifact: the AppImage, Debian package, RPM package, Flatpak bundle, Windows installer, macOS disk image and app bundle, and the prebuilt Linux tarball (the payload the AUR `kappastream-bin` package installs).
 
 Download the artifacts into the same directory and verify them with:
 
