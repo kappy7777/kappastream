@@ -110,7 +110,7 @@ tauri-plugin-window-state = "2.4.1"
 # resolves to an empty dep set and the module is cfg'd out in lib.rs — a
 # plain `cargo build` there compiles and links nothing mpv.
 [target.'cfg(target_os = "linux")'.dependencies]
-libmpv2 = { version = "6", optional = true }
+libmpv2 = { version = "7", optional = true }
 libloading = { version = "0.9", optional = true }
 gtk = { version = "0.18", optional = true }
 glib = { version = "0.18", optional = true }
