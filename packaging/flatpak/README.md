@@ -28,7 +28,13 @@ artifacts; everything below is the local equivalent.
   `sh scripts/flatpak-gen-sources.sh` whenever `package-lock.json`,
   `src-tauri/Cargo.lock`, or the streamlink pin changes — a stale file is
   not silent: the offline build fails loudly (npm `ENOTCACHED`, cargo
-  vendor-vs-lockfile mismatch, pip resolution error).
+  vendor-vs-lockfile mismatch, pip resolution error). The cargo and npm
+  lists are lockfile-derived and regenerate byte-identical; pip has no
+  lockfile, so each regeneration resolves streamlink's Python
+  dependencies to the newest compatible wheels — a regenerated
+  `streamlink-sources.json` can therefore carry real dependency bumps,
+  which the regen diff shows and deserves the same review as any
+  dependency change.
 
 ## Why each bundled piece exists
 
