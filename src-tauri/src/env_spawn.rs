@@ -76,7 +76,8 @@ pub(crate) fn in_appimage() -> bool {
 /// True inside a flatpak sandbox (the runtime always exports a non-empty
 /// `FLATPAK_ID` to the app process). One shared detector so every
 /// flatpak-only behavior — the mpv audio pacing options, the MPRIS desktop
-/// entry, the external-player handoff — agrees about what a flatpak run is.
+/// entry and webview-player stand-in, the external-player handoff — agrees
+/// about what a flatpak run is.
 pub(crate) fn in_flatpak() -> bool {
     std::env::var_os("FLATPAK_ID").is_some_and(|v| !v.is_empty())
 }

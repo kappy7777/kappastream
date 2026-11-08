@@ -140,6 +140,13 @@ pub fn run() {
 
     builder = vod_proxy::register(builder);
 
+    // Window lifecycle for the mpv module (the MPRIS page stand-in drops a
+    // destroyed window's note). Same cfg as the module itself.
+    #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
+    {
+        builder = builder.on_window_event(mpv::on_window_event);
+    }
+
     builder
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -208,6 +215,8 @@ pub fn run() {
             mpv::mpris_set_authority,
             #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpris_set_art,
+            #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
+            mpv::mpris_note_page,
             #[cfg(all(feature = "mpv-embed", target_os = "linux"))]
             mpv::mpv_set_rect,
         ])

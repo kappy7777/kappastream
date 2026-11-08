@@ -1,4 +1,4 @@
-//! MPRIS D-Bus service for the native engine (media keys on the desktop).
+//! MPRIS D-Bus service for desktop media controls.
 //!
 //! WebKitGTK's own MPRIS bridge — what hardware media keys ride on for the
 //! webview — is built around a real, audio-producing media element, and the
@@ -8,22 +8,34 @@
 //! an `org.mpris.MediaPlayer2.kappastream` service whose Play/Pause/Stop run
 //! the same internal command paths as the Tauri commands.
 //!
-//! Ownership of the well-known name tracks native playback: it is requested
-//! while any engine is playing/paused and released otherwise, so an MPRIS
-//! entry exists exactly while native playback could respond — and never
-//! competes with the webview's element-backed session while the hls engine
-//! plays. Which engine answers is the AUDIO AUTHORITY — the frontend
-//! mirrors that pointer here via `mpris_set_authority`, so desktop keys
-//! follow the same target as the keyboard shortcuts (single view is always
-//! engine 0; a tile becomes the authority by being clicked). Before the
-//! frontend speaks — or when its pick has no live engine — the last engine
-//! that saw a click or a volume/mute/seek write
-//! stands in. What the desktop widgets DISPLAY (xesam:title) rides along
-//! with every load: mpv_load records the channel / VOD / clip title for
-//! the engine it loads. Cover art (mpris:artUrl) arrives separately via
-//! mpris_set_art — the avatar URL is only known once the GQL status
-//! fetch lands, not at load time — and is downloaded to the app cache so
-//! the URI is a local file (GNOME Shell ignores remote art URLs).
+//! Ownership of the well-known name tracks playback: it is requested while
+//! anything playable is live and released otherwise, so an MPRIS entry
+//! exists exactly while playback could respond. Two kinds of player feed
+//! it:
+//!
+//! - **Engines.** Which engine answers is the AUDIO AUTHORITY — the
+//!   frontend mirrors that pointer here via `mpris_set_authority`, so
+//!   desktop keys follow the same target as the keyboard shortcuts (single
+//!   view is always engine 0; a tile becomes the authority by being
+//!   clicked). Before the frontend speaks — or when its pick has no live
+//!   engine — the last engine that saw a click or a volume/mute/seek write
+//!   stands in. What the desktop widgets DISPLAY (xesam:title) rides along
+//!   with every load: mpv_load records the channel / VOD / clip title for
+//!   the engine it loads. Cover art (mpris:artUrl) arrives separately via
+//!   mpris_set_art — the avatar URL is only known once the GQL status
+//!   fetch lands, not at load time — and is downloaded to the app cache so
+//!   the URI is a local file (GNOME Shell ignores remote art URLs).
+//! - **The webview player, inside the Flatpak only.** WebKitGTK's bridge
+//!   never registers in that sandbox (it would need a desktop portal that
+//!   does not exist), so the page reports its own playback via
+//!   `mpris_note_page` — keyed by the calling window's label, so the PiP
+//!   player is covered too — and desktop play/pause travels back as a
+//!   `ks://mpris-action` event to exactly that window. Outside the Flatpak
+//!   the command answers false and records nothing: the webview player
+//!   keeps riding WebKitGTK's own bridge, and this service never competes
+//!   with it there. The page answers at engine id 0 (the single-view
+//!   slot), and a live engine 0 always wins — an engine mid-stream is
+//!   never shadowed by a page note.
 //!
 //! Everything is best-effort: no session bus (or the bus going away
 //! mid-run) just logs — the supervisor below restarts the service on a
@@ -37,6 +49,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use serde::Serialize;
+use tauri::Emitter;
 use zbus::interface;
 use zbus::zvariant::{ObjectPath, OwnedValue, Value};
 
@@ -45,6 +59,22 @@ use super::{lock_or_recover, mpv_set_paused, mpv_stop, DerivedState};
 const MPRIS_NAME: &str = "org.mpris.MediaPlayer2.kappastream";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const TRACK_ID: &str = "/org/mpris/mediaplayer/kappastream/track";
+
+/// Event a desktop play/pause request rides when the serving player is the
+/// webview's (see Target::Page): the reporting window listens for it on
+/// itself and routes the action through its own playback controls.
+const PAGE_ACTION_EVENT: &str = "ks://mpris-action";
+
+/// Art-cache slot for the webview player's avatar. Engine slots are
+/// 0..=MAX_ENGINE_ID, so this sits past the engine range and its cache
+/// files carry their own stem.
+const PAGE_ART_ID: u32 = super::MAX_ENGINE_ID + 1;
+
+/// Bounds on what a page report may carry: titles are channel or VOD
+/// names (well under this), and the art URL is length-checked before it
+/// is parsed.
+const MAX_PAGE_TITLE_CHARS: usize = 256;
+const MAX_PAGE_ART_URL_BYTES: usize = 2048;
 
 /// Restart cadence for the supervised service loop (see ensure_started).
 const MPRIS_RETRY_BASE: Duration = Duration::from_secs(2);
@@ -234,7 +264,8 @@ fn url_hash(url: &str) -> u64 {
 /// the publish swap (which removes the superseded file) is what a widget
 /// sees.
 fn art_file_name(id: u32, url: &str, ext: &str) -> String {
-    format!("engine-{id}-{:016x}.{ext}", url_hash(url))
+    let stem = if id == PAGE_ART_ID { "page" } else { "engine" };
+    format!("{stem}-{id}-{:016x}.{ext}", url_hash(url))
 }
 
 /// The file a publish must remove: the previously published one, unless it
@@ -327,20 +358,235 @@ async fn fetch_art(app: &tauri::AppHandle, id: u32, url: &url::Url) -> Result<()
     Ok(())
 }
 
-fn snapshot() -> Option<(u32, Status)> {
-    let map = lock_or_recover(statuses());
+/// Who answers a desktop media control right now: an mpv engine, or —
+/// inside the flatpak, where the webview's own MPRIS bridge never
+/// registers — the webview player of the named window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Target {
+    Engine(u32),
+    Page(String),
+}
+
+/// One window's webview-player report. `art` is the validated, normalized
+/// avatar URL (or none) — the download itself runs through the same
+/// bounded path as engine art.
+struct PageNote {
+    status: Status,
+    title: Option<String>,
+    art: Option<String>,
+}
+
+/// Page notes keyed by the reporting window's label. The label is taken
+/// from the Webview server-side, so a page cannot report for another
+/// window, and a destroyed window's note is dropped by the window-event
+/// hook (webview teardown does not reliably run page code).
+fn page_notes() -> &'static Mutex<HashMap<String, PageNote>> {
+    static MAP: OnceLock<Mutex<HashMap<String, PageNote>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// A page state token: playing/paused keep the window's note, stopped
+/// removes it, anything else is a caller bug and rejected.
+fn parse_page_state(raw: &str) -> Result<Option<Status>, String> {
+    match raw {
+        "playing" => Ok(Some(Status::Playing)),
+        "paused" => Ok(Some(Status::Paused)),
+        "stopped" => Ok(None),
+        other => Err(format!("unknown page state: {other}")),
+    }
+}
+
+/// Trim, strip control characters, and bound the title; empty becomes
+/// None.
+fn clean_page_title(raw: Option<String>) -> Option<String> {
+    let raw = raw?;
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_PAGE_TITLE_CHARS)
+        .collect();
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(cleaned)
+    }
+}
+
+/// Bound and validate the art URL under the same rules as engine art
+/// (the avatar CDN over https, nothing else). Anything outside the rules
+/// is DROPPED, not rejected: a bad URL must not silence the reporter —
+/// the note still matters without art.
+fn clean_page_art(raw: Option<String>) -> Option<String> {
+    let raw = raw?;
+    if raw.len() > MAX_PAGE_ART_URL_BYTES {
+        return None;
+    }
+    parse_art_url(&raw).map(|url| url.to_string())
+}
+
+/// Record (or remove) one window's note. Outside the flatpak nothing is
+/// ever recorded: the webview's own MPRIS bridge serves the webview player
+/// there, and this service must not compete with it. Returns whether the
+/// note was taken.
+fn record_page_note(
+    in_flatpak: bool,
+    label: &str,
+    status: Option<Status>,
+    title: Option<String>,
+    art: Option<String>,
+) -> bool {
+    if !in_flatpak {
+        return false;
+    }
+    let mut map = lock_or_recover(page_notes());
+    match status {
+        Some(status) => {
+            map.insert(label.to_string(), PageNote { status, title, art });
+        }
+        None => {
+            map.remove(label);
+        }
+    }
+    true
+}
+
+/// Drop a window's note outright (window destroyed). Returns whether a
+/// note existed.
+fn drop_page_note(label: &str) -> bool {
+    lock_or_recover(page_notes()).remove(label).is_some()
+}
+
+/// Which window's player stands in: a secondary window (the PiP player —
+/// the audio authority while open) beats the main window's. Labels are
+/// sorted so the pick is deterministic.
+fn serving_page(notes: &HashMap<String, PageNote>) -> Option<(&str, &PageNote)> {
+    let main = crate::tray::MAIN_WINDOW;
+    let label = notes
+        .keys()
+        .filter(|label| label.as_str() != main)
+        .min()
+        .map(String::as_str)
+        .or_else(|| notes.contains_key(main).then_some(main))?;
+    notes.get(label).map(|note| (label, note))
+}
+
+/// Merge the engine states with the page notes into the one player
+/// desktop controls act on. The page answers at id 0 (the single-view
+/// slot): every pointer that would name engine 0 prefers a LIVE engine 0,
+/// then the page — an engine mid-stream is never shadowed — and with no
+/// engine alive the page alone decides whether the name is owned.
+fn resolve(
+    engines: &HashMap<u32, Status>,
+    pages: &HashMap<String, PageNote>,
+    authority: u32,
+    touched: u32,
+) -> Option<(Target, Status)> {
+    let at_zero = |engines: &HashMap<u32, Status>, pages: &HashMap<String, PageNote>| {
+        engines
+            .get(&0)
+            .map(|status| (Target::Engine(0), *status))
+            .or_else(|| {
+                serving_page(pages)
+                    .map(|(label, note)| (Target::Page(label.to_string()), note.status))
+            })
+    };
+    if let Some(status) = engines.get(&authority) {
+        return Some((Target::Engine(authority), *status));
+    }
+    if authority == 0 {
+        if let Some(hit) = at_zero(engines, pages) {
+            return Some(hit);
+        }
+    }
+    if let Some(status) = engines.get(&touched) {
+        return Some((Target::Engine(touched), *status));
+    }
+    if touched == 0 {
+        if let Some(hit) = at_zero(engines, pages) {
+            return Some(hit);
+        }
+    }
+    // Fallback: the lowest live engine id (single view first). With no
+    // engine alive, the page alone decides whether the name is owned.
+    match engines.keys().min() {
+        Some(&id) => engines.get(&id).map(|status| (Target::Engine(id), *status)),
+        None => {
+            serving_page(pages).map(|(label, note)| (Target::Page(label.to_string()), note.status))
+        }
+    }
+}
+
+fn snapshot() -> Option<(Target, Status)> {
+    // statuses first, then page notes — the one place both are held, so a
+    // single lock order everywhere (statuses -> page_notes -> arts).
+    let engines = lock_or_recover(statuses());
+    let pages = lock_or_recover(page_notes());
     let authority = authority().load(Ordering::Relaxed);
-    if let Some(status) = map.get(&authority) {
-        return Some((authority, *status));
-    }
     let touched = touched().load(Ordering::Relaxed);
-    if let Some(status) = map.get(&touched) {
-        return Some((touched, *status));
+    resolve(&engines, &pages, authority, touched)
+}
+
+/// Title + art for whoever is serving: engines read their own maps, the
+/// page reads its serving note and the page art slot.
+fn media_of(target: &Target) -> (Option<String>, Option<String>) {
+    match target {
+        Target::Engine(id) => (title_of(*id), art_of(*id)),
+        Target::Page(label) => {
+            let title = lock_or_recover(page_notes())
+                .get(label)
+                .and_then(|note| note.title.clone());
+            (title, art_of(PAGE_ART_ID))
+        }
     }
-    // Neither pointer names a live engine (tile closed / stream stopped):
-    // fall back to the lowest live id — engine 0 first, i.e. single view.
-    let id = *map.keys().min()?;
-    map.get(&id).map(|status| (id, *status))
+}
+
+/// One window's webview-player report (see the module doc). Returns false
+/// outside the flatpak — the caller stops reporting after that answer.
+pub(super) fn note_page(
+    in_flatpak: bool,
+    app: &tauri::AppHandle,
+    label: &str,
+    state: &str,
+    title: Option<String>,
+    art_url: Option<String>,
+) -> Result<bool, String> {
+    if !in_flatpak {
+        return Ok(false);
+    }
+    let status = parse_page_state(state)?;
+    let title = clean_page_title(title);
+    let art = clean_page_art(art_url);
+    let playing = status.is_some();
+    record_page_note(true, label, status, title, art);
+    if playing {
+        ensure_started(app);
+    }
+    sync_page_art(app);
+    Ok(true)
+}
+
+/// Drop a window's note (its window was destroyed).
+pub(super) fn forget_page(app: &tauri::AppHandle, label: &str) {
+    drop_page_note(label);
+    sync_page_art(app);
+}
+
+/// Keep the page art slot in step with whatever the serving window last
+/// reported: a change re-triggers the bounded download; no serving player
+/// clears the slot (and its cache file).
+fn sync_page_art(app: &tauri::AppHandle) {
+    let wanted =
+        serving_page(&lock_or_recover(page_notes())).and_then(|(_, note)| note.art.clone());
+    let current = lock_or_recover(arts())
+        .get(&PAGE_ART_ID)
+        .map(|art| art.wanted.clone());
+    if current == wanted {
+        return;
+    }
+    if let Err(err) = note_art(app, PAGE_ART_ID, wanted) {
+        eprintln!("[mpv] mpris page art: {err}");
+    }
 }
 
 /// The DesktopEntry name desktop shells resolve against the installed
@@ -398,7 +644,76 @@ impl Root {
     }
 }
 
-struct Player;
+/// The MPRIS method a desktop control invoked.
+#[derive(Clone, Copy, Debug)]
+enum Method {
+    Play,
+    Pause,
+    PlayPause,
+    Stop,
+}
+
+/// What the webview player can be asked to do. PlayPause and Stop are
+/// resolved against the reported status HERE — the page applies a bare
+/// play/pause and its apply guard makes repeats no-ops (a Stop on a live
+/// stream pauses; there is no deeper stop for a browser player).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum PageAction {
+    Play,
+    Pause,
+}
+
+#[derive(Clone, Serialize)]
+struct PageActionPayload {
+    action: PageAction,
+}
+
+fn page_action(method: Method, status: Status) -> PageAction {
+    match method {
+        Method::Play => PageAction::Play,
+        Method::Pause | Method::Stop => PageAction::Pause,
+        Method::PlayPause if status == Status::Playing => PageAction::Pause,
+        Method::PlayPause => PageAction::Play,
+    }
+}
+
+struct Player {
+    app: tauri::AppHandle,
+}
+
+impl Player {
+    /// Route one desktop control to whoever is serving: engines run their
+    /// own command paths; the webview player gets a bare play/pause event
+    /// on its window (scoped to the window that reported playback).
+    async fn dispatch(&self, method: Method) {
+        let Some((target, status)) = snapshot() else {
+            return;
+        };
+        match (target, method) {
+            (Target::Engine(id), Method::Stop) => {
+                let _ = mpv_stop(Some(id)).await;
+            }
+            (Target::Engine(id), Method::PlayPause) => {
+                let _ = mpv_set_paused(Some(id), engine_paused_for_play_pause(status)).await;
+            }
+            (Target::Engine(id), Method::Play) => {
+                let _ = mpv_set_paused(Some(id), false).await;
+            }
+            (Target::Engine(id), Method::Pause) => {
+                let _ = mpv_set_paused(Some(id), true).await;
+            }
+            (Target::Page(label), method) => {
+                let payload = PageActionPayload {
+                    action: page_action(method, status),
+                };
+                if let Err(err) = self.app.emit_to(label.as_str(), PAGE_ACTION_EVENT, payload) {
+                    eprintln!("[mpv] mpris page action: {err}");
+                }
+            }
+        }
+    }
+}
 
 /// The paused value PlayPause must SET: the opposite of the current state.
 /// Passing the current state back (Paused → paused, Playing → playing) made
@@ -412,24 +727,16 @@ impl Player {
     async fn next(&self) {}
     async fn previous(&self) {}
     async fn stop(&self) {
-        if let Some((id, _)) = snapshot() {
-            let _ = mpv_stop(Some(id)).await;
-        }
+        self.dispatch(Method::Stop).await;
     }
     async fn play(&self) {
-        if let Some((id, _)) = snapshot() {
-            let _ = mpv_set_paused(Some(id), false).await;
-        }
+        self.dispatch(Method::Play).await;
     }
     async fn pause(&self) {
-        if let Some((id, _)) = snapshot() {
-            let _ = mpv_set_paused(Some(id), true).await;
-        }
+        self.dispatch(Method::Pause).await;
     }
     async fn play_pause(&self) {
-        if let Some((id, status)) = snapshot() {
-            let _ = mpv_set_paused(Some(id), engine_paused_for_play_pause(status)).await;
-        }
+        self.dispatch(Method::PlayPause).await;
     }
     async fn seek(&self, _offset: i64) {}
     async fn set_position(&self, _track: ObjectPath<'_>, _position: i64) {}
@@ -457,7 +764,7 @@ impl Player {
     }
     #[zbus(property)]
     fn metadata(&self) -> HashMap<String, OwnedValue> {
-        metadata_map(snapshot().map(|(id, _)| id))
+        metadata_for(snapshot().as_ref().map(|(target, _)| target))
     }
     #[zbus(property)]
     fn volume(&self) -> f64 {
@@ -506,18 +813,21 @@ impl Player {
 /// what GNOME's and KDE's media widgets display — the same string the
 /// hls engine's MediaMetadata would carry) and the cached avatar file
 /// (`mpris:artUrl` — GNOME Shell only renders local files).
-fn metadata_map(id: Option<u32>) -> HashMap<String, OwnedValue> {
-    let id = id.unwrap_or(0);
+fn metadata_with(
+    track_suffix: &str,
+    title: Option<String>,
+    art: Option<String>,
+) -> HashMap<String, OwnedValue> {
     let mut map = HashMap::with_capacity(3);
     let track = Value::ObjectPath(
-        ObjectPath::try_from(format!("{TRACK_ID}/{id}"))
-            .expect("an engine id keeps the track path valid"),
+        ObjectPath::try_from(format!("{TRACK_ID}/{track_suffix}"))
+            .expect("engine ids and the page suffix keep the track path valid"),
     );
     map.insert(
         "mpris:trackid".to_string(),
         track.try_to_owned().expect("object path converts to owned"),
     );
-    if let Some(title) = title_of(id) {
+    if let Some(title) = title {
         map.insert(
             "xesam:title".to_string(),
             Value::from(title)
@@ -525,7 +835,7 @@ fn metadata_map(id: Option<u32>) -> HashMap<String, OwnedValue> {
                 .expect("string value converts to owned"),
         );
     }
-    if let Some(art) = art_of(id) {
+    if let Some(art) = art {
         map.insert(
             "mpris:artUrl".to_string(),
             Value::from(art)
@@ -536,21 +846,36 @@ fn metadata_map(id: Option<u32>) -> HashMap<String, OwnedValue> {
     map
 }
 
+/// Metadata for the serving target (or the empty shell when nothing is
+/// live). Engines keep their per-id track ids; the webview player has its
+/// own.
+fn metadata_for(target: Option<&Target>) -> HashMap<String, OwnedValue> {
+    match target {
+        Some(Target::Engine(id)) => metadata_with(&id.to_string(), title_of(*id), art_of(*id)),
+        Some(Target::Page(label)) => {
+            let (title, art) = media_of(&Target::Page(label.clone()));
+            metadata_with("page", title, art)
+        }
+        None => metadata_with("0", None, None),
+    }
+}
+
 /// Start the service once per process. The spawned task SUPERVISES the
 /// service loop: a connection-level failure (no session bus now, or the
 /// bus going away) is retried on a capped backoff rather than left for the
 /// next engine creation — engines are never removed from the registry, so
 /// nothing else would restart the service and media keys would stay dead
 /// until the app restarts.
-pub(super) fn ensure_started() {
+pub(super) fn ensure_started(app: &tauri::AppHandle) {
     static STARTED: AtomicBool = AtomicBool::new(false);
     if STARTED.swap(true, Ordering::Relaxed) {
         return;
     }
-    tauri::async_runtime::spawn(async {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
         let mut backoff = MPRIS_RETRY_BASE;
         loop {
-            match run().await {
+            match run(&app).await {
                 // Unreachable today: the service loop below never exits on
                 // its own — keep the arm so a future early-return can't turn
                 // the supervisor into a busy loop.
@@ -622,15 +947,15 @@ async fn emit_metadata_signal(conn: &zbus::connection::Connection) -> zbus::Resu
     Ok(())
 }
 
-async fn run() -> zbus::Result<()> {
+async fn run(app: &tauri::AppHandle) -> zbus::Result<()> {
     let conn = zbus::connection::Builder::session()?
         .serve_at(MPRIS_PATH, Root)?
-        .serve_at(MPRIS_PATH, Player)?
+        .serve_at(MPRIS_PATH, Player { app: app.clone() })?
         .build()
         .await?;
     let mut owned = false;
     let mut announced: Option<Status> = None;
-    let mut announced_meta: Option<(u32, Option<String>, Option<String>)> = None;
+    let mut announced_meta: Option<(Target, Option<String>, Option<String>)> = None;
     let mut failures = TickFailures::default();
     loop {
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -662,17 +987,22 @@ async fn run() -> zbus::Result<()> {
                 ),
             }
         }
-        let status = snap.map(|(_, status)| status);
+        // The target tuple is not Copy (it carries the window label), so
+        // borrow for the status read and move only for the metadata read.
+        let status = snap.as_ref().map(|(_, status)| *status);
         if owned && status != announced {
             match emit_status_signal(&conn).await {
                 Ok(()) => announced = status,
                 Err(err) => failures.note("playback-status signal", err),
             }
         }
-        // The controlling engine, its title, or its art changed (authority
+        // The serving player, its title, or its art changed (authority
         // moved, a load replaced the media, or the art download landed):
         // re-announce so widgets re-render.
-        let meta = snap.map(|(id, _)| (id, title_of(id), art_of(id)));
+        let meta = snap.map(|(target, _)| {
+            let (title, art) = media_of(&target);
+            (target, title, art)
+        });
         if owned && meta != announced_meta {
             match emit_metadata_signal(&conn).await {
                 Ok(()) => announced_meta = meta,
@@ -729,11 +1059,11 @@ mod tests {
         cleanup(&[40, 41]);
         set_title(40, Some("somechannel".to_string()));
         set_title(41, None);
-        let with = metadata_map(Some(40));
+        let with = metadata_for(Some(&Target::Engine(40)));
         assert_eq!(str_of(&with, "xesam:title").as_deref(), Some("somechannel"));
         assert!(with.contains_key("mpris:trackid"));
         // No title recorded: the key is absent, not an empty string.
-        let without = metadata_map(Some(41));
+        let without = metadata_for(Some(&Target::Engine(41)));
         assert!(!without.contains_key("xesam:title"));
         assert!(without.contains_key("mpris:trackid"));
         cleanup(&[40, 41]);
@@ -741,8 +1071,8 @@ mod tests {
 
     #[test]
     fn track_ids_differ_per_engine() {
-        let a = metadata_map(Some(40));
-        let b = metadata_map(Some(41));
+        let a = metadata_for(Some(&Target::Engine(40)));
+        let b = metadata_for(Some(&Target::Engine(41)));
         let path = |m: &HashMap<String, OwnedValue>| match &**m.get("mpris:trackid").unwrap() {
             Value::ObjectPath(p) => p.to_string(),
             _ => panic!("trackid is not an object path"),
@@ -763,10 +1093,10 @@ mod tests {
         set_alive(43, Status::Playing);
         note_touched(42);
         set_authority(43);
-        assert_eq!(snapshot(), Some((43, Status::Playing)));
+        assert_eq!(snapshot(), Some((Target::Engine(43), Status::Playing)));
         // The authority engine went away: the touched one stands in.
         lock_or_recover(statuses()).remove(&43);
-        assert_eq!(snapshot(), Some((42, Status::Playing)));
+        assert_eq!(snapshot(), Some((Target::Engine(42), Status::Playing)));
         cleanup(&[42, 43]);
     }
 
@@ -783,7 +1113,7 @@ mod tests {
                 published: None,
             },
         );
-        assert!(!metadata_map(Some(44)).contains_key("mpris:artUrl"));
+        assert!(!metadata_for(Some(&Target::Engine(44))).contains_key("mpris:artUrl"));
         lock_or_recover(arts()).insert(
             44,
             Art {
@@ -792,7 +1122,7 @@ mod tests {
                 published: None,
             },
         );
-        let with = metadata_map(Some(44));
+        let with = metadata_for(Some(&Target::Engine(44)));
         assert_eq!(
             str_of(&with, "mpris:artUrl").as_deref(),
             Some("file:///cache/mpris/engine-44-00000000000000ab.png")
@@ -900,5 +1230,281 @@ mod tests {
         // The stale URL is still the published one (a newer fetch for it is
         // in flight): never delete the published file.
         assert_eq!(stale_art_to_delete(&written, Some(&written)), None);
+    }
+
+    // ── Webview-player stand-in (flatpak) ─────────────────────────────
+
+    /// Test labels are unique per test: the page-note map is a process-wide
+    /// static and tests run in parallel.
+    fn cleanup_pages(labels: &[&str]) {
+        let mut pages = lock_or_recover(page_notes());
+        for label in labels {
+            pages.remove(*label);
+        }
+    }
+
+    fn page_note_of(status: Status, title: Option<&str>) -> (String, PageNote) {
+        (
+            "main".to_string(),
+            PageNote {
+                status,
+                title: title.map(str::to_string),
+                art: None,
+            },
+        )
+    }
+
+    fn engines_of(pairs: &[(u32, Status)]) -> HashMap<u32, Status> {
+        pairs.iter().copied().collect()
+    }
+
+    #[test]
+    fn page_states_parse_and_unknown_states_are_rejected() {
+        assert_eq!(parse_page_state("playing"), Ok(Some(Status::Playing)));
+        assert_eq!(parse_page_state("paused"), Ok(Some(Status::Paused)));
+        assert_eq!(parse_page_state("stopped"), Ok(None));
+        // The vocabulary is exact: casing or emptiness is a caller bug.
+        assert!(parse_page_state("Playing").is_err());
+        assert!(parse_page_state("").is_err());
+    }
+
+    #[test]
+    fn page_notes_record_nothing_outside_the_flatpak() {
+        cleanup_pages(&["test-notflat"]);
+        assert!(!record_page_note(
+            false,
+            "test-notflat",
+            Some(Status::Playing),
+            Some("somechannel".to_string()),
+            None
+        ));
+        assert!(lock_or_recover(page_notes()).get("test-notflat").is_none());
+        cleanup_pages(&["test-notflat"]);
+    }
+
+    #[test]
+    fn a_stopped_page_note_removes_the_record() {
+        cleanup_pages(&["test-stopped"]);
+        assert!(record_page_note(
+            true,
+            "test-stopped",
+            Some(Status::Playing),
+            Some("somechannel".to_string()),
+            None
+        ));
+        assert!(record_page_note(true, "test-stopped", None, None, None));
+        assert!(lock_or_recover(page_notes()).get("test-stopped").is_none());
+        cleanup_pages(&["test-stopped"]);
+    }
+
+    #[test]
+    fn page_titles_are_trimmed_bounded_and_control_free() {
+        assert_eq!(clean_page_title(None), None);
+        assert_eq!(clean_page_title(Some("   ".to_string())), None);
+        assert_eq!(
+            clean_page_title(Some("  somechannel \n".to_string())),
+            Some("somechannel".to_string())
+        );
+        // Control characters are stripped, not rejected.
+        assert_eq!(
+            clean_page_title(Some("a\u{7}b".to_string())),
+            Some("ab".to_string())
+        );
+        // The cap truncates instead of failing.
+        let long = "x".repeat(MAX_PAGE_TITLE_CHARS + 10);
+        assert_eq!(
+            clean_page_title(Some(long)).map(|t| t.chars().count()),
+            Some(MAX_PAGE_TITLE_CHARS)
+        );
+    }
+
+    #[test]
+    fn page_art_urls_are_validated_and_dropped_when_out_of_rules() {
+        assert_eq!(clean_page_art(None), None);
+        assert_eq!(
+            clean_page_art(Some(
+                "https://static-cdn.jtvnw.net/jtv_user_pictures/x.png".to_string()
+            )),
+            Some("https://static-cdn.jtvnw.net/jtv_user_pictures/x.png".to_string())
+        );
+        // Off-host, not https, or oversized: dropped, never an error — a
+        // rejected note would silence the whole reporter.
+        assert_eq!(
+            clean_page_art(Some("https://example.invalid/x.png".to_string())),
+            None
+        );
+        assert_eq!(
+            clean_page_art(Some("http://static-cdn.jtvnw.net/x.png".to_string())),
+            None
+        );
+        let oversized = format!(
+            "https://static-cdn.jtvnw.net/{}.png",
+            "a".repeat(MAX_PAGE_ART_URL_BYTES)
+        );
+        assert_eq!(clean_page_art(Some(oversized)), None);
+    }
+
+    #[test]
+    fn resolve_without_page_notes_follows_the_engine_rules() {
+        let pages = HashMap::new();
+        // Authority wins, then touched, then the lowest live id.
+        assert_eq!(
+            resolve(
+                &engines_of(&[(2, Status::Playing), (1, Status::Paused)]),
+                &pages,
+                1,
+                2
+            ),
+            Some((Target::Engine(1), Status::Paused))
+        );
+        assert_eq!(
+            resolve(&engines_of(&[(2, Status::Playing)]), &pages, 9, 2),
+            Some((Target::Engine(2), Status::Playing))
+        );
+        assert_eq!(resolve(&HashMap::new(), &pages, 0, 0), None);
+    }
+
+    #[test]
+    fn the_page_answers_at_id_0_only_while_engine_0_is_idle() {
+        let pages: HashMap<String, PageNote> =
+            [page_note_of(Status::Playing, None)].into_iter().collect();
+        // A live engine 0 shadows the page even when the pointers drift.
+        assert_eq!(
+            resolve(&engines_of(&[(0, Status::Paused)]), &pages, 0, 3),
+            Some((Target::Engine(0), Status::Paused))
+        );
+        // Engine 0 idle: the page answers through the id-0 pointers.
+        assert_eq!(
+            resolve(&engines_of(&[(3, Status::Playing)]), &pages, 0, 0),
+            Some((Target::Page("main".to_string()), Status::Playing))
+        );
+    }
+
+    #[test]
+    fn an_engine_authority_wins_over_a_live_page() {
+        let pages: HashMap<String, PageNote> =
+            [page_note_of(Status::Playing, None)].into_iter().collect();
+        assert_eq!(
+            resolve(&engines_of(&[(2, Status::Paused)]), &pages, 2, 0),
+            Some((Target::Engine(2), Status::Paused))
+        );
+    }
+
+    #[test]
+    fn with_no_engine_alive_the_page_alone_decides_ownership() {
+        let pages: HashMap<String, PageNote> =
+            [page_note_of(Status::Playing, None)].into_iter().collect();
+        assert_eq!(
+            resolve(&HashMap::new(), &pages, 4, 4),
+            Some((Target::Page("main".to_string()), Status::Playing))
+        );
+        // Engines from 1 up keep the pure-engine fallback (the lowest live
+        // id serves; the page is not spliced in front of a real engine).
+        assert_eq!(
+            resolve(
+                &engines_of(&[(1, Status::Playing), (2, Status::Paused)]),
+                &pages,
+                9,
+                9
+            ),
+            Some((Target::Engine(1), Status::Playing))
+        );
+    }
+
+    #[test]
+    fn a_secondary_window_serves_ahead_of_the_main_window() {
+        let pages: HashMap<String, PageNote> = [
+            page_note_of(Status::Playing, None),
+            (
+                "pip".to_string(),
+                PageNote {
+                    status: Status::Paused,
+                    title: None,
+                    art: None,
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            serving_page(&pages).map(|(label, note)| (label.to_string(), note.status)),
+            Some(("pip".to_string(), Status::Paused))
+        );
+        assert_eq!(
+            resolve(&HashMap::new(), &pages, 0, 0),
+            Some((Target::Page("pip".to_string()), Status::Paused))
+        );
+    }
+
+    #[test]
+    fn page_actions_map_play_pause_toggle_and_stop() {
+        use Method::{Pause, Play, PlayPause, Stop};
+        assert_eq!(page_action(Play, Status::Paused), PageAction::Play);
+        assert_eq!(page_action(Pause, Status::Playing), PageAction::Pause);
+        // The toggle flips against the reported status.
+        assert_eq!(page_action(PlayPause, Status::Playing), PageAction::Pause);
+        assert_eq!(page_action(PlayPause, Status::Paused), PageAction::Play);
+        // Stop on a browser player pauses (or is a guarded no-op paused).
+        assert_eq!(page_action(Stop, Status::Playing), PageAction::Pause);
+        assert_eq!(page_action(Stop, Status::Paused), PageAction::Pause);
+    }
+
+    #[test]
+    fn page_action_payload_serializes_to_the_frontend_vocabulary() {
+        let json = serde_json::to_string(&PageActionPayload {
+            action: PageAction::Pause,
+        })
+        .expect("serializes");
+        assert_eq!(json, r#"{"action":"pause"}"#);
+    }
+
+    #[test]
+    fn page_metadata_uses_the_page_title_and_its_own_track_id() {
+        cleanup_pages(&["test-pagemeta"]);
+        lock_or_recover(page_notes()).insert(
+            "test-pagemeta".to_string(),
+            PageNote {
+                status: Status::Playing,
+                title: Some("somechannel".to_string()),
+                art: None,
+            },
+        );
+        let page = metadata_for(Some(&Target::Page("test-pagemeta".to_string())));
+        assert_eq!(str_of(&page, "xesam:title").as_deref(), Some("somechannel"));
+        let track = |m: &HashMap<String, OwnedValue>| match &**m.get("mpris:trackid").unwrap() {
+            Value::ObjectPath(p) => p.to_string(),
+            _ => panic!("trackid is not an object path"),
+        };
+        assert_ne!(
+            track(&page),
+            track(&metadata_for(Some(&Target::Engine(40))))
+        );
+        cleanup_pages(&["test-pagemeta"]);
+    }
+
+    #[test]
+    fn the_page_art_slot_sits_past_the_engine_range_with_its_own_file_names() {
+        let name = art_file_name(PAGE_ART_ID, "https://static-cdn.jtvnw.net/a.png", "png");
+        assert!(name.starts_with("page-"), "name: {name}");
+        // Engine names keep their shape.
+        assert!(
+            art_file_name(2, "https://static-cdn.jtvnw.net/a.png", "png").starts_with("engine-2-")
+        );
+    }
+
+    #[test]
+    fn forgetting_a_window_drops_only_its_page_note() {
+        cleanup_pages(&["test-drop-a", "test-drop-b"]);
+        record_page_note(true, "test-drop-a", Some(Status::Playing), None, None);
+        record_page_note(true, "test-drop-b", Some(Status::Paused), None, None);
+        assert!(drop_page_note("test-drop-a"));
+        // A second drop of the same label reports nothing left.
+        assert!(!drop_page_note("test-drop-a"));
+        {
+            let pages = lock_or_recover(page_notes());
+            assert!(pages.get("test-drop-a").is_none());
+            assert!(pages.get("test-drop-b").is_some());
+        }
+        cleanup_pages(&["test-drop-a", "test-drop-b"]);
     }
 }

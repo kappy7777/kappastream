@@ -82,7 +82,7 @@ use libmpv2::events::{Event, PropertyData};
 use libmpv2::Mpv;
 use serde::Serialize;
 use tauri::async_runtime::Mutex as AsyncMutex;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -283,7 +283,7 @@ fn ensure_engine(app: &AppHandle, id: u32) -> Result<(), String> {
     match build_engine(app, id) {
         Ok(engine) => {
             lock_or_recover(engines()).insert(id, engine);
-            mpris::ensure_started();
+            mpris::ensure_started(app);
             maybe_start_diag_task();
             Ok(())
         }
@@ -1061,6 +1061,37 @@ pub fn mpris_set_art(
     url: Option<String>,
 ) -> Result<(), String> {
     mpris::note_art(&app, engine_id(id)?, url)
+}
+
+/// Webview-player report for the MPRIS service — the flatpak stand-in (see
+/// mpris.rs). The window label is taken from the calling webview, so a page
+/// cannot report for another window. Outside the flatpak this is a no-op
+/// answering false: the webview's own media-session bridge serves the
+/// webview player there and must not gain a competitor.
+#[tauri::command]
+pub fn mpris_note_page(
+    webview: tauri::Webview,
+    state: String,
+    title: Option<String>,
+    art_url: Option<String>,
+) -> Result<bool, String> {
+    mpris::note_page(
+        crate::env_spawn::in_flatpak(),
+        webview.app_handle(),
+        webview.label(),
+        &state,
+        title,
+        art_url,
+    )
+}
+
+/// Window lifecycle for the MPRIS service: a destroyed window's webview
+/// player can no longer answer, so its note is dropped (webview teardown
+/// does not reliably run page code).
+pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    if matches!(event, tauri::WindowEvent::Destroyed) {
+        mpris::forget_page(window.app_handle(), window.label());
+    }
 }
 
 /// Position the surface (logical px, window-relative, zoom-adjusted by the
