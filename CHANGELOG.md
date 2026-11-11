@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the GStreamer codecs) plus streamlink, so playback works out of
   the box on any distro that runs Flatpak. New versions arrive as newer
   bundles from the release page (flatpak replaces the old install in
-  place), so the in-app updater stays out of the way there.
+  place), so the in-app updater stays out of the way there; a small
+  notice points at the release page when a new version is available.
 
 ### Changed
 
@@ -51,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while the hls engine played. The app's own media-control service now
   stands in there: the widget shows the channel and its avatar, and
   desktop play/pause goes through the player's own controls.
+
+- **Dependencies refreshed** (notably the tauri window stack, the libmpv
+  and D-Bus Rust bindings, the save-dialog crate, and the Vite/Vitest
+  and ESLint tooling).
 
 ## [1.0.9] - 2026-11-04
 
