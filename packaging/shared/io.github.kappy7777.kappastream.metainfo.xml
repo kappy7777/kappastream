@@ -87,6 +87,21 @@
   </content_rating>
 
   <releases>
+    <release version="1.1.0" date="2026-11-11">
+      <url>https://github.com/kappy7777/kappastream/releases/tag/v1.1.0</url>
+      <description>
+        <p>A Flatpak bundle joins the release artifacts, bundling the
+        embedded engine stack and streamlink so playback works out of
+        the box on any distro that runs Flatpak. The application ID
+        changes to io.github.kappy7777.kappastream and all existing
+        data carries over automatically on first launch.</p>
+        <p>Hardware video decoding engages where it previously could
+        not, desktop play/pause toggles the embedded engine, media
+        controls work inside the Flatpak while the default engine
+        plays, and the trust boundary around third-party data is
+        hardened.</p>
+      </description>
+    </release>
     <release version="1.0.9" date="2026-11-04">
       <url>https://github.com/kappy7777/kappastream/releases/tag/v1.0.9</url>
       <description>

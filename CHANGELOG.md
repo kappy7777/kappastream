@@ -5,7 +5,7 @@ All notable changes to **kappastream** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2026-11-11
 
 ### Added
 
@@ -1304,7 +1304,8 @@ marks the milestone; it is not a breaking change.
 - 29 themes, configurable UI scale, theater mode, fullscreen, and
   per-channel quality preference. All state persisted to `localStorage`.
 
-[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.0.9...HEAD
+[Unreleased]: https://github.com/kappy7777/kappastream/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/kappy7777/kappastream/releases/tag/v1.1.0
 [1.0.9]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.9
 [1.0.8]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.8
 [1.0.7]: https://github.com/kappy7777/kappastream/releases/tag/v1.0.7

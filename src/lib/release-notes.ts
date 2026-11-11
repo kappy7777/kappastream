@@ -41,6 +41,21 @@ export interface VersionNotes {
 }
 
 export const RELEASE_NOTES: Record<string, VersionNotes> = {
+  '1.1.0': {
+    added: [
+      '📦 A Flatpak bundle joins the releases — the full native-engine stack and streamlink included, so playback works out of the box on any distro that runs Flatpak.',
+    ],
+    changed: [
+      '🪪 The application ID is now io.github.kappy7777.kappastream; all existing data carries over automatically on the first launch of the renamed build.',
+    ],
+    fixed: [
+      '🎬 Hardware video decoding engages where it previously could not, falling back to copy-based vaapi/nvdec instead of silently dropping to software.',
+      '🔒 Hardened the trust boundary around third-party data: proxied responses served as inert data, bounded cover-art downloads, no referrer from the webview.',
+      '⏯️ Desktop play/pause now toggles mpv playback — hardware media keys work while the native engine plays.',
+      '🎛️ Desktop media controls work in the Flatpak while the hls engine plays: the widget shows the channel and its avatar, and play/pause goes through the player.',
+      '♻️ Dependencies refreshed, notably the tauri window stack, the libmpv and D-Bus Rust bindings, and the Vite/Vitest tooling.',
+    ],
+  },
   '1.0.9': {
     fixed: [
       '🖱️ The control bar hides as soon as the pointer leaves the player, and clicking a control no longer pins it open.',

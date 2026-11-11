@@ -1,0 +1,1 @@
+A Flatpak bundle joins the releases, the app ID changes to io.github.kappy7777.kappastream (your data carries over), hardware video decoding engages where it couldn't before, and desktop media keys work during native and Flatpak playback.
