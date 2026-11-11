@@ -6,7 +6,11 @@ authors = ["kappy <kappy777@proton.me>"]
 license = "GPL-3.0-only"
 repository = "https://github.com/kappy7777/kappastream"
 edition = "2021"
-rust-version = "1.89.0"
+# The rust-version floor is the MAXIMUM rust_version declared across the
+# resolved dependency graph (see `cargo metadata`): rfd 0.18.0 sets the
+# 1.92 floor, with the tauri 2.12.5 stack at 1.90 just below it. rfd is
+# an unconditional dependency, so the floor holds for every build.
+rust-version = "1.92"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -41,12 +45,6 @@ updater = []
 # links nothing mpv and needs nothing installed. On Linux the only
 # libmpv-free builds are `--no-default-features` invocations that don't
 # re-add the feature (the AUR PKGBUILDs re-add it explicitly).
-# Note: the crate rust-version is the MAXIMUM rust_version declared across
-# the resolved DEFAULT-feature dependency graph (see `cargo metadata`):
-# notify-rust 4.18.0, via tauri-plugin-notification, sets the 1.89.0 floor.
-# This default-on feature is part of that graph, so the floor holds for
-# every release build; the only --no-default-features consumers (AUR,
-# updater off) re-add the feature explicitly.
 mpv-embed = [
   "dep:libmpv2",
   "dep:libloading",
