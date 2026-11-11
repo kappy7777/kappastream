@@ -48,18 +48,16 @@
 //      window itself an opaque black CSS background so a resize's newly
 //      exposed area can never flash the desktop (belt and suspenders under
 //      the floor).
-// tauri's undecorated-resize handler resolves `webview.parent().parent()`
-// and downcasts the grandparent to a gtk::Window on EVERY pointer event:
-// `resizable_window()` (tauri-runtime-wry's undecorated_resizing.rs) runs
-// inside each motion / button-press / touch handler. Once this bootstrap
-// moves tao's vbox into the GtkOverlay, the webview's grandparent is the
-// overlay — the downcast fails and the handler silently returns Proceed,
-// so tauri's built-in edge resize (and its resize cursors) stop working
-// for the rest of the session. Accepted on purpose: the app's own .rz
-// edge handles (App.svelte → startResizeDragging) are the only working
-// mouse-resize path once the engine has booted. Restoring tauri's handler
-// would mean reparenting the webview widget itself, which leaves its
-// rebuilt surface opaque (step 3 above).
+// tauri's undecorated-resize handler resolves the webview's toplevel on
+// every pointer event (`webview.toplevel()` in tauri-runtime-wry's
+// undecorated_resizing.rs), so the deeper nesting this bootstrap creates
+// (webview → vbox → GtkOverlay → window) leaves it working: tauri's
+// built-in edge resize and its resize cursors stay live once the engine
+// has booted, coexisting with the app's own .rz edge handles (App.svelte
+// → startResizeDragging) exactly as in hls mode, where nothing is
+// reparented. (tauri-runtime-wry 2.12.2 resolved exactly two parents up
+// instead, and this nesting broke that walk; 2.12.3 switched to toplevel
+// resolution.)
 //
 // WHY BELOW works now (and the old above-page design existed at all): the
 // pre-2026-10 attempts at web-UI-over-video tried DESKTOP-through
@@ -516,10 +514,11 @@ fn init_on_main_thread(
         #[allow(deprecated)]
         overlay.add_overlay(&vbox);
 
-        // The overlay must become the WINDOW's direct child — not stay
-        // detached. This re-shape is also what disables tauri's
-        // undecorated-resize handler (see the module header): the app's
-        // .rz page handles take over as the mouse-resize path.
+        // The overlay must become the WINDOW's direct child, not stay
+        // detached. The re-shape nests the webview one level deeper but
+        // leaves tauri's undecorated-resize handler working (it resolves
+        // the toplevel; see the module header): the app's .rz page
+        // handles keep working alongside it.
         #[allow(deprecated)]
         window.add(&overlay);
         // The window's own GTK background: opaque black, so a resize's

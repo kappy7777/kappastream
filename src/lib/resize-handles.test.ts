@@ -4,12 +4,12 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 // Source contract: the app ships its own borderless resize handles because
-// the window is decorations:false (no server-side edges on Wayland), and on
-// Linux they are the ONLY working mouse-resize path once the native engine
-// has booted — the engine's GTK reparent disables tauri's built-in
-// undecorated-resize handler for the rest of the session (see
-// src-tauri/src/mpv/linux.rs). This pins all 8 handles so a cleanup pass
-// cannot drop them as redundant.
+// the window is decorations:false (no server-side edges on Wayland).
+// tauri's built-in undecorated-resize handler works alongside them in
+// every mode (the engine's GTK reparent no longer disables it; see
+// src-tauri/src/mpv/linux.rs), and the handles stay on purpose as the
+// app-controlled path. This pins all 8 handles so a cleanup pass cannot
+// drop them as redundant next to tauri's handler.
 describe('borderless resize handles (App.svelte source contract)', () => {
   const source = readFileSync(join(process.cwd(), 'src/App.svelte'), 'utf8')
   const handles = [
@@ -32,8 +32,8 @@ describe('borderless resize handles (App.svelte source contract)', () => {
     expect(source.match(/class="rz rz-/g)).toHaveLength(8)
   })
 
-  it('documents that on Linux these are the only working resize path', () => {
-    expect(source).toMatch(/ONLY working mouse-resize path/)
-    expect(source).toMatch(/undecorated-resize handler/)
+  it('documents that the handles stay despite tauri edge resize working', () => {
+    expect(source).toMatch(/undecorated-resize\s+handler\s+works\s+alongside/)
+    expect(source).toMatch(/never\s+remove the handles as redundant/)
   })
 })

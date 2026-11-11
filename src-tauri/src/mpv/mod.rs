@@ -807,7 +807,7 @@ pub struct AvailabilityPayload {
 /// bootstrapping anything. The only check is the GL provider load
 /// (`linux::gl_supported` — dlopen/dlsym, no GL calls, no GTK, no GL
 /// context, no mpv core, no MPRIS), so merely opening Settings never
-/// reparents the window or disables tauri's undecorated-resize handler.
+/// reparents or otherwise touches the window.
 /// `mpv_available` remains the real probe once the engine is toggled on:
 /// it creates engine 0 and reports whether the surface actually
 /// initialized.
